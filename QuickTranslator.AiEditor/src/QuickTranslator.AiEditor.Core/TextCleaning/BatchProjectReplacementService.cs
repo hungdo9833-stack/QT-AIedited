@@ -51,7 +51,11 @@ public sealed class BatchProjectReplacementService(ChapterFileStore store, TimeP
         var results = new List<BatchProjectChapterResult>();
         foreach (var chapter in chapterList.Where(x => targetIds.Contains(x.Id)))
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                results.Add(CancelledChapter(chapter));
+                continue;
+            }
             try
             {
                 var snapshot = DocumentJson.Clone(chapter);
@@ -60,6 +64,10 @@ public sealed class BatchProjectReplacementService(ChapterFileStore store, TimeP
                     BatchReplacementScope.CurrentProject, batchId, _clock.GetUtcNow());
                 await store.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
                 results.Add(new(chapter.Id, chapter.Title, true, result.OccurrencesChanged, null));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                results.Add(CancelledChapter(chapter));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -82,13 +90,21 @@ public sealed class BatchProjectReplacementService(ChapterFileStore store, TimeP
         var results = new List<BatchProjectChapterResult>();
         foreach (var chapter in targets)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                results.Add(CancelledChapter(chapter));
+                continue;
+            }
             try
             {
                 var snapshot = DocumentJson.Clone(chapter);
                 var result = BatchReplacementEngine.UndoLatest(snapshot, _clock.GetUtcNow(), batchId);
                 await store.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
                 results.Add(new(chapter.Id, chapter.Title, true, result.OccurrencesChanged, null));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                results.Add(CancelledChapter(chapter));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -97,4 +113,8 @@ public sealed class BatchProjectReplacementService(ChapterFileStore store, TimeP
         }
         return new(batchId, backup, results);
     }
+
+    private static BatchProjectChapterResult CancelledChapter(ChapterDocument chapter) => new(
+        chapter.Id, chapter.Title, false, 0,
+        "Đã hủy; chương này chưa được ghi. Các chương đã ghi được báo riêng và có backup để đối chiếu/phục hồi.");
 }

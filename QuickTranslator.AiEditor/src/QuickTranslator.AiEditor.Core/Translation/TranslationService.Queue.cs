@@ -39,13 +39,14 @@ public sealed partial class TranslationService
 
     internal void SetQueueCurrent(Guid id)
     {
-        lock (_sync) { _chapter.Queue.CurrentSegmentId = id; Touch(); }
+        lock (_sync) { EnsureNoBatchCommit(); _chapter.Queue.CurrentSegmentId = id; Touch(); }
     }
 
     internal void AdvanceQueue()
     {
         lock (_sync)
         {
+            EnsureNoBatchCommit();
             _chapter.Queue.NextIndex++;
             _chapter.Queue.CurrentSegmentId = null;
             Touch();
@@ -54,13 +55,14 @@ public sealed partial class TranslationService
 
     internal void CheckpointElapsed(TimeSpan elapsed)
     {
-        lock (_sync) { _chapter.Queue.Elapsed = elapsed; Touch(); }
+        lock (_sync) { EnsureNoBatchCommit(); _chapter.Queue.Elapsed = elapsed; Touch(); }
     }
 
     internal void SetQueueStatus(QueueStatus status, TimeSpan? elapsed = null, string? error = null)
     {
         lock (_sync)
         {
+            EnsureNoBatchCommit();
             _chapter.Queue.Status = status;
             if (elapsed is not null) _chapter.Queue.Elapsed = elapsed.Value;
             if (!_chapter.Queue.IsActive) _chapter.Queue.CurrentSegmentId = null;

@@ -125,6 +125,110 @@ public sealed class AtomicBatchTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task F05_LockedRealChapterFileLeavesDiskAndLiveDocumentUnchanged()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "qtaie-phase2-locked-" + Guid.NewGuid());
+        try
+        {
+            var store = new ChapterFileStore(root);
+            var service = new TranslationService(CreateChapter(), new FakeClient(), store);
+            await service.SaveAsync();
+            string path = service.SavePath;
+            byte[] beforeDisk = File.ReadAllBytes(path);
+            string beforeLive = Serialize(service.GetSnapshot());
+            var preview = service.PreviewBatchReplacement([Rule()], BatchReplacementScope.CurrentChapter);
+            using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                await Assert.ThrowsAnyAsync<IOException>(() => service.ApplyBatchReplacementAsync(preview, true, BatchReplacementScope.CurrentChapter));
+            Assert.Equal(beforeDisk, File.ReadAllBytes(path));
+            Assert.Equal(beforeLive, Serialize(service.GetSnapshot()));
+            Assert.False(service.HasUnsavedChanges);
+            Assert.Empty(Directory.GetFiles(root, "*.tmp-*"));
+            await service.ApplyBatchReplacementAsync(preview, true, BatchReplacementScope.CurrentChapter);
+            Assert.Single((await store.LoadAsync(path)).Chapter.BatchReplacementHistory);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData("SetQueueCurrent")]
+    [InlineData("AdvanceQueue")]
+    [InlineData("CheckpointElapsed")]
+    [InlineData("SetQueueStatus")]
+    public async Task F05_LateQueueCheckpointCannotMutateDocumentDuringBatchPersistence(string method)
+    {
+        var chapter = CreateChapter();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var store = new MemoryStore { BeforeSave = async (_, _) => { entered.TrySetResult(); await release.Task; } };
+        var service = new TranslationService(chapter, new FakeClient(), store);
+        var batch = service.ApplyBatchReplacementAsync(service.PreviewBatchReplacement([Rule()], BatchReplacementScope.CurrentChapter),
+            true, BatchReplacementScope.CurrentChapter);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        try
+        {
+            string before = Serialize(service.GetSnapshot());
+            object?[] args = method switch
+            {
+                "SetQueueCurrent" => [chapter.Segments[0].Id],
+                "AdvanceQueue" => [],
+                "CheckpointElapsed" => [TimeSpan.FromSeconds(7)],
+                _ => [QueueStatus.Faulted, null, "Late queue write failure"]
+            };
+            var error = Assert.Throws<System.Reflection.TargetInvocationException>(() => typeof(TranslationService)
+                .GetMethod(method, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(service, args));
+            Assert.IsType<InvalidOperationException>(error.InnerException);
+            Assert.Equal(before, Serialize(service.GetSnapshot()));
+        }
+        finally { release.TrySetResult(); await batch; }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task F05_ProjectCancellationReportsCompletedAndUnwrittenChaptersWithoutPartialDocument(bool undo)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "qtaie-phase2-cancel-" + Guid.NewGuid());
+        try
+        {
+            using var cancellation = new CancellationTokenSource();
+            var store = new ChapterFileStore(root);
+            var chapters = new[] { CreateChapter(), CreateChapter(), CreateChapter() };
+            foreach (var chapter in chapters)
+            {
+                chapter.CharacterProject.Id = chapters[0].CharacterProject.Id;
+                await store.SaveAsync(chapter);
+            }
+            var preview = new BatchReplacementEngine().Preview(chapters, [Rule()], BatchReplacementScope.CurrentProject);
+            Guid? batchId = null;
+            if (undo)
+            {
+                batchId = (await new BatchProjectReplacementService(store).ApplyAsync(chapters, preview, true)).BatchId;
+                chapters = (await new BatchProjectReplacementService(store).LoadProjectChaptersAsync(chapters[0].CharacterProject.Id)).ToArray();
+            }
+            var unchanged = chapters.Skip(1).ToDictionary(x => x.Id, x => File.ReadAllBytes(store.GetPath(x.Id)));
+            var coordinator = new BatchProjectReplacementService(store, new CancelSecondChapterClock(cancellation));
+            var report = undo ? await coordinator.UndoAsync(chapters, batchId!.Value, cancellation.Token)
+                : await coordinator.ApplyAsync(chapters, preview, true, cancellation.Token);
+            Assert.Equal(1, report.AppliedChapters);
+            Assert.Equal(2, report.FailedChapters);
+            Assert.All(report.Chapters.Where(x => !x.Applied), x => Assert.Contains("hủy", x.Error));
+            foreach (var chapter in chapters.Skip(1)) Assert.Equal(unchanged[chapter.Id], File.ReadAllBytes(store.GetPath(chapter.Id)));
+            Assert.Equal(undo, (await store.LoadAsync(store.GetPath(chapters[0].Id))).Chapter.BatchReplacementHistory.Single().Reverted);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    private sealed class CancelSecondChapterClock(CancellationTokenSource cancellation) : TimeProvider
+    {
+        private int _calls;
+        public override DateTimeOffset GetUtcNow()
+        {
+            if (++_calls == 2) cancellation.Cancel();
+            return DateTimeOffset.UtcNow;
+        }
+    }
+
     internal static ChapterDocument CreateChapter()
     {
         var chapter = TranslationService.CreateChapter("Dữ liệu batch tổng hợp", "你好。\n你好。\n你好。",
