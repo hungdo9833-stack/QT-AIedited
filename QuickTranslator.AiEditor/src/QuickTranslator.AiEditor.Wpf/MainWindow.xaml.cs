@@ -274,10 +274,12 @@ public partial class MainWindow : Window
     private async Task SaveCurrentAsync()
     {
         _autosave.Stop();
-        if (_service is not null)
+        var service = _service;
+        var session = _projectSession;
+        if (service is not null)
         {
-            await _service.SaveAsync();
-            if (_projectSession is not null) await _projectRepository.UpdateChapterSummaryAsync(_projectSession, _service.GetSnapshot());
+            await service.SaveAsync();
+            if (session is not null) await _projectRepository.UpdateChapterSummaryAsync(session, service.GetSnapshot());
         }
     }
 
@@ -510,7 +512,10 @@ public partial class MainWindow : Window
     }
     private void ShowError(Exception error)
     {
-        StatusText.Text = "Lỗi: " + error.Message + (_service?.HasUnsavedChanges == true ? " Có thay đổi chưa lưu; hãy giữ ứng dụng mở và thử Lưu tiến độ." : "");
+        StatusText.Text = "Lỗi: " + error.Message +
+            (error is IOException or UnauthorizedAccessException
+                ? " Tác vụ chưa hoàn tất; hãy giữ ứng dụng mở, kiểm tra dung lượng/quyền ghi và thử lại thao tác lưu."
+                : _service?.HasUnsavedChanges == true ? " Có thay đổi chưa lưu; hãy giữ ứng dụng mở và thử Lưu tiến độ." : "");
         StatusText.Foreground = Brushes.Firebrick;
     }
 
@@ -533,7 +538,9 @@ public partial class MainWindow : Window
             if (_activeRequest is not null)
             {
                 if (_queue?.IsRunning == true) await _queue.CancelAsync();
-                try { await _activeRequest; } catch (Exception) { /* The service records the failure; save all remaining edits below. */ }
+                try { await _activeRequest; }
+                catch (OperationCanceledException) { SetStatus("Request đã hủy; đang lưu bản nháp trước khi đóng."); }
+                catch (OllamaRequestException ex) { ShowError(ex); }
             }
             if (_projectSession is not null)
             {

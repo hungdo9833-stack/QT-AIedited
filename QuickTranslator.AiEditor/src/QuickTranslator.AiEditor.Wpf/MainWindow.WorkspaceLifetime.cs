@@ -42,8 +42,8 @@ public partial class MainWindow
         if (request is not null)
         {
             try { await request; }
-            catch (OperationCanceledException) { /* Recorded by the source service; save below. */ }
-            catch (OllamaRequestException) { /* API failure is recorded; disk failures must still block switching. */ }
+            catch (OperationCanceledException) { SetStatus("Request đã hủy; đang lưu bản nháp trước khi chuyển."); }
+            catch (OllamaRequestException ex) { ShowError(ex); } // Recorded by source service; disk errors still block switching.
         }
         if (completion is not null) await completion;
         if (ReferenceEquals(request, _activeRequest) && request is { IsCompleted: true })

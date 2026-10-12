@@ -28,7 +28,7 @@ public partial class MainWindow
     private async void InitializeReader()
     {
         ReaderFontInput.ItemsSource = Fonts.SystemFontFamilies.Select(f => f.Source).OrderBy(n => n).ToArray();
-        _readerSaveTimer.Tick += async (_, _) => { _readerSaveTimer.Stop(); await SaveReaderPreferencesAsync(); };
+        _readerSaveTimer.Tick += OnReaderPreferencesSave;
         var store = _readerStore;
         try
         {
@@ -383,8 +383,20 @@ public partial class MainWindow
     private async Task SaveReaderPreferencesAsync()
     {
         if (!_readerReady) return;
-        try { await _readerStore.SaveAsync(_readerPreferences); }
+        await _readerStore.SaveAsync(_readerPreferences);
+    }
+
+    private async void OnReaderPreferencesSave(object? sender, EventArgs e)
+    {
+        _readerSaveTimer.Stop();
+        if (!BeginUiOperation(allowDuringTranslation: true))
+        {
+            if (!_closing) _readerSaveTimer.Start();
+            return;
+        }
+        try { await SaveReaderPreferencesAsync(); }
         catch (Exception ex) { ShowError(ex); }
+        finally { EndUiOperation(); }
     }
 
     private void OnToggleFocusMode(object sender, RoutedEventArgs e)

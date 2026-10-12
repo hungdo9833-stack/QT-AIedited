@@ -18,8 +18,14 @@ public partial class MainWindow
     private readonly ChineseTextScanner _chineseTextScanner = new();
     private readonly BatchReplacementEngine _batchReplacementEngine = new();
 
-    private void OnOpenBatchReplace(object sender, RoutedEventArgs e) => ShowTextCleanerWindow(scanFirst: false);
-    private void OnScanChineseText(object sender, RoutedEventArgs e) => ShowTextCleanerWindow(scanFirst: true);
+    private void OnOpenBatchReplace(object sender, RoutedEventArgs e) => OpenTextCleanerUi(scanFirst: false);
+    private void OnScanChineseText(object sender, RoutedEventArgs e) => OpenTextCleanerUi(scanFirst: true);
+
+    private void OpenTextCleanerUi(bool scanFirst)
+    {
+        try { ShowTextCleanerWindow(scanFirst); }
+        catch (Exception ex) { EndUiOperation(); ShowError(ex); }
+    }
 
     private async void OnUndoBatchReplace(object sender, RoutedEventArgs e)
     {
@@ -259,6 +265,7 @@ public partial class MainWindow
 
         async Task ApplyRowsAsync(IReadOnlyList<BatchPreviewRow> rows)
         {
+            if (working) return;
             if (rows.Count == 0) { status.Text = "Chưa chọn vị trí nào."; return; }
             if (rows.Any(x => x.Item.Conflict)) { status.Text = "Bỏ chọn hoặc giải quyết các ánh xạ xung đột trước."; return; }
             bool protectedText = rows.Any(x => x.Item.Protected);
@@ -313,63 +320,97 @@ public partial class MainWindow
         };
         applySelected.Click += async (_, _) => await ApplyRowsAsync(previewRows.Where(x => x.IsSelected).ToArray());
         undo.Click += (_, _) => { window.Close(); OnUndoBatchReplace(undo, new RoutedEventArgs()); };
+        async Task<bool> RunDialogActionAsync(Func<Task<bool>> action)
+        {
+            if (working) return false;
+            SetWorking(true, "Đang lưu thay đổi…");
+            try
+            {
+                if (!await action()) return false;
+                Refresh();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                status.Text = "Chưa hoàn tất: " + ex.Message +
+                    " Thay đổi trong bộ nhớ được giữ; kiểm tra quyền ghi/dung lượng rồi bấm lại thao tác để thử lưu.";
+                status.Foreground = Brushes.Firebrick;
+                ShowError(ex);
+                return false;
+            }
+            finally { SetWorking(false); }
+        }
+
         keep.Click += async (_, _) =>
         {
-            if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row) { status.Text = "Hãy chọn một cụm chữ Hán."; return; }
-            if (row.Item.ChapterId != _service!.GetSnapshot().Id) { status.Text = "Hãy nhấp đúp mở chương đó trước khi đánh dấu giữ nguyên."; return; }
-            var chapter = _service.GetSnapshot();
-            var ignored = chapter.TextCleaner.IgnoredChineseText.Append(row.Item.Text).Distinct(StringComparer.Ordinal).ToArray();
-            await _service.ConfigureTextCleanerAsync(chapter.TextCleaner.AutoApplyConfirmedMappings, ignored);
-            await ScanAsync(); Refresh();
+            if (await RunDialogActionAsync(async () =>
+            {
+                if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row) { status.Text = "Hãy chọn một cụm chữ Hán."; return false; }
+                if (row.Item.ChapterId != _service!.GetSnapshot().Id) { status.Text = "Hãy nhấp đúp mở chương đó trước khi đánh dấu giữ nguyên."; return false; }
+                var chapter = _service.GetSnapshot();
+                var ignored = chapter.TextCleaner.IgnoredChineseText.Append(row.Item.Text).Distinct(StringComparer.Ordinal).ToArray();
+                await _service.ConfigureTextCleanerAsync(chapter.TextCleaner.AutoApplyConfirmedMappings, ignored);
+                return true;
+            })) await ScanAsync();
         };
         addGlossary.Click += async (_, _) =>
         {
-            if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row) { status.Text = "Hãy chọn một cụm chữ Hán."; return; }
-            if (row.Item.ChapterId != _service!.GetSnapshot().Id) { status.Text = "Hãy nhấp đúp mở chương đó trước khi xác nhận Glossary."; return; }
-            var edited = ShowGlossaryEditor(null, row.Item.Text);
-            if (edited is null) return;
-            var existing = _glossaryRows.SingleOrDefault(x => string.Equals(x.Chinese, edited.Chinese, StringComparison.Ordinal));
-            if (existing is not null && MessageBox.Show(window,
-                    $"Mục này đang là “{existing.Vietnamese}”. Thay bằng “{edited.Vietnamese}”?", "Cập nhật Glossary",
-                    MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-            if (existing is null) _glossaryRows.Add(edited); else _glossaryRows[_glossaryRows.IndexOf(existing)] = edited;
-            GlossaryChanged(); await PersistCurrentGlossaryAsync(); await ScanAsync();
+            if (await RunDialogActionAsync(async () =>
+            {
+                if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row) { status.Text = "Hãy chọn một cụm chữ Hán."; return false; }
+                if (row.Item.ChapterId != _service!.GetSnapshot().Id) { status.Text = "Hãy nhấp đúp mở chương đó trước khi xác nhận Glossary."; return false; }
+                var edited = ShowGlossaryEditor(null, row.Item.Text);
+                if (edited is null) return false;
+                var existing = _glossaryRows.SingleOrDefault(x => string.Equals(x.Chinese, edited.Chinese, StringComparison.Ordinal));
+                if (existing is not null && MessageBox.Show(window,
+                        $"Mục này đang là “{existing.Vietnamese}”. Thay bằng “{edited.Vietnamese}”?", "Cập nhật Glossary",
+                        MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
+                if (existing is null) _glossaryRows.Add(edited); else _glossaryRows[_glossaryRows.IndexOf(existing)] = edited;
+                GlossaryChanged();
+                if (!await PersistCurrentGlossaryAsync())
+                    throw new InvalidOperationException("Glossary chưa được lưu; hãy lưu chương trước khi thử lại.");
+                return true;
+            })) await ScanAsync();
         };
         addCharacter.Click += async (_, _) =>
         {
-            if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row) { status.Text = "Hãy chọn một cụm chữ Hán."; return; }
-            if (row.Item.ChapterId != _service!.GetSnapshot().Id) { status.Text = "Hãy nhấp đúp mở chương đó trước khi xác nhận hồ sơ."; return; }
-            var existing = _characterProject.Profiles.FirstOrDefault(x =>
-                string.Equals(x.ChineseName, row.Item.Text, StringComparison.Ordinal));
-            var seed = existing is null ? new CharacterProfile { ChineseName = row.Item.Text, NormalizationEnabled = false } : CloneProfile(existing);
-            var edited = ShowCharacterEditor(seed);
-            if (edited is null) return;
-            if (existing is null) _characterProject.Profiles.Add(edited);
-            else _characterProject.Profiles[_characterProject.Profiles.IndexOf(existing)] = edited;
-            await SaveCharacterProjectAsync();
-            await ScanAsync(); Refresh();
+            if (await RunDialogActionAsync(async () =>
+            {
+                if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row) { status.Text = "Hãy chọn một cụm chữ Hán."; return false; }
+                if (row.Item.ChapterId != _service!.GetSnapshot().Id) { status.Text = "Hãy nhấp đúp mở chương đó trước khi xác nhận hồ sơ."; return false; }
+                var existing = _characterProject.Profiles.FirstOrDefault(x =>
+                    string.Equals(x.ChineseName, row.Item.Text, StringComparison.Ordinal));
+                var seed = existing is null ? new CharacterProfile { ChineseName = row.Item.Text, NormalizationEnabled = false } : CloneProfile(existing);
+                var edited = ShowCharacterEditor(seed);
+                if (edited is null) return false;
+                if (existing is null) _characterProject.Profiles.Add(edited);
+                else _characterProject.Profiles[_characterProject.Profiles.IndexOf(existing)] = edited;
+                await SaveCharacterProjectAsync();
+                return true;
+            })) await ScanAsync();
         };
         search.TextChanged += (_, _) => ApplyFilter();
         classification.SelectionChanged += (_, _) => ApplyFilter();
         close.Click += (_, _) => window.Close();
         previewGrid.MouseDoubleClick += (_, _) =>
         {
+            if (working) return;
             if (previewGrid.SelectedItem is BatchPreviewRow row)
             { navigation = new(row.Item.ChapterId, row.Item.SegmentId, row.Item.StartUtf16, row.Item.LengthUtf16); window.Close(); }
         };
         chineseGrid.MouseDoubleClick += (_, _) =>
         {
+            if (working) return;
             if (chineseGrid.SelectedItem is ChineseOccurrenceRow row)
             { navigation = new(row.Item.ChapterId, row.Item.SegmentId, row.Item.StartUtf16, row.Item.LengthUtf16); window.Close(); }
         };
         window.Loaded += async (_, _) => { if (scanFirst) await ScanAsync(); };
         window.Closing += (_, args) => { if (working) { args.Cancel = true; status.Text = "Đang ghi/đọc dữ liệu; hãy chờ thao tác hoàn tất trước khi đóng."; } };
-        window.Closed += async (_, _) =>
-        {
-            _uiOperation = false; UpdateButtons();
-            if (navigation is not null) await OpenTextLocationAsync(navigation);
-        };
-        window.ShowDialog();
+        try { window.ShowDialog(); }
+        finally { _uiOperation = false; UpdateButtons(); }
+        // Navigation owns a new operation lock only after the dialog's lock has been released.
+        // OpenTextLocationAsync handles and reports its own errors.
+        if (navigation is not null) _ = OpenTextLocationAsync(navigation);
     }
 
     private async Task ReloadCurrentChapterAfterProjectBatchAsync(Guid chapterId)

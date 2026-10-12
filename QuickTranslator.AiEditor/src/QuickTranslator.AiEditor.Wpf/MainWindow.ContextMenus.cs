@@ -106,7 +106,6 @@ public partial class MainWindow
                 "Nhân vật đã có", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes) return;
             var edited = ShowCharacterEditor(CloneProfile(existing));
             if (edited is null) return;
-            var backup = CharacterProjectStore.Clone(_characterProject);
             try
             {
                 int index = _characterProject.Profiles.FindIndex(p => p.Id == existing.Id);
@@ -115,14 +114,12 @@ public partial class MainWindow
                 RefreshCharacterGrid();
                 SetStatus("Đã cập nhật hồ sơ nhân vật hiện có; không tạo bản trùng.");
             }
-            catch (Exception ex) { _characterProject = backup; RefreshCharacterGrid(); ShowError(ex); }
+            catch (Exception ex) { _settingsDirty = true; RefreshCharacterGrid(); ShowError(ex); }
             return;
         }
 
         var quick = ShowQuickCharacterEditor(chinese);
         if (quick is null) return;
-        var projectBackup = CharacterProjectStore.Clone(_characterProject);
-        var termsBackup = ReadTerms().ToList();
         try
         {
             var conflict = _glossaryRows.FirstOrDefault(t => string.Equals(t.Chinese, quick.Profile.ChineseName, StringComparison.Ordinal));
@@ -145,8 +142,9 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            _characterProject = projectBackup;
-            SetGlossaryTerms(termsBackup);
+            // Keep the confirmed editor inputs available for an explicit save retry.
+            // Some earlier writes may already have succeeded; rolling back only the UI would diverge.
+            _settingsDirty = true;
             RefreshCharacterGrid();
             ShowError(ex);
         }
@@ -215,7 +213,7 @@ public partial class MainWindow
                     int index = _characterProject.Profiles.FindIndex(p => p.Id == character.Id);
                     _characterProject.Profiles[index] = profile;
                     try { await SaveCharacterProjectAsync(); RefreshCharacterGrid(); }
-                    catch (Exception ex) { _characterProject.Profiles[index] = character; ShowError(ex); }
+                    catch (Exception ex) { _settingsDirty = true; RefreshCharacterGrid(); ShowError(ex); }
                 }
             }
             return;
@@ -223,16 +221,19 @@ public partial class MainWindow
         if (existing is not null && existing.Vietnamese != edited.Vietnamese &&
             MessageBox.Show(this, $"Đổi nghĩa “{existing.Vietnamese}” thành “{edited.Vietnamese}”?", "Cập nhật glossary",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        var backup = ReadTerms().ToList();
         try
         {
             if (existing is null) _glossaryRows.Add(edited);
             else _glossaryRows[_glossaryRows.IndexOf(existing)] = edited;
             GlossaryChanged();
-            if (!await PersistCurrentGlossaryAsync()) { SetGlossaryTerms(backup); return; }
+            if (!await PersistCurrentGlossaryAsync())
+            {
+                SetStatus("Glossary còn trong bộ nhớ, chưa lưu. Hãy lưu chương rồi thử Lưu thiết lập.");
+                return;
+            }
             SetStatus("Đã lưu thuật ngữ vào glossary của chương hiện tại.");
         }
-        catch (Exception ex) { SetGlossaryTerms(backup); ShowError(ex); }
+        catch (Exception ex) { _settingsDirty = true; ShowError(ex); }
     }
 
     private async Task<bool> PersistCurrentGlossaryAsync()

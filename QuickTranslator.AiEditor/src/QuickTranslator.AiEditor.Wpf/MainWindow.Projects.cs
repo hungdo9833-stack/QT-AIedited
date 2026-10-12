@@ -30,7 +30,8 @@ public partial class MainWindow
         ProjectChapterList.ItemsSource = _projectChapters;
         Loaded += async (_, _) =>
         {
-            await Dispatcher.InvokeAsync(async () => await InitializeProjectsAsync(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            try { await Dispatcher.InvokeAsync(InitializeProjectsAsync, System.Windows.Threading.DispatcherPriority.ApplicationIdle).Task.Unwrap(); }
+            catch (Exception ex) { ShowError(ex); }
         };
     }
 
@@ -394,7 +395,17 @@ public partial class MainWindow
             }
             catch (Exception ex) { MessageBox.Show(window, ex.Message, "Không thể định vị", MessageBoxButton.OK, MessageBoxImage.Error); }
         };
-        remove.Click += async (_, _) => { if (list.SelectedItem is RecentProject selected) { ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId); await _projectLibraryStore.SaveAsync(_projectLibrary); Reload(); RefreshProjectSwitcher(); } };
+        remove.Click += async (_, _) =>
+        {
+            if (list.SelectedItem is not RecentProject selected || !BeginUiOperation(allowDuringTranslation: true)) return;
+            try
+            {
+                ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
+                await _projectLibraryStore.SaveAsync(_projectLibrary); Reload(); RefreshProjectSwitcher();
+            }
+            catch (Exception ex) { ShowError(ex); }
+            finally { EndUiOperation(); }
+        };
         delete.Click += async (_, _) =>
         {
             if (list.SelectedItem is not RecentProject selected || selected.Missing) return;
