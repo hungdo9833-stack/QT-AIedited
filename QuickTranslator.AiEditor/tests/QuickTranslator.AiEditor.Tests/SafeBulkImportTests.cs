@@ -135,6 +135,56 @@ public sealed class SafeBulkImportTests : IDisposable
     }
 
     [Fact]
+    public async Task Cancel_inside_a_chunk_rolls_back_every_chapter_in_that_chunk()
+    {
+        var repository = new ProjectRepository();
+        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "cancel-inside"), "Synthetic cancel inside chunk");
+        repository.FaultPoint = point =>
+        {
+            if (point == "AfterFile:1") throw new OperationCanceledException("Injected cancellation while publishing a chunk.");
+        };
+
+        BulkImportReport report = await new SafeBulkImportService(repository).ImportAsync(
+            session, Plan(5), Defaults(), new BulkImportOptions(5, 1024 * 1024));
+
+        Assert.False(report.Completed);
+        Assert.Equal(0, report.ImportedCount);
+        Assert.All(report.Chapters, chapter => Assert.Equal(BulkImportChapterState.RolledBack, chapter.State));
+        Assert.Empty(session.Manifest.Chapters);
+        Assert.Empty(Directory.GetFiles(session.Resolve("Chapters"), "*.qtaie.json"));
+        ProjectSession reopened = (await new ProjectRepository().OpenAsync(session.ManifestPath)).Session;
+        Assert.False(reopened.RecoveryReport.RequiresDecision);
+        Assert.Empty(reopened.RecoveryReport.Orphans);
+    }
+
+    [Fact]
+    public async Task Corrupt_existing_source_rescue_blocks_resume_before_any_target_write()
+    {
+        var repository = new ProjectRepository();
+        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "corrupt-rescue"), "Synthetic corrupt rescue");
+        ImportPreviewPlan plan = Plan(3);
+        var service = new SafeBulkImportService(repository);
+        BulkImportReport first = await service.ImportAsync(session, plan, Defaults());
+        Assert.True(first.Completed);
+
+        byte[] manifestBefore = File.ReadAllBytes(session.ManifestPath);
+        Dictionary<string, byte[]> chaptersBefore = Directory.GetFiles(session.Resolve("Chapters"), "*.qtaie.json")
+            .ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes, StringComparer.OrdinalIgnoreCase);
+        await File.WriteAllTextAsync(first.SourceArchivePath, "corrupt rescue archive");
+
+        BulkImportReport retry = await service.ImportAsync(session, plan, Defaults());
+
+        Assert.False(retry.Completed);
+        Assert.Contains("source rescue", retry.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(3, retry.AlreadyImportedCount);
+        Assert.Equal(manifestBefore, File.ReadAllBytes(session.ManifestPath));
+        Assert.Equal(chaptersBefore.Keys.Order(), Directory.GetFiles(session.Resolve("Chapters"), "*.qtaie.json")
+            .Select(path => Path.GetFileName(path)!).Order());
+        foreach ((string fileName, byte[] before) in chaptersBefore)
+            Assert.Equal(before, File.ReadAllBytes(Path.Combine(session.Resolve("Chapters"), fileName)));
+    }
+
+    [Fact]
     public async Task Simulated_crash_reopens_with_recovery_then_same_plan_resumes_without_duplicates()
     {
         var repository = new ProjectRepository();
