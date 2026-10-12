@@ -115,6 +115,46 @@ public sealed partial class ProjectRepository
         saved.CharacterProject.Id = session.Manifest.ProjectId;
         DocumentJson.Validate(saved); return saved;
     }
+
+    internal async Task<Guid> ImportChaptersTransactionAsync(ProjectSession session,
+        IReadOnlyList<(ChapterDocument Source, int Number)> chapters, string sourceArchive, Action<Guid> published,
+        Action<ChapterDocument, ChapterDocument> verify, CancellationToken token)
+    {
+        await session.OperationGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            var after = Clone(session.Manifest);
+            var expected = new List<ChapterDocument>(); var files = new List<PlannedProjectFile>();
+            foreach (var (source, number) in chapters)
+            {
+                if (after.Chapters.Any(x => x.ChapterId == source.Id || x.DeletedAt is null && x.Number == number))
+                    throw new InvalidOperationException("ID/số chương nhập đã có trong target (kể cả ID xóa mềm).");
+                string relative = $"Chapters/{source.Id:D}.qtaie.json";
+                await EnsureDestinationEmptyAsync(session.Resolve(relative), token).ConfigureAwait(false);
+                var saved = PrepareRegisteredChapter(session, source, number, null);
+                expected.Add(saved); after.Chapters.Add(ToEntry(saved, number));
+                files.Add(new(relative, ChapterFileStore.SerializeDocument(saved)));
+                after.CurrentChapterId = saved.Id;
+            }
+            NormalizeManifest(after);
+            return await Transactions.ExecuteAsync(session, "LegacyImport", after, files, token, async () =>
+            {
+                foreach (var saved in expected)
+                {
+                    FaultPoint?.Invoke("BeforeChapterRead");
+                    var actual = await ChapterFileStore.ReadVerifiedFileAsync(session.ChapterStore.GetPath(saved.Id), token).ConfigureAwait(false);
+                    verify(saved, actual); // Expected already contains ONLY the explicit target identity conversion.
+                }
+            }, relative =>
+            {
+                var file = expected.SingleOrDefault(x => relative == $"Chapters/{x.Id:D}.qtaie.json");
+                if (file is not null) published(file.Id);
+            }, sourceArchiveRelative: Path.GetRelativePath(session.RootDirectory, sourceArchive).Replace('\\', '/'),
+                sourceIdentities: chapters.Select(x => new LegacySourceIdentity(x.Source.Id, x.Source.ProjectId,
+                    x.Source.CharacterProject.Id, x.Source.ChapterNumber, session.Manifest.ProjectId, x.Number)).ToArray()).ConfigureAwait(false);
+        }
+        finally { session.OperationGate.Release(); }
+    }
     private static void NormalizeManifest(ProjectManifest manifest)
     {
         manifest.UpdatedAt = DateTimeOffset.UtcNow;

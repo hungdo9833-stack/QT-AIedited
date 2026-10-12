@@ -173,6 +173,24 @@ public sealed class ProjectTransactionTests : IDisposable
         AssertExact(before, Capture(session));
     }
 
+    [Fact]
+    public async Task F07_FailedRecoveryRefreshesManifestAndPendingReportBeforeReturningError()
+    {
+        var (session, id) = await ChapterWithBackupAsync();
+        _repository.FaultPoint = point => { if (point == "BeforeCommit") throw new ProjectOperationInterruptedException(point); };
+        await Assert.ThrowsAsync<ProjectOperationInterruptedException>(() => _repository.SoftDeleteChapterAsync(session, id));
+        var repository = new ProjectRepository();
+        var reopened = (await repository.OpenAsync(session.ManifestPath)).Session;
+        var pending = reopened.RecoveryReport.Transactions.Single(x => x.State == ProjectTransactionState.Pending);
+        using (var locked = new FileStream(reopened.ManifestPath + ".bak", FileMode.Open, FileAccess.Read, FileShare.Read))
+            await Assert.ThrowsAsync<ProjectTransactionException>(() => repository.RecoverTransactionAsync(reopened, pending.Id, ProjectRecoveryDecision.RollBack));
+        var disk = (await repository.OpenAsync(session.ManifestPath)).Session;
+        Assert.Equal(JsonSerializer.Serialize(disk.Manifest, DocumentJson.Options), JsonSerializer.Serialize(reopened.Manifest, DocumentJson.Options));
+        Assert.Equal(ProjectTransactionState.RecoveryRequired, reopened.RecoveryReport.Transactions.Single(x => x.Id == pending.Id).State);
+        await repository.RecoverTransactionAsync(reopened, pending.Id, ProjectRecoveryDecision.RollBack);
+        Assert.False(reopened.RecoveryReport.RequiresDecision);
+    }
+
     private Task ActAsync(string operation, ProjectSession session, Guid id) => operation switch
     {
         "add" => _repository.AddChapterAsync(session, TranslationService.CreateChapter("Thêm tổng hợp", "你好。"), 2),

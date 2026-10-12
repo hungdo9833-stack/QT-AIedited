@@ -118,6 +118,17 @@ public sealed class ChapterFileStore : IChapterStore
             Encoding.UTF8.GetBytes(JsonSerializer.Serialize(chapter, LegacyOptions)))) : Hash(envelope.Chapter);
         if (!string.Equals(checksum, envelope.ContentSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Tệp tiến độ bị thay đổi hoặc hỏng: checksum không khớp.");
+        // Fields absent in legacy bytes get stable metadata, so reopening the same source yields the same value.
+        // Explicit stored snapshots are retained, including compatible fields in a v1/v2 document.
+        if (!envelope.Chapter.TryGetProperty("selectedPreset", out _))
+            chapter.SelectedPreset = PromptPreset.Default with { UpdatedAt = chapter.UpdatedAt };
+        if (!envelope.Chapter.TryGetProperty("queue", out var queue))
+            chapter.Queue = new() { Preset = PromptPreset.Default with { UpdatedAt = chapter.UpdatedAt } };
+        else if (queue.ValueKind == JsonValueKind.Object && !queue.TryGetProperty("preset", out _) && chapter.Queue is not null)
+            chapter.Queue.Preset = PromptPreset.Default with { UpdatedAt = chapter.UpdatedAt };
+        if (!envelope.Chapter.TryGetProperty("characterProject", out _))
+            chapter.CharacterProject = new() { Id = chapter.ProjectId ?? chapter.Id, UpdatedAt = chapter.UpdatedAt,
+                Name = string.IsNullOrWhiteSpace(chapter.Title) ? "Bộ truyện mới" : chapter.Title };
         // Check the original JSON before migration adds fields and changes serialization of v1 data.
         DocumentJson.Migrate(chapter);
         DocumentJson.Validate(chapter);

@@ -644,8 +644,14 @@ public partial class MainWindow
             if (window.ShowDialog() != true) return;
             int number = NextChapterNumber(); var selections = list.SelectedItems.Cast<LegacyChapterCandidate>().Select(x => new LegacyChapterSelection(x, number++)).ToArray();
                 var result = await importer.ImportAsync(_projectSession, selections);
-                if (_projectSession.Manifest.CurrentChapterId is Guid current) await LoadProjectChapterCoreAsync(current);
                 RefreshProjectChapterList();
+                try { if (_projectSession.Manifest.CurrentChapterId is Guid current) await LoadProjectChapterCoreAsync(current); }
+                catch (Exception ex)
+                {
+                    if (result.Report is not null) ShowLegacyImportReport(result.Report);
+                    ShowError(new IOException($"Đã commit {result.ImportedCount} chương nhưng chưa nạp được editor. Chọn lại chương sau khi xử lý lỗi đọc; dữ liệu import và ZIP được giữ.", ex));
+                    return;
+                }
                 SetStatus($"Đã nhập {result.ImportedCount} chương. Nguồn cũ không đổi; bản sao trước nhập: {result.SourceBackupPath}");
             });
         }

@@ -28,7 +28,9 @@ public static class DocumentJson
         if (chapter.SchemaVersion is 1 or 2)
         {
             chapter.SchemaVersion = 3;
-            chapter.CharacterProject = new CharacterProject { Name = string.IsNullOrWhiteSpace(chapter.Title) ? "Bộ truyện mới" : chapter.Title };
+            // Keep stored snapshots; initialize only fields absent in the older schema.
+            chapter.CharacterProject ??= new() { Id = chapter.ProjectId ?? chapter.Id, UpdatedAt = chapter.UpdatedAt,
+                Name = string.IsNullOrWhiteSpace(chapter.Title) ? "Bộ truyện mới" : chapter.Title };
             foreach (var segment in chapter.Segments) segment.NormalizationHistory ??= [];
         }
         chapter.TextCleaner ??= new();

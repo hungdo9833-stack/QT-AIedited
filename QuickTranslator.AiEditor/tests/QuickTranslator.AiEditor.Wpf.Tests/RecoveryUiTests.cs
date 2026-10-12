@@ -1,6 +1,10 @@
 using System.IO;
+using System.Reflection;
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using QuickTranslator.AiEditor.Core.Persistence;
+using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Reading;
 using Xunit;
 
@@ -48,6 +52,50 @@ public sealed class RecoveryUiTests
         Assert.Equal("{damaged target", File.ReadAllText(path));
         Assert.Equal(backup, File.ReadAllBytes(path + ".bak"));
     });
+
+    [Fact]
+    public Task F07_ActualRecoveryDialogRollsBackPendingTransactionAndExportsRescue() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        var chapter = await fixture.AddChapterAsync("Chương tổng hợp", 1);
+        var seam = typeof(ProjectRepository).GetProperty("FaultPoint", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var interruptedType = typeof(ProjectRepository).Assembly.GetType("QuickTranslator.AiEditor.Core.Projects.ProjectOperationInterruptedException")!;
+        seam.SetValue(fixture.Repository, (Action<string>)(point =>
+        {
+            if (point == "BeforeCommit") throw (Exception)Activator.CreateInstance(interruptedType, point)!;
+        }));
+        await Assert.ThrowsAnyAsync<Exception>(() => fixture.Repository.SoftDeleteChapterAsync(fixture.Project, chapter.Id));
+        Assert.True(fixture.Project.RecoveryReport.RequiresDecision);
+        fixture.Window.ShowInTaskbar = false; fixture.Window.Left = -30000; fixture.Window.Show();
+        Task? review = null;
+        var launch = fixture.Window.Dispatcher.InvokeAsync(() => { review = fixture.TaskCall("ReviewProjectRecoveryAsync", fixture.Project); }).Task;
+        await UntilAsync(() => fixture.Window.OwnedWindows.Count > 0);
+        var dialog = fixture.Window.OwnedWindows.Cast<Window>().Single(); dialog.Left = -30000;
+        try
+        {
+            await UntilAsync(() => Descendants<Button>(dialog).Any(x => Equals(x.Content, "Rollback transaction đã chọn")));
+            Descendants<Button>(dialog).Single(x => Equals(x.Content, "Rollback transaction đã chọn")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await UntilAsync(() => !fixture.Project.RecoveryReport.RequiresDecision && Descendants<Button>(dialog).All(x => x.IsEnabled));
+            Descendants<Button>(dialog).Single(x => Equals(x.Content, "Tiếp tục / Đóng")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await launch; await review!;
+            Assert.Null(fixture.Project.Manifest.Chapters.Single().DeletedAt);
+            Assert.True(File.Exists(fixture.Project.ChapterStore.GetPath(chapter.Id)));
+            Assert.NotEmpty(Directory.GetFiles(fixture.Project.Resolve("Backups"), "transaction-rescue-*.zip"));
+            Assert.False((await fixture.Repository.OpenAsync(fixture.Project.ManifestPath)).Session.RecoveryReport.RequiresDecision);
+        }
+        finally { dialog.Close(); }
+    });
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) yield return match;
+            foreach (var nested in Descendants<T>(child)) yield return nested;
+        }
+    }
 
     private static async Task UntilAsync(Func<bool> condition)
     {

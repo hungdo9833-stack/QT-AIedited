@@ -16,6 +16,8 @@ public partial class MainWindow
         _autosave.Stop();
         try
         {
+            if (_projectSession?.RecoveryReport.RequiresDecision == true)
+                await ReviewProjectRecoveryAsync(_projectSession); // Resolve the journal before guarded saves can resume.
             if (_service is null && !string.IsNullOrWhiteSpace(ChapterInput.Text))
             {
                 if (!ConfirmWorkspaceChange("Lưu nguyên văn chưa chia thành chương trước khi chuyển? Chọn Không để giữ nguyên cửa sổ và nội dung đang nhập.",

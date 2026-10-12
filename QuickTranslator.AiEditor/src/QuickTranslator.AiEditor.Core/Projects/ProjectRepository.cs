@@ -113,6 +113,7 @@ public sealed partial class ProjectRepository
     public async Task<ChapterLoadResult> LoadChapterAsync(ProjectSession session, Guid chapterId,
         CancellationToken cancellationToken = default)
     {
+        FaultPoint?.Invoke("BeforeChapterRead");
         var entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapterId && x.DeletedAt is null)
             ?? throw new FileNotFoundException("Không tìm thấy chương trong dự án.");
         string path = session.Resolve(entry.RelativePath);

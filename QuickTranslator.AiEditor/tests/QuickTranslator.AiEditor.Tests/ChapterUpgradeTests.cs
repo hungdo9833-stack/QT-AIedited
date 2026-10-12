@@ -71,6 +71,20 @@ public sealed class ChapterUpgradeTests : IDisposable
         Assert.Empty(migrated.CharacterProject.Profiles);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void OlderSchemaWithStoredCharacterSnapshotPreservesEverySnapshotField(int schema)
+    {
+        var chapter = TranslationService.CreateChapter("Snapshot cũ", "你好。");
+        chapter.SchemaVersion = schema;
+        chapter.CharacterProject.Name = "Hồ sơ đã sửa";
+        chapter.CharacterProject.Profiles = [new() { ChineseName = "王秀兰", VietnameseName = "Vương Tú Lan", NormalizationEnabled = false }];
+        string before = JsonSerializer.Serialize(chapter.CharacterProject, DocumentJson.Options);
+        DocumentJson.Migrate(chapter);
+        Assert.Equal(before, JsonSerializer.Serialize(chapter.CharacterProject, DocumentJson.Options));
+    }
+
     [Fact]
     public async Task FutureSchema_IsRejectedInsteadOfSilentlyDowngraded()
     {

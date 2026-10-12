@@ -98,4 +98,12 @@ public partial class MainWindow
             throw new OperationCanceledException("Dự án còn transaction chưa đối chiếu; chưa thay context. Journal/orphans được giữ nguyên.");
     }
     private sealed record RecoveryRow(string Label, ProjectTransactionPreview? Transaction);
+
+    private void ShowLegacyImportReport(LegacyImportReport report)
+    {
+        string rows = string.Join("\n", report.Chapters.Select(x =>
+            $"{x.State} · chương {x.Number} · {x.ChapterId}\nNguồn: {x.LoadedSourcePath ?? x.SourcePath}\nĐích: {x.TargetPath}"));
+        ShowTextWindow("Báo cáo import legacy",
+            $"Transaction: {report.TransactionId}\nRollback hoàn tất: {report.RollbackComplete}\nZIP nguồn: {report.SourceBackupPath}\nLỗi: {report.Error}\n\n{rows}\n\nNguồn legacy không bị thay đổi. Nếu NeedsRecovery, mở đối chiếu transaction trước khi ghi tiếp.");
+    }
 }

@@ -512,6 +512,8 @@ public partial class MainWindow : Window
     }
     private void ShowError(Exception error)
     {
+        if (error is LegacyImportException import) ShowLegacyImportReport(import.Report);
+        else if (error is LegacyImportCanceledException cancelledImport) ShowLegacyImportReport(cancelledImport.Report);
         StatusText.Text = "Lỗi: " + error.Message +
             (error is IOException or UnauthorizedAccessException
                 ? " Tác vụ chưa hoàn tất; hãy giữ ứng dụng mở, kiểm tra dung lượng/quyền ghi và thử lại thao tác lưu."
