@@ -464,10 +464,25 @@ public partial class MainWindow
 
     internal async Task RenameProjectChapterAsync(Guid chapterId, string title, string chineseTitle)
     {
-        if (_projectSession is null) return;
-        await _projectRepository.RenameChapterAsync(_projectSession, chapterId, title, chineseTitle);
-        await LoadProjectChapterAsync(chapterId);
-        RefreshProjectChapterList();
+        if (_projectSession is null || !BeginUiOperation(allowDuringTranslation: true)) return;
+        try
+        {
+            var session = _projectSession;
+            var service = _service;
+            if (service?.GetSnapshot().Id == chapterId)
+            {
+                await service.RenameAsync(title, chineseTitle);
+                await _projectRepository.UpdateChapterSummaryAsync(session, service.GetSnapshot());
+                if (ReferenceEquals(service, _service)) TitleInput.Text = service.GetSnapshot().Title;
+            }
+            else
+            {
+                await SaveCurrentAsync();
+                await _projectRepository.RenameChapterAsync(session, chapterId, title, chineseTitle);
+            }
+            RefreshProjectChapterList(); Refresh();
+        }
+        finally { EndUiOperation(); }
     }
 
     private async void OnDuplicateProjectChapter(object sender, RoutedEventArgs e)

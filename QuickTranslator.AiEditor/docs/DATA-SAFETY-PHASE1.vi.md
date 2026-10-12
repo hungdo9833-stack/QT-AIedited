@@ -33,4 +33,10 @@ Script ưu tiên SDK `.tools/dotnet` nếu có, nếu không dùng dotnet trong 
 
 ## Chưa xác minh thủ công
 
+## F02 — Đồng bộ đổi tên chương
+
+- Hai WPF regression tests trước sửa thất bại: tên trong service vẫn cũ sau rename; bản nháp pending không có trong file vừa được repository rename (`f02-red`).
+- Metadata của chương đang mở đổi qua `TranslationService.RenameAsync` dưới cùng khóa trạng thái/save gate với autosave; lưu cả draft pending rồi cập nhật summary manifest. UI không reload/ghi một bản chapter đĩa cũ lên trạng thái đang mở.
+- Test bổ sung có autosave đang chờ: rename đợi save gate và bản lưu cuối giữ metadata mới cùng draft. Invalid rename không mutation.
+
 WPF Show/thao tác chuột/bàn phím/DPI/IME/clipboard; prompt/template và chất lượng Ollama/TranslateGemma thực; offline end-to-end; disk-full, kill process/mất điện; tương thích toàn bộ Data thực. Không chạy request model hoặc thay dữ liệu truyện thật để có baseline.
