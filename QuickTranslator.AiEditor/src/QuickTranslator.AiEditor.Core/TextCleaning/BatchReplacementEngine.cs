@@ -1,4 +1,5 @@
 using QuickTranslator.AiEditor.Core.Models;
+using QuickTranslator.AiEditor.Core.Persistence;
 
 namespace QuickTranslator.AiEditor.Core.TextCleaning;
 
@@ -41,7 +42,7 @@ public sealed class BatchReplacementEngine
         {
             if (item.Conflict || item.Replacement is null)
                 throw new InvalidOperationException("Không thể áp dụng quy tắc đang xung đột.");
-            if (item.StartUtf16 < 0 || item.LengthUtf16 <= 0 || item.StartUtf16 + item.LengthUtf16 > text.Length ||
+            if (item.StartUtf16 < 0 || item.LengthUtf16 <= 0 || item.StartUtf16 > text.Length || item.LengthUtf16 > text.Length - item.StartUtf16 ||
                 item.StartUtf16 + item.LengthUtf16 > previousStart ||
                 !string.Equals(text.Substring(item.StartUtf16, item.LengthUtf16), item.Original, StringComparison.Ordinal))
                 throw new InvalidOperationException("Bản dịch hoặc danh sách chọn đã thay đổi/chồng lấn; hãy xem trước lại.");
@@ -57,9 +58,32 @@ public sealed class BatchReplacementEngine
         BatchReplacementScope scope, Guid batchId, DateTimeOffset createdAt, bool automatic = false)
     {
         ArgumentNullException.ThrowIfNull(chapter);
-        var items = selectedItems.Where(x => x.ChapterId == chapter.Id).ToArray();
+        ArgumentNullException.ThrowIfNull(selectedItems);
+        // Validate the complete plan on a private copy before touching the caller's document.
+        var candidate = DocumentJson.Clone(chapter);
+        var result = ApplyToCandidate(candidate, selectedItems.ToArray(), allowProtected, scope, batchId, createdAt, automatic);
+        DocumentJson.Validate(candidate);
+        foreach (var changed in candidate.Segments)
+        {
+            var live = chapter.Segments.Single(x => x.Id == changed.Id);
+            live.UserDraft = changed.UserDraft;
+            live.DraftSourceAttemptId = changed.DraftSourceAttemptId;
+            live.DraftRevision = changed.DraftRevision;
+            live.DraftHistory = changed.DraftHistory;
+            live.Status = changed.Status;
+            live.LastError = changed.LastError;
+        }
+        chapter.BatchReplacementHistory = candidate.BatchReplacementHistory;
+        chapter.UpdatedAt = candidate.UpdatedAt;
+        return result;
+    }
+
+    private static BatchApplyResult ApplyToCandidate(ChapterDocument chapter,
+        BatchReplacementPreviewItem[] items, bool allowProtected, BatchReplacementScope scope,
+        Guid batchId, DateTimeOffset createdAt, bool automatic)
+    {
         if (items.Length == 0) throw new InvalidOperationException("Không có vị trí hợp lệ được chọn trong chương này.");
-        if (items.Any(x => x.CharacterProjectId != chapter.CharacterProject.Id))
+        if (items.Any(x => x.ChapterId != chapter.Id || x.CharacterProjectId != chapter.CharacterProject.Id))
             throw new InvalidOperationException("Kết quả xem trước thuộc bộ truyện/dự án khác.");
         var run = new BatchReplacementRun
         {
@@ -76,7 +100,12 @@ public sealed class BatchReplacementEngine
             if (segment.IsProtectedFromAutomaticTranslation && !allowProtected)
                 throw new InvalidOperationException($"Đoạn {segment.Order} đã sửa/duyệt và đang được bảo vệ.");
             string before = segment.EditableText;
-            if (groupItems.Any(x => x.DraftRevision != segment.DraftRevision ||
+            if (segment.Status == SegmentStatus.Translating ||
+                groupItems.Any(x => x.SegmentStatus != segment.Status ||
+                                    x.Protected != segment.IsProtectedFromAutomaticTranslation ||
+                                    x.ApprovalVersion != segment.Approvals.Count ||
+                                    x.LastApprovalId != segment.Approvals.LastOrDefault()?.Id ||
+                                    x.DraftRevision != segment.DraftRevision ||
                                     !string.Equals(x.AnalysedText, before, StringComparison.Ordinal)))
                 throw new InvalidOperationException($"Đoạn {segment.Order} đã đổi sau khi xem trước; hãy quét lại.");
             string after = Apply(before, groupItems);
@@ -186,6 +215,7 @@ public sealed class BatchReplacementEngine
                 BeforeSentence = beforeSentence,
                 AfterSentence = ChineseTextScanner.SentenceAround(afterFull, offset, replacement?.Length ?? selected.Find.Length),
                 AnalysedText = text, DraftRevision = segment.DraftRevision, SegmentStatus = segment.Status,
+                ApprovalVersion = segment.Approvals.Count, LastApprovalId = segment.Approvals.LastOrDefault()?.Id,
                 Protected = segment.IsProtectedFromAutomaticTranslation, Conflict = selected.Conflict,
                 ConflictMessage = selected.Conflict
                     ? $"Có nhiều ánh xạ cho “{selected.Find}”: {string.Join(" / ", selected.Rules.Select(x => x.Replacement).Distinct())}."

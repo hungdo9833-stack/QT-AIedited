@@ -5,3 +5,11 @@ Phạm vi được duyệt: F05, F06, F12; kế thừa F01–F04. Branch `codex/
 Baseline chạy lại trên Windows, SDK riêng 10.0.401: restore locked thành công; Release **0 lỗi/0 cảnh báo**; **201 Core + 19 WPF = 220 tests đạt**, không bỏ qua. Logs/TRX: `artifacts/data-safety/phase2-baseline` (không commit).
 
 Checkpoint chuẩn bị được tạo trước khi sửa. Kết quả red/green và nghiệm thu từng nhóm được bổ sung tại tài liệu này.
+
+## F05 — Atomic Batch Replacement
+
+Nguyên nhân: ApplyToChapter vừa kiểm tra vừa sửa segment; ApplyBatchReplacementAsync sửa bản sống trước khi SaveAsync. Lỗi muộn hoặc lỗi ghi tạo nội dung/lịch sử dở dang.
+
+Cách sửa: chuẩn bị toàn bộ ứng viên riêng, validate revision, text, approval version/ID, status, protected draft, xung đột/offset và DocumentJson trước commit. Service giữ save gate, khóa mutation trong lúc ghi, chỉ thay bản sống/saved revision khi store thành công. Lỗi/hủy giữ nguyên document, dirty flag và history; Retry dùng cùng preview nếu chưa thay đổi. Không thay schema file ở F05. Giữa nhiều chương vẫn partial success có báo cáo và backup riêng; không tuyên bố transaction toàn project.
+
+Tests trước sửa: `phase2-f05-red`, 20 tests mới: **16 fail / 4 pass**. Tests bổ sung lỗi lưu/hủy với nháp chưa lưu, retry và partial success project. Sau sửa `phase2-f05-final`: **224 Core + 19 WPF = 243 pass**, không skip/fail. Locked restore và Release build 0 warning/error. Dữ liệu đều tổng hợp trong temp; artifacts được ignore.

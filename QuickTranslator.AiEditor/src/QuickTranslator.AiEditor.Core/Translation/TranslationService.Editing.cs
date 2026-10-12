@@ -12,6 +12,7 @@ public sealed partial class TranslationService
         ArgumentNullException.ThrowIfNull(chineseTitle);
         lock (_sync)
         {
+            EnsureNoBatchCommit();
             _chapter.Title = title.Trim();
             _chapter.ChineseTitle = chineseTitle.Trim();
             Touch();
@@ -20,7 +21,7 @@ public sealed partial class TranslationService
         await SaveAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public bool IsProcessing { get { lock (_sync) return _chapter.Queue.IsActive || _translationGate.CurrentCount == 0; } }
+    public bool IsProcessing { get { lock (_sync) return _batchCommitInProgress || _chapter.Queue.IsActive || _translationGate.CurrentCount == 0; } }
 
     public async Task ConfigureAsync(ModelOptions options, PromptPreset preset, IReadOnlyList<ConfirmedTerm>? terms = null,
         string? confirmedContext = null, CancellationToken cancellationToken = default)
@@ -110,6 +111,7 @@ public sealed partial class TranslationService
 
     private void EnsureStructureAvailable()
     {
+        EnsureNoBatchCommit();
         if (_chapter.Queue.IsActive || _translationGate.CurrentCount == 0)
             throw new InvalidOperationException("Hãy Tạm dừng và chờ yêu cầu đang chạy kết thúc trước khi đổi cấu trúc/thiết lập.");
     }

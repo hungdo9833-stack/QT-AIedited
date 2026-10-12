@@ -1,4 +1,5 @@
 using QuickTranslator.AiEditor.Core.Models;
+using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.TextCleaning;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
@@ -37,21 +38,56 @@ public sealed partial class TranslationService
         await SaveAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<BatchApplyResult> ApplyBatchReplacementAsync(
+    public Task<BatchApplyResult> ApplyBatchReplacementAsync(
         IEnumerable<BatchReplacementPreviewItem> selectedItems, bool allowProtected,
         BatchReplacementScope scope, Guid? batchId = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(selectedItems);
-        BatchApplyResult result;
-        lock (_sync)
+        var items = selectedItems.ToArray();
+        return CommitBatchAsync(candidate => BatchReplacementEngine.ApplyToChapter(candidate, items,
+            allowProtected, scope, batchId ?? Guid.NewGuid(), _clock.GetUtcNow()), cancellationToken);
+    }
+
+    private bool _batchCommitInProgress;
+
+    private void EnsureNoBatchCommit()
+    {
+        if (_batchCommitInProgress)
+            throw new InvalidOperationException("Đang ghi thay đổi batch; hãy chờ hoàn tất trước khi sửa hoặc duyệt.");
+    }
+
+    private async Task<BatchApplyResult> CommitBatchAsync(Func<ChapterDocument, BatchApplyResult> prepare,
+        CancellationToken cancellationToken)
+    {
+        await _saveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        bool ownsCommit = false;
+        try
         {
-            EnsureStructureAvailable();
-            result = BatchReplacementEngine.ApplyToChapter(_chapter, selectedItems, allowProtected, scope,
-                batchId ?? Guid.NewGuid(), _clock.GetUtcNow());
-            Touch();
+            ChapterDocument candidate;
+            BatchApplyResult result;
+            lock (_sync)
+            {
+                EnsureStructureAvailable();
+                candidate = DocumentJson.Clone(_chapter);
+                result = prepare(candidate);
+                DocumentJson.Validate(candidate);
+                _batchCommitInProgress = true;
+                ownsCommit = true;
+            }
+            await _store.SaveAsync(candidate, cancellationToken).ConfigureAwait(false);
+            lock (_sync)
+            {
+                _chapter = candidate;
+                _revision++;
+                _savedRevision = _revision;
+            }
+            return result;
         }
-        await SaveAsync(cancellationToken).ConfigureAwait(false);
-        return result;
+        finally
+        {
+            if (ownsCommit) lock (_sync) _batchCommitInProgress = false;
+            _saveGate.Release();
+        }
     }
 
     public async Task<BatchApplyResult> UndoLatestBatchReplacementAsync(Guid? batchId = null,

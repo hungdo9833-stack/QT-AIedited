@@ -83,6 +83,8 @@ public sealed record BatchReplacementPreviewItem
     public string AfterSentence { get; init; } = "";
     public string AnalysedText { get; init; } = "";
     public int DraftRevision { get; init; }
+    public int ApprovalVersion { get; init; }
+    public Guid? LastApprovalId { get; init; }
     public SegmentStatus SegmentStatus { get; init; }
     public bool Protected { get; init; }
     public bool Conflict { get; init; }

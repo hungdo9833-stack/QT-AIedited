@@ -9,7 +9,7 @@ public sealed partial class TranslationService
     private readonly object _sync = new();
     private readonly SemaphoreSlim _translationGate = new(1, 1);
     private readonly SemaphoreSlim _saveGate = new(1, 1);
-    private readonly ChapterDocument _chapter;
+    private ChapterDocument _chapter;
     private readonly IOllamaClient _client;
     private readonly IChapterStore _store;
     private readonly IGlossaryProvider _glossary;
@@ -180,8 +180,11 @@ public sealed partial class TranslationService
         options ??= GetSnapshot().DefaultModelOptions;
         options.Validate();
         lock (_sync)
+        {
+            EnsureNoBatchCommit();
             if (_chapter.Queue.IsActive && _chapter.Queue.RunId != runId)
                 throw new InvalidOperationException("Hàng đợi đang chạy. Hãy tạm dừng hoàn toàn trước khi dịch riêng một đoạn.");
+        }
         // Reject a second user request instead of queuing it to run automatically later.
         if (!await _translationGate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
             throw new InvalidOperationException("Đã có một đoạn đang dịch. Hãy chờ hoặc hủy; ứng dụng không xếp hàng dịch tự động.");
@@ -191,8 +194,11 @@ public sealed partial class TranslationService
         try
         {
             lock (_sync)
+            {
+                EnsureNoBatchCommit();
                 if (_chapter.Queue.IsActive && _chapter.Queue.RunId != runId)
                     throw new InvalidOperationException("Hàng đợi đã bắt đầu. Hãy tạm dừng trước khi dịch riêng.");
+            }
             var context = GetOperationSnapshot(out var resourceRevision);
             var selected = context.Segments.SingleOrDefault(s => s.Id == segmentId)
                 ?? throw new ArgumentException("Không tìm thấy đoạn đang chọn.", nameof(segmentId));
@@ -315,8 +321,12 @@ public sealed partial class TranslationService
         finally { _saveGate.Release(); }
     }
 
-    private TranslationSegment Find(Guid segmentId) => _chapter.Segments.SingleOrDefault(s => s.Id == segmentId)
-        ?? throw new ArgumentException("Không tìm thấy đoạn.", nameof(segmentId));
+    private TranslationSegment Find(Guid segmentId)
+    {
+        EnsureNoBatchCommit();
+        return _chapter.Segments.SingleOrDefault(s => s.Id == segmentId)
+            ?? throw new ArgumentException("Không tìm thấy đoạn.", nameof(segmentId));
+    }
 
     private void Touch() { _revision++; _chapter.UpdatedAt = _clock.GetUtcNow(); }
 
