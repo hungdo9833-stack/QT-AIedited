@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/QuickTranslator.AiEditor.Core/QuickTranslator.AiEditor.Core.csproj" />
+  <Project Path="src/QuickTranslator.AiEditor.Wpf/QuickTranslator.AiEditor.Wpf.csproj" />
+  <Project Path="tests/QuickTranslator.AiEditor.Tests/QuickTranslator.AiEditor.Tests.csproj" />
+</Solution>

@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "contentSha256": "E1C697D49A1C03E6F4E8F897A69FCB82FB13DADBEFCEBF81AE49D5E28DE8A58F",
+  "chapter": {
+    "schemaVersion": 1,
+    "id": "fa105d81-3379-4067-a6e5-e8bd73c5a608",
+    "title": "Ch\u01B0\u01A1ng gi\u1EA3 l\u1EADp phi\u00EAn b\u1EA3n 1",
+    "originalText": "\u7532\u4E59\u4E19\u4E01\u620A\u3002\r\n\u5DF1\u5E9A\u8F9B\u58EC\u7678\u3002\r\n\u5929\u5730\u7384\u9EC4\u5B87\u3002",
+    "createdAt": "2026-10-11T12:43:21.9489134+00:00",
+    "updatedAt": "2026-10-11T12:43:22.3497174+00:00",
+    "segmentationOptions": {
+      "minimumHanCharacters": 3,
+      "targetHanCharacters": 5,
+      "maximumHanCharacters": 6,
+      "maximumTextElements": 2000
+    },
+    "defaultModelOptions": {
+      "model": "translategemma:12b",
+      "temperature": 0.1,
+      "contextSize": 4096,
+      "maximumOutputTokens": 1536,
+      "requestTimeout": "00:05:00"
+    },
+    "selectedSegmentId": "1b70d8f2-daba-33ee-b5af-6ce73a922274",
+    "segments": [
+      {
+        "id": "1b70d8f2-daba-33ee-b5af-6ce73a922274",
+        "order": 1,
+        "startUtf16": 0,
+        "sourceText": "\u7532\u4E59\u4E19\u4E01\u620A\u3002\r\n",
+        "hanCharacterCount": 5,
+        "status": "Approved",
+        "userDraft": "B\u1EA3n s\u1EEDa t\u1EEB phi\u00EAn b\u1EA3n c\u0169.",
+        "draftSourceAttemptId": "9e87108f-8ae2-4852-a553-30bc97d7bc0a",
+        "draftRevision": 1,
+        "lastError": null,
+        "attempts": [
+          {
+            "id": "9e87108f-8ae2-4852-a553-30bc97d7bc0a",
+            "startedAt": "2026-10-11T12:43:22.261757+00:00",
+            "finishedAt": "2026-10-11T12:43:22.3261905+00:00",
+            "outcome": "Completed",
+            "modelOptions": {
+              "model": "translategemma:12b",
+              "temperature": 0.1,
+              "contextSize": 4096,
+              "maximumOutputTokens": 1536,
+              "requestTimeout": "00:05:00"
+            },
+            "promptVersion": "translategemma-zh-vi-v1",
+            "prompt": "You are a professional Chinese (zh) to Vietnamese (vi) translator.\nAccurately convey the meaning and nuances of this novel excerpt in natural Vietnamese.\nPreserve names, paragraph breaks, dialogue, tone and punctuation. Do not omit, summarize or invent content.\nProduce only the Vietnamese translation, without explanations, commentary or Markdown fences.\nPlease translate the following Chinese text into Vietnamese:\n\u003Csource_text\u003E\n\u7532\u4E59\u4E19\u4E01\u620A\u3002\r\n\n\u003C/source_text\u003E",
+            "aiText": "B\u1EA3n d\u1ECBch nh\u00E2n t\u1EA1o cho ki\u1EC3m th\u1EED.",
+            "responseDone": true,
+            "doneReason": "stop",
+            "metrics": {
+              "inputTokens": 40,
+              "outputTokens": 12,
+              "totalDurationNanoseconds": null,
+              "loadDurationNanoseconds": null,
+              "promptEvaluationDurationNanoseconds": null,
+              "evaluationDurationNanoseconds": null,
+              "clientElapsed": "00:00:02"
+            },
+            "issues": [],
+            "error": null
+          }
+        ],
+        "approvals": [
+          {
+            "id": "98dc6bbf-c845-41e6-b2d5-727b83f4cea3",
+            "approvedAt": "2026-10-11T12:43:22.3404218+00:00",
+            "draftRevision": 1,
+            "text": "B\u1EA3n s\u1EEDa t\u1EEB phi\u00EAn b\u1EA3n c\u0169.",
+            "sourceAttemptId": "9e87108f-8ae2-4852-a553-30bc97d7bc0a"
+          }
+        ]
+      },
+      {
+        "id": "8c998e75-ad51-caad-4590-88e051488ffc",
+        "order": 2,
+        "startUtf16": 8,
+        "sourceText": "\u5DF1\u5E9A\u8F9B\u58EC\u7678\u3002\r\n",
+        "hanCharacterCount": 5,
+        "status": "AwaitingReview",
+        "userDraft": null,
+        "draftSourceAttemptId": null,
+        "draftRevision": 0,
+        "lastError": null,
+        "attempts": [
+          {
+            "id": "bbf0eda8-a95d-4f16-9407-682606834622",
+            "startedAt": "2026-10-11T12:43:22.3469193+00:00",
+            "finishedAt": "2026-10-11T12:43:22.3497166+00:00",
+            "outcome": "Completed",
+            "modelOptions": {
+              "model": "translategemma:12b",
+              "temperature": 0.1,
+              "contextSize": 4096,
+              "maximumOutputTokens": 1536,
+              "requestTimeout": "00:05:00"
+            },
+            "promptVersion": "translategemma-zh-vi-v1",
+            "prompt": "You are a professional Chinese (zh) to Vietnamese (vi) translator.\nAccurately convey the meaning and nuances of this novel excerpt in natural Vietnamese.\nPreserve names, paragraph breaks, dialogue, tone and punctuation. Do not omit, summarize or invent content.\nProduce only the Vietnamese translation, without explanations, commentary or Markdown fences.\nPlease translate the following Chinese text into Vietnamese:\n\u003Csource_text\u003E\n\u5DF1\u5E9A\u8F9B\u58EC\u7678\u3002\r\n\n\u003C/source_text\u003E",
+            "aiText": "B\u1EA3n d\u1ECBch nh\u00E2n t\u1EA1o cho ki\u1EC3m th\u1EED.",
+            "responseDone": true,
+            "doneReason": "stop",
+            "metrics": {
+              "inputTokens": 40,
+              "outputTokens": 12,
+              "totalDurationNanoseconds": null,
+              "loadDurationNanoseconds": null,
+              "promptEvaluationDurationNanoseconds": null,
+              "evaluationDurationNanoseconds": null,
+              "clientElapsed": "00:00:02"
+            },
+            "issues": [],
+            "error": null
+          }
+        ],
+        "approvals": []
+      },
+      {
+        "id": "143c1f0e-654d-8dff-bcbc-81d404d29c4f",
+        "order": 3,
+        "startUtf16": 16,
+        "sourceText": "\u5929\u5730\u7384\u9EC4\u5B87\u3002",
+        "hanCharacterCount": 5,
+        "status": "Untranslated",
+        "userDraft": null,
+        "draftSourceAttemptId": null,
+        "draftRevision": 0,
+        "lastError": null,
+        "attempts": [],
+        "approvals": []
+      }
+    ]
+  }
+}
