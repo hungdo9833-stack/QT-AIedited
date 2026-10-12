@@ -39,4 +39,11 @@ Script ưu tiên SDK `.tools/dotnet` nếu có, nếu không dùng dotnet trong 
 - Metadata của chương đang mở đổi qua `TranslationService.RenameAsync` dưới cùng khóa trạng thái/save gate với autosave; lưu cả draft pending rồi cập nhật summary manifest. UI không reload/ghi một bản chapter đĩa cũ lên trạng thái đang mở.
 - Test bổ sung có autosave đang chờ: rename đợi save gate và bản lưu cuối giữ metadata mới cùng draft. Invalid rename không mutation.
 
+## F03 — Đăng ký chương trước khi ghi từ Editor
+
+- Ba regression tests trước sửa thất bại: tạo qua Glossary thiếu ProjectId/manifest; editor nhận chương chưa đăng ký; lỗi write manifest để lại entry trong bộ nhớ trỏ tới file đã bị dọn (`f03-red`).
+- Đường Glossary lưu đủ glossary/context rồi gọi cơ chế đăng ký chung trước attach; nhập TXT cũng đi qua cùng helper. Repository tiếp tục là nơi đăng ký cho import legacy/duplicate.
+- `RegisteredChapterStore` chặn service editor ghi file ngoài manifest/khác ProjectId/số chương. `AttachChapter` kiểm tra đăng ký trước thay service.
+- Rollback Add phục hồi manifest trong bộ nhớ nếu write thất bại. Không triển khai journal crash/move/delete/restore của F07 trong lượt này; không sửa/xóa orphan cũ hay dữ liệu thật.
+
 WPF Show/thao tác chuột/bàn phím/DPI/IME/clipboard; prompt/template và chất lượng Ollama/TranslateGemma thực; offline end-to-end; disk-full, kill process/mất điện; tương thích toàn bộ Data thực. Không chạy request model hoặc thay dữ liệu truyện thật để có baseline.

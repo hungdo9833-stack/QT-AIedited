@@ -231,6 +231,10 @@ public partial class MainWindow
             var chapter = TranslationService.CreateChapter(TitleInput.Text, _importedOriginalText ?? ChapterInput.Text,
                 ReadSegmenterOptions(), ReadModelOptions());
             chapter.CharacterProject = CharacterProjectStore.Clone(_characterProject);
+            chapter.SelectedPreset = _presetManager.Selected;
+            chapter.ConfirmedTerms = ReadTerms().ToList();
+            chapter.ConfirmedContextNotes = ContextNotesInput.Text;
+            chapter = await RegisterChapterIfNeededAsync(chapter);
             AttachChapter(chapter); _selectedId = chapter.SelectedSegmentId; _shownAttemptId = null;
         }
         var service = _service!;

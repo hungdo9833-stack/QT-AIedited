@@ -90,6 +90,7 @@ public sealed class ProjectRepository
             throw new IOException("Thư mục dự án đã có tệp cùng ID nhưng manifest không quản lý. Ứng dụng dừng để tránh ghi đè.");
 
         var saved = DocumentJson.Clone(chapter);
+        var previousManifest = Clone(session.Manifest);
         saved.ProjectId = session.Manifest.ProjectId;
         saved.ChapterNumber = number;
         saved.ChineseTitle = chineseTitle?.Trim() ?? saved.ChineseTitle;
@@ -101,6 +102,7 @@ public sealed class ProjectRepository
         try { await SaveManifestAsync(session, cancellationToken).ConfigureAwait(false); }
         catch
         {
+            session.Manifest = previousManifest;
             TryDelete(session.ChapterStore.GetPath(saved.Id));
             throw;
         }

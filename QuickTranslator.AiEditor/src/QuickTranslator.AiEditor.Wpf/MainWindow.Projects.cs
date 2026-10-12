@@ -444,7 +444,7 @@ public partial class MainWindow
                 var chapter = TranslationService.CreateChapter(Path.GetFileNameWithoutExtension(file), text, ReadSegmenterOptions(), ReadModelOptions());
                 chapter.SelectedPreset = _presetManager.Selected; chapter.ConfirmedTerms = ReadTerms().ToList(); chapter.ConfirmedContextNotes = ContextNotesInput.Text;
                 chapter.CharacterProject = CharacterProjectStore.Clone(_characterProject);
-                await _projectRepository.AddChapterAsync(_projectSession, chapter, NextChapterNumber());
+                await RegisterChapterIfNeededAsync(chapter);
             }
             RefreshProjectChapterList();
             if (_projectSession.Manifest.CurrentChapterId is Guid id) await LoadProjectChapterAsync(id);

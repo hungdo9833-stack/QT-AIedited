@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
+using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Segmentation;
 using QuickTranslator.AiEditor.Core.Translation;
 
@@ -29,8 +30,11 @@ public partial class MainWindow
 
     private void AttachChapter(ChapterDocument chapter)
     {
+        if (_projectSession is not null && (chapter.ProjectId != _projectSession.Manifest.ProjectId ||
+            !_projectSession.Manifest.Chapters.Any(x => x.ChapterId == chapter.Id && x.DeletedAt is null)))
+            throw new InvalidOperationException("Đăng ký chương trong manifest trước khi mở editor.");
         if (_queue is not null) _queue.ProgressChanged -= OnQueueProgress;
-        _service = new(chapter, _translationClient, _store);
+        _service = new(chapter, _translationClient, _projectSession is null ? _store : new RegisteredChapterStore(_projectSession));
         _queue = new(_service);
         _queue.ProgressChanged += OnQueueProgress;
         if (_projectSession is null) LoadCharacterProject(_service.GetSnapshot().CharacterProject);
