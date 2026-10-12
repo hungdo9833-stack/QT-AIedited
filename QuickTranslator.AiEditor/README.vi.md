@@ -1,5 +1,7 @@
 # QuickTranslator AI Editor — AI offline, Reader Mode và Editor bốn ô
 
+Kết quả ổn định dữ liệu M0/F01–F04 trên Windows, cách chạy regression tests và lưu ý tương thích tài nguyên Project: [DATA-SAFETY-PHASE1.vi.md](docs/DATA-SAFETY-PHASE1.vi.md).
+
 Ứng dụng độc lập để dịch tiểu thuyết Trung–Việt bằng **Ollama trên máy Windows**. Người dùng nhập một chương, bấm **Dịch toàn chương** một lần; ứng dụng chia đoạn, dịch tuần tự từng đoạn, lưu sau mỗi đoạn và ghép bản Việt theo đúng thứ tự. Người dùng vẫn có thể sửa, duyệt hoặc dịch lại riêng từng đoạn.
 
 Mã mới nằm hoàn toàn trong thư mục này, dùng **C# / .NET 10 LTS / WPF**. Không sửa QuickTranslator, TranslatorEngine hay WinFormsUI gốc. Dịch AI vẫn chạy khi không có Data QuickTranslator; hai ô Hán Việt và VP đơn ý cần người dùng chọn bộ Data riêng trong Settings.

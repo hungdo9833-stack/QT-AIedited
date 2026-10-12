@@ -31,11 +31,14 @@ public sealed partial class TranslationService
         }
     }
 
-    private ChapterDocument GetOperationSnapshot()
+    private ChapterDocument GetOperationSnapshot() => GetOperationSnapshot(out _);
+
+    private ChapterDocument GetOperationSnapshot(out long? resourceRevision)
     {
         lock (_sync)
         {
             var snapshot = DocumentJson.Clone(_chapter);
+            resourceRevision = _projectResources?.Revision;
             _projectResources?.ApplyTo(snapshot);
             return snapshot;
         }
@@ -79,6 +82,7 @@ public sealed partial class TranslationService
     }
 
     public ChapterDocument GetSnapshot() { lock (_sync) return DocumentJson.Clone(_chapter); }
+    public ChapterDocument GetWorkingSnapshot() => GetOperationSnapshot();
     public bool HasUnsavedChanges { get { lock (_sync) return _revision > _savedRevision; } }
     public string SavePath { get { lock (_sync) return _store.GetPath(_chapter.Id); } }
 
@@ -189,7 +193,7 @@ public sealed partial class TranslationService
             lock (_sync)
                 if (_chapter.Queue.IsActive && _chapter.Queue.RunId != runId)
                     throw new InvalidOperationException("Hàng đợi đã bắt đầu. Hãy tạm dừng trước khi dịch riêng.");
-            var context = GetOperationSnapshot();
+            var context = GetOperationSnapshot(out var resourceRevision);
             var selected = context.Segments.SingleOrDefault(s => s.Id == segmentId)
                 ?? throw new ArgumentException("Không tìm thấy đoạn đang chọn.", nameof(segmentId));
             var entries = await _glossary.GetEntriesAsync(selected.SourceText, cancellationToken).ConfigureAwait(false);
@@ -200,7 +204,8 @@ public sealed partial class TranslationService
             {
                 StartedAt = _clock.GetUtcNow(), Outcome = AttemptOutcome.InProgress,
                 ModelOptions = options with { }, PromptVersion = TranslationPromptBuilder.Version, Prompt = prompt,
-                PresetSnapshot = preset with { }, SourceSha256 = SourceHash(selected.SourceText)
+                PresetSnapshot = preset with { }, SourceSha256 = SourceHash(selected.SourceText),
+                ProjectResourceRevision = resourceRevision
             };
             lock (_sync)
             {

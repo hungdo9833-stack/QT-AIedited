@@ -90,7 +90,7 @@ public static class DocumentJson
             {
                 if (attempt is null || attempt.Id == Guid.Empty || !attemptIds.Add(attempt.Id) ||
                     !Enum.IsDefined(attempt.Outcome) || attempt.ModelOptions is null || attempt.Prompt is null ||
-                    attempt.PromptVersion is null || attempt.Issues is null)
+                    attempt.PromptVersion is null || attempt.Issues is null || attempt.ProjectResourceRevision < 0)
                     throw new InvalidDataException("Lịch sử dịch không hợp lệ.");
                 attempt.ModelOptions.Validate();
                 attempt.PresetSnapshot?.Validate();

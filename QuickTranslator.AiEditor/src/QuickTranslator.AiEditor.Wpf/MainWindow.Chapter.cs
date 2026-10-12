@@ -47,7 +47,7 @@ public partial class MainWindow
     }
     private void OnQueueProgress(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() =>
     {
-        if (!ReferenceEquals(sender, _queue) || _closing) return;
+        if (!ReferenceEquals(sender, _queue) || _closing || _transitioning) return;
         if (FollowQueueCheck.IsChecked == true && !DraftText.IsKeyboardFocusWithin && _service?.GetSnapshot().Queue.CurrentSegmentId is Guid current)
         { _selectedId = current; _shownAttemptId = null; }
         Refresh();
@@ -82,27 +82,36 @@ public partial class MainWindow
     {
         if (WorkActive || !BeginUiOperation()) return;
         Task? request = null;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _activeWorkCompletion = completion.Task;
+        TranslationService? service = null;
+        bool preparing = true;
         try
         {
             if (!resume) await PrepareChapterAsync();
             else await SaveCurrentAsync();
             EndUiOperation();
+            preparing = false;
+            service = _service;
             FollowQueueCheck.IsChecked = true;
             request = resume ? _queue!.ResumeAsync() : _queue!.StartAsync(mode, ReadModelOptions(), _presetManager.Selected);
             _activeRequest = request;
             Refresh();
             SetStatus(resume ? "Đang tiếp tục phần chưa hoàn tất với snapshot cấu hình của hàng đợi." : "Đang dịch tuần tự toàn chương; tự lưu từng đoạn, không chờ duyệt.");
             await request;
+            if (!ReferenceEquals(service, _service) || _transitioning) return;
             Refresh();
             var state = _service!.GetSnapshot().Queue;
             SetStatus(state.LastError ?? QueueLabel(state.Status));
         }
-        catch (Exception ex) { ShowError(ex); }
+        catch (Exception ex) { if (!_transitioning) ShowError(ex); }
         finally
         {
             if (ReferenceEquals(_activeRequest, request)) _activeRequest = null;
-            _uiOperation = false;
-            Refresh();
+            if (preparing) EndUiOperation();
+            if (ReferenceEquals(_activeWorkCompletion, completion.Task)) _activeWorkCompletion = null;
+            if (!_transitioning) Refresh();
+            completion.TrySetResult();
         }
     }
 

@@ -35,6 +35,14 @@ public sealed class ProjectResources
         chapter.ConfirmedTerms = Terms.ToList();
         chapter.ConfirmedContextNotes = Context;
     }
+
+    public ChapterDocument CreateWorkingChapter(ChapterDocument chapter)
+    {
+        if (chapter.ProjectId != ProjectId) throw new InvalidOperationException("Chương không thuộc project sở hữu tài nguyên.");
+        var snapshot = DocumentJson.Clone(chapter);
+        ApplyTo(snapshot);
+        return snapshot;
+    }
 }
 
 public sealed class ProjectResourceStore(ProjectSession session)
@@ -70,6 +78,7 @@ public sealed class ProjectResourceStore(ProjectSession session)
     public async Task<ProjectResources> SaveAsync(ProjectResources proposed, CancellationToken cancellationToken = default)
     {
         var saved = proposed.Clone();
+        if (saved.ProjectId != session.Manifest.ProjectId) throw new InvalidOperationException("Không ghi tài nguyên của project khác.");
         saved.ProjectId = session.Manifest.ProjectId;
         saved.Characters.Id = saved.ProjectId;
         saved.Validate();

@@ -116,7 +116,6 @@ internal sealed class WorkspaceFixture : IDisposable
         Get<DispatcherTimer>("_autosave").Stop();
         Get<DispatcherTimer>("_progressTimer").Stop();
         Get<DispatcherTimer>("_readerSaveTimer").Stop();
-        Get<OllamaClient>("_client").Dispose();
         Set("_allowClose", true);
         Window.Close();
         string resolved = Path.GetFullPath(Root);

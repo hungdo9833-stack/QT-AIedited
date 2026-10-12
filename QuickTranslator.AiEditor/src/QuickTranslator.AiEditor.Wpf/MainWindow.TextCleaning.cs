@@ -149,12 +149,14 @@ public partial class MainWindow
 
         async Task<IReadOnlyList<ChapterDocument>> ReadScopeAsync()
         {
-            var current = _service!.GetSnapshot();
+            var current = _service!.GetWorkingSnapshot();
             var selectedScope = ((ScopeOption)scope.SelectedItem).Scope;
             if (selectedScope != BatchReplacementScope.CurrentProject) return [current];
             await SaveCurrentAsync();
             var coordinator = new BatchProjectReplacementService(_store);
-            return await coordinator.LoadProjectChaptersAsync(current.CharacterProject.Id, current);
+            var chapters = await coordinator.LoadProjectChaptersAsync(current.CharacterProject.Id, current);
+            return _projectResources is null ? chapters : chapters.Select(chapter =>
+                chapter.ProjectId == _projectResources.ProjectId ? _projectResources.CreateWorkingChapter(chapter) : chapter).ToArray();
         }
 
         IReadOnlyList<BatchReplacementRule> BuildRules(IReadOnlyList<ChapterDocument> chapters)
@@ -361,6 +363,7 @@ public partial class MainWindow
             { navigation = new(row.Item.ChapterId, row.Item.SegmentId, row.Item.StartUtf16, row.Item.LengthUtf16); window.Close(); }
         };
         window.Loaded += async (_, _) => { if (scanFirst) await ScanAsync(); };
+        window.Closing += (_, args) => { if (working) { args.Cancel = true; status.Text = "Đang ghi/đọc dữ liệu; hãy chờ thao tác hoàn tất trước khi đóng."; } };
         window.Closed += async (_, _) =>
         {
             _uiOperation = false; UpdateButtons();
@@ -385,10 +388,14 @@ public partial class MainWindow
         {
             if (_service?.GetSnapshot().Id != request.ChapterId)
             {
-                await SaveCurrentAsync();
-                var loaded = await _store.LoadAsync(_store.GetPath(request.ChapterId));
-                AttachChapter(loaded.Chapter); ApplyInputs(loaded.Chapter); SelectChapterPreset(loaded.Chapter.SelectedPreset);
+                if (_projectSession is not null) await LoadProjectChapterAsync(request.ChapterId);
+                else await RunWorkspaceTransitionAsync(async () =>
+                {
+                    var loaded = await _store.LoadAsync(_store.GetPath(request.ChapterId));
+                    AttachChapter(loaded.Chapter); ApplyInputs(loaded.Chapter); SelectChapterPreset(loaded.Chapter.SelectedPreset);
+                });
             }
+            if (_service?.GetSnapshot().Id != request.ChapterId) return;
             _selectedId = request.SegmentId; _shownAttemptId = null;
             ReaderModeButton.IsChecked = false; EditorModeButton.IsChecked = true; EditorTabs.SelectedIndex = 1;
             Refresh();

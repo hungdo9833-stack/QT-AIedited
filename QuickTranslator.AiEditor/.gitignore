@@ -26,6 +26,7 @@ Mark.txt
 *.qtproj.bak
 *.qtproj.tmp-*
 **/Backups/
+**/Settings/resources.json*
 library.json
 library.json.bak
 *.user

@@ -29,12 +29,19 @@ public partial class MainWindow
     {
         ReaderFontInput.ItemsSource = Fonts.SystemFontFamilies.Select(f => f.Source).OrderBy(n => n).ToArray();
         _readerSaveTimer.Tick += async (_, _) => { _readerSaveTimer.Stop(); await SaveReaderPreferencesAsync(); };
+        var store = _readerStore;
         try
         {
-            _readerPreferences = await _readerStore.LoadAsync();
+            var preferences = await store.LoadAsync();
+            if (!ReferenceEquals(store, _readerStore)) return;
+            _readerPreferences = preferences;
             if (_readerStore.RecoveredFromBackup) SetStatus("Đã phục hồi thiết lập Reader từ bản dự phòng.");
         }
-        catch (Exception ex) { ShowError(ex); _readerPreferences = new(); }
+        catch (Exception ex)
+        {
+            if (!ReferenceEquals(store, _readerStore)) return;
+            ShowError(ex); _readerPreferences = new();
+        }
         _readerReady = true;
         LoadReaderAppearanceControls();
         ApplyReaderAppearance();

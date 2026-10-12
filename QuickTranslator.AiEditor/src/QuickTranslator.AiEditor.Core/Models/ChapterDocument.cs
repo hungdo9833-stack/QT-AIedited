@@ -30,6 +30,7 @@ public sealed class TranslationAttempt
     public string PromptVersion { get; set; } = "";
     public string Prompt { get; set; } = "";
     public PromptPreset? PresetSnapshot { get; set; }
+    public long? ProjectResourceRevision { get; set; }
     public string? SourceSha256 { get; set; }
     public Guid? NormalizationRunId { get; set; }
     public string? AiText { get; set; }

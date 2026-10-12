@@ -84,25 +84,16 @@ public partial class MainWindow : Window
 
     private async void OnNewChapter(object sender, RoutedEventArgs e)
     {
-        if (!BeginUiOperation()) return;
         try
         {
-            if (_service is not null || _characterProject.Profiles.Count > 0) await SaveCharacterProjectAsync();
-            await SaveCurrentAsync();
-            if (_service is null && !string.IsNullOrWhiteSpace(ChapterInput.Text) &&
-                MessageBox.Show(this, "Phần nguyên văn chưa chia sẽ được thay bằng chương mới. Bạn muốn tiếp tục?", "Chương mới",
-                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-            DetachChapter();
-            _selectedId = null;
-            _shownAttemptId = null;
-            TitleInput.Text = "Chương mới";
-            ChapterInput.Clear();
-            _importedOriginalText = null;
-            Refresh();
-            SetStatus("Nhập chương mới. Tiến độ chương trước vẫn nằm trong thư mục dữ liệu Windows.");
+            await RunWorkspaceTransitionAsync(() =>
+            {
+                DetachChapter(); ClearChapterEditor(); Refresh();
+                SetStatus("Nhập chương mới. Chương trước đã được lưu.");
+                return Task.CompletedTask;
+            });
         }
         catch (Exception ex) { ShowError(ex); }
-        finally { EndUiOperation(); }
     }
 
     private void OnPasteChapter(object sender, RoutedEventArgs e)
@@ -138,62 +129,64 @@ public partial class MainWindow : Window
             InitialDirectory = ChapterFileStore.DefaultDirectory
         };
         if (dialog.ShowDialog(this) != true) return;
-        if (!BeginUiOperation()) return;
         try
         {
-            if (_service is null && !string.IsNullOrWhiteSpace(ChapterInput.Text) &&
-                MessageBox.Show(this, "Nguyên văn chưa chia sẽ được thay bằng chương trong tệp. Tiếp tục?", "Mở tiến độ",
-                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-            if (_service is not null || _characterProject.Profiles.Count > 0) await SaveCharacterProjectAsync();
-            await SaveCurrentAsync();
-            var loaded = await _store.LoadAsync(dialog.FileName);
-            var openedChapter = await RegisterChapterIfNeededAsync(loaded.Chapter);
-            AttachChapter(openedChapter);
-            _selectedId = openedChapter.SelectedSegmentId ?? openedChapter.Segments[0].Id;
-            _shownAttemptId = null;
-            ApplyInputs(_service!.GetSnapshot());
-            SelectChapterPreset(loaded.Chapter.SelectedPreset);
-            await _service.SaveAsync();
-            Refresh();
-            SetStatus(loaded.RecoveredFromBackup
-                ? "Đã phục hồi từ bản dự phòng. Kiểm tra tiến độ; ứng dụng không tự dịch tiếp."
-                : "Đã mở tiến độ. Lần dịch bị gián đoạn (nếu có) được đánh dấu lỗi; không tự gửi lại.");
+            await RunWorkspaceTransitionAsync(async () =>
+            {
+                var loaded = await _store.LoadAsync(dialog.FileName);
+                var openedChapter = await RegisterChapterIfNeededAsync(loaded.Chapter);
+                // Persist crash recovery before replacing the previous live service.
+                var prepared = new TranslationService(openedChapter, _translationClient,
+                    _projectSession is null ? _store : new RegisteredChapterStore(_projectSession));
+                await prepared.SaveAsync();
+                AttachChapter(prepared.GetSnapshot());
+                _selectedId = openedChapter.SelectedSegmentId ?? openedChapter.Segments[0].Id; _shownAttemptId = null;
+                ApplyInputs(openedChapter); SelectChapterPreset(openedChapter.SelectedPreset); Refresh();
+                SetStatus(loaded.RecoveredFromBackup ? "Đã phục hồi từ bản dự phòng; hãy kiểm tra tiến độ." : "Đã mở tiến độ; không tự gửi lại request.");
+            });
         }
         catch (Exception ex) { ShowError(ex); }
-        finally { Refresh(); EndUiOperation(); }
     }
 
     private async void OnTranslate(object sender, RoutedEventArgs e)
     {
         if (_service is null || _selectedId is not Guid selected || WorkActive || _uiOperation) return;
+        var service = _service;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _activeWorkCompletion = completion.Task;
+        CancellationTokenSource? cancellation = null;
+        Task? request = null;
         try
         {
             if (!BeginUiOperation()) return;
             try { await SaveSelectedSettingsAsync(); } finally { EndUiOperation(); }
             var options = ReadModelOptions();
             _busy = true;
-            _requestCancellation = new();
-            _activeRequest = _service.TranslateAsync(selected, options, _requestCancellation.Token, _presetManager.Selected);
+            cancellation = new(); _requestCancellation = cancellation;
+            request = service.TranslateAsync(selected, options, cancellation.Token, _presetManager.Selected);
+            _activeRequest = request;
             Refresh();
             SetStatus("Đang dịch riêng đúng một đoạn. Bạn vẫn có thể sửa nháp; bản sửa không bị ghi đè.");
-            await _activeRequest;
+            await request;
+            if (!ReferenceEquals(service, _service) || _transitioning) return;
             if (_selectedId == selected) _shownAttemptId = null;
             Refresh();
-            var translated = _service.GetSnapshot().Segments.Single(s => s.Id == selected);
+            var translated = service.GetSnapshot().Segments.Single(s => s.Id == selected);
             if (translated.Status == SegmentStatus.Error)
                 ShowError(new InvalidDataException(translated.LastError ?? "Kết quả AI không hợp lệ; hãy kiểm tra hoặc dịch lại."));
             else
                 SetStatus("Đã nhận kết quả. Hãy đọc, sửa và bấm Duyệt khi bạn đồng ý. Không chuyển đoạn tự động.");
         }
-        catch (OperationCanceledException) { SetStatus("Đã hủy lần dịch. Bản nháp và lịch sử cũ được giữ."); }
-        catch (Exception ex) { ShowError(ex); }
+        catch (OperationCanceledException) { if (!_transitioning) SetStatus("Đã hủy lần dịch. Bản nháp và lịch sử cũ được giữ."); }
+        catch (Exception ex) { if (!_transitioning) ShowError(ex); }
         finally
         {
-            _requestCancellation?.Dispose();
-            _requestCancellation = null;
-            _activeRequest = null;
-            _busy = false;
-            Refresh();
+            cancellation?.Dispose();
+            if (ReferenceEquals(cancellation, _requestCancellation)) _requestCancellation = null;
+            if (ReferenceEquals(request, _activeRequest)) { _activeRequest = null; _busy = false; }
+            if (ReferenceEquals(_activeWorkCompletion, completion.Task)) _activeWorkCompletion = null;
+            if (!_transitioning) Refresh();
+            completion.TrySetResult();
         }
     }
 
@@ -317,7 +310,8 @@ public partial class MainWindow : Window
         var options = attempt.ModelOptions;
         string details = $"Model: {options.Model}\nTemperature: {options.Temperature}\nContext: {options.ContextSize}\n" +
             $"Đầu ra: {options.MaximumOutputTokens} token; timeout: {options.RequestTimeout.TotalSeconds:0} giây\n" +
-            $"Preset: {attempt.PresetSnapshot?.Name ?? "Legacy"} (v{attempt.PresetSnapshot?.Revision})\nPrompt: {attempt.PromptVersion}\n\n{attempt.Prompt}";
+            $"Preset: {attempt.PresetSnapshot?.Name ?? "Legacy"} (v{attempt.PresetSnapshot?.Revision})\n" +
+            $"Tài nguyên project: revision {attempt.ProjectResourceRevision?.ToString() ?? "legacy/standalone"}\nPrompt: {attempt.PromptVersion}\n\n{attempt.Prompt}";
         new Window
         {
             Owner = this, Title = "Prompt đã lưu — chỉ hiển thị trên máy này", Width = 850, Height = 600,

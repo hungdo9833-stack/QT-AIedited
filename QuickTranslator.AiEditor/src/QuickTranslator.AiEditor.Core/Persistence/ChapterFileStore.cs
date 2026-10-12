@@ -177,7 +177,7 @@ public sealed class ChapterFileStore : IChapterStore
                 ? ["projectId", "chapterNumber", "chineseTitle", "selectedPreset", "queue", "segmentationHistory", "confirmedTerms", "confirmedContextNotes", "characterProject", "textCleaner", "batchReplacementHistory"]
                 : info.Type == typeof(TranslationSegment)
                     ? ["draftHistory", "preservedText", "requiresRetranslation", "protectedByPreviousEdit", "normalizedText", "normalizationHistory"]
-                    : info.Type == typeof(TranslationAttempt) ? ["presetSnapshot", "sourceSha256", "normalizationRunId"] : [];
+                    : info.Type == typeof(TranslationAttempt) ? ["presetSnapshot", "sourceSha256", "normalizationRunId", "projectResourceRevision"] : [];
             foreach (var property in info.Properties.Where(p => added.Contains(p.Name)).ToArray()) info.Properties.Remove(property);
         });
         return new(DocumentJson.Options) { TypeInfoResolver = resolver };

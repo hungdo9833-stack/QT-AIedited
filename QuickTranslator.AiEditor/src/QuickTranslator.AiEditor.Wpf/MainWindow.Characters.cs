@@ -78,7 +78,7 @@ public partial class MainWindow
             }
             else if (_service is not null) await _service.ConfigureCharacterProjectAsync(_characterProject);
             LoadCharacterProject(_characterProject);
-            SetStatus("Đã tạo dự án nhân vật mới với Project ID riêng.");
+            SetStatus(_projectSession is null ? "Đã tạo dự án nhân vật mới với Project ID riêng." : "Đã tạo bộ hồ sơ mới thuộc dự án truyện đang mở.");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
@@ -156,7 +156,7 @@ public partial class MainWindow
                 LoadCharacterProject(imported);
                 await _characterStore.SaveAsync(imported);
             }
-            SetStatus("Đã nhập hồ sơ JSON UTF-8. Project ID được giữ nguyên để tránh trộn dự án.");
+            SetStatus(_projectSession is null ? "Đã nhập hồ sơ JSON UTF-8, giữ Project ID gốc." : "Đã nhập hồ sơ vào tài nguyên của dự án truyện đang mở.");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }

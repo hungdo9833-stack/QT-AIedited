@@ -15,16 +15,19 @@ public partial class MainWindow
 
     private async void OnPresetsLoaded(object sender, RoutedEventArgs e)
     {
+        var store = _presetStore;
         try
         {
-            _presetManager = new(await _presetStore.LoadAsync());
+            var presets = await store.LoadAsync();
+            if (!ReferenceEquals(store, _presetStore)) return;
+            _presetManager = new(presets);
             _presetsReady = true;
             if (_service is not null)
                 _presetManager.ImportSnapshot(_service.GetSnapshot().SelectedPreset);
             RefreshPresetEditor(); UpdateButtons();
             if (_presetStore.RecoveredFromBackup) SetStatus("Đã phục hồi thư viện preset từ bản dự phòng.");
         }
-        catch (Exception ex) { ShowError(ex); UpdateButtons(); }
+        catch (Exception ex) { if (ReferenceEquals(store, _presetStore)) { ShowError(ex); UpdateButtons(); } }
     }
     private void RefreshPresetEditor()
     {

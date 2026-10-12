@@ -14,10 +14,18 @@ public sealed class ChapterRegistrationTests
         {
             var project = await repository.CreateAsync(root, "Dữ liệu thử");
             var chapter = TranslationService.CreateChapter("Một", "你好。");
-            // Fail at the manifest destination without changing access rights or any real project.
-            using (var locked = new FileStream(project.ManifestPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            // An occupied directory at the synthetic destination fails on Windows and Unix alike.
+            var manifestBytes = await File.ReadAllBytesAsync(project.ManifestPath);
+            File.Delete(project.ManifestPath);
+            Directory.CreateDirectory(project.ManifestPath);
+            try
             {
                 await Assert.ThrowsAnyAsync<IOException>(() => repository.AddChapterAsync(project, chapter, 1));
+            }
+            finally
+            {
+                Directory.Delete(project.ManifestPath);
+                await File.WriteAllBytesAsync(project.ManifestPath, manifestBytes);
             }
             Assert.Empty(project.Manifest.Chapters);
             Assert.Null(project.Manifest.CurrentChapterId);

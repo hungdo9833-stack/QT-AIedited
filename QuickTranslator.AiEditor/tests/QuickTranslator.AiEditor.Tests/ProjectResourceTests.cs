@@ -77,6 +77,9 @@ public sealed class ProjectResourceTests : IDisposable
             Terms = [new("王秀兰", "Tên mới")], Context = "Ngữ cảnh mới", Revision = 4 };
         service.UseProjectResources(resources);
         Assert.Equal("Tên cũ", service.GetSnapshot().ConfirmedTerms.Single().Vietnamese);
+        Assert.Equal("Tên mới", service.GetWorkingSnapshot().ConfirmedTerms.Single().Vietnamese);
+        Assert.Equal("Tên mới", resources.CreateWorkingChapter(chapter).ConfirmedTerms.Single().Vietnamese);
+        Assert.Equal("Tên cũ", chapter.ConfirmedTerms.Single().Vietnamese);
         await service.TranslateAsync(segment.Id);
         var result = service.GetSnapshot();
         Assert.Contains("Tên mới", client.Prompts.Single());
@@ -84,6 +87,7 @@ public sealed class ProjectResourceTests : IDisposable
         Assert.Equal("Prompt lịch sử", result.Segments[0].Attempts[0].Prompt);
         Assert.Equal("Bản sửa đã giữ", result.Segments[0].UserDraft);
         Assert.Equal(5, result.Segments[0].DraftRevision);
+        Assert.Contains("\"projectResourceRevision\":4", System.Text.Json.JsonSerializer.Serialize(result.Segments[0].Attempts.Last(), DocumentJson.Options));
     }
 
     public void Dispose()

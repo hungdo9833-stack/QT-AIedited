@@ -81,6 +81,7 @@ public partial class MainWindow
     {
         var dialog = new OpenFileDialog { Filter = "Từ điển (*.txt;*.json)|*.txt;*.json|Tất cả tệp|*.*" };
         if (dialog.ShowDialog(this) != true) return;
+        if (!BeginUiOperation()) return;
         try
         {
             string content = await File.ReadAllTextAsync(dialog.FileName, new UTF8Encoding(false, true));
@@ -96,6 +97,7 @@ public partial class MainWindow
             SetStatus("Đã nhập và kiểm tra từ điển trong bộ nhớ. Bấm Lưu để áp dụng.");
         }
         catch (Exception ex) { ShowError(ex); }
+        finally { EndUiOperation(); }
     }
 
     private async void OnExportGlossary(object sender, RoutedEventArgs e)

@@ -52,65 +52,93 @@ public partial class MainWindow
 
     private async Task OpenProjectPathAsync(string path)
     {
-        if (!BeginUiOperation()) return;
         try
         {
-            await SafelyLeaveCurrentProjectAsync();
-            DetachChapter();
-            var opened = await _projectRepository.OpenAsync(path);
-            _projectSession = opened.Session;
-            _projectSession.Manifest.LastOpenedAt = DateTimeOffset.UtcNow;
-            _store = _projectSession.ChapterStore;
-            _presetStore = new(_projectSession.Resolve(_projectSession.Manifest.Files.PromptPresets));
-            _readerStore = new(_projectSession.Resolve(_projectSession.Manifest.Files.ReaderSettings));
-            _characterStore = new(Path.Combine(_projectSession.RootDirectory, "Characters"));
-            await LoadProjectAssetsAsync();
-            await _projectRepository.SaveManifestAsync(_projectSession);
-            ProjectLibraryStore.Remember(_projectLibrary, _projectSession);
-            await _projectLibraryStore.SaveAsync(_projectLibrary);
-            RefreshProjectSwitcher(); RefreshProjectChapterList();
-            if (_projectSession.Manifest.CurrentChapterId is Guid current)
-                await LoadProjectChapterAsync(current);
-            else
-            {
-                DetachChapter(); ClearChapterEditor(); Refresh();
-            }
-            SetStatus(opened.RecoveredFromBackup
-                ? "Đã mở dự án từ bản dự phòng manifest. Hãy kiểm tra rồi bấm Lưu; không có chương nào tự dịch."
-                : $"Đã mở dự án “{_projectSession.Manifest.VietnameseTitle}”.");
+            await RunWorkspaceTransitionAsync(() => OpenProjectCoreAsync(path));
         }
         catch (Exception ex) { ShowError(ex); }
-        finally { EndUiOperation(); }
+        finally { RefreshProjectSwitcher(); }
+    }
+
+    private async Task OpenProjectCoreAsync(string path)
+    {
+        var opened = await _projectRepository.OpenAsync(path);
+        var candidate = opened.Session;
+        var assets = await ReadProjectAssetsAsync(candidate);
+        ChapterDocument? chapter = candidate.Manifest.CurrentChapterId is Guid current
+            ? (await _projectRepository.LoadChapterAsync(candidate, current)).Chapter : null;
+        // Validate the service before touching the live context.
+        if (chapter is not null) _ = new TranslationService(chapter, _translationClient, new RegisteredChapterStore(candidate));
+        candidate.Manifest.LastOpenedAt = DateTimeOffset.UtcNow;
+        await _projectRepository.SaveManifestAsync(candidate);
+        var library = System.Text.Json.JsonSerializer.Deserialize<ProjectLibrary>(
+            System.Text.Json.JsonSerializer.Serialize(_projectLibrary, DocumentJson.Options), DocumentJson.Options)!;
+        ProjectLibraryStore.Remember(library, candidate);
+        await _projectLibraryStore.SaveAsync(library);
+
+        // No await after the context commit: all target stores/chapter have been checked.
+        DetachChapter();
+        _projectSession = candidate; _projectLibrary = library; _store = candidate.ChapterStore;
+        _presetStore = new(candidate.Resolve(candidate.Manifest.Files.PromptPresets));
+        _readerStore = new(candidate.Resolve(candidate.Manifest.Files.ReaderSettings));
+        _characterStore = new(Path.Combine(candidate.RootDirectory, "Characters"));
+        ApplyProjectAssets(assets);
+        if (chapter is not null)
+        {
+            AttachChapter(chapter); _selectedId = chapter.SelectedSegmentId ?? chapter.Segments[0].Id; _shownAttemptId = null;
+            ApplyInputs(chapter); SelectChapterPreset(chapter.SelectedPreset);
+        }
+        else ClearChapterEditor();
+        RefreshProjectSwitcher(); RefreshProjectChapterList(); Refresh();
+        SetStatus(opened.RecoveredFromBackup
+            ? "Đã mở dự án từ bản dự phòng manifest; hãy kiểm tra tiến độ. Không tự dịch."
+            : $"Đã mở dự án “{candidate.Manifest.VietnameseTitle}”.");
     }
 
     private async Task SafelyLeaveCurrentProjectAsync()
     {
-        if (_queue?.IsRunning == true)
-        {
-            SetStatus("Đang chờ request hiện tại hoàn tất và lưu checkpoint trước khi chuyển dự án…");
-            await _queue.PauseAsync();
-        }
+        await WaitForCurrentWorkAsync();
         await SaveCurrentAsync();
         if (_projectSession is not null) await SaveProjectAssetsAsync();
+        else
+        {
+            if (_presetsReady) await SavePresetEditorAsync();
+            if (_service is not null || _characterProject.Profiles.Count > 0 || !string.IsNullOrWhiteSpace(CharacterProjectNameInput.Text))
+                await SaveCharacterProjectAsync();
+        }
     }
 
     private async Task LoadProjectAssetsAsync()
     {
         if (_projectSession is null) return;
-        _presetsReady = false;
-        _presetManager = new(await _presetStore.LoadAsync());
-        _presetsReady = true; RefreshPresetEditor();
-        _readerPreferences = await _readerStore.LoadAsync();
-        _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
-        _projectResources = await new ProjectResourceStore(_projectSession).LoadAsync();
-        LoadCharacterProject(_projectResources.Characters);
-        var settings = new ProjectSettingsStore(_projectSession);
-        var translation = await settings.LoadTranslationAsync();
-        ApplyProjectDefaults(translation);
-        SetGlossaryTerms(_projectResources.Terms);
-        ContextNotesInput.Text = _projectResources.Context;
-        ApplyCurrentProjectResources();
+        ApplyProjectAssets(await ReadProjectAssetsAsync(_projectSession));
     }
+
+    private static async Task<ProjectAssetState> ReadProjectAssetsAsync(ProjectSession session)
+    {
+        var translation = await new ProjectSettingsStore(session).LoadTranslationAsync();
+        translation.Model.Validate(); translation.Segmentation.Validate();
+        return new(new PromptPresetManager(await new PromptPresetStore(session.Resolve(session.Manifest.Files.PromptPresets)).LoadAsync()),
+            await new ReaderPreferencesStore(session.Resolve(session.Manifest.Files.ReaderSettings)).LoadAsync(),
+            await new ProjectResourceStore(session).LoadAsync(), translation);
+    }
+
+    private void ApplyProjectAssets(ProjectAssetState assets)
+    {
+        bool prior = _rendering; _rendering = true;
+        try
+        {
+            _presetManager = assets.Presets; _presetsReady = true; RefreshPresetEditor();
+            _readerPreferences = assets.Reader; _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
+            _projectResources = assets.Resources; LoadCharacterProject(assets.Resources.Characters);
+            ApplyProjectDefaults(assets.Translation); SetGlossaryTerms(assets.Resources.Terms); ContextNotesInput.Text = assets.Resources.Context;
+            ApplyCurrentProjectResources(); _settingsDirty = false;
+        }
+        finally { _rendering = prior; }
+    }
+
+    private sealed record ProjectAssetState(PromptPresetManager Presets, ReaderPreferences Reader,
+        ProjectResources Resources, ProjectTranslationSettings Translation);
 
     private async Task SaveProjectAssetsAsync()
     {
@@ -191,15 +219,22 @@ public partial class MainWindow
     {
         if (_projectSession is null) return;
         if (_service?.GetSnapshot().Id == chapterId) return;
-        if (_queue?.IsRunning == true) await _queue.PauseAsync();
-        await SaveCurrentAsync();
-        await SaveProjectResourcesAsync();
+        await RunWorkspaceTransitionAsync(() => LoadProjectChapterCoreAsync(chapterId));
+    }
+
+    private async Task LoadProjectChapterCoreAsync(Guid chapterId)
+    {
+        if (_projectSession is null) return;
         var loaded = await _projectRepository.LoadChapterAsync(_projectSession, chapterId);
+        var oldCurrent = _projectSession.Manifest.CurrentChapterId;
+        _projectSession.Manifest.CurrentChapterId = chapterId;
+        try { await _projectRepository.SaveManifestAsync(_projectSession); }
+        catch { _projectSession.Manifest.CurrentChapterId = oldCurrent; throw; }
         AttachChapter(loaded.Chapter); _selectedId = loaded.Chapter.SelectedSegmentId ?? loaded.Chapter.Segments[0].Id; _shownAttemptId = null;
         ApplyInputs(loaded.Chapter); SelectChapterPreset(loaded.Chapter.SelectedPreset);
-        _projectSession.Manifest.CurrentChapterId = chapterId; await _projectRepository.SaveManifestAsync(_projectSession);
         RefreshProjectChapterList(); Refresh();
-        if (loaded.RecoveredFromBackup) SetStatus("Chương được phục hồi từ bản dự phòng; không tự tiếp tục hàng đợi.");
+        SetStatus(loaded.RecoveredFromBackup ? "Chương được phục hồi từ bản dự phòng; không tự tiếp tục hàng đợi."
+            : $"Đã mở chương “{loaded.Chapter.Title}” sau khi lưu trạng thái trước đó.");
     }
 
     private void RefreshProjectChapterList()
@@ -262,6 +297,7 @@ public partial class MainWindow
     {
         if (_syncingProjectUi || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
         try { await LoadProjectChapterAsync(item.Id); } catch (Exception ex) { ShowError(ex); }
+        finally { RefreshProjectChapterList(); }
     }
     private void OnChapterSearchChanged(object sender, RoutedEventArgs e) { if (_initialized) RefreshProjectChapterList(); }
 
@@ -271,10 +307,17 @@ public partial class MainWindow
         var folder = new OpenFolderDialog { Title = "Chọn thư mục cha để tạo dự án", Multiselect = false,
             InitialDirectory = Directory.Exists(_projectLibrary.DefaultProjectsDirectory) ? _projectLibrary.DefaultProjectsDirectory : null };
         if (folder.ShowDialog(this) != true) return;
-        _projectLibrary.DefaultProjectsDirectory = folder.FolderName;
-        await _projectLibraryStore.SaveAsync(_projectLibrary);
         string destination = Path.Combine(folder.FolderName, SafeFolderName(title));
-        try { var created = await _projectRepository.CreateAsync(destination, title); await OpenProjectPathAsync(created.ManifestPath); }
+        try
+        {
+            await RunWorkspaceTransitionAsync(async () =>
+            {
+                var created = await _projectRepository.CreateAsync(destination, title);
+                await OpenProjectCoreAsync(created.ManifestPath);
+                _projectLibrary.DefaultProjectsDirectory = folder.FolderName;
+                await _projectLibraryStore.SaveAsync(_projectLibrary);
+            });
+        }
         catch (Exception ex) { ShowError(ex); }
     }
 
@@ -286,29 +329,24 @@ public partial class MainWindow
 
     private async void OnCloseProject(object sender, RoutedEventArgs e)
     {
-        if (_projectSession is null || !BeginUiOperation()) return;
+        if (_projectSession is null) return;
         try
         {
-            await SafelyLeaveCurrentProjectAsync(); DetachChapter(); _projectSession = null; _projectResources = null;
-            _store = new(ChapterFileStore.DefaultDirectory); _presetStore = new(PromptPresetStore.DefaultPath);
-            _readerStore = new(ReaderPreferencesStore.DefaultPath); _characterStore = new(CharacterProjectStore.DefaultDirectory);
-            await LoadGlobalAssetsAsync();
-            ClearChapterEditor(); RefreshProjectChapterList(); RefreshProjectSwitcher(); Refresh();
-            SetStatus("Đã đóng dự án sau khi lưu. Nội dung dự án vẫn nằm nguyên trong thư mục của nó.");
+            await RunWorkspaceTransitionAsync(async () =>
+            {
+                var presets = new PromptPresetManager(await new PromptPresetStore(PromptPresetStore.DefaultPath).LoadAsync());
+                var reader = await new ReaderPreferencesStore(ReaderPreferencesStore.DefaultPath).LoadAsync();
+                DetachChapter(); _projectSession = null; _projectResources = null;
+                _store = new(ChapterFileStore.DefaultDirectory); _presetStore = new(PromptPresetStore.DefaultPath);
+                _readerStore = new(ReaderPreferencesStore.DefaultPath); _characterStore = new(CharacterProjectStore.DefaultDirectory);
+                _presetManager = presets; _presetsReady = true; RefreshPresetEditor();
+                _readerPreferences = reader; _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
+                LoadCharacterProject(new CharacterProject { Name = "Bộ truyện mới" }); SetGlossaryTerms([]); ContextNotesInput.Clear();
+                ClearChapterEditor(); RefreshProjectChapterList(); RefreshProjectSwitcher(); Refresh();
+                SetStatus("Đã đóng dự án sau khi lưu.");
+            });
         }
         catch (Exception ex) { ShowError(ex); }
-        finally { EndUiOperation(); }
-    }
-
-    private async Task LoadGlobalAssetsAsync()
-    {
-        _presetsReady = false;
-        _presetManager = new(await _presetStore.LoadAsync());
-        _presetsReady = true; RefreshPresetEditor();
-        _readerPreferences = await _readerStore.LoadAsync();
-        _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
-        LoadCharacterProject(new CharacterProject { Name = "Bộ truyện mới" });
-        SetGlossaryTerms([]); ContextNotesInput.Clear();
     }
 
     private void ClearChapterEditor()
@@ -387,6 +425,9 @@ public partial class MainWindow
         var panel = FormPanel(("Tên tiếng Việt", title), ("Tên tiếng Trung", chinese), ("Tác giả", author), ("Thể loại, cách nhau bằng dấu phẩy", genres), ("Nguồn", source), ("Ảnh bìa trong thư mục dự án", coverRow), ("Trạng thái", status), ("Mô tả", description));
         if (!ShowForm("Thuộc tính dự án", panel)) return;
         if (string.IsNullOrWhiteSpace(title.Text)) { ShowError(new ArgumentException("Tên dự án không được trống.")); return; }
+        if (!BeginUiOperation(allowDuringTranslation: true)) return;
+        try
+        {
         manifest.VietnameseTitle = title.Text.Trim(); manifest.ChineseTitle = chinese.Text.Trim(); manifest.Author = author.Text.Trim();
         manifest.Genres = genres.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.CurrentCultureIgnoreCase).ToList();
         manifest.SourceUrl = source.Text.Trim(); manifest.Description = description.Text; manifest.Status = (ProjectStatus)status.SelectedItem;
@@ -398,6 +439,9 @@ public partial class MainWindow
         }
         await _projectRepository.SaveManifestAsync(_projectSession); ProjectLibraryStore.Remember(_projectLibrary, _projectSession); await _projectLibraryStore.SaveAsync(_projectLibrary);
         RefreshProjectSwitcher(); RefreshProjectChapterList(); Title = manifest.VietnameseTitle + " — QuickTranslator AI Editor";
+        }
+        catch (Exception ex) { ShowError(ex); }
+        finally { EndUiOperation(); }
     }
 
     private void OnOpenProjectFolder(object sender, RoutedEventArgs e)
@@ -428,7 +472,14 @@ public partial class MainWindow
         var file = new OpenFileDialog { Filter = "Bản sao dự án (*.zip)|*.zip" }; if (file.ShowDialog(this) != true) return;
         var folder = new OpenFolderDialog { Title = "Chọn thư mục cha để khôi phục thành dự án mới", Multiselect = false }; if (folder.ShowDialog(this) != true) return;
         string target = Path.Combine(folder.FolderName, "Restored-" + DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss"));
-        try { var restored = await _projectBackup.RestoreAsync(file.FileName, target); await OpenProjectPathAsync(restored.ManifestPath); }
+        try
+        {
+            await RunWorkspaceTransitionAsync(async () =>
+            {
+                var restored = await _projectBackup.RestoreAsync(file.FileName, target);
+                await OpenProjectCoreAsync(restored.ManifestPath);
+            });
+        }
         catch (Exception ex) { ShowError(ex); }
     }
 
@@ -438,6 +489,8 @@ public partial class MainWindow
         var dialog = new OpenFileDialog { Filter = "Văn bản UTF-8 (*.txt)|*.txt", Multiselect = true }; if (dialog.ShowDialog(this) != true) return;
         try
         {
+            await RunWorkspaceTransitionAsync(async () =>
+            {
             foreach (string file in dialog.FileNames)
             {
                 string text = await File.ReadAllTextAsync(file, new UTF8Encoding(false, true));
@@ -447,7 +500,8 @@ public partial class MainWindow
                 await RegisterChapterIfNeededAsync(chapter);
             }
             RefreshProjectChapterList();
-            if (_projectSession.Manifest.CurrentChapterId is Guid id) await LoadProjectChapterAsync(id);
+            if (_projectSession.Manifest.CurrentChapterId is Guid id) await LoadProjectChapterCoreAsync(id);
+            });
         }
         catch (Exception ex) { ShowError(ex); }
     }
@@ -488,7 +542,15 @@ public partial class MainWindow
     private async void OnDuplicateProjectChapter(object sender, RoutedEventArgs e)
     {
         if (_projectSession is null || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
-        try { var entry = await _projectRepository.DuplicateChapterAsync(_projectSession, item.Id, NextChapterNumber(), "Bản sao - " + _projectSession.Manifest.Chapters.Single(x => x.ChapterId == item.Id).VietnameseTitle); RefreshProjectChapterList(); await LoadProjectChapterAsync(entry.ChapterId); }
+        try
+        {
+            await RunWorkspaceTransitionAsync(async () =>
+            {
+                var entry = await _projectRepository.DuplicateChapterAsync(_projectSession, item.Id, NextChapterNumber(),
+                    "Bản sao - " + _projectSession.Manifest.Chapters.Single(x => x.ChapterId == item.Id).VietnameseTitle);
+                await LoadProjectChapterCoreAsync(entry.ChapterId);
+            });
+        }
         catch (Exception ex) { ShowError(ex); }
     }
 
@@ -496,12 +558,22 @@ public partial class MainWindow
     {
         if (_projectSession is null || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
         if (MessageBox.Show(this, "Chuyển chương vào History của dự án? Có thể phục hồi bằng dữ liệu manifest; tệp không bị xóa vĩnh viễn.", "Xóa mềm chương", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        try { if (_queue?.IsRunning == true) await _queue.PauseAsync(); await SaveCurrentAsync(); await _projectRepository.SoftDeleteChapterAsync(_projectSession, item.Id); DetachChapter(); RefreshProjectChapterList(); if (_projectSession.Manifest.CurrentChapterId is Guid id) await LoadProjectChapterAsync(id); else { ClearChapterEditor(); Refresh(); } }
+        try
+        {
+            await RunWorkspaceTransitionAsync(async () =>
+            {
+                await _projectRepository.SoftDeleteChapterAsync(_projectSession, item.Id);
+                if (_projectSession.Manifest.CurrentChapterId is Guid id) await LoadProjectChapterCoreAsync(id);
+                else { DetachChapter(); ClearChapterEditor(); RefreshProjectChapterList(); Refresh(); }
+            });
+        }
         catch (Exception ex) { ShowError(ex); }
     }
 
-    private async void OnPreviousProjectChapter(object sender, RoutedEventArgs e) => await MoveProjectChapterAsync(-1);
-    private async void OnNextProjectChapter(object sender, RoutedEventArgs e) => await MoveProjectChapterAsync(1);
+    private async void OnPreviousProjectChapter(object sender, RoutedEventArgs e)
+    { try { await MoveProjectChapterAsync(-1); } catch (Exception ex) { ShowError(ex); } }
+    private async void OnNextProjectChapter(object sender, RoutedEventArgs e)
+    { try { await MoveProjectChapterAsync(1); } catch (Exception ex) { ShowError(ex); } }
     private async Task MoveProjectChapterAsync(int delta)
     {
         if (_projectSession?.Manifest.CurrentChapterId is not Guid current) return;
@@ -516,6 +588,8 @@ public partial class MainWindow
         if (folder.ShowDialog(this) != true) return;
         try
         {
+            await RunWorkspaceTransitionAsync(async () =>
+            {
             var importer = new LegacyProjectImporter(_projectRepository); var candidates = await importer.ScanAsync(folder.FolderName);
             var valid = candidates.Where(x => x.Error is null).ToList();
             var list = new ListBox { ItemsSource = valid, SelectionMode = SelectionMode.Extended, DisplayMemberPath = "Title", Margin = new Thickness(10) };
@@ -525,8 +599,11 @@ public partial class MainWindow
             import.Click += (_, _) => { if (list.SelectedItems.Count > 0) window.DialogResult = true; }; cancel.Click += (_, _) => window.DialogResult = false;
             if (window.ShowDialog() != true) return;
             int number = NextChapterNumber(); var selections = list.SelectedItems.Cast<LegacyChapterCandidate>().Select(x => new LegacyChapterSelection(x, number++)).ToArray();
-            var result = await importer.ImportAsync(_projectSession, selections); RefreshProjectChapterList();
-            SetStatus($"Đã nhập {result.ImportedCount} chương. Nguồn cũ không đổi; bản sao trước nhập: {result.SourceBackupPath}");
+                var result = await importer.ImportAsync(_projectSession, selections);
+                if (_projectSession.Manifest.CurrentChapterId is Guid current) await LoadProjectChapterCoreAsync(current);
+                RefreshProjectChapterList();
+                SetStatus($"Đã nhập {result.ImportedCount} chương. Nguồn cũ không đổi; bản sao trước nhập: {result.SourceBackupPath}");
+            });
         }
         catch (Exception ex) { ShowError(ex); }
     }

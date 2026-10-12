@@ -22,8 +22,8 @@ public partial class MainWindow
     private void AttachSourceContextMenu(TextBox textBox)
     {
         var menu = new ContextMenu();
-        var addCharacter = MenuItem("Thêm vào hồ sơ nhân vật", async () => await AddQuickCharacterAsync(textBox));
-        var addGlossary = MenuItem("Thêm vào Glossary Trung–Việt", async () => await AddSelectedGlossaryAsync(textBox));
+        var addCharacter = WorkspaceMenuItem("Thêm vào hồ sơ nhân vật", () => AddQuickCharacterAsync(textBox));
+        var addGlossary = WorkspaceMenuItem("Thêm vào Glossary Trung–Việt", () => AddSelectedGlossaryAsync(textBox));
         var find = MenuItem("Tìm các vị trí xuất hiện trong chương", () => ShowSourceOccurrences(textBox));
         var translate = MenuItem("Dịch riêng phần đã chọn", async () => await TranslateSourceSelectionAsync(textBox));
         var copy = MenuItem("Sao chép", () => CopySourceSelection(textBox));
@@ -35,7 +35,7 @@ public partial class MainWindow
         {
             RestoreSourceSelection(textBox);
             string selected = GetSourceSelection(textBox);
-            var capabilities = SourceContextMenuPolicy.Evaluate(selected, WorkActive, textBox.IsReadOnly);
+            var capabilities = SourceContextMenuPolicy.Evaluate(selected, WorkActive || _uiOperation, textBox.IsReadOnly);
             addCharacter.IsEnabled = capabilities.AddCharacter;
             addGlossary.IsEnabled = capabilities.AddGlossary;
             find.IsEnabled = capabilities.FindOccurrences;
@@ -50,6 +50,19 @@ public partial class MainWindow
     {
         var item = new MenuItem { Header = header };
         item.Click += (_, _) => action();
+        return item;
+    }
+
+    private MenuItem WorkspaceMenuItem(string header, Func<Task> action)
+    {
+        var item = new MenuItem { Header = header };
+        item.Click += async (_, _) =>
+        {
+            if (!BeginUiOperation()) return;
+            try { await action(); }
+            catch (Exception ex) { ShowError(ex); }
+            finally { EndUiOperation(); }
+        };
         return item;
     }
 
@@ -283,21 +296,26 @@ public partial class MainWindow
 
     private async Task TranslateSourceSelectionAsync(TextBox textBox)
     {
-        if (WorkActive) return;
+        if (WorkActive || _uiOperation) return;
         string selected;
         try { selected = SourceContextActions.ValidateTranslationSelection(GetSourceSelection(textBox)); }
         catch (Exception ex) { ShowError(ex); return; }
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _activeWorkCompletion = completion.Task;
+        var cancellation = new CancellationTokenSource();
+        Task? request = null;
         try
         {
-            _busy = true; _requestCancellation = new(); UpdateButtons();
+            _busy = true; _requestCancellation = cancellation; UpdateButtons();
             var options = ReadModelOptions();
             var glossary = ReadTerms().Where(t => selected.Contains(t.Chinese, StringComparison.Ordinal))
                 .Select(t => new GlossaryEntry(t.Chinese, t.Vietnamese)).ToArray();
             string prompt = new TranslationPromptBuilder().Build(selected, glossary, ContextNotesInput.Text, _presetManager.Selected);
-            var request = _client.TranslateAsync(prompt, options, _requestCancellation.Token);
+            var translation = _client.TranslateAsync(prompt, options, cancellation.Token);
+            request = translation;
             _activeRequest = request;
             SetStatus("Đang dịch riêng vùng chọn; kết quả chỉ để xem và không ghi đè bản dịch chương.");
-            var result = await request;
+            var result = await translation;
             ShowTextWindow("Dịch riêng vùng chọn — chưa lưu vào bản dịch chương", result.Text);
             SetStatus("Đã dịch riêng vùng chọn. Kết quả không làm thay đổi segment hoặc bản người dùng đã sửa.");
         }
@@ -305,7 +323,11 @@ public partial class MainWindow
         catch (Exception ex) { ShowError(ex); }
         finally
         {
-            _requestCancellation?.Dispose(); _requestCancellation = null; _activeRequest = null; _busy = false; UpdateButtons();
+            cancellation.Dispose();
+            if (ReferenceEquals(cancellation, _requestCancellation)) _requestCancellation = null;
+            if (ReferenceEquals(request, _activeRequest)) { _activeRequest = null; _busy = false; }
+            if (ReferenceEquals(_activeWorkCompletion, completion.Task)) _activeWorkCompletion = null;
+            UpdateButtons(); completion.TrySetResult();
             RestoreSourceSelection(textBox);
         }
     }
