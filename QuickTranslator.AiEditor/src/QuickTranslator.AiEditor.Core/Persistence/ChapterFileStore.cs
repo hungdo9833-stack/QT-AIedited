@@ -31,6 +31,18 @@ public sealed class ChapterFileStore : IChapterStore
 
     public string GetPath(Guid chapterId) => Path.Combine(_directory, $"{chapterId:D}.qtaie.json");
 
+    internal static byte[] SerializeDocument(ChapterDocument chapter)
+    {
+        var snapshot = DocumentJson.Clone(chapter);
+        DocumentJson.Migrate(snapshot); DocumentJson.Validate(snapshot);
+        var content = JsonSerializer.SerializeToElement(snapshot, DocumentJson.Options);
+        return JsonSerializer.SerializeToUtf8Bytes(new Envelope { SchemaVersion = 1, Chapter = content,
+            ContentSha256 = Hash(content) }, EnvelopeOptions);
+    }
+
+    internal static Task<ChapterDocument> ReadVerifiedFileAsync(string path, CancellationToken cancellationToken = default) =>
+        ReadVerifiedAsync(path, cancellationToken);
+
     public async Task<string> CreateBatchBackupAsync(IEnumerable<Guid> chapterIds, Guid batchId,
         CancellationToken cancellationToken = default)
     {

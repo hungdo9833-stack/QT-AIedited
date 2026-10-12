@@ -13,14 +13,21 @@ public sealed class RegisteredChapterStore(ProjectSession session) : IChapterSto
         return session.Resolve(entry.RelativePath);
     }
 
-    public Task SaveAsync(ChapterDocument chapter, CancellationToken cancellationToken = default)
+    public async Task SaveAsync(ChapterDocument chapter, CancellationToken cancellationToken = default)
     {
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+        if (session.RecoveryReport.RequiresDecision)
+            throw new InvalidOperationException("Project có transaction chưa đối chiếu; bản nháp giữ trong bộ nhớ, không ghi chapter làm mất dấu phục hồi.");
         var entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapter.Id && x.DeletedAt is null)
             ?? throw new InvalidOperationException("Không lưu chương mồ côi vào thư mục dự án.");
         if (chapter.ProjectId != session.Manifest.ProjectId || chapter.ChapterNumber != entry.Number ||
             !string.Equals(GetPath(chapter.Id), session.ChapterStore.GetPath(chapter.Id), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Liên kết/path chương không khớp với manifest.");
-        return session.ChapterStore.SaveAsync(chapter, cancellationToken);
+        await session.ChapterStore.SaveAsync(chapter, cancellationToken).ConfigureAwait(false);
+        }
+        finally { session.OperationGate.Release(); }
     }
 
     public Task<ChapterLoadResult> LoadAsync(string path, CancellationToken cancellationToken = default)

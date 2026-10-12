@@ -6,7 +6,7 @@ using QuickTranslator.AiEditor.Core.Persistence;
 
 namespace QuickTranslator.AiEditor.Core.Projects;
 
-public sealed class ProjectRepository
+public sealed partial class ProjectRepository
 {
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private static readonly JsonSerializerOptions PrettyJson = new(DocumentJson.Options) { WriteIndented = true };
@@ -62,12 +62,19 @@ public sealed class ProjectRepository
         }
         string root = Path.GetDirectoryName(manifestPath)!;
         CreateLayout(root);
-        return new(new ProjectSession(manifestPath, manifest), recovered);
+        var session = new ProjectSession(manifestPath, manifest);
+        session.RecoveryReport = await ProjectTransactionJournal.InspectAsync(session, cancellationToken).ConfigureAwait(false);
+        return new(session, recovered);
     }
 
     public async Task SaveManifestAsync(ProjectSession session, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+        if (session.RecoveryReport.RequiresDecision)
+            throw new InvalidOperationException("Còn transaction chưa đối chiếu; không lưu manifest đè trạng thái phục hồi.");
         session.Manifest.UpdatedAt = DateTimeOffset.UtcNow;
         session.Manifest.ChapterCount = session.Manifest.Chapters.Count(x => x.DeletedAt is null);
         session.Manifest.DeletedChapterCount = session.Manifest.Chapters.Count(x => x.DeletedAt is not null);
@@ -75,66 +82,50 @@ public sealed class ProjectRepository
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { await WriteManifestAsync(session.ManifestPath, session.Manifest, cancellationToken).ConfigureAwait(false); }
         finally { _writeGate.Release(); }
-    }
-
-    public async Task<ProjectChapterEntry> AddChapterAsync(ProjectSession session, ChapterDocument chapter, int number,
-        string? chineseTitle = null, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(session); ArgumentNullException.ThrowIfNull(chapter);
-        if (number <= 0) throw new ArgumentOutOfRangeException(nameof(number));
-        if (session.Manifest.Chapters.Any(x => x.DeletedAt is null && x.Number == number))
-            throw new InvalidOperationException($"Dự án đã có chương số {number}.");
-        if (session.Manifest.Chapters.Any(x => x.ChapterId == chapter.Id))
-            throw new InvalidOperationException("Chương này đã có trong dự án.");
-        if (File.Exists(session.ChapterStore.GetPath(chapter.Id)))
-            throw new IOException("Thư mục dự án đã có tệp cùng ID nhưng manifest không quản lý. Ứng dụng dừng để tránh ghi đè.");
-
-        var saved = DocumentJson.Clone(chapter);
-        var previousManifest = Clone(session.Manifest);
-        saved.ProjectId = session.Manifest.ProjectId;
-        saved.ChapterNumber = number;
-        saved.ChineseTitle = chineseTitle?.Trim() ?? saved.ChineseTitle;
-        saved.CharacterProject.Id = session.Manifest.ProjectId;
-        await session.ChapterStore.SaveAsync(saved, cancellationToken).ConfigureAwait(false);
-        var entry = ToEntry(saved, number);
-        session.Manifest.Chapters.Add(entry);
-        session.Manifest.CurrentChapterId = saved.Id;
-        try { await SaveManifestAsync(session, cancellationToken).ConfigureAwait(false); }
-        catch
-        {
-            session.Manifest = previousManifest;
-            TryDelete(session.ChapterStore.GetPath(saved.Id));
-            throw;
         }
-        return entry;
+        finally { session.OperationGate.Release(); }
     }
 
     public async Task UpdateChapterAsync(ProjectSession session, ChapterDocument chapter,
         CancellationToken cancellationToken = default)
     {
-        var entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapter.Id && x.DeletedAt is null)
-            ?? throw new InvalidOperationException("Chương không thuộc dự án đang mở.");
-        if (chapter.ProjectId is not null && chapter.ProjectId != session.Manifest.ProjectId)
-            throw new InvalidOperationException("Chương đang thuộc dự án khác.");
-        chapter.ProjectId = session.Manifest.ProjectId;
-        chapter.ChapterNumber = entry.Number;
-        chapter.CharacterProject.Id = session.Manifest.ProjectId;
-        await session.ChapterStore.SaveAsync(chapter, cancellationToken).ConfigureAwait(false);
-        CopySummary(entry, chapter);
-        session.Manifest.CurrentChapterId = chapter.Id;
-        await SaveManifestAsync(session, cancellationToken).ConfigureAwait(false);
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (session.RecoveryReport.RequiresDecision) throw new InvalidOperationException("Còn transaction cần phục hồi; không ghi chương.");
+            var entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapter.Id && x.DeletedAt is null)
+                ?? throw new InvalidOperationException("Chương không thuộc dự án đang mở.");
+            if (chapter.ProjectId is not null && chapter.ProjectId != session.Manifest.ProjectId)
+                throw new InvalidOperationException("Chương đang thuộc dự án khác.");
+            chapter.ProjectId = session.Manifest.ProjectId; chapter.ChapterNumber = entry.Number;
+            chapter.CharacterProject.Id = session.Manifest.ProjectId;
+            var after = Clone(session.Manifest);
+            CopySummary(after.Chapters.Single(x => x.ChapterId == chapter.Id), chapter);
+            after.CurrentChapterId = chapter.Id; NormalizeManifest(after);
+            string relative = entry.RelativePath;
+            var bytes = await File.ReadAllBytesAsync(session.Resolve(relative), cancellationToken).ConfigureAwait(false);
+            await Transactions.ExecuteAsync(session, "UpdateChapter", after,
+                [new(relative + ".bak", bytes), new(relative, ChapterFileStore.SerializeDocument(chapter))], cancellationToken).ConfigureAwait(false);
+        }
+        finally { session.OperationGate.Release(); }
     }
 
     public async Task UpdateChapterSummaryAsync(ProjectSession session, ChapterDocument chapter,
         CancellationToken cancellationToken = default)
     {
-        var entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapter.Id && x.DeletedAt is null)
-            ?? throw new InvalidOperationException("Chương không thuộc dự án đang mở.");
-        CopySummary(entry, chapter);
-        session.Manifest.CurrentChapterId = chapter.Id;
-        await SaveManifestAsync(session, cancellationToken).ConfigureAwait(false);
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (session.RecoveryReport.RequiresDecision) throw new InvalidOperationException("Còn transaction cần phục hồi; không ghi manifest.");
+            var after = Clone(session.Manifest);
+            var entry = after.Chapters.SingleOrDefault(x => x.ChapterId == chapter.Id && x.DeletedAt is null)
+                ?? throw new InvalidOperationException("Chương không thuộc dự án đang mở.");
+            CopySummary(entry, chapter); after.CurrentChapterId = chapter.Id; NormalizeManifest(after);
+            await WriteManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
+            session.Manifest = after;
+        }
+        finally { session.OperationGate.Release(); }
     }
-
     public async Task<ChapterLoadResult> LoadChapterAsync(ProjectSession session, Guid chapterId,
         CancellationToken cancellationToken = default)
     {
@@ -155,61 +146,6 @@ public sealed class ProjectRepository
         result.Chapter.Title = title.Trim(); result.Chapter.ChineseTitle = chineseTitle.Trim();
         result.Chapter.UpdatedAt = DateTimeOffset.UtcNow;
         await UpdateChapterAsync(session, result.Chapter, cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task SoftDeleteChapterAsync(ProjectSession session, Guid chapterId,
-        CancellationToken cancellationToken = default)
-    {
-        var entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapterId && x.DeletedAt is null)
-            ?? throw new FileNotFoundException("Không tìm thấy chương cần xóa.");
-        string source = session.Resolve(entry.RelativePath);
-        string relative = $"History/Deleted/{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{chapterId:D}.qtaie.json";
-        string destination = session.Resolve(relative);
-        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        if (File.Exists(destination)) throw new IOException("Đích lưu lịch sử đã tồn tại.");
-        File.Move(source, destination);
-        if (File.Exists(source + ".bak")) File.Move(source + ".bak", destination + ".bak");
-        string oldRelative = entry.RelativePath;
-        DateTimeOffset? oldDeletedAt = entry.DeletedAt;
-        Guid? oldCurrent = session.Manifest.CurrentChapterId;
-        entry.RelativePath = relative; entry.DeletedAt = DateTimeOffset.UtcNow;
-        if (session.Manifest.CurrentChapterId == chapterId)
-            session.Manifest.CurrentChapterId = session.Manifest.Chapters.FirstOrDefault(x => x.DeletedAt is null)?.ChapterId;
-        try { await SaveManifestAsync(session, cancellationToken).ConfigureAwait(false); }
-        catch
-        {
-            File.Move(destination, source);
-            if (File.Exists(destination + ".bak")) File.Move(destination + ".bak", source + ".bak");
-            entry.RelativePath = oldRelative; entry.DeletedAt = oldDeletedAt; session.Manifest.CurrentChapterId = oldCurrent;
-            throw;
-        }
-    }
-
-    public async Task RestoreDeletedChapterAsync(ProjectSession session, Guid chapterId,
-        CancellationToken cancellationToken = default)
-    {
-        var entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapterId && x.DeletedAt is not null)
-            ?? throw new FileNotFoundException("Không tìm thấy chương trong thùng lịch sử.");
-        if (session.Manifest.Chapters.Any(x => x.DeletedAt is null && x.Number == entry.Number))
-            throw new InvalidOperationException("Không thể phục hồi vì số chương đã được dùng.");
-        string source = session.Resolve(entry.RelativePath);
-        string relative = $"Chapters/{chapterId:D}.qtaie.json";
-        string destination = session.Resolve(relative);
-        if (File.Exists(destination)) throw new IOException("Tệp chương đích đã tồn tại.");
-        File.Move(source, destination);
-        if (File.Exists(source + ".bak")) File.Move(source + ".bak", destination + ".bak");
-        string oldRelative = entry.RelativePath;
-        DateTimeOffset? oldDeletedAt = entry.DeletedAt;
-        Guid? oldCurrent = session.Manifest.CurrentChapterId;
-        entry.RelativePath = relative; entry.DeletedAt = null; session.Manifest.CurrentChapterId = chapterId;
-        try { await SaveManifestAsync(session, cancellationToken).ConfigureAwait(false); }
-        catch
-        {
-            File.Move(destination, source);
-            if (File.Exists(destination + ".bak")) File.Move(destination + ".bak", source + ".bak");
-            entry.RelativePath = oldRelative; entry.DeletedAt = oldDeletedAt; session.Manifest.CurrentChapterId = oldCurrent;
-            throw;
-        }
     }
 
     public async Task<ProjectChapterEntry> DuplicateChapterAsync(ProjectSession session, Guid chapterId, int newNumber,
@@ -264,14 +200,17 @@ public sealed class ProjectRepository
     internal static ProjectManifest Clone(ProjectManifest value) => JsonSerializer.Deserialize<ProjectManifest>(
         JsonSerializer.Serialize(value, DocumentJson.Options), DocumentJson.Options)!;
 
-    private static async Task WriteManifestAsync(string path, ProjectManifest manifest, CancellationToken cancellationToken)
+    internal static byte[] SerializeManifest(ProjectManifest manifest)
     {
         var content = JsonSerializer.SerializeToElement(manifest, DocumentJson.Options);
         var envelope = new ManifestEnvelope { SchemaVersion = 1, ContentSha256 = Hash(content), Project = content };
-        await AtomicLocalFile.WriteAsync(path, JsonSerializer.SerializeToUtf8Bytes(envelope, PrettyJson), cancellationToken).ConfigureAwait(false);
+        return JsonSerializer.SerializeToUtf8Bytes(envelope, PrettyJson);
     }
 
-    private static async Task<ProjectManifest> ReadManifestAsync(string path, CancellationToken cancellationToken)
+    private static Task WriteManifestAsync(string path, ProjectManifest manifest, CancellationToken cancellationToken) =>
+        AtomicLocalFile.WriteAsync(path, SerializeManifest(manifest), cancellationToken);
+
+    internal static async Task<ProjectManifest> ReadManifestAsync(string path, CancellationToken cancellationToken)
     {
         byte[] bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
         var envelope = JsonSerializer.Deserialize<ManifestEnvelope>(bytes, DocumentJson.Options)
@@ -297,7 +236,6 @@ public sealed class ProjectRepository
         foreach (string directory in new[] { "Chapters", "Characters", "Glossary", "Settings", "Settings/prompts", "Resources", "Backups", "History", "History/Deleted", "Cache" })
             Directory.CreateDirectory(Path.Combine(root, directory.Replace('/', Path.DirectorySeparatorChar)));
     }
-    private static void TryDelete(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
 
     private sealed class ManifestEnvelope
     {

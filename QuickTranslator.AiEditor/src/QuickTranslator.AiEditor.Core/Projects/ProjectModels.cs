@@ -100,6 +100,7 @@ public sealed record ProjectOpenResult(ProjectSession Session, bool RecoveredFro
 
 public sealed class ProjectSession
 {
+    internal SemaphoreSlim OperationGate { get; } = new(1, 1);
     internal SemaphoreSlim ResourceGate { get; } = new(1, 1);
     internal ProjectSession(string manifestPath, ProjectManifest manifest)
     {
@@ -113,6 +114,7 @@ public sealed class ProjectSession
     public string RootDirectory { get; }
     public ProjectManifest Manifest { get; internal set; }
     public Persistence.ChapterFileStore ChapterStore { get; }
+    public ProjectRecoveryReport RecoveryReport { get; internal set; } = new([], []);
     public string Resolve(string relativePath) => ProjectPath.Resolve(RootDirectory, relativePath);
 }
 
