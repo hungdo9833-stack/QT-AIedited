@@ -121,6 +121,9 @@ public static class DocumentJson
                 if (revision is null || !ids.Contains(revision.SegmentId) || revision.SegmentOrder <= 0 ||
                     revision.BeforeText is null || revision.AfterText is null || revision.Changes is null ||
                     revision.Changes.Count == 0 || revision.PreviousDraftRevision < 0 || revision.AppliedDraftRevision < 0 ||
+                    revision.AppliedApprovalVersion < 0 || revision.AppliedLastApprovalId == Guid.Empty ||
+                    revision.AppliedApprovalVersion == 0 && revision.AppliedLastApprovalId is not null ||
+                    revision.AppliedApprovalVersion > 0 && revision.AppliedLastApprovalId is null ||
                     !Enum.IsDefined(revision.PreviousStatus) || revision.Changes.Any(change =>
                         change is null || change.StartUtf16 < 0 || change.LengthUtf16 <= 0 ||
                         string.IsNullOrEmpty(change.Original) || change.Replacement is null ||

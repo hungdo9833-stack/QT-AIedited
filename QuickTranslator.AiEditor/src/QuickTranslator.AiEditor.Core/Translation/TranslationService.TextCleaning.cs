@@ -90,19 +90,10 @@ public sealed partial class TranslationService
         }
     }
 
-    public async Task<BatchApplyResult> UndoLatestBatchReplacementAsync(Guid? batchId = null,
-        CancellationToken cancellationToken = default)
-    {
-        BatchApplyResult result;
-        lock (_sync)
-        {
-            EnsureStructureAvailable();
-            result = BatchReplacementEngine.UndoLatest(_chapter, _clock.GetUtcNow(), batchId);
-            Touch();
-        }
-        await SaveAsync(cancellationToken).ConfigureAwait(false);
-        return result;
-    }
+    public Task<BatchApplyResult> UndoLatestBatchReplacementAsync(Guid? batchId = null,
+        CancellationToken cancellationToken = default) =>
+        CommitBatchAsync(candidate => BatchReplacementEngine.UndoLatest(candidate, _clock.GetUtcNow(), batchId),
+            cancellationToken);
 
     private ChineseCleaningAnalysis AnalyseAutomaticChinese(ChapterDocument chapter, TranslationSegment selected,
         string translatedText, Guid batchId)

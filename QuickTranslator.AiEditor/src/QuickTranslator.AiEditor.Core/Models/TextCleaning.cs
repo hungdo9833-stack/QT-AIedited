@@ -114,6 +114,9 @@ public sealed class BatchReplacementSegmentRevision
     public SegmentStatus PreviousStatus { get; set; }
     public string? PreviousLastError { get; set; }
     public int AppliedDraftRevision { get; set; }
+    // Null marks legacy runs whose approval state cannot be verified safely.
+    public int? AppliedApprovalVersion { get; set; }
+    public Guid? AppliedLastApprovalId { get; set; }
     public List<BatchReplacementChange> Changes { get; set; } = [];
 }
 
