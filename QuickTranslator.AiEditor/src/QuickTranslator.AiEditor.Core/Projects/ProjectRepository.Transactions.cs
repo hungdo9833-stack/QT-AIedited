@@ -155,6 +155,51 @@ public sealed partial class ProjectRepository
         }
         finally { session.OperationGate.Release(); }
     }
+
+    internal async Task<Guid> ImportDetectedChapterChunkAsync(ProjectSession session,
+        IReadOnlyList<(ChapterDocument Source, int Number)> chapters, string sourceArchive, string operation,
+        Action<Guid> published, CancellationToken token)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation);
+        await session.OperationGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            var after = Clone(session.Manifest);
+            var expected = new List<ChapterDocument>();
+            var files = new List<PlannedProjectFile>();
+            foreach (var (source, number) in chapters)
+            {
+                if (after.Chapters.Any(x => x.ChapterId == source.Id || x.DeletedAt is null && x.Number == number))
+                    throw new InvalidOperationException("ID/số chương nhập đã có trong Project (kể cả ID xóa mềm).");
+                string relative = $"Chapters/{source.Id:D}.qtaie.json";
+                await EnsureDestinationEmptyAsync(session.Resolve(relative), token).ConfigureAwait(false);
+                ChapterDocument saved = PrepareRegisteredChapter(session, source, number, source.ChineseTitle);
+                expected.Add(saved);
+                after.Chapters.Add(ToEntry(saved, number));
+                files.Add(new(relative, ChapterFileStore.SerializeDocument(saved)));
+                after.CurrentChapterId = saved.Id;
+            }
+            NormalizeManifest(after);
+            return await Transactions.ExecuteAsync(session, operation, after, files, token, async () =>
+            {
+                foreach (ChapterDocument saved in expected)
+                {
+                    FaultPoint?.Invoke("BeforeChapterRead");
+                    ChapterDocument actual = await ChapterFileStore.ReadVerifiedFileAsync(
+                        session.ChapterStore.GetPath(saved.Id), token).ConfigureAwait(false);
+                    if (System.Text.Json.JsonSerializer.Serialize(saved, DocumentJson.Options) !=
+                        System.Text.Json.JsonSerializer.Serialize(actual, DocumentJson.Options))
+                        throw new InvalidDataException("Chương vừa nhập không khớp kế hoạch; transaction chưa commit.");
+                }
+            }, relative =>
+            {
+                ChapterDocument? file = expected.SingleOrDefault(x => relative == $"Chapters/{x.Id:D}.qtaie.json");
+                if (file is not null) published(file.Id);
+            }, sourceArchiveRelative: Path.GetRelativePath(session.RootDirectory, sourceArchive).Replace('\\', '/'))
+                .ConfigureAwait(false);
+        }
+        finally { session.OperationGate.Release(); }
+    }
     private static void NormalizeManifest(ProjectManifest manifest)
     {
         manifest.UpdatedAt = DateTimeOffset.UtcNow;

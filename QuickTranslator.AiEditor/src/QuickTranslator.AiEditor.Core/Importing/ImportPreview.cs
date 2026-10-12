@@ -1,0 +1,331 @@
+using System.Collections.Immutable;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace QuickTranslator.AiEditor.Core.Importing;
+
+public enum ImportPreviewIssueCode
+{
+    NoChapterHeadings,
+    MissingNumber,
+    MissingTitle,
+    DuplicateNumber,
+    ReversedNumber,
+    NumberJump,
+    UncertainBoundary,
+    UnclassifiedSource,
+    EmptyContent
+}
+
+public sealed record ImportPreviewIssue(
+    ImportPreviewIssueCode Code,
+    DetectionIssueSeverity Severity,
+    string Message,
+    ImmutableArray<Guid> ItemIds);
+
+public sealed record ImportPreviewItem(
+    Guid Id,
+    Guid ChapterId,
+    PlannedRegionKind Kind,
+    SourceSpan Span,
+    SourceSpan? HeadingSpan,
+    SourceSpan ContentSpan,
+    int? Number,
+    string Title,
+    string? VolumeTitle,
+    string RawHeading,
+    bool Included,
+    CandidateDecision Decision,
+    int? OriginalCandidateIndex)
+{
+    public bool IsChapter => Kind is PlannedRegionKind.Chapter or PlannedRegionKind.SpecialChapter;
+}
+
+public sealed class ImportPreviewPlan
+{
+    internal ImportPreviewPlan(RawSourceSnapshot source, ImmutableArray<SourceLine> lines,
+        ImmutableArray<ImportPreviewItem> items, int revision)
+    {
+        Source = source;
+        Lines = lines;
+        Items = items;
+        Revision = revision;
+        ValidateExactCoverage();
+        Issues = Analyze(items, source);
+        Fingerprint = CalculateFingerprint(source, items);
+    }
+
+    public RawSourceSnapshot Source { get; }
+    public ImmutableArray<SourceLine> Lines { get; }
+    public ImmutableArray<ImportPreviewItem> Items { get; }
+    public ImmutableArray<ImportPreviewIssue> Issues { get; }
+    public int Revision { get; }
+    public string Fingerprint { get; }
+    public IEnumerable<ImportPreviewItem> Chapters => Items.Where(x => x.IsChapter);
+    public IEnumerable<ImportPreviewItem> ImportableChapters => Chapters.Where(x => x.Included);
+    public bool HasBlockingIssues => Issues.Any(x => x.Severity == DetectionIssueSeverity.Error);
+
+    public string Slice(SourceSpan span) => Source.Text.Substring(span.StartUtf16, span.LengthUtf16);
+    public string ReconstructSource() => string.Concat(Items.Select(x => Slice(x.Span)));
+
+    public void ValidateExactCoverage()
+    {
+        if (Source.Text.Length == 0)
+        {
+            if (!Items.IsEmpty) throw new InvalidDataException("Nguồn rỗng không được có item preview.");
+            return;
+        }
+        if (Items.IsEmpty) throw new InvalidDataException("Preview không phủ nguồn.");
+        int expected = 0;
+        var ids = new HashSet<Guid>();
+        var chapterIds = new HashSet<Guid>();
+        foreach (ImportPreviewItem item in Items)
+        {
+            if (item.Id == Guid.Empty || !ids.Add(item.Id) || item.Span.LengthUtf16 <= 0 || item.Span.StartUtf16 != expected)
+                throw new InvalidDataException("Preview có ID trùng hoặc vùng nguồn bị hở/chồng/rỗng.");
+            ValidateSpan(item.Span, Source.Text.Length, "item");
+            ValidateSpan(item.ContentSpan, Source.Text.Length, "nội dung");
+            if (item.ContentSpan.StartUtf16 < item.Span.StartUtf16 || item.ContentSpan.EndUtf16 > item.Span.EndUtf16)
+                throw new InvalidDataException("Nội dung nằm ngoài item preview.");
+            if (item.HeadingSpan is SourceSpan heading)
+            {
+                ValidateSpan(heading, Source.Text.Length, "tiêu đề");
+                if (heading.StartUtf16 < item.Span.StartUtf16 || heading.EndUtf16 > item.Span.EndUtf16)
+                    throw new InvalidDataException("Tiêu đề nằm ngoài item preview.");
+            }
+            if (item.IsChapter && (item.ChapterId == Guid.Empty || !chapterIds.Add(item.ChapterId)))
+                throw new InvalidDataException("Preview có ChapterId rỗng hoặc trùng.");
+            expected = item.Span.EndUtf16;
+        }
+        if (expected != Source.Text.Length || !string.Equals(ReconstructSource(), Source.Text, StringComparison.Ordinal))
+            throw new InvalidDataException("Không thể tái tạo chính xác nguyên văn từ preview.");
+    }
+
+    private static ImmutableArray<ImportPreviewIssue> Analyze(ImmutableArray<ImportPreviewItem> items, RawSourceSnapshot source)
+    {
+        var issues = ImmutableArray.CreateBuilder<ImportPreviewIssue>();
+        ImportPreviewItem[] chapters = items.Where(x => x.IsChapter).ToArray();
+        ImportPreviewItem[] included = chapters.Where(x => x.Included).ToArray();
+        if (chapters.Length == 0)
+            issues.Add(new(ImportPreviewIssueCode.NoChapterHeadings, DetectionIssueSeverity.Error,
+                "Không có tiêu đề chương nào trong preview.", []));
+
+        foreach (ImportPreviewItem item in chapters)
+        {
+            if (item.Decision == CandidateDecision.NeedsReview)
+                issues.Add(new(ImportPreviewIssueCode.UncertainBoundary, DetectionIssueSeverity.Warning,
+                    "Ranh giới này có độ tin cậy thấp; hãy kiểm tra trước khi include.", [item.Id]));
+            if (item.Number is not > 0)
+                issues.Add(new(ImportPreviewIssueCode.MissingNumber,
+                    item.Included ? DetectionIssueSeverity.Error : DetectionIssueSeverity.Warning,
+                    item.Included
+                        ? "Chương được chọn chưa có số hợp lệ; QT Studio không tự đánh lại số."
+                        : "Chương chưa có số đang được exclude; hãy gán số trước khi include.", [item.Id]));
+            if (!item.Included) continue;
+            if (string.IsNullOrWhiteSpace(item.Title))
+                issues.Add(new(ImportPreviewIssueCode.MissingTitle, DetectionIssueSeverity.Error,
+                    "Chương được chọn chưa có tên.", [item.Id]));
+            if (string.IsNullOrWhiteSpace(source.Text.Substring(item.ContentSpan.StartUtf16, item.ContentSpan.LengthUtf16)))
+                issues.Add(new(ImportPreviewIssueCode.EmptyContent, DetectionIssueSeverity.Error,
+                    "Chương được chọn không có nội dung nguyên văn.", [item.Id]));
+        }
+
+        foreach (IGrouping<int, ImportPreviewItem> duplicate in included.Where(x => x.Number > 0)
+                     .GroupBy(x => x.Number!.Value).Where(x => x.Count() > 1))
+            issues.Add(new(ImportPreviewIssueCode.DuplicateNumber, DetectionIssueSeverity.Error,
+                $"Số chương {duplicate.Key} xuất hiện {duplicate.Count()} lần; Project hiện yêu cầu số active duy nhất.",
+                duplicate.Select(x => x.Id).ToImmutableArray()));
+
+        foreach (IGrouping<string, ImportPreviewItem> volume in included.Where(x => x.Number > 0)
+                     .GroupBy(x => x.VolumeTitle ?? "", StringComparer.Ordinal))
+        {
+            ImportPreviewItem[] ordered = volume.OrderBy(x => x.Span.StartUtf16).ToArray();
+            for (int index = 1; index < ordered.Length; index++)
+            {
+                int previous = ordered[index - 1].Number!.Value;
+                int current = ordered[index].Number!.Value;
+                if (current < previous)
+                    issues.Add(new(ImportPreviewIssueCode.ReversedNumber, DetectionIssueSeverity.Warning,
+                        $"Thứ tự giảm từ chương {previous} xuống {current}.", [ordered[index - 1].Id, ordered[index].Id]));
+                else if (current > previous + 1)
+                    issues.Add(new(ImportPreviewIssueCode.NumberJump, DetectionIssueSeverity.Warning,
+                        $"Thiếu số giữa chương {previous} và {current}.", [ordered[index - 1].Id, ordered[index].Id]));
+            }
+        }
+
+        foreach (ImportPreviewItem item in items.Where(x => x.Kind == PlannedRegionKind.Unclassified &&
+                     !string.IsNullOrWhiteSpace(source.Text.Substring(x.Span.StartUtf16, x.Span.LengthUtf16))))
+            issues.Add(new(ImportPreviewIssueCode.UnclassifiedSource, DetectionIssueSeverity.Information,
+                "Vùng nguồn chưa phân loại được giữ nguyên trong source rescue và không tự nhập thành chương.", [item.Id]));
+        return issues.ToImmutable();
+    }
+
+    private static string CalculateFingerprint(RawSourceSnapshot source, ImmutableArray<ImportPreviewItem> items)
+    {
+        var builder = new StringBuilder(source.RawSha256).Append('|').Append(source.TextSha256);
+        foreach (ImportPreviewItem item in items)
+            builder.Append('\n').Append(item.Id.ToString("D")).Append('|').Append(item.ChapterId.ToString("D"))
+                .Append('|').Append(item.Kind).Append('|').Append(item.Span.StartUtf16).Append(':').Append(item.Span.LengthUtf16)
+                .Append('|').Append(item.ContentSpan.StartUtf16).Append(':').Append(item.ContentSpan.LengthUtf16)
+                .Append('|').Append(item.Number?.ToString(CultureInfo.InvariantCulture) ?? "-")
+                .Append('|').Append(item.Included ? '1' : '0').Append('|').Append(item.Title).Append('|').Append(item.VolumeTitle);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+    }
+
+    private static void ValidateSpan(SourceSpan span, int length, string label)
+    {
+        if (span.StartUtf16 < 0 || span.LengthUtf16 < 0 || span.EndUtf16 > length)
+            throw new InvalidDataException($"Offset {label} không hợp lệ.");
+    }
+}
+
+public sealed class ImportPreviewEditor
+{
+    private readonly Stack<ImportPreviewPlan> _undo = new();
+
+    private ImportPreviewEditor(ImportPreviewPlan initial) => Current = initial;
+
+    public ImportPreviewPlan Current { get; private set; }
+    public bool CanUndo => _undo.Count > 0;
+
+    public static ImportPreviewEditor Create(ImmutableImportPlan detected)
+    {
+        ArgumentNullException.ThrowIfNull(detected);
+        detected.ValidateExactCoverage();
+        var items = detected.Regions.Select(region => FromRegion(detected, region)).ToImmutableArray();
+        return new(new ImportPreviewPlan(detected.Source, detected.Lines, items, 0));
+    }
+
+    public void UpdateChapter(Guid itemId, int? number, string title)
+    {
+        ImportPreviewItem item = RequireChapter(itemId);
+        if (number is <= 0) throw new ArgumentOutOfRangeException(nameof(number), "Số chương phải lớn hơn 0 hoặc để trống.");
+        Replace(itemId, item with { Number = number, Title = title?.Trim() ?? "" });
+    }
+
+    public void SetIncluded(Guid itemId, bool included)
+    {
+        ImportPreviewItem item = RequireChapter(itemId);
+        Replace(itemId, item with { Included = included });
+    }
+
+    public void Split(Guid itemId, int splitAtUtf16, int? newNumber, string newTitle)
+    {
+        ImportPreviewItem item = RequireChapter(itemId);
+        if (newNumber is <= 0) throw new ArgumentOutOfRangeException(nameof(newNumber));
+        if (splitAtUtf16 <= item.ContentSpan.StartUtf16 || splitAtUtf16 >= item.Span.EndUtf16 || !IsLineStart(splitAtUtf16))
+            throw new InvalidOperationException("Chỉ có thể tách tại đầu một dòng nằm bên trong nội dung chương.");
+
+        int index = Current.Items.IndexOf(item);
+        var left = item with
+        {
+            Span = new(item.Span.StartUtf16, splitAtUtf16 - item.Span.StartUtf16),
+            ContentSpan = new(item.ContentSpan.StartUtf16, splitAtUtf16 - item.ContentSpan.StartUtf16)
+        };
+        var rightSpan = new SourceSpan(splitAtUtf16, item.Span.EndUtf16 - splitAtUtf16);
+        var right = new ImportPreviewItem(
+            StableId(Current.Source.RawSha256, "preview-item", rightSpan, item.Kind),
+            StableId(Current.Source.RawSha256, "chapter", rightSpan, item.Kind),
+            PlannedRegionKind.Chapter, rightSpan, null, rightSpan, newNumber, newTitle?.Trim() ?? "",
+            item.VolumeTitle, "", true, CandidateDecision.NeedsReview, null);
+        Mutate(Current.Items.RemoveAt(index).InsertRange(index, ImmutableArray.Create(left, right)));
+    }
+
+    public void MergeWithNext(Guid itemId)
+    {
+        ImportPreviewItem item = RequireChapter(itemId);
+        int index = Current.Items.IndexOf(item);
+        if (index < 0 || index + 1 >= Current.Items.Length || !Current.Items[index + 1].IsChapter)
+            throw new InvalidOperationException("Không có chương liền kề phía sau để gộp.");
+        ImportPreviewItem next = Current.Items[index + 1];
+        if (item.Span.EndUtf16 != next.Span.StartUtf16)
+            throw new InvalidOperationException("Hai chương không liền kề trong nguồn.");
+        var merged = item with
+        {
+            Span = new(item.Span.StartUtf16, next.Span.EndUtf16 - item.Span.StartUtf16),
+            ContentSpan = new(item.ContentSpan.StartUtf16, next.Span.EndUtf16 - item.ContentSpan.StartUtf16),
+            Decision = CandidateDecision.NeedsReview
+        };
+        Mutate(Current.Items.RemoveAt(index).RemoveAt(index).Insert(index, merged));
+    }
+
+    public void MoveBoundary(Guid leftItemId, int boundaryUtf16)
+    {
+        ImportPreviewItem left = RequireChapter(leftItemId);
+        int index = Current.Items.IndexOf(left);
+        if (index < 0 || index + 1 >= Current.Items.Length || !Current.Items[index + 1].IsChapter)
+            throw new InvalidOperationException("Không có chương liền kề để dời ranh giới.");
+        ImportPreviewItem right = Current.Items[index + 1];
+        if (boundaryUtf16 <= left.ContentSpan.StartUtf16 || boundaryUtf16 >= right.Span.EndUtf16 || !IsLineStart(boundaryUtf16))
+            throw new InvalidOperationException("Ranh giới mới phải là đầu dòng nằm giữa hai chương.");
+        var movedLeft = left with
+        {
+            Span = new(left.Span.StartUtf16, boundaryUtf16 - left.Span.StartUtf16),
+            ContentSpan = new(left.ContentSpan.StartUtf16, boundaryUtf16 - left.ContentSpan.StartUtf16),
+            Decision = CandidateDecision.NeedsReview
+        };
+        var rightSpan = new SourceSpan(boundaryUtf16, right.Span.EndUtf16 - boundaryUtf16);
+        var movedRight = right with
+        {
+            Span = rightSpan,
+            HeadingSpan = null,
+            ContentSpan = rightSpan,
+            RawHeading = "",
+            Decision = CandidateDecision.NeedsReview
+        };
+        var items = Current.Items.SetItem(index, movedLeft).SetItem(index + 1, movedRight);
+        Mutate(items);
+    }
+
+    public void Undo()
+    {
+        if (_undo.Count == 0) return;
+        Current = _undo.Pop();
+    }
+
+    private void Replace(Guid id, ImportPreviewItem replacement)
+    {
+        int index = -1;
+        for (int candidate = 0; candidate < Current.Items.Length; candidate++)
+            if (Current.Items[candidate].Id == id) { index = candidate; break; }
+        if (index < 0) throw new KeyNotFoundException("Không tìm thấy item preview.");
+        Mutate(Current.Items.SetItem(index, replacement));
+    }
+
+    private void Mutate(ImmutableArray<ImportPreviewItem> items)
+    {
+        var next = new ImportPreviewPlan(Current.Source, Current.Lines, items, checked(Current.Revision + 1));
+        _undo.Push(Current);
+        Current = next;
+    }
+
+    private ImportPreviewItem RequireChapter(Guid id)
+    {
+        ImportPreviewItem item = Current.Items.FirstOrDefault(x => x.Id == id)
+            ?? throw new KeyNotFoundException("Không tìm thấy item preview.");
+        if (!item.IsChapter) throw new InvalidOperationException("Thao tác chỉ áp dụng cho chương.");
+        return item;
+    }
+
+    private bool IsLineStart(int offset) => Current.Lines.Any(x => x.FullSpan.StartUtf16 == offset);
+
+    private static ImportPreviewItem FromRegion(ImmutableImportPlan detected, PlannedSourceRegion region)
+    {
+        HeadingCandidate? candidate = region.CandidateIndex is int index ? detected.Candidates[index] : null;
+        string rawHeading = region.HeadingSpan is SourceSpan heading ? detected.Slice(heading) : "";
+        string title = !string.IsNullOrWhiteSpace(region.Title) ? region.Title : rawHeading.Trim();
+        bool isChapter = region.Kind is PlannedRegionKind.Chapter or PlannedRegionKind.SpecialChapter;
+        bool included = isChapter && candidate?.Decision == CandidateDecision.Accepted && region.ChapterNumber is > 0;
+        Guid chapterId = isChapter ? StableId(detected.Source.RawSha256, "chapter", region.Span, region.Kind) : Guid.Empty;
+        return new(StableId(detected.Source.RawSha256, "preview-item", region.Span, region.Kind), chapterId,
+            region.Kind, region.Span, region.HeadingSpan, region.BodySpan, region.ChapterNumber, title,
+            region.VolumeTitle, rawHeading, included, candidate?.Decision ?? CandidateDecision.Rejected, region.CandidateIndex);
+    }
+
+    private static Guid StableId(string sourceHash, string purpose, SourceSpan span, PlannedRegionKind kind)
+    {
+        string value = $"qtaie-m2:{purpose}:{sourceHash}:{kind}:{span.StartUtf16}:{span.LengthUtf16}";
+        return new Guid(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
+    }
+}
