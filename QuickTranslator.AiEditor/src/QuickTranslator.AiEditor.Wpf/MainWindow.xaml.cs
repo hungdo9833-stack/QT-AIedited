@@ -31,11 +31,15 @@ public partial class MainWindow : Window
 
     private readonly string? _startupProjectPath;
 
-    public MainWindow(string? startupProjectPath = null)
+    public MainWindow(string? startupProjectPath = null) : this(startupProjectPath, initializeApplication: true) { }
+
+    // Integration tests construct controls on an STA dispatcher without loading any real user stores.
+    internal MainWindow(string? startupProjectPath, bool initializeApplication)
     {
         _startupProjectPath = startupProjectPath;
         InitializeComponent();
         _initialized = true;
+        if (!initializeApplication) return;
         _autosave.Tick += OnAutosave;
         InitializeChapterView();
         InitializeReader();

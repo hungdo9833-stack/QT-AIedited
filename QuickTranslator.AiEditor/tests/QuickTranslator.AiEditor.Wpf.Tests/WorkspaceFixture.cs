@@ -1,0 +1,148 @@
+using System.IO;
+using System.Reflection;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using QuickTranslator.AiEditor.Core.Models;
+using QuickTranslator.AiEditor.Core.Persistence;
+using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Translation;
+using QuickTranslator.AiEditor.Tests;
+using QuickTranslator.AiEditor.Wpf;
+using Xunit;
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
+namespace QuickTranslator.AiEditor.Wpf.Tests;
+
+internal static class StaHost
+{
+    private static readonly Task<Dispatcher> Ready = Start();
+    private static Task<Dispatcher> Start()
+    {
+        var ready = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+                var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+                app.InitializeComponent(); // No Startup/Run: never opens a real project or window.
+                ready.SetResult(Dispatcher.CurrentDispatcher);
+                Dispatcher.Run();
+            }
+            catch (Exception ex) { ready.TrySetException(ex); }
+        }) { IsBackground = true, Name = "Isolated WPF regression tests" };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return ready.Task;
+    }
+
+    public static async Task Run(Func<Task> test)
+    {
+        var dispatcher = await Ready.WaitAsync(TimeSpan.FromSeconds(15));
+        await dispatcher.InvokeAsync(test).Task.Unwrap().WaitAsync(TimeSpan.FromSeconds(30));
+    }
+}
+
+internal sealed class WorkspaceFixture : IDisposable
+{
+    public string Root { get; } = Path.Combine(Path.GetTempPath(), "qtaie-safety-wpf-" + Guid.NewGuid().ToString("N"));
+    public MainWindow Window { get; }
+    public ProjectRepository Repository { get; } = new();
+    public FakeClient Client { get; } = new();
+    public ProjectSession Project { get; private set; } = null!;
+    public TranslationService Service => Get<TranslationService>("_service");
+
+    public WorkspaceFixture()
+    {
+        Directory.CreateDirectory(Root);
+        Window = new MainWindow(null, initializeApplication: false) { WorkspaceConfirmation = (_, _) => true };
+        Set("_store", new ChapterFileStore(Path.Combine(Root, "Standalone")));
+        Set("_presetStore", new PromptPresetStore(Path.Combine(Root, "app", "presets.qtaip.json")));
+        Set("_readerStore", new ReaderPreferencesStore(Path.Combine(Root, "app", "reader.json")));
+        Set("_characterStore", new CharacterProjectStore(Path.Combine(Root, "app", "Characters")));
+        Set("_projectLibraryStore", new ProjectLibraryStore(Path.Combine(Root, "app", "library.json")));
+        Set("_presetsReady", true);
+        Call("RefreshPresetEditor");
+        Call("LoadCharacterProject", new CharacterProject { Name = "Hồ sơ thử" });
+    }
+
+    public async Task CreateProjectAsync()
+    {
+        Project = await Repository.CreateAsync(Path.Combine(Root, "Novel"), "Truyện thử tổng hợp");
+        Set("_projectSession", Project);
+        Set("_store", Project.ChapterStore);
+        Set("_presetStore", new PromptPresetStore(Project.Resolve(Project.Manifest.Files.PromptPresets)));
+        Set("_readerStore", new ReaderPreferencesStore(Project.Resolve(Project.Manifest.Files.ReaderSettings)));
+        Set("_characterStore", new CharacterProjectStore(Path.Combine(Project.RootDirectory, "Characters")));
+        await TaskCall("LoadProjectAssetsAsync");
+        Set("_readerReady", false); // Reader visual layout is outside these data tests.
+    }
+
+    public async Task<ChapterDocument> AddChapterAsync(string title, int number)
+    {
+        var chapter = TranslationService.CreateChapter(title, "你好。王秀兰来了。");
+        chapter.CharacterProject = new() { Id = Project.Manifest.ProjectId, Name = "Hồ sơ cũ" };
+        chapter.ConfirmedTerms = [new("王秀兰", "Tên cũ")];
+        chapter.ConfirmedContextNotes = "Ngữ cảnh cũ";
+        await Repository.AddChapterAsync(Project, chapter, number);
+        return (await Repository.LoadChapterAsync(Project, chapter.Id)).Chapter;
+    }
+
+    public void Attach(ChapterDocument chapter)
+    {
+        Call("AttachChapter", chapter);
+        // Replace only the client transport. Production lifecycle/save/queue logic remains in use.
+        var service = new TranslationService(chapter, Client, Get<ChapterFileStore>("_store"));
+        Set("_service", service);
+        Set("_queue", new TranslationQueue(service));
+        Set("_selectedId", chapter.SelectedSegmentId);
+        Call("ApplyInputs", chapter);
+    }
+
+    public T Get<T>(string field) => (T)typeof(MainWindow).GetField(field,
+        BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Window)!;
+    public void Set(string field, object? value) => typeof(MainWindow).GetField(field,
+        BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(Window, value);
+    public TextBox Text(string name) => (TextBox)Window.FindName(name);
+    public object? Call(string method, params object?[] arguments)
+    {
+        try { return typeof(MainWindow).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(Window, arguments); }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw(); throw; }
+    }
+    public Task TaskCall(string method, params object?[] arguments) => (Task)Call(method, arguments)!;
+
+    public void Dispose()
+    {
+        Get<DispatcherTimer>("_autosave").Stop();
+        Get<DispatcherTimer>("_progressTimer").Stop();
+        Get<DispatcherTimer>("_readerSaveTimer").Stop();
+        Get<OllamaClient>("_client").Dispose();
+        Set("_allowClose", true);
+        Window.Close();
+        string resolved = Path.GetFullPath(Root);
+        if (!resolved.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) ||
+            !Path.GetFileName(resolved).StartsWith("qtaie-safety-wpf-", StringComparison.Ordinal))
+            throw new InvalidOperationException("Refusing to clean outside the synthetic test root.");
+        Directory.Delete(resolved, recursive: true);
+    }
+}
+
+public sealed class WorkspaceHarnessTests
+{
+    [Fact]
+    public Task ConstructsControlsAndSyntheticProjectWithoutOpeningUserData() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        var chapter = await fixture.AddChapterAsync("Một", 1);
+        fixture.Attach(chapter);
+        fixture.Service.UpdateDraft(chapter.Segments[0].Id, "Nháp tổng hợp.");
+        await fixture.TaskCall("SaveCurrentAsync");
+        var loaded = await fixture.Repository.LoadChapterAsync(fixture.Project, chapter.Id);
+        Assert.Equal("Nháp tổng hợp.", loaded.Chapter.Segments[0].UserDraft);
+        Assert.Equal(0, fixture.Client.Calls);
+    });
+}

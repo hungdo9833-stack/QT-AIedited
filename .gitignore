@@ -1,6 +1,9 @@
 #Autosave files
 *~
 
+# Local SDK and isolated build/test caches (never project data)
+.tools/
+
 #build
 [Oo]bj/
 [Bb]in/

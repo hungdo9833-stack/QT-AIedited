@@ -442,8 +442,16 @@ public partial class MainWindow
         var entry = _projectSession.Manifest.Chapters.Single(x => x.ChapterId == item.Id);
         string? title = AskText("Đổi tên chương", "Tên tiếng Việt", entry.VietnameseTitle); if (title is null) return;
         string? chinese = AskText("Đổi tên chương", "Tên tiếng Trung (có thể để trống)", entry.ChineseTitle); if (chinese is null) return;
-        try { await _projectRepository.RenameChapterAsync(_projectSession, item.Id, title, chinese); await LoadProjectChapterAsync(item.Id); RefreshProjectChapterList(); }
+        try { await RenameProjectChapterAsync(item.Id, title, chinese); }
         catch (Exception ex) { ShowError(ex); }
+    }
+
+    internal async Task RenameProjectChapterAsync(Guid chapterId, string title, string chineseTitle)
+    {
+        if (_projectSession is null) return;
+        await _projectRepository.RenameChapterAsync(_projectSession, chapterId, title, chineseTitle);
+        await LoadProjectChapterAsync(chapterId);
+        RefreshProjectChapterList();
     }
 
     private async void OnDuplicateProjectChapter(object sender, RoutedEventArgs e)

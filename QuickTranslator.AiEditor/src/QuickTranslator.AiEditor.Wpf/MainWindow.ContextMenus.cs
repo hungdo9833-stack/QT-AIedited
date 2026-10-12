@@ -226,8 +226,8 @@ public partial class MainWindow
     {
         if (_service is null)
         {
-            if (MessageBox.Show(this, "Chương chưa có tệp tiến độ. Tạo phân đoạn và lưu chương ngay để glossary không bị mất khi đóng ứng dụng?",
-                "Lưu glossary", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return false;
+            if (!ConfirmWorkspaceChange("Chương chưa có tệp tiến độ. Tạo phân đoạn và lưu chương ngay để glossary không bị mất khi đóng ứng dụng?",
+                "Lưu glossary")) return false;
             var chapter = TranslationService.CreateChapter(TitleInput.Text, _importedOriginalText ?? ChapterInput.Text,
                 ReadSegmenterOptions(), ReadModelOptions());
             chapter.CharacterProject = CharacterProjectStore.Clone(_characterProject);
