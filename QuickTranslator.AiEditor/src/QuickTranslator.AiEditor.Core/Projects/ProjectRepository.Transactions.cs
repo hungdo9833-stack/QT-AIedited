@@ -26,6 +26,7 @@ public sealed partial class ProjectRepository
             NormalizeManifest(after);
             await Transactions.ExecuteAsync(session, "AddChapter", after,
                 [new(relative, ChapterFileStore.SerializeDocument(saved))], cancellationToken).ConfigureAwait(false);
+            PublishManifestCommitted(session, "AddChapter");
             return session.Manifest.Chapters.Single(x => x.ChapterId == saved.Id);
         }
         catch (UnauthorizedAccessException ex) { throw new IOException("Không đủ quyền hoặc file bị khóa; thao tác thêm chương chưa hoàn tất.", ex); }
@@ -71,6 +72,7 @@ public sealed partial class ProjectRepository
             else if (after.CurrentChapterId == chapterId) after.CurrentChapterId = after.Chapters.FirstOrDefault(x => x.DeletedAt is null)?.ChapterId;
             NormalizeManifest(after);
             await Transactions.ExecuteAsync(session, restore ? "RestoreDeletedChapter" : "SoftDeleteChapter", after, changes, token).ConfigureAwait(false);
+            PublishManifestCommitted(session, restore ? "RestoreDeletedChapter" : "SoftDeleteChapter");
         }
         catch (UnauthorizedAccessException ex) { throw new IOException("Không đủ quyền hoặc file bị khóa; thao tác chuyển chương chưa hoàn tất.", ex); }
         finally { session.OperationGate.Release(); }
@@ -95,6 +97,7 @@ public sealed partial class ProjectRepository
             session.ManifestRecovery = await RecoveryFiles.RestoreBackupAsync(session.ManifestRecovery ?? throw new InvalidOperationException("Chưa có preview manifest."),
                 bytes => { var value = DecodeManifest(bytes); if (value.ProjectId != session.Manifest.ProjectId) throw new InvalidDataException("ProjectId manifest thay đổi."); return value; }, cancellationToken).ConfigureAwait(false);
             session.Manifest = await ReadManifestAsync(session.ManifestPath, cancellationToken).ConfigureAwait(false);
+            PublishManifestCommitted(session, "RestoreManifestBackup");
         }
         finally { session.OperationGate.Release(); }
     }
@@ -103,7 +106,12 @@ public sealed partial class ProjectRepository
         CancellationToken cancellationToken = default)
     {
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { await Transactions.RecoverAsync(session, transactionId, decision, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            await Transactions.RecoverAsync(session, transactionId, decision, cancellationToken).ConfigureAwait(false);
+            PublishManifestCommitted(session, decision == ProjectRecoveryDecision.RollBack
+                ? "RecoverTransactionRollback" : "RecoverTransactionCommit");
+        }
         finally { session.OperationGate.Release(); }
     }
 
@@ -137,7 +145,7 @@ public sealed partial class ProjectRepository
                 after.CurrentChapterId = saved.Id;
             }
             NormalizeManifest(after);
-            return await Transactions.ExecuteAsync(session, "LegacyImport", after, files, token, async () =>
+            Guid transactionId = await Transactions.ExecuteAsync(session, "LegacyImport", after, files, token, async () =>
             {
                 foreach (var saved in expected)
                 {
@@ -152,6 +160,8 @@ public sealed partial class ProjectRepository
             }, sourceArchiveRelative: Path.GetRelativePath(session.RootDirectory, sourceArchive).Replace('\\', '/'),
                 sourceIdentities: chapters.Select(x => new LegacySourceIdentity(x.Source.Id, x.Source.ProjectId,
                     x.Source.CharacterProject.Id, x.Source.ChapterNumber, session.Manifest.ProjectId, x.Number)).ToArray()).ConfigureAwait(false);
+            PublishManifestCommitted(session, "LegacyImport");
+            return transactionId;
         }
         finally { session.OperationGate.Release(); }
     }
@@ -180,7 +190,7 @@ public sealed partial class ProjectRepository
                 after.CurrentChapterId = saved.Id;
             }
             NormalizeManifest(after);
-            return await Transactions.ExecuteAsync(session, operation, after, files, token, async () =>
+            Guid transactionId = await Transactions.ExecuteAsync(session, operation, after, files, token, async () =>
             {
                 foreach (ChapterDocument saved in expected)
                 {
@@ -197,6 +207,8 @@ public sealed partial class ProjectRepository
                 if (file is not null) published(file.Id);
             }, sourceArchiveRelative: Path.GetRelativePath(session.RootDirectory, sourceArchive).Replace('\\', '/'))
                 .ConfigureAwait(false);
+            PublishManifestCommitted(session, operation);
+            return transactionId;
         }
         finally { session.OperationGate.Release(); }
     }

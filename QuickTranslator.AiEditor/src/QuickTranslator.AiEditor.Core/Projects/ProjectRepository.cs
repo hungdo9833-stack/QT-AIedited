@@ -33,7 +33,9 @@ public sealed partial class ProjectRepository
         manifest.Validate();
         CreateLayout(root);
         await WriteManifestAsync(manifestPath, manifest, cancellationToken).ConfigureAwait(false);
-        return new ProjectSession(manifestPath, Clone(manifest));
+        var session = new ProjectSession(manifestPath, Clone(manifest));
+        PublishManifestCommitted(session, "CreateProject");
+        return session;
     }
 
     public async Task<ProjectOpenResult> OpenAsync(string manifestPath, CancellationToken cancellationToken = default)
@@ -66,6 +68,7 @@ public sealed partial class ProjectRepository
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { await WriteManifestAsync(session.ManifestPath, session.Manifest, cancellationToken).ConfigureAwait(false); }
         finally { _writeGate.Release(); }
+        PublishManifestCommitted(session, "SaveManifest");
         }
         finally { session.OperationGate.Release(); }
     }
@@ -90,6 +93,7 @@ public sealed partial class ProjectRepository
             var bytes = await File.ReadAllBytesAsync(session.Resolve(relative), cancellationToken).ConfigureAwait(false);
             await Transactions.ExecuteAsync(session, "UpdateChapter", after,
                 [new(relative + ".bak", bytes), new(relative, ChapterFileStore.SerializeDocument(chapter))], cancellationToken).ConfigureAwait(false);
+            PublishManifestCommitted(session, "UpdateChapter");
         }
         finally { session.OperationGate.Release(); }
     }
@@ -107,6 +111,7 @@ public sealed partial class ProjectRepository
             CopySummary(entry, chapter); after.CurrentChapterId = chapter.Id; NormalizeManifest(after);
             await WriteManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
             session.Manifest = after;
+            PublishManifestCommitted(session, "UpdateChapterSummary");
         }
         finally { session.OperationGate.Release(); }
     }
