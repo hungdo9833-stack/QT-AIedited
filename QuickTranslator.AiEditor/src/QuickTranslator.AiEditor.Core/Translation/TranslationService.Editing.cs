@@ -30,7 +30,7 @@ public sealed partial class TranslationService
 
     public string PreviewPrompt(Guid segmentId, PromptPreset preset, IReadOnlyList<ConfirmedTerm>? terms = null, string? confirmedContext = null)
     {
-        var chapter = GetSnapshot();
+        var chapter = GetOperationSnapshot();
         if (terms is not null) chapter.ConfirmedTerms = terms.ToList();
         if (confirmedContext is not null) chapter.ConfirmedContextNotes = confirmedContext;
         var segment = chapter.Segments.Single(s => s.Id == segmentId);

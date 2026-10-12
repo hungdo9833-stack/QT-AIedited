@@ -30,10 +30,11 @@ public partial class MainWindow
     private void AttachChapter(ChapterDocument chapter)
     {
         if (_queue is not null) _queue.ProgressChanged -= OnQueueProgress;
-        _service = new(chapter, _client, _store);
+        _service = new(chapter, _translationClient, _store);
         _queue = new(_service);
         _queue.ProgressChanged += OnQueueProgress;
-        LoadCharacterProject(_service.GetSnapshot().CharacterProject);
+        if (_projectSession is null) LoadCharacterProject(_service.GetSnapshot().CharacterProject);
+        else ApplyCurrentProjectResources();
     }
     private void DetachChapter()
     {

@@ -8,12 +8,12 @@ public sealed partial class TranslationService
     private readonly ChineseTextScanner _chineseScanner = new();
     private readonly BatchReplacementEngine _batchReplacement = new();
 
-    public ChineseTextScanReport ScanChineseText() => _chineseScanner.Scan(GetSnapshot(), _clock.GetUtcNow());
+    public ChineseTextScanReport ScanChineseText() => _chineseScanner.Scan(GetOperationSnapshot(), _clock.GetUtcNow());
 
     public IReadOnlyList<BatchReplacementPreviewItem> PreviewBatchReplacement(
         IEnumerable<BatchReplacementRule> rules, BatchReplacementScope scope)
     {
-        var chapter = GetSnapshot();
+        var chapter = GetOperationSnapshot();
         if (scope == BatchReplacementScope.CurrentProject)
             throw new ArgumentException("Xem trước toàn dự án cần nạp các chương qua bộ điều phối lưu trữ.", nameof(scope));
         return _batchReplacement.Preview([chapter], rules, scope, chapter.SelectedSegmentId);

@@ -20,6 +20,7 @@ public partial class MainWindow
     private readonly ProjectLibraryStore _projectLibraryStore = new();
     private ProjectLibrary _projectLibrary = new();
     private ProjectSession? _projectSession;
+    private ProjectResources? _projectResources;
     private readonly ObservableCollection<ProjectChapterItem> _projectChapters = [];
     private bool _syncingProjectUi;
     private bool _syncingProjectSummary;
@@ -101,17 +102,14 @@ public partial class MainWindow
         _presetsReady = true; RefreshPresetEditor();
         _readerPreferences = await _readerStore.LoadAsync();
         _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
-        string characterPath = _projectSession.Resolve(_projectSession.Manifest.Files.CharacterProfiles);
-        CharacterProject characters;
-        if (File.Exists(characterPath)) characters = await _characterStore.LoadAsync(characterPath);
-        else characters = new() { Id = _projectSession.Manifest.ProjectId, Name = _projectSession.Manifest.VietnameseTitle };
-        characters.Id = _projectSession.Manifest.ProjectId;
-        LoadCharacterProject(characters);
+        _projectResources = await new ProjectResourceStore(_projectSession).LoadAsync();
+        LoadCharacterProject(_projectResources.Characters);
         var settings = new ProjectSettingsStore(_projectSession);
         var translation = await settings.LoadTranslationAsync();
         ApplyProjectDefaults(translation);
-        SetGlossaryTerms((await settings.LoadGlossaryAsync()).Terms);
-        ContextNotesInput.Text = await settings.LoadContextNotesAsync();
+        SetGlossaryTerms(_projectResources.Terms);
+        ContextNotesInput.Text = _projectResources.Context;
+        ApplyCurrentProjectResources();
     }
 
     private async Task SaveProjectAssetsAsync()
@@ -127,9 +125,26 @@ public partial class MainWindow
             SelectedPromptPresetId = _presetsReady ? _presetManager.Selected.Id : null,
             TraditionalDataDirectory = TraditionalDataDirectoryInput.Text
         });
-        await settings.SaveGlossaryAsync(new() { Terms = ReadTerms().ToList() });
-        await settings.SaveContextNotesAsync(ContextNotesInput.Text);
         await _projectRepository.SaveManifestAsync(_projectSession);
+    }
+
+    private void ApplyCurrentProjectResources()
+    {
+        if (_projectResources is not null && _service?.GetSnapshot().ProjectId == _projectResources.ProjectId)
+            _service.UseProjectResources(_projectResources);
+    }
+
+    private async Task SaveProjectResourcesAsync()
+    {
+        if (_projectSession is null || _projectResources is null) return;
+        UpdateCharacterProjectFromInputs();
+        var proposed = new ProjectResources { ProjectId = _projectSession.Manifest.ProjectId,
+            Revision = _projectResources.Revision, Characters = CharacterProjectStore.Clone(_characterProject),
+            Terms = ReadTerms().ToList(), Context = ContextNotesInput.Text };
+        _projectResources = await new ProjectResourceStore(_projectSession).SaveAsync(proposed);
+        LoadCharacterProject(_projectResources.Characters);
+        SetGlossaryTerms(_projectResources.Terms);
+        ApplyCurrentProjectResources();
     }
 
     private void ApplyProjectDefaults(ProjectTranslationSettings settings)
@@ -178,6 +193,7 @@ public partial class MainWindow
         if (_service?.GetSnapshot().Id == chapterId) return;
         if (_queue?.IsRunning == true) await _queue.PauseAsync();
         await SaveCurrentAsync();
+        await SaveProjectResourcesAsync();
         var loaded = await _projectRepository.LoadChapterAsync(_projectSession, chapterId);
         AttachChapter(loaded.Chapter); _selectedId = loaded.Chapter.SelectedSegmentId ?? loaded.Chapter.Segments[0].Id; _shownAttemptId = null;
         ApplyInputs(loaded.Chapter); SelectChapterPreset(loaded.Chapter.SelectedPreset);
@@ -273,7 +289,7 @@ public partial class MainWindow
         if (_projectSession is null || !BeginUiOperation()) return;
         try
         {
-            await SafelyLeaveCurrentProjectAsync(); DetachChapter(); _projectSession = null;
+            await SafelyLeaveCurrentProjectAsync(); DetachChapter(); _projectSession = null; _projectResources = null;
             _store = new(ChapterFileStore.DefaultDirectory); _presetStore = new(PromptPresetStore.DefaultPath);
             _readerStore = new(ReaderPreferencesStore.DefaultPath); _characterStore = new(CharacterProjectStore.DefaultDirectory);
             await LoadGlobalAssetsAsync();

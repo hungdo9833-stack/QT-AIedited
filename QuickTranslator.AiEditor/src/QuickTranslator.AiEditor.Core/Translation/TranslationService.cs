@@ -19,6 +19,27 @@ public sealed partial class TranslationService
     private readonly TranslationQualityChecker _quality = new();
     private long _revision;
     private long _savedRevision = -1;
+    private Projects.ProjectResources? _projectResources;
+
+    public void UseProjectResources(Projects.ProjectResources resources)
+    {
+        var copy = resources.Clone(); copy.Validate();
+        lock (_sync)
+        {
+            if (_chapter.ProjectId != copy.ProjectId) throw new InvalidOperationException("Tài nguyên không thuộc project của chương.");
+            _projectResources = copy;
+        }
+    }
+
+    private ChapterDocument GetOperationSnapshot()
+    {
+        lock (_sync)
+        {
+            var snapshot = DocumentJson.Clone(_chapter);
+            _projectResources?.ApplyTo(snapshot);
+            return snapshot;
+        }
+    }
 
     public TranslationService(ChapterDocument chapter, IOllamaClient client, IChapterStore store,
         IGlossaryProvider? glossary = null, IContextMemory? memory = null, TimeProvider? clock = null)
@@ -168,7 +189,7 @@ public sealed partial class TranslationService
             lock (_sync)
                 if (_chapter.Queue.IsActive && _chapter.Queue.RunId != runId)
                     throw new InvalidOperationException("Hàng đợi đã bắt đầu. Hãy tạm dừng trước khi dịch riêng.");
-            var context = GetSnapshot();
+            var context = GetOperationSnapshot();
             var selected = context.Segments.SingleOrDefault(s => s.Id == segmentId)
                 ?? throw new ArgumentException("Không tìm thấy đoạn đang chọn.", nameof(segmentId));
             var entries = await _glossary.GetEntriesAsync(selected.SourceText, cancellationToken).ConfigureAwait(false);
@@ -186,6 +207,13 @@ public sealed partial class TranslationService
                 var segment = Find(segmentId);
                 if (runId is not null && segment.IsProtectedFromAutomaticTranslation) throw new QueueSegmentSkippedException();
                 segment.Attempts.Add(attempt);
+                // Capture resources used for this operation. Historical attempts/prompts remain intact.
+                if (_projectResources is not null)
+                {
+                    _chapter.CharacterProject = CharacterProjectStore.Clone(context.CharacterProject);
+                    _chapter.ConfirmedTerms = context.ConfirmedTerms.ToList();
+                    _chapter.ConfirmedContextNotes = context.ConfirmedContextNotes;
+                }
                 segment.Status = SegmentStatus.Translating;
                 segment.LastError = null;
                 _chapter.DefaultModelOptions = options with { };

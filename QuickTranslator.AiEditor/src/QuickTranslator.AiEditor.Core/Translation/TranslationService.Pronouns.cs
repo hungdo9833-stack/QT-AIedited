@@ -35,7 +35,7 @@ public sealed partial class TranslationService
 
     public PronounScanReport ScanPronouns()
     {
-        var chapter = GetSnapshot();
+        var chapter = GetOperationSnapshot();
         var items = new List<PronounSuggestion>();
         string previous = "";
         foreach (var segment in chapter.Segments.OrderBy(s => s.Order))

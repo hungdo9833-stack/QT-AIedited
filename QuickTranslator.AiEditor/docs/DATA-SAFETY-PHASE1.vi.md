@@ -15,6 +15,14 @@ Phạm vi được duyệt: M0, F01–F04 theo báo cáo kiểm toán ngày 12/1
 
 ## Cách chạy lại
 
+## F01 — Quyền sở hữu tài nguyên Project
+
+- Ba regression tests WPF đã chạy trước sửa và đều thất bại đúng vì snapshot cũ/đổi chương thay tài nguyên hiện hành (`f01-red-verified`). Một lần đầu có lỗi truyền tham số ở test; đã sửa harness và chạy lại trước khi sửa production.
+- `ProjectResourceStore` lưu một bundle nguyên tử `Settings/resources.json`: Character Profiles, glossary, context và revision tăng; checksum/backup và guard revision chống lưu snapshot đã cũ. Chỉ đọc các tệp tài nguyên project cũ khi chưa có bundle; không tự lấy tài nguyên từ chapter.
+- Không tăng schema `.qtproj` hoặc `.qtaie.json`. Bundle mới là định dạng tài nguyên cần thiết cho F01; các tệp legacy giữ nguyên để phục hồi. Khi đã có bundle, không dùng bản ứng dụng cũ ghi đồng thời; bản cũ không hiểu nguồn tài nguyên mới.
+- Attach/load chương không thay tài nguyên UI/project. Chỉnh tài nguyên được commit trước chuyển chương; dịch/quét dùng tài nguyên project hiện hành. Snapshot chương cập nhật khi bắt đầu dịch; prompt/history/draft/approval/checkpoint cũ không bị xóa.
+- Regression tests bổ sung: revision conflict, import legacy giữ nguyên bytes/schema, giữ backup tốt khi phục hồi, dịch dùng tài nguyên mới nhưng giữ draft/lịch sử cũ.
+
 Trên Windows với .NET 10 SDK:
 
 ```powershell

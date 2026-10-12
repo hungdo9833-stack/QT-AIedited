@@ -18,6 +18,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 public partial class MainWindow : Window
 {
     private readonly OllamaClient _client = OllamaClient.CreateLocal();
+    private readonly IOllamaClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
     private readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private TranslationService? _service;
@@ -37,6 +38,7 @@ public partial class MainWindow : Window
     internal MainWindow(string? startupProjectPath, bool initializeApplication)
     {
         _startupProjectPath = startupProjectPath;
+        _translationClient = _client;
         InitializeComponent();
         _initialized = true;
         if (!initializeApplication) return;
@@ -467,8 +469,11 @@ public partial class MainWindow : Window
         ContextInput.Text = chapter.DefaultModelOptions.ContextSize.ToString(CultureInfo.InvariantCulture);
         OutputTokensInput.Text = chapter.DefaultModelOptions.MaximumOutputTokens.ToString(CultureInfo.InvariantCulture);
         TimeoutInput.Text = chapter.DefaultModelOptions.RequestTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
-        SetGlossaryTerms(chapter.ConfirmedTerms);
-        ContextNotesInput.Text = chapter.ConfirmedContextNotes;
+        if (_projectSession is null)
+        {
+            SetGlossaryTerms(chapter.ConfirmedTerms);
+            ContextNotesInput.Text = chapter.ConfirmedContextNotes;
+        }
         AutoCleanConfirmedCheck.IsChecked = chapter.TextCleaner.AutoApplyConfirmedMappings;
     }
 

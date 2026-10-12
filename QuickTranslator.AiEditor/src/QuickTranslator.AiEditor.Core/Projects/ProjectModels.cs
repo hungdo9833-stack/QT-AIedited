@@ -100,6 +100,7 @@ public sealed record ProjectOpenResult(ProjectSession Session, bool RecoveredFro
 
 public sealed class ProjectSession
 {
+    internal SemaphoreSlim ResourceGate { get; } = new(1, 1);
     internal ProjectSession(string manifestPath, ProjectManifest manifest)
     {
         ManifestPath = Path.GetFullPath(manifestPath);

@@ -235,6 +235,7 @@ public partial class MainWindow
         }
         var service = _service!;
         var snapshot = service.GetSnapshot();
+        if (_projectSession is not null) await SaveProjectResourcesAsync();
         await service.ConfigureAsync(snapshot.DefaultModelOptions, _presetManager.Selected, ReadTerms(), snapshot.ConfirmedContextNotes);
         Refresh();
         return true;

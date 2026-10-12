@@ -64,6 +64,7 @@ internal sealed class WorkspaceFixture : IDisposable
         Set("_characterStore", new CharacterProjectStore(Path.Combine(Root, "app", "Characters")));
         Set("_projectLibraryStore", new ProjectLibraryStore(Path.Combine(Root, "app", "library.json")));
         Set("_presetsReady", true);
+        Set("_translationClient", Client);
         Call("RefreshPresetEditor");
         Call("LoadCharacterProject", new CharacterProject { Name = "Hồ sơ thử" });
     }
@@ -93,10 +94,6 @@ internal sealed class WorkspaceFixture : IDisposable
     public void Attach(ChapterDocument chapter)
     {
         Call("AttachChapter", chapter);
-        // Replace only the client transport. Production lifecycle/save/queue logic remains in use.
-        var service = new TranslationService(chapter, Client, Get<ChapterFileStore>("_store"));
-        Set("_service", service);
-        Set("_queue", new TranslationQueue(service));
         Set("_selectedId", chapter.SelectedSegmentId);
         Call("ApplyInputs", chapter);
     }

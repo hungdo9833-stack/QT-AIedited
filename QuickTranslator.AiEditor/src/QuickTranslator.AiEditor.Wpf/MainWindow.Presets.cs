@@ -61,6 +61,7 @@ public partial class MainWindow
     private async Task SaveSelectedSettingsAsync()
     {
         await SavePresetEditorAsync();
+        if (_projectSession is not null) await SaveProjectResourcesAsync();
         if (_service is not null)
         {
             await _service.ConfigureAsync(ReadModelOptions(), _presetManager.Selected, ReadTerms(), ContextNotesInput.Text);
@@ -123,6 +124,7 @@ public partial class MainWindow
                 await SaveCharacterProjectAsync();
             }
             else await SaveSelectedSettingsAsync();
+            if (_projectSession is not null) await SaveProjectAssetsAsync();
             _settingsDirty = false;
             SetStatus("Đã lưu preset; thiết lập/thuật ngữ/ngữ cảnh của chương được lưu nếu chương đã tạo. Cỡ đoạn dùng khi tạo chương mới.");
         }

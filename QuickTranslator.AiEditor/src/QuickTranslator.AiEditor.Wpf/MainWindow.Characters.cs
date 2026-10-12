@@ -49,6 +49,7 @@ public partial class MainWindow
 
     private async Task SaveCharacterProjectAsync()
     {
+        if (_projectSession is not null) { await SaveProjectResourcesAsync(); RefreshCharacterGrid(); return; }
         UpdateCharacterProjectFromInputs();
         if (_service is not null)
         {
@@ -70,7 +71,12 @@ public partial class MainWindow
                     "Tạo Project ID mới? Hồ sơ hiện tại vẫn còn trong tệp đã lưu nhưng sẽ không áp dụng cho chương này.",
                     "Dự án nhân vật mới", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             _characterProject = new CharacterProject { Name = "Bộ truyện mới" };
-            if (_service is not null) await _service.ConfigureCharacterProjectAsync(_characterProject);
+            if (_projectSession is not null)
+            {
+                _characterProject.Id = _projectSession.Manifest.ProjectId;
+                await SaveProjectResourcesAsync();
+            }
+            else if (_service is not null) await _service.ConfigureCharacterProjectAsync(_characterProject);
             LoadCharacterProject(_characterProject);
             SetStatus("Đã tạo dự án nhân vật mới với Project ID riêng.");
         }
@@ -138,9 +144,18 @@ public partial class MainWindow
             if (_characterProject.Profiles.Count > 0 && imported.Id != _characterProject.Id && MessageBox.Show(this,
                     $"Thay dự án “{_characterProject.Name}” bằng “{imported.Name}” cho chương hiện tại?",
                     "Nhập hồ sơ", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-            if (_service is not null) await _service.ConfigureCharacterProjectAsync(imported);
-            LoadCharacterProject(imported);
-            await _characterStore.SaveAsync(imported);
+            if (_projectSession is not null)
+            {
+                imported.Id = _projectSession.Manifest.ProjectId;
+                LoadCharacterProject(imported);
+                await SaveProjectResourcesAsync();
+            }
+            else
+            {
+                if (_service is not null) await _service.ConfigureCharacterProjectAsync(imported);
+                LoadCharacterProject(imported);
+                await _characterStore.SaveAsync(imported);
+            }
             SetStatus("Đã nhập hồ sơ JSON UTF-8. Project ID được giữ nguyên để tránh trộn dự án.");
         }
         catch (Exception ex) { ShowError(ex); }
