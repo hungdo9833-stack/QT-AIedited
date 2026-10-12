@@ -529,25 +529,7 @@ public partial class MainWindow
 
     private async void OnAddChapterFromText(object sender, RoutedEventArgs e)
     {
-        if (_projectSession is null) return;
-        var dialog = new OpenFileDialog { Filter = "Văn bản UTF-8 (*.txt)|*.txt", Multiselect = true }; if (dialog.ShowDialog(this) != true) return;
-        try
-        {
-            await RunWorkspaceTransitionAsync(async () =>
-            {
-            foreach (string file in dialog.FileNames)
-            {
-                string text = await File.ReadAllTextAsync(file, new UTF8Encoding(false, true));
-                var chapter = TranslationService.CreateChapter(Path.GetFileNameWithoutExtension(file), text, ReadSegmenterOptions(), ReadModelOptions());
-                chapter.SelectedPreset = _presetManager.Selected; chapter.ConfirmedTerms = ReadTerms().ToList(); chapter.ConfirmedContextNotes = ContextNotesInput.Text;
-                chapter.CharacterProject = CharacterProjectStore.Clone(_characterProject);
-                await RegisterChapterIfNeededAsync(chapter);
-            }
-            RefreshProjectChapterList();
-            if (_projectSession.Manifest.CurrentChapterId is Guid id) await LoadProjectChapterCoreAsync(id);
-            });
-        }
-        catch (Exception ex) { ShowError(ex); }
+        await OpenDetectedBulkImportAsync();
     }
 
     private async void OnRenameProjectChapter(object sender, RoutedEventArgs e)
