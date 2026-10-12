@@ -48,6 +48,9 @@ public partial class MainWindow
         try
         {
             var preferences = await _traditionalPreferencesStore.LoadAsync();
+            await ConfirmRecoveredSourcesAsync(_traditionalPreferencesStore.LastRecovery is null ? [] : [_traditionalPreferencesStore.LastRecovery],
+                _traditionalPreferencesStore.LastRecovery?.Source == RecoverySource.Backup ? [() => _traditionalPreferencesStore.RestoreBackupAsync()] : [],
+                Path.Combine(Path.GetDirectoryName(_traditionalPreferencesStore.LastRecovery?.PrimaryPath ?? TraditionalEditorPreferencesStore.DefaultPath)!, "Recovery"));
             TraditionalDataDirectoryInput.Text = preferences.DataDirectory;
             TraditionalPrioritizeNamesInput.IsChecked = preferences.PrioritizeNames;
             TraditionalAlgorithmInput.SelectedIndex = Math.Clamp(preferences.TranslationAlgorithm, 0, 2);

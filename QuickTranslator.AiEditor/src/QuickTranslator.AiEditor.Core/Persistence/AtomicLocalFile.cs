@@ -23,7 +23,8 @@ internal static class AtomicLocalFile
         finally
         {
             try { if (File.Exists(temporary)) File.Delete(temporary); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { System.Diagnostics.Trace.TraceError($"Không dọn được file tạm {temporary}: {ex}"); }
         }
     }
 }

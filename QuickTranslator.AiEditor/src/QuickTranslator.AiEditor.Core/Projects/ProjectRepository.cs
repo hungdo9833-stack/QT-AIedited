@@ -42,27 +42,11 @@ public sealed partial class ProjectRepository
         manifestPath = Path.GetFullPath(manifestPath);
         if (!string.Equals(Path.GetExtension(manifestPath), ".qtproj", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Hãy chọn đúng tệp dự án .qtproj.");
-        Exception? primary = null;
-        ProjectManifest manifest;
-        bool recovered = false;
-        try { manifest = await ReadManifestAsync(manifestPath, cancellationToken).ConfigureAwait(false); }
-        catch (Exception ex) when (IsRecoverable(ex))
-        {
-            primary = ex;
-            try
-            {
-                manifest = await ReadManifestAsync(manifestPath + ".bak", cancellationToken).ConfigureAwait(false);
-                recovered = true;
-            }
-            catch (Exception backup) when (IsRecoverable(backup))
-            {
-                throw new InvalidDataException("Không đọc được dự án hoặc bản dự phòng. Không có dữ liệu nào bị ghi đè.",
-                    new AggregateException(primary, backup));
-            }
-        }
-        string root = Path.GetDirectoryName(manifestPath)!;
+        var loaded = await RecoveryFiles.ReadAsync(manifestPath, DecodeManifest, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var manifest = loaded.Value;
+        bool recovered = loaded.Info.Source == RecoverySource.Backup;        string root = Path.GetDirectoryName(manifestPath)!;
         CreateLayout(root);
-        var session = new ProjectSession(manifestPath, manifest);
+        var session = new ProjectSession(manifestPath, manifest) { ManifestRecovery = loaded.Info };
         session.RecoveryReport = await ProjectTransactionJournal.InspectAsync(session, cancellationToken).ConfigureAwait(false);
         return new(session, recovered);
     }
@@ -208,12 +192,16 @@ public sealed partial class ProjectRepository
     }
 
     private static Task WriteManifestAsync(string path, ProjectManifest manifest, CancellationToken cancellationToken) =>
-        AtomicLocalFile.WriteAsync(path, SerializeManifest(manifest), cancellationToken);
+        WriteSafeManifestAsync(path, manifest, cancellationToken);
 
     internal static async Task<ProjectManifest> ReadManifestAsync(string path, CancellationToken cancellationToken)
     {
-        byte[] bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
-        var envelope = JsonSerializer.Deserialize<ManifestEnvelope>(bytes, DocumentJson.Options)
+        return DecodeManifest(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+    }
+    private static async Task WriteSafeManifestAsync(string path, ProjectManifest manifest, CancellationToken token) =>
+        _ = await RecoveryFiles.WriteAsync(path, SerializeManifest(manifest), DecodeManifest, token).ConfigureAwait(false);
+    internal static ProjectManifest DecodeManifest(byte[] bytes)
+    {        var envelope = JsonSerializer.Deserialize<ManifestEnvelope>(bytes, DocumentJson.Options)
             ?? throw new InvalidDataException("Tệp dự án trống.");
         if (envelope.SchemaVersion != 1 || envelope.Project.ValueKind != JsonValueKind.Object ||
             !string.Equals(envelope.ContentSha256, Hash(envelope.Project), StringComparison.OrdinalIgnoreCase))

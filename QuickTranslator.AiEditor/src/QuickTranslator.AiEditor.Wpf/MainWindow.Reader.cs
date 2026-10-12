@@ -16,6 +16,7 @@ public partial class MainWindow
     private ReaderPreferencesStore _readerStore = new(ReaderPreferencesStore.DefaultPath);
     private readonly DispatcherTimer _readerSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(800) };
     private ReaderPreferences _readerPreferences = new();
+    private Exception? _readerLoadFailure;
     private ReaderDocument? _readerDocument;
     private readonly List<ReaderRunRange> _readerRuns = [];
     private bool _readerReady, _applyingReaderAppearance, _restoringReaderScroll, _focusMode;
@@ -34,13 +35,19 @@ public partial class MainWindow
         {
             var preferences = await store.LoadAsync();
             if (!ReferenceEquals(store, _readerStore)) return;
+            await ConfirmRecoveredSourcesAsync(store.LastRecovery is null ? [] : [store.LastRecovery],
+                store.RecoveredFromBackup ? [() => store.RestoreBackupAsync()] : [],
+                System.IO.Path.Combine(System.IO.Path.GetDirectoryName(store.LastRecovery?.PrimaryPath ?? ReaderPreferencesStore.DefaultPath)!, "Recovery"));
+            if (!ReferenceEquals(store, _readerStore)) return;
+            _readerLoadFailure = null;
             _readerPreferences = preferences;
             if (_readerStore.RecoveredFromBackup) SetStatus("Đã phục hồi thiết lập Reader từ bản dự phòng.");
         }
         catch (Exception ex)
         {
             if (!ReferenceEquals(store, _readerStore)) return;
-            ShowError(ex); _readerPreferences = new();
+            _readerLoadFailure = ex; _readerReady = false; ShowError(ex);
+            return; // A display default must never become a writable replacement for unread data.
         }
         _readerReady = true;
         LoadReaderAppearanceControls();
@@ -382,6 +389,8 @@ public partial class MainWindow
     private void QueueReaderPreferencesSave() { _readerSaveTimer.Stop(); _readerSaveTimer.Start(); }
     private async Task SaveReaderPreferencesAsync()
     {
+        if (_readerLoadFailure is not null)
+            throw new System.IO.IOException("Chưa đọc/xác nhận được Reader preferences; giữ file lỗi và backup, không lưu defaults. Hãy phục hồi rồi thử lại.", _readerLoadFailure);
         if (!_readerReady) return;
         await _readerStore.SaveAsync(_readerPreferences);
     }

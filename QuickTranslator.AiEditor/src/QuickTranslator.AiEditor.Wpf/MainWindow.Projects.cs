@@ -19,6 +19,7 @@ public partial class MainWindow
     private readonly ProjectBackupService _projectBackup = new();
     private readonly ProjectLibraryStore _projectLibraryStore = new();
     private ProjectLibrary _projectLibrary = new();
+    private bool _projectLibraryReady = true;
     private ProjectSession? _projectSession;
     private ProjectResources? _projectResources;
     private readonly ObservableCollection<ProjectChapterItem> _projectChapters = [];
@@ -37,8 +38,16 @@ public partial class MainWindow
 
     private async Task InitializeProjectsAsync()
     {
-        try { _projectLibrary = await _projectLibraryStore.LoadAsync(); }
-        catch (Exception ex) { ShowError(ex); _projectLibrary = new(); }
+        _projectLibraryReady = false;
+        try
+        {
+            var library = await _projectLibraryStore.LoadAsync();
+            await ConfirmRecoveredSourcesAsync(_projectLibraryStore.LastRecovery is null ? [] : [_projectLibraryStore.LastRecovery],
+                _projectLibraryStore.LastRecovery?.Source == RecoverySource.Backup ? [() => _projectLibraryStore.RestoreBackupAsync()] : [],
+                Path.Combine(Path.GetDirectoryName(_projectLibraryStore.PathName)!, "Recovery"));
+            _projectLibrary = library; _projectLibraryReady = true;
+        }
+        catch (Exception ex) { ShowError(ex); }
         RefreshProjectSwitcher();
         if (!string.IsNullOrWhiteSpace(_startupProjectPath))
         {
@@ -65,17 +74,30 @@ public partial class MainWindow
     {
         var opened = await _projectRepository.OpenAsync(path);
         var candidate = opened.Session;
+        if (candidate.ManifestRecovery?.Source == RecoverySource.Backup)
+            await ConfirmRecoveredSourcesAsync([candidate.ManifestRecovery],
+                [() => _projectRepository.RestoreManifestBackupAsync(candidate)], Path.Combine(candidate.RootDirectory, "Backups"));
+        await _projectRepository.InspectRecoveryAsync(candidate);
+        await ReviewProjectRecoveryAsync(candidate);
         var assets = await ReadProjectAssetsAsync(candidate);
         ChapterDocument? chapter = candidate.Manifest.CurrentChapterId is Guid current
             ? (await _projectRepository.LoadChapterAsync(candidate, current)).Chapter : null;
         // Validate the service before touching the live context.
         if (chapter is not null) _ = new TranslationService(chapter, _translationClient, new RegisteredChapterStore(candidate));
+        var chapterRecovery = candidate.ChapterStore.LastRecovery;
+        var recoverySources = assets.RecoverySources.Concat(chapterRecovery is null ? [] : new[] { chapterRecovery }).ToArray();
+        var repairs = assets.Repairs.Concat(chapterRecovery?.Source == RecoverySource.Backup
+            ? new Func<Task>[] { () => candidate.ChapterStore.RestoreBackupAsync() } : []).ToArray();
+        await ConfirmRecoveredSourcesAsync(recoverySources, repairs, Path.Combine(candidate.RootDirectory, "Backups"));
         candidate.Manifest.LastOpenedAt = DateTimeOffset.UtcNow;
         await _projectRepository.SaveManifestAsync(candidate);
         var library = System.Text.Json.JsonSerializer.Deserialize<ProjectLibrary>(
             System.Text.Json.JsonSerializer.Serialize(_projectLibrary, DocumentJson.Options), DocumentJson.Options)!;
-        ProjectLibraryStore.Remember(library, candidate);
-        await _projectLibraryStore.SaveAsync(library);
+        if (_projectLibraryReady)
+        {
+            ProjectLibraryStore.Remember(library, candidate);
+            await _projectLibraryStore.SaveAsync(library);
+        }
 
         // No await after the context commit: all target stores/chapter have been checked.
         DetachChapter();
@@ -91,9 +113,10 @@ public partial class MainWindow
         }
         else ClearChapterEditor();
         RefreshProjectSwitcher(); RefreshProjectChapterList(); Refresh();
-        SetStatus(opened.RecoveredFromBackup
+        SetStatus((opened.RecoveredFromBackup
             ? "Đã mở dự án từ bản dự phòng manifest; hãy kiểm tra tiến độ. Không tự dịch."
-            : $"Đã mở dự án “{candidate.Manifest.VietnameseTitle}”.");
+            : $"Đã mở dự án “{candidate.Manifest.VietnameseTitle}”.") +
+            (_projectLibraryReady ? "" : " Danh sách gần đây chưa đọc/xác nhận được; chưa ghi shortcut, file lỗi và backup được giữ."));
     }
 
     private async Task SafelyLeaveCurrentProjectAsync()
@@ -117,11 +140,21 @@ public partial class MainWindow
 
     private static async Task<ProjectAssetState> ReadProjectAssetsAsync(ProjectSession session)
     {
-        var translation = await new ProjectSettingsStore(session).LoadTranslationAsync();
+        var settings = new ProjectSettingsStore(session);
+        var translation = await settings.LoadTranslationAsync();
         translation.Model.Validate(); translation.Segmentation.Validate();
-        return new(new PromptPresetManager(await new PromptPresetStore(session.Resolve(session.Manifest.Files.PromptPresets)).LoadAsync()),
-            await new ReaderPreferencesStore(session.Resolve(session.Manifest.Files.ReaderSettings)).LoadAsync(),
-            await new ProjectResourceStore(session).LoadAsync(), translation);
+        var presets = new PromptPresetStore(session.Resolve(session.Manifest.Files.PromptPresets));
+        var reader = new ReaderPreferencesStore(session.Resolve(session.Manifest.Files.ReaderSettings));
+        var resources = new ProjectResourceStore(session);
+        var loadedPresets = await presets.LoadAsync(); var loadedReader = await reader.LoadAsync(); var loadedResources = await resources.LoadAsync();
+        var sources = settings.RecoverySources.Concat(resources.RecoverySources)
+            .Concat(new[] { presets.LastRecovery!, reader.LastRecovery! }).ToArray();
+        var repairs = new List<Func<Task>>();
+        if (settings.RecoverySources.Any(x => x.Source == RecoverySource.Backup)) repairs.Add(() => settings.RestoreRecoveredBackupsAsync());
+        if (resources.RecoverySources.Any(x => x.Source == RecoverySource.Backup)) repairs.Add(() => resources.RestoreRecoveredBackupsAsync());
+        if (presets.RecoveredFromBackup) repairs.Add(() => presets.RestoreBackupAsync());
+        if (reader.RecoveredFromBackup) repairs.Add(() => reader.RestoreBackupAsync());
+        return new(new PromptPresetManager(loadedPresets), loadedReader, loadedResources, translation, sources, repairs);
     }
 
     private void ApplyProjectAssets(ProjectAssetState assets)
@@ -130,7 +163,7 @@ public partial class MainWindow
         try
         {
             _presetManager = assets.Presets; _presetsReady = true; RefreshPresetEditor();
-            _readerPreferences = assets.Reader; _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
+            _readerPreferences = assets.Reader; _readerLoadFailure = null; _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
             _projectResources = assets.Resources; LoadCharacterProject(assets.Resources.Characters);
             ApplyProjectDefaults(assets.Translation); SetGlossaryTerms(assets.Resources.Terms); ContextNotesInput.Text = assets.Resources.Context;
             ApplyCurrentProjectResources(); _settingsDirty = false;
@@ -139,7 +172,7 @@ public partial class MainWindow
     }
 
     private sealed record ProjectAssetState(PromptPresetManager Presets, ReaderPreferences Reader,
-        ProjectResources Resources, ProjectTranslationSettings Translation);
+        ProjectResources Resources, ProjectTranslationSettings Translation, IReadOnlyList<RecoveryInfo> RecoverySources, IReadOnlyList<Func<Task>> Repairs);
 
     private async Task SaveProjectAssetsAsync()
     {

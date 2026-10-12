@@ -29,8 +29,10 @@ public sealed class SafeSwitchingTests
         fixture.Attach(first);
         var service = fixture.Service;
         var target = await fixture.Repository.CreateAsync(Path.Combine(fixture.Root, "BadSettings"), "Đích lỗi");
-        await new QuickTranslator.AiEditor.Core.Projects.ProjectSettingsStore(target)
-            .SaveTranslationAsync(new() { Model = new() { ContextSize = 0 } });
+        // Inject damaged legacy bytes directly: the store now rejects invalid settings before writing.
+        await File.WriteAllTextAsync(target.Resolve(target.Manifest.Files.TranslationSettings),
+            System.Text.Json.JsonSerializer.Serialize(new QuickTranslator.AiEditor.Core.Projects.ProjectTranslationSettings
+                { Model = new() { ContextSize = 0 } }, DocumentJson.Options));
         await fixture.TaskCall("OpenProjectPathAsync", target.ManifestPath);
         Assert.Same(service, fixture.Service);
     });

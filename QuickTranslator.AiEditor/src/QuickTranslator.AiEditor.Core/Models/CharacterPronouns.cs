@@ -49,6 +49,9 @@ public sealed class CharacterProfile
 
     public void Validate()
     {
+        if (ChineseName is null || PrimaryNarrativePronoun is null || SecondaryNarrativePronoun is null || AddressingNotes is null ||
+            Aliases is null || DisallowedNarrativePronouns is null || Relationships is null)
+            throw new ArgumentException("Hồ sơ nhân vật có trường null; dữ liệu chưa hợp lệ để phục hồi/lưu.");
         if (Id == Guid.Empty || string.IsNullOrWhiteSpace(VietnameseName) || VietnameseName.Length > 200 ||
             ChineseName.Length > 200 || !Enum.IsDefined(Gender) || PrimaryNarrativePronoun.Length > 80 ||
             SecondaryNarrativePronoun.Length > 80 || AddressingNotes.Length > 2000 || Aliases.Count > 100 ||

@@ -16,6 +16,7 @@ public sealed class CharacterProjectStore
         _directory = Path.GetFullPath(directory);
     }
 
+    public RecoveryInfo? LastRecovery { get; private set; }
     public static string DefaultDirectory => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QuickTranslatorAiEditor", "CharacterProjects");
 
@@ -34,18 +35,19 @@ public sealed class CharacterProjectStore
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(envelope,
             new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { await AtomicLocalFile.WriteAsync(path, bytes, cancellationToken).ConfigureAwait(false); }
+        try { LastRecovery = await RecoveryFiles.WriteAsync(path, bytes, Decode, cancellationToken).ConfigureAwait(false); }
         finally { _gate.Release(); }
     }
 
     public async Task<CharacterProject> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete,
-            8192, FileOptions.Asynchronous);
-        var envelope = await JsonSerializer.DeserializeAsync<CharacterProjectEnvelope>(stream, DocumentJson.Options, cancellationToken)
-            .ConfigureAwait(false);
-        if (envelope?.SchemaVersion != 1 || envelope.Project.ValueKind != JsonValueKind.Object ||
+        var loaded = await RecoveryFiles.ReadAsync(path, Decode, cancellationToken: cancellationToken).ConfigureAwait(false);
+        LastRecovery = loaded.Info; return loaded.Value;
+    }
+
+    private static CharacterProject Decode(byte[] bytes)
+    {
+        var envelope = JsonSerializer.Deserialize<CharacterProjectEnvelope>(bytes, DocumentJson.Options);        if (envelope?.SchemaVersion != 1 || envelope.Project.ValueKind != JsonValueKind.Object ||
             !string.Equals(envelope.ContentSha256, Hash(envelope.Project), StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Tệp hồ sơ nhân vật sai định dạng hoặc checksum không khớp.");
         var project = envelope.Project.Deserialize<CharacterProject>(DocumentJson.Options)
@@ -56,6 +58,8 @@ public sealed class CharacterProjectStore
 
     public static CharacterProject Clone(CharacterProject project) =>
         JsonSerializer.Deserialize<CharacterProject>(JsonSerializer.Serialize(project, DocumentJson.Options), DocumentJson.Options)!;
+    public async Task RestoreBackupAsync(CancellationToken cancellationToken = default) =>
+        LastRecovery = await RecoveryFiles.RestoreBackupAsync(LastRecovery ?? throw new InvalidOperationException("Hãy đọc preview trước."), Decode, cancellationToken).ConfigureAwait(false);
 
     private static string Hash(JsonElement content) => Convert.ToHexString(
         SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(content, DocumentJson.Options))));

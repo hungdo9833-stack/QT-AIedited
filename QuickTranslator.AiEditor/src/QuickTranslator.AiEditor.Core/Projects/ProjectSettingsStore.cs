@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using QuickTranslator.AiEditor.Core.Persistence;
 
@@ -5,38 +6,90 @@ namespace QuickTranslator.AiEditor.Core.Projects;
 
 public sealed class ProjectSettingsStore(ProjectSession session)
 {
-    public Task SaveTranslationAsync(ProjectTranslationSettings settings, CancellationToken cancellationToken = default) =>
-        SaveAsync(session.Manifest.Files.TranslationSettings, settings, cancellationToken);
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Dictionary<string, RecoveryInfo> _recovery = new(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyCollection<RecoveryInfo> RecoverySources => _recovery.Values;
+    public Task SaveTranslationAsync(ProjectTranslationSettings value, CancellationToken cancellationToken = default) =>
+        SaveAsync(session.Manifest.Files.TranslationSettings, value, DecodeTranslation, cancellationToken);
     public Task<ProjectTranslationSettings> LoadTranslationAsync(CancellationToken cancellationToken = default) =>
-        LoadAsync(session.Manifest.Files.TranslationSettings, new ProjectTranslationSettings(), cancellationToken);
-    public Task SaveExportAsync(ProjectExportSettings settings, CancellationToken cancellationToken = default) =>
-        SaveAsync(session.Manifest.Files.ExportSettings, settings, cancellationToken);
+        LoadAsync(session.Manifest.Files.TranslationSettings, DecodeTranslation, () => new ProjectTranslationSettings(), cancellationToken);
+    public Task SaveExportAsync(ProjectExportSettings value, CancellationToken cancellationToken = default) =>
+        SaveAsync(session.Manifest.Files.ExportSettings, value, DecodeExport, cancellationToken);
     public Task<ProjectExportSettings> LoadExportAsync(CancellationToken cancellationToken = default) =>
-        LoadAsync(session.Manifest.Files.ExportSettings, new ProjectExportSettings(), cancellationToken);
-    public Task SaveGlossaryAsync(ProjectGlossary glossary, CancellationToken cancellationToken = default) =>
-        SaveAsync(session.Manifest.Files.Glossary, glossary, cancellationToken);
+        LoadAsync(session.Manifest.Files.ExportSettings, DecodeExport, () => new ProjectExportSettings(), cancellationToken);
+    public Task SaveGlossaryAsync(ProjectGlossary value, CancellationToken cancellationToken = default) =>
+        SaveAsync(session.Manifest.Files.Glossary, value, DecodeGlossary, cancellationToken);
     public Task<ProjectGlossary> LoadGlossaryAsync(CancellationToken cancellationToken = default) =>
-        LoadAsync(session.Manifest.Files.Glossary, new ProjectGlossary(), cancellationToken);
+        LoadAsync(session.Manifest.Files.Glossary, DecodeGlossary, () => new ProjectGlossary(), cancellationToken);
 
-    public async Task SaveContextNotesAsync(string notes, CancellationToken cancellationToken = default) =>
-        await AtomicLocalFile.WriteAsync(session.Resolve(session.Manifest.Files.ContextNotes),
-            System.Text.Encoding.UTF8.GetBytes(notes ?? ""), cancellationToken).ConfigureAwait(false);
-
-    public async Task<string> LoadContextNotesAsync(CancellationToken cancellationToken = default)
+    public Task<string> LoadContextNotesAsync(CancellationToken cancellationToken = default) =>
+        LoadAsync(session.Manifest.Files.ContextNotes, DecodeContext, () => "", cancellationToken);
+    public async Task SaveContextNotesAsync(string notes, CancellationToken cancellationToken = default)
     {
-        string path = session.Resolve(session.Manifest.Files.ContextNotes);
-        return File.Exists(path) ? await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false) : "";
+        byte[] bytes = new UTF8Encoding(false, true).GetBytes(notes ?? "");
+        _ = DecodeContext(bytes);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            EnsureWritable();
+            _recovery[session.Manifest.Files.ContextNotes] = await RecoveryFiles.WriteAsync(session.Resolve(session.Manifest.Files.ContextNotes),
+                bytes, DecodeContext, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
     }
 
-    private async Task SaveAsync<T>(string relative, T value, CancellationToken cancellationToken) =>
-        await AtomicLocalFile.WriteAsync(session.Resolve(relative),
-            JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true }), cancellationToken).ConfigureAwait(false);
-
-    private async Task<T> LoadAsync<T>(string relative, T fallback, CancellationToken cancellationToken)
+    private async Task SaveAsync<T>(string relative, T value, Func<byte[], T> decode, CancellationToken token)
     {
-        string path = session.Resolve(relative);
-        if (!File.Exists(path)) return fallback;
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, FileOptions.Asynchronous);
-        return await JsonSerializer.DeserializeAsync<T>(stream, DocumentJson.Options, cancellationToken).ConfigureAwait(false) ?? fallback;
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
+        _ = decode(bytes);
+        await _gate.WaitAsync(token).ConfigureAwait(false);
+        try { EnsureWritable(); _recovery[relative] = await RecoveryFiles.WriteAsync(session.Resolve(relative), bytes, decode, token).ConfigureAwait(false); }
+        finally { _gate.Release(); }
+    }
+    private async Task<T> LoadAsync<T>(string relative, Func<byte[], T> decode, Func<T> missing, CancellationToken token)
+    {
+        var result = await RecoveryFiles.ReadAsync(session.Resolve(relative), decode, missing, token).ConfigureAwait(false);
+        _recovery[relative] = result.Info; return result.Value;
+    }
+    private void EnsureWritable()
+    {
+        if (session.RecoveryReport.RequiresDecision) throw new InvalidOperationException("Transaction project chưa đối chiếu; không ghi settings.");
+    }
+    public async Task RestoreRecoveredBackupsAsync(CancellationToken cancellationToken = default)
+    {
+        foreach (var info in _recovery.Values.Where(x => x.Source == RecoverySource.Backup).ToArray())
+        {
+            string relative = Path.GetRelativePath(session.RootDirectory, info.PrimaryPath).Replace('\\', '/');
+            RecoveryInfo restored;
+            if (relative == session.Manifest.Files.TranslationSettings) restored = await RecoveryFiles.RestoreBackupAsync(info, DecodeTranslation, cancellationToken).ConfigureAwait(false);
+            else if (relative == session.Manifest.Files.ExportSettings) restored = await RecoveryFiles.RestoreBackupAsync(info, DecodeExport, cancellationToken).ConfigureAwait(false);
+            else if (relative == session.Manifest.Files.Glossary) restored = await RecoveryFiles.RestoreBackupAsync(info, DecodeGlossary, cancellationToken).ConfigureAwait(false);
+            else if (relative == session.Manifest.Files.ContextNotes) restored = await RecoveryFiles.RestoreBackupAsync(info, DecodeContext, cancellationToken).ConfigureAwait(false);
+            else throw new InvalidDataException("Recovery path không thuộc settings của session.");
+            _recovery[relative] = restored;
+        }
+    }
+    private static ProjectTranslationSettings DecodeTranslation(byte[] bytes) => RecoveryFiles.DecodeJson<ProjectTranslationSettings>(bytes, value =>
+    {
+        if (value.Model is null || value.Segmentation is null || value.TraditionalDataDirectory is null || value.SelectedPromptPresetId == Guid.Empty)
+            throw new InvalidDataException("Thiết lập dịch thiếu dữ liệu.");
+        value.Model.Validate(); value.Segmentation.Validate();
+    }, "model", "segmentation");
+    private static ProjectExportSettings DecodeExport(byte[] bytes) => RecoveryFiles.DecodeJson<ProjectExportSettings>(bytes, value =>
+    {
+        if (string.IsNullOrWhiteSpace(value.FileNameTemplate) || value.FileNameTemplate.Length > 300)
+            throw new InvalidDataException("Mẫu tên file xuất không hợp lệ.");
+    }, "fileNameTemplate");
+    private static ProjectGlossary DecodeGlossary(byte[] bytes) => RecoveryFiles.DecodeJson<ProjectGlossary>(bytes, value =>
+    {
+        if (value.Terms is null || value.Terms.Count > 1000 || value.Terms.Any(x => x is null || string.IsNullOrWhiteSpace(x.Chinese) || string.IsNullOrWhiteSpace(x.Vietnamese)) ||
+            value.Terms.Select(x => x.Chinese).Distinct(StringComparer.Ordinal).Count() != value.Terms.Count)
+            throw new InvalidDataException("Glossary bị thiếu/trùng/không hợp lệ.");
+    }, "terms");
+    private static string DecodeContext(byte[] bytes)
+    {
+        string notes = new UTF8Encoding(false, true).GetString(bytes).TrimStart('\uFEFF');
+        if (notes.Length > 4000 || notes.Contains('\0')) throw new InvalidDataException("Context không hợp lệ hoặc quá 4.000 ký tự.");
+        return notes;
     }
 }

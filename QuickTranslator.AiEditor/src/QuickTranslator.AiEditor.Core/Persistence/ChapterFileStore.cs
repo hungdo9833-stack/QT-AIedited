@@ -86,80 +86,29 @@ public sealed class ChapterFileStore : IChapterStore
         }
     }
 
+    public RecoveryInfo? LastRecovery { get; private set; }
+    public async Task RestoreBackupAsync(CancellationToken cancellationToken = default) =>
+        LastRecovery = await RecoveryFiles.RestoreBackupAsync(LastRecovery ?? throw new InvalidOperationException("Hãy đọc preview trước."), DeserializeDocument, cancellationToken).ConfigureAwait(false);
     public async Task SaveAsync(ChapterDocument chapter, CancellationToken cancellationToken = default)
     {
-        var snapshot = DocumentJson.Clone(chapter);
-        DocumentJson.Migrate(snapshot);
-        DocumentJson.Validate(snapshot);
+        byte[] bytes = SerializeDocument(chapter);
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        string path = GetPath(snapshot.Id);
-        string temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            Directory.CreateDirectory(_directory);
-            var envelope = new Envelope
-            {
-                SchemaVersion = 1,
-                Chapter = JsonSerializer.SerializeToElement(snapshot, DocumentJson.Options)
-            };
-            envelope.ContentSha256 = Hash(envelope.Chapter);
-            await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                8192, FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                await JsonSerializer.SerializeAsync(stream, envelope, EnvelopeOptions, cancellationToken).ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!File.Exists(path))
-                File.Move(temporary, path);
-            else if (await IsValidFileAsync(path, cancellationToken).ConfigureAwait(false))
-                File.Replace(temporary, path, path + ".bak", ignoreMetadataErrors: true);
-            else
-                // Preserve the last good backup when recovering a damaged primary.
-                File.Move(temporary, path, overwrite: true);
-        }
-        finally
-        {
-            try { if (File.Exists(temporary)) File.Delete(temporary); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            _writeGate.Release();
-        }
+        try { LastRecovery = await RecoveryFiles.WriteAsync(GetPath(chapter.Id), bytes, DeserializeDocument, cancellationToken).ConfigureAwait(false); }
+        finally { _writeGate.Release(); }
     }
-
     public async Task<ChapterLoadResult> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        Exception? primaryFailure;
-        try
-        {
-            return new(await ReadVerifiedAsync(path, cancellationToken).ConfigureAwait(false), false, Path.GetFullPath(path));
-        }
-        catch (Exception ex) when (IsRecoverableReadError(ex)) { primaryFailure = ex; }
-
-        try
-        {
-            string backup = path + ".bak";
-            return new(await ReadVerifiedAsync(backup, cancellationToken).ConfigureAwait(false), true, Path.GetFullPath(backup));
-        }
-        catch (Exception ex) when (IsRecoverableReadError(ex))
-        {
-            throw new InvalidDataException("Không đọc được tệp tiến độ hoặc bản dự phòng. Giữ cả hai tệp để phục hồi; không tạo chương mới đè lên chúng.",
-                new AggregateException(primaryFailure!, ex));
-        }
+        var loaded = await RecoveryFiles.ReadAsync(path, DeserializeDocument, cancellationToken: cancellationToken).ConfigureAwait(false);
+        LastRecovery = loaded.Info;
+        return new(loaded.Value, loaded.Info.Source == RecoverySource.Backup, loaded.Info.SourcePath!);
     }
-
-    private static async Task<bool> IsValidFileAsync(string path, CancellationToken cancellationToken)
-    {
-        try { await ReadVerifiedAsync(path, cancellationToken).ConfigureAwait(false); return true; }
-        catch (Exception ex) when (IsRecoverableReadError(ex)) { return false; }
-    }
-
     private static async Task<ChapterDocument> ReadVerifiedAsync(string path, CancellationToken cancellationToken)
     {
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 8192, FileOptions.Asynchronous);
-        var envelope = await JsonSerializer.DeserializeAsync<Envelope>(stream, DocumentJson.Options, cancellationToken).ConfigureAwait(false);
-        if (envelope?.SchemaVersion != 1 || envelope.Chapter.ValueKind != JsonValueKind.Object || envelope.ContentSha256 is null)
+        return DeserializeDocument(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
+    }
+    internal static ChapterDocument DeserializeDocument(byte[] bytes)
+    {
+        var envelope = JsonSerializer.Deserialize<Envelope>(bytes, DocumentJson.Options);        if (envelope?.SchemaVersion != 1 || envelope.Chapter.ValueKind != JsonValueKind.Object || envelope.ContentSha256 is null)
             throw new InvalidDataException("Tệp tiến độ sai định dạng hoặc phiên bản.");
         var chapter = envelope.Chapter.Deserialize<ChapterDocument>(DocumentJson.Options)
             ?? throw new InvalidDataException("Thiếu nội dung chương.");

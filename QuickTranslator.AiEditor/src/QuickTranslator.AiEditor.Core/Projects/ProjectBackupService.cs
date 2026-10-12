@@ -115,6 +115,16 @@ public sealed class ProjectBackupService
         return destination;
     }
     private static string SafeName(string value) => string.Concat(value.Select(x => Path.GetInvalidFileNameChars().Contains(x) ? '_' : x));
-    private static void TryDelete(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
-    private static void TryDeleteDirectory(string path) { try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch { } }
+    private static void TryDelete(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { System.Diagnostics.Trace.TraceError($"Không dọn được artifact backup tạm {path}: {ex}"); }
+    }
+    private static void TryDeleteDirectory(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        { System.Diagnostics.Trace.TraceError($"Không dọn được staging restore {path}: {ex}"); }
+    }
 }

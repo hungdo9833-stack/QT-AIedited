@@ -76,8 +76,28 @@ public sealed partial class ProjectRepository
         finally { session.OperationGate.Release(); }
     }
 
-    public Task<ProjectRecoveryReport> InspectRecoveryAsync(ProjectSession session, CancellationToken cancellationToken = default) =>
-        ProjectTransactionJournal.InspectAsync(session, cancellationToken);
+    public async Task<ProjectRecoveryReport> InspectRecoveryAsync(ProjectSession session, CancellationToken cancellationToken = default)
+    {
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            session.RecoveryReport = await ProjectTransactionJournal.InspectAsync(session, cancellationToken).ConfigureAwait(false);
+            return session.RecoveryReport;
+        }
+        finally { session.OperationGate.Release(); }
+    }
+
+    public async Task RestoreManifestBackupAsync(ProjectSession session, CancellationToken cancellationToken = default)
+    {
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            session.ManifestRecovery = await RecoveryFiles.RestoreBackupAsync(session.ManifestRecovery ?? throw new InvalidOperationException("Chưa có preview manifest."),
+                bytes => { var value = DecodeManifest(bytes); if (value.ProjectId != session.Manifest.ProjectId) throw new InvalidDataException("ProjectId manifest thay đổi."); return value; }, cancellationToken).ConfigureAwait(false);
+            session.Manifest = await ReadManifestAsync(session.ManifestPath, cancellationToken).ConfigureAwait(false);
+        }
+        finally { session.OperationGate.Release(); }
+    }
 
     public async Task RecoverTransactionAsync(ProjectSession session, Guid transactionId, ProjectRecoveryDecision decision,
         CancellationToken cancellationToken = default)

@@ -34,9 +34,12 @@ public sealed class ProjectManifest
             throw new InvalidDataException($"Phiên bản dự án {SchemaVersion} chưa được hỗ trợ.");
         if (ProjectId == Guid.Empty || string.IsNullOrWhiteSpace(VietnameseTitle))
             throw new InvalidDataException("Dự án thiếu ID hoặc tên tiếng Việt.");
+        if (Chapters is null || Files is null || Genres is null || Chapters.Any(x => x is null) || !Enum.IsDefined(Status))
+            throw new InvalidDataException("Manifest thiếu danh sách chương/đường dẫn hoặc trạng thái không hợp lệ.");
         if (Chapters.Any(x => x.ChapterId == Guid.Empty || x.Number <= 0 || string.IsNullOrWhiteSpace(x.RelativePath)))
             throw new InvalidDataException("Danh sách chương có mục không hợp lệ.");
         if (Chapters.GroupBy(x => x.ChapterId).Any(x => x.Count() > 1) ||
+            Chapters.Select(x => x.RelativePath.Replace('\\', '/')).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Chapters.Count ||
             Chapters.Where(x => x.DeletedAt is null).GroupBy(x => x.Number).Any(x => x.Count() > 1))
             throw new InvalidDataException("Dự án có ID hoặc số chương bị trùng.");
         if (ChapterCount != Chapters.Count(x => x.DeletedAt is null) || DeletedChapterCount != Chapters.Count(x => x.DeletedAt is not null))
@@ -115,6 +118,7 @@ public sealed class ProjectSession
     public ProjectManifest Manifest { get; internal set; }
     public Persistence.ChapterFileStore ChapterStore { get; }
     public ProjectRecoveryReport RecoveryReport { get; internal set; } = new([], []);
+    public Persistence.RecoveryInfo? ManifestRecovery { get; internal set; }
     public string Resolve(string relativePath) => ProjectPath.Resolve(RootDirectory, relativePath);
 }
 

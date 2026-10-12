@@ -27,33 +27,21 @@ public sealed class ProjectLibraryStore(string? path = null)
         "QuickTranslatorAiEditor", "Projects", "library.json");
     public string PathName { get; } = System.IO.Path.GetFullPath(path ?? DefaultPath);
 
+    public RecoveryInfo? LastRecovery { get; private set; }
     public async Task<ProjectLibrary> LoadAsync(CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(PathName)) return new();
-        try
-        {
-            await using var stream = new FileStream(PathName, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, FileOptions.Asynchronous);
-            var library = await JsonSerializer.DeserializeAsync<ProjectLibrary>(stream, DocumentJson.Options, cancellationToken).ConfigureAwait(false)
-                ?? new ProjectLibrary();
-            Validate(library); RefreshMissing(library); return library;
-        }
-        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException)
-        {
-            string backup = PathName + ".bak";
-            if (!File.Exists(backup)) throw new InvalidDataException("Không đọc được danh sách dự án gần đây. Tệp dự án thật không bị ảnh hưởng.", ex);
-            await using var stream = new FileStream(backup, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, FileOptions.Asynchronous);
-            var library = await JsonSerializer.DeserializeAsync<ProjectLibrary>(stream, DocumentJson.Options, cancellationToken).ConfigureAwait(false)
-                ?? throw new InvalidDataException("Bản dự phòng danh sách dự án bị trống.", ex);
-            Validate(library); RefreshMissing(library); return library;
-        }
+        var result = await RecoveryFiles.ReadAsync(PathName, Decode, () => new ProjectLibrary(), cancellationToken).ConfigureAwait(false);
+        LastRecovery = result.Info; RefreshMissing(result.Value); return result.Value;
     }
-
+    private static ProjectLibrary Decode(byte[] bytes) => RecoveryFiles.DecodeJson<ProjectLibrary>(bytes, Validate, "schemaVersion", "recentProjects");
+    public async Task RestoreBackupAsync(CancellationToken cancellationToken = default) =>
+        LastRecovery = await RecoveryFiles.RestoreBackupAsync(LastRecovery ?? throw new InvalidOperationException("Hãy đọc preview trước."), Decode, cancellationToken).ConfigureAwait(false);
     public async Task SaveAsync(ProjectLibrary library, CancellationToken cancellationToken = default)
     {
         Validate(library);
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(library,
             new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
-        await AtomicLocalFile.WriteAsync(PathName, bytes, cancellationToken).ConfigureAwait(false);
+        LastRecovery = await RecoveryFiles.WriteAsync(PathName, bytes, Decode, cancellationToken).ConfigureAwait(false);
     }
 
     public static void Remember(ProjectLibrary library, ProjectSession session)

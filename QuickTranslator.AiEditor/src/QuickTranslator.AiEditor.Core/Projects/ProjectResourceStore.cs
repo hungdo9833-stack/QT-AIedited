@@ -49,32 +49,48 @@ public sealed class ProjectResourceStore(ProjectSession session)
 {
     public string PathName => session.Resolve("Settings/resources.json");
 
-    public async Task<ProjectResources> LoadAsync(CancellationToken cancellationToken = default)
+    public RecoveryInfo? LastRecovery { get; private set; }
+    private readonly List<RecoveryInfo> _sources = [];
+    public IReadOnlyList<RecoveryInfo> RecoverySources => _sources;
+    public async Task RestoreRecoveredBackupsAsync(CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(PathName) && !File.Exists(PathName + ".bak"))
+        foreach (var info in _sources.Where(x => x.Source == RecoverySource.Backup).ToArray())
         {
-            // Import only project-owned legacy stores; never promote a chapter snapshot automatically.
-            var settings = new ProjectSettingsStore(session);
-            string characterPath = session.Resolve(session.Manifest.Files.CharacterProfiles);
-            var characters = File.Exists(characterPath)
-                ? await new CharacterProjectStore(System.IO.Path.GetDirectoryName(characterPath)!).LoadAsync(characterPath, cancellationToken)
-                : new CharacterProject { Name = session.Manifest.VietnameseTitle };
-            characters.Id = session.Manifest.ProjectId;
-            var legacy = new ProjectResources { ProjectId = session.Manifest.ProjectId, Characters = characters,
-                Terms = (await settings.LoadGlossaryAsync(cancellationToken)).Terms,
-                Context = await settings.LoadContextNotesAsync(cancellationToken) };
-            legacy.Validate();
-            return legacy;
-        }
-        try { return await ReadAsync(PathName, cancellationToken); }
-        catch (Exception ex) when (Recoverable(ex))
-        {
-            try { return await ReadAsync(PathName + ".bak", cancellationToken); }
-            catch (Exception backup) when (Recoverable(backup))
-            { throw new InvalidDataException("Không đọc được tài nguyên dự án và bản dự phòng; không dùng snapshot chương để ghi đè.", new AggregateException(ex, backup)); }
+            if (info.PrimaryPath == PathName) LastRecovery = await RecoveryFiles.RestoreBackupAsync(info, Decode, cancellationToken).ConfigureAwait(false);
+            else if (info.PrimaryPath == session.Resolve(session.Manifest.Files.CharacterProfiles))
+            {
+                var characters = new CharacterProjectStore(Path.GetDirectoryName(info.PrimaryPath)!);
+                await characters.LoadAsync(info.PrimaryPath, cancellationToken).ConfigureAwait(false);
+                await characters.RestoreBackupAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var settings = new ProjectSettingsStore(session);
+                await settings.LoadGlossaryAsync(cancellationToken).ConfigureAwait(false);
+                await settings.LoadContextNotesAsync(cancellationToken).ConfigureAwait(false);
+                await settings.RestoreRecoveredBackupsAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
     }
-
+    public async Task<ProjectResources> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        _sources.Clear();
+        var canonical = await RecoveryFiles.ReadAsync(PathName, Decode, () => (ProjectResources)null!, cancellationToken).ConfigureAwait(false);
+        LastRecovery = canonical.Info; _sources.Add(canonical.Info);
+        if (canonical.Info.Source != RecoverySource.Missing) return canonical.Value;
+        var settings = new ProjectSettingsStore(session);
+        string characterPath = session.Resolve(session.Manifest.Files.CharacterProfiles);
+        var characterStore = new CharacterProjectStore(Path.GetDirectoryName(characterPath)!);
+        CharacterProject characters;
+        try { characters = await characterStore.LoadAsync(characterPath, cancellationToken).ConfigureAwait(false); }
+        catch (FileNotFoundException) { characters = new CharacterProject { Name = session.Manifest.VietnameseTitle }; }
+        if (characterStore.LastRecovery is not null) _sources.Add(characterStore.LastRecovery);
+        characters.Id = session.Manifest.ProjectId;
+        var legacy = new ProjectResources { ProjectId = session.Manifest.ProjectId, Characters = characters,
+            Terms = (await settings.LoadGlossaryAsync(cancellationToken).ConfigureAwait(false)).Terms,
+            Context = await settings.LoadContextNotesAsync(cancellationToken).ConfigureAwait(false) };
+        _sources.AddRange(settings.RecoverySources); legacy.Validate(); return legacy;
+    }
     public async Task<ProjectResources> SaveAsync(ProjectResources proposed, CancellationToken cancellationToken = default)
     {
         var saved = proposed.Clone();
@@ -101,27 +117,30 @@ public sealed class ProjectResourceStore(ProjectSession session)
             }
             saved.Characters.UpdatedAt = current.Characters.UpdatedAt;
             saved.Validate();
-            if (File.Exists(PathName) && JsonSerializer.Serialize(saved, DocumentJson.Options) == JsonSerializer.Serialize(current, DocumentJson.Options))
+            if (LastRecovery?.Source != RecoverySource.Missing && JsonSerializer.Serialize(saved, DocumentJson.Options) == JsonSerializer.Serialize(current, DocumentJson.Options))
+            {
+                if (LastRecovery?.Source == RecoverySource.Backup)
+                {
+                    var unchanged = JsonSerializer.SerializeToElement(current, DocumentJson.Options);
+                    LastRecovery = await RecoveryFiles.WriteAsync(PathName, JsonSerializer.SerializeToUtf8Bytes(new Envelope { Content = unchanged, Sha256 = Hash(unchanged) },
+                        new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true }), Decode, cancellationToken).ConfigureAwait(false);
+                }
                 return current;
+            }
             saved.Revision = checked(current.Revision + 1);
             saved.Characters.UpdatedAt = DateTimeOffset.UtcNow;
             var content = JsonSerializer.SerializeToElement(saved, DocumentJson.Options);
             var envelope = new Envelope { Content = content, Sha256 = Hash(content) };
-            bool damaged = false;
-            if (File.Exists(PathName))
-                try { _ = await ReadAsync(PathName, cancellationToken); }
-                catch (Exception ex) when (Recoverable(ex)) { damaged = true; }
-            await AtomicLocalFile.WriteAsync(PathName, JsonSerializer.SerializeToUtf8Bytes(envelope,
-                new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true }), cancellationToken, damaged);
-            return saved.Clone();
+            if (session.RecoveryReport.RequiresDecision) throw new InvalidOperationException("Project có transaction cần phục hồi; không ghi resources.");
+            LastRecovery = await RecoveryFiles.WriteAsync(PathName, JsonSerializer.SerializeToUtf8Bytes(envelope,
+                new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true }), Decode, cancellationToken).ConfigureAwait(false);            return saved.Clone();
         }
         finally { session.ResourceGate.Release(); }
     }
 
-    private async Task<ProjectResources> ReadAsync(string path, CancellationToken cancellationToken)
+    private ProjectResources Decode(byte[] bytes)
     {
-        var envelope = JsonSerializer.Deserialize<Envelope>(await File.ReadAllBytesAsync(path, cancellationToken), DocumentJson.Options);
-        if (envelope is null || envelope.SchemaVersion != 1 || envelope.Content.ValueKind != JsonValueKind.Object ||
+        var envelope = JsonSerializer.Deserialize<Envelope>(bytes, DocumentJson.Options);        if (envelope is null || envelope.SchemaVersion != 1 || envelope.Content.ValueKind != JsonValueKind.Object ||
             envelope.Sha256 != Hash(envelope.Content)) throw new InvalidDataException("Tài nguyên dự án sai checksum/định dạng.");
         var resources = envelope.Content.Deserialize<ProjectResources>(DocumentJson.Options) ?? throw new InvalidDataException("Thiếu tài nguyên.");
         resources.Validate();
