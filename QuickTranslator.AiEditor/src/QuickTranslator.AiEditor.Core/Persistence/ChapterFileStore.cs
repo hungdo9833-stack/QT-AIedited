@@ -146,7 +146,7 @@ public sealed class ChapterFileStore : IChapterStore
         resolver.Modifiers.Add(info =>
         {
             string[] added = info.Type == typeof(ChapterDocument)
-                ? ["projectId", "chapterNumber", "chineseTitle", "selectedPreset", "queue", "segmentationHistory", "confirmedTerms", "confirmedContextNotes", "characterProject", "textCleaner", "batchReplacementHistory"]
+                ? ["projectId", "chapterNumber", "chineseTitle", "selectedPreset", "queue", "segmentationHistory", "confirmedTerms", "confirmedContextNotes", "characterProject", "textCleaner", "batchReplacementHistory", "sourceRevision", "sourceEditHistory"]
                 : info.Type == typeof(TranslationSegment)
                     ? ["draftHistory", "preservedText", "requiresRetranslation", "protectedByPreviousEdit", "normalizedText", "normalizationHistory"]
                     : info.Type == typeof(TranslationAttempt) ? ["presetSnapshot", "sourceSha256", "normalizationRunId", "projectResourceRevision"] : [];
