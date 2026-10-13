@@ -268,6 +268,11 @@ public partial class MainWindow : Window
 
     private async void OnSaveProgress(object sender, RoutedEventArgs e)
     {
+        if (_sourceEditMode)
+        {
+            OnSaveSourceEdit(sender, e);
+            return;
+        }
         if (!BeginUiOperation(allowDuringTranslation: true)) return;
         try
         {
@@ -398,7 +403,15 @@ public partial class MainWindow : Window
         SaveButton.IsEnabled = document && available;
         SplitButton.IsEnabled = !document && !active && available && _presetsReady;
         PasteButton.IsEnabled = ImportTextButton.IsEnabled = !document && !active && available;
-        ChapterInput.IsReadOnly = TitleInput.IsReadOnly = document || !available;
+        ChapterInput.IsReadOnly = document && !_sourceEditMode || !available;
+        TitleInput.IsReadOnly = document || !available;
+        EditSourceButton.IsEnabled = document && !active && available && !_sourceEditMode &&
+            _projectTranslationCoordinator?.IsRunning != true;
+        EditSourceButton.Visibility = _sourceEditMode ? Visibility.Collapsed : Visibility.Visible;
+        SaveSourceEditButton.IsEnabled = _sourceEditMode && available && !active && HasPendingSourceEdit;
+        SaveSourceEditButton.Visibility = _sourceEditMode ? Visibility.Visible : Visibility.Collapsed;
+        CancelSourceEditButton.IsEnabled = _sourceEditMode && available && !active;
+        CancelSourceEditButton.Visibility = _sourceEditMode ? Visibility.Visible : Visibility.Collapsed;
         MinimumInput.IsEnabled = TargetInput.IsEnabled = MaximumInput.IsEnabled = !document && available;
         SegmentList.IsEnabled = available;
         TranslateButton.IsEnabled = selected && !active && available && _presetsReady;
@@ -464,6 +477,8 @@ public partial class MainWindow : Window
 
     private void ApplyInputs(ChapterDocument chapter)
     {
+        _sourceEditMode = false;
+        _sourceBeforeEdit = null;
         TitleInput.Text = chapter.Title;
         AssignOriginalText(chapter.OriginalText);
         if (_projectSession is null)
@@ -510,6 +525,7 @@ public partial class MainWindow : Window
     private void OnChapterInputChanged(object sender, TextChangedEventArgs e)
     {
         if (!_assigningOriginalText && _initialized) _importedOriginalText = null;
+        if (_initialized && _sourceEditMode) UpdateButtons();
     }
     private void ShowError(Exception error)
     {
@@ -527,6 +543,11 @@ public partial class MainWindow : Window
         if (_allowClose) return;
         e.Cancel = true;
         if (_closing) return;
+        if (HasPendingSourceEdit)
+        {
+            SetStatus("Nguyên văn đang sửa chưa được lưu. Hãy lưu hoặc hủy sửa nguồn trước khi đóng ứng dụng.");
+            return;
+        }
         if (_uiOperation) { SetStatus("Đang đọc hoặc lưu tệp. Hãy chờ thao tác hoàn tất rồi đóng ứng dụng."); return; }
         if (_service is null && !string.IsNullOrWhiteSpace(ChapterInput.Text) &&
             MessageBox.Show(this, "Chương này chưa được chia và lưu. Đóng sẽ mất phần văn bản đang nhập. Chọn Không để chia/lưu trước.",

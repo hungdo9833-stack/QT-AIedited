@@ -98,6 +98,37 @@ public sealed class ProjectSystemTests : IDisposable
         Assert.Equal("你好。", restored.Chapter.OriginalText);
     }
 
+    [Theory]
+    [InlineData(100)]
+    [InlineData(300)]
+    public async Task BatchSoftDeleteAndRestore_CommitsAllSelectedChaptersAtomically(int count)
+    {
+        var project = await _repository.CreateAsync(Path.Combine(_root, "Batch-" + count), "Truyện batch");
+        var ids = new List<Guid>(count);
+        for (int number = 1; number <= count; number++)
+        {
+            ChapterDocument chapter = TranslationService.CreateChapter("Chương " + number, $"第{number}章。你好。 ");
+            chapter.Segments[0].UserDraft = "Nháp " + number;
+            chapter.Segments[0].DraftRevision = 1;
+            ids.Add(chapter.Id);
+            await _repository.AddChapterAsync(project, chapter, number);
+        }
+
+        await _repository.SoftDeleteChaptersAsync(project, ids);
+        Assert.Equal(count, project.Manifest.DeletedChapterCount);
+        Assert.All(project.Manifest.Chapters, entry =>
+        {
+            Assert.NotNull(entry.DeletedAt);
+            Assert.True(File.Exists(project.Resolve(entry.RelativePath)));
+        });
+
+        await _repository.RestoreDeletedChaptersAsync(project, ids);
+        Assert.Equal(count, project.Manifest.ChapterCount);
+        Assert.All(project.Manifest.Chapters, entry => Assert.Null(entry.DeletedAt));
+        ChapterDocument restored = (await _repository.LoadChapterAsync(project, ids[^1])).Chapter;
+        Assert.Equal("Nháp " + count, restored.Segments[0].UserDraft);
+    }
+
     [Fact]
     public async Task DuplicateChapter_GetsStableNewIdsAndProtectedDraft()
     {

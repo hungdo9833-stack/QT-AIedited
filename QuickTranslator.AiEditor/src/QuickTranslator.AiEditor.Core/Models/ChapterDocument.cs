@@ -110,6 +110,7 @@ public sealed class ChapterDocument
     public string Title { get; set; } = "";
     public string ChineseTitle { get; set; } = "";
     public string OriginalText { get; set; } = "";
+    public long SourceRevision { get; set; } = 1;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public SegmenterOptions SegmentationOptions { get; set; } = new();
@@ -119,6 +120,7 @@ public sealed class ChapterDocument
     public PromptPreset SelectedPreset { get; set; } = PromptPreset.Default;
     public QueueCheckpoint Queue { get; set; } = new();
     public List<SegmentationChange> SegmentationHistory { get; set; } = [];
+    public List<SourceEditRevision> SourceEditHistory { get; set; } = [];
     public List<ConfirmedTerm> ConfirmedTerms { get; set; } = [];
     public string ConfirmedContextNotes { get; set; } = "";
     public CharacterProject CharacterProject { get; set; } = new();

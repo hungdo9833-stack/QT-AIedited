@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using System.Text;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Segmentation;
 
@@ -19,6 +21,9 @@ public static class DocumentJson
     public static ChapterDocument Clone(ChapterDocument chapter) =>
         JsonSerializer.Deserialize<ChapterDocument>(JsonSerializer.Serialize(chapter, Options), Options)!;
 
+    public static TranslationSegment CloneSegment(TranslationSegment segment) =>
+        JsonSerializer.Deserialize<TranslationSegment>(JsonSerializer.Serialize(segment, Options), Options)!;
+
     public static void Migrate(ChapterDocument chapter)
     {
         if (chapter.SchemaVersion == 1)
@@ -36,6 +41,8 @@ public static class DocumentJson
         chapter.TextCleaner ??= new();
         chapter.TextCleaner.IgnoredChineseText ??= [];
         chapter.BatchReplacementHistory ??= [];
+        chapter.SourceEditHistory ??= [];
+        if (chapter.SourceRevision < 1) chapter.SourceRevision = 1;
         foreach (var segment in chapter.Segments)
         {
             segment.DraftHistory ??= [];
@@ -47,7 +54,7 @@ public static class DocumentJson
     {
         if (chapter.SchemaVersion is not (1 or 2 or 3))
             throw new InvalidDataException("Phiên bản dữ liệu chưa được hỗ trợ. Hãy giữ bản gốc và mở bằng phiên bản ứng dụng phù hợp.");
-        if (chapter.Id == Guid.Empty || chapter.Title is null || string.IsNullOrWhiteSpace(chapter.OriginalText) ||
+        if (chapter.Id == Guid.Empty || chapter.Title is null || string.IsNullOrWhiteSpace(chapter.OriginalText) || chapter.SourceRevision < 1 ||
             chapter.Segments is null || chapter.Segments.Count == 0 || chapter.SegmentationOptions is null || chapter.DefaultModelOptions is null)
             throw new InvalidDataException("Dữ liệu chương không đầy đủ.");
         if (chapter.ProjectId == Guid.Empty || chapter.ChapterNumber is <= 0)
@@ -56,7 +63,8 @@ public static class DocumentJson
         chapter.DefaultModelOptions.Validate();
         if (chapter.SelectedPreset is null || chapter.Queue is null || chapter.SegmentationHistory is null ||
             chapter.ConfirmedTerms is null || chapter.ConfirmedContextNotes is null || chapter.CharacterProject is null ||
-            chapter.TextCleaner is null || chapter.TextCleaner.IgnoredChineseText is null || chapter.BatchReplacementHistory is null)
+            chapter.TextCleaner is null || chapter.TextCleaner.IgnoredChineseText is null || chapter.BatchReplacementHistory is null ||
+            chapter.SourceEditHistory is null)
             throw new InvalidDataException("Thiếu preset, hàng đợi hoặc lịch sử phân đoạn.");
         chapter.CharacterProject.Validate();
         chapter.SelectedPreset.Validate();
@@ -152,7 +160,33 @@ public static class DocumentJson
             if (previousOffset > chapter.OriginalText.Length || !chapter.OriginalText.AsSpan(change.PreviousSegments[0].StartUtf16, archivedSource.Length).SequenceEqual(archivedSource))
                 throw new InvalidDataException("Lịch sử phân đoạn không khớp nguyên văn.");
         }
+        foreach (SourceEditRevision revision in chapter.SourceEditHistory)
+        {
+            if (revision is null || revision.Id == Guid.Empty || revision.PreviousSourceRevision < 1 ||
+                string.IsNullOrEmpty(revision.PreviousOriginalText) || revision.PreviousSegments is null ||
+                revision.PreviousSegments.Count == 0 || revision.PreviousSegmentationHistory is null ||
+                revision.PreviousQueue is null || string.IsNullOrWhiteSpace(revision.Description) ||
+                !string.Equals(SourceHash(revision.PreviousOriginalText), revision.PreviousSourceSha256, StringComparison.Ordinal) ||
+                string.IsNullOrWhiteSpace(revision.NewSourceSha256))
+                throw new InvalidDataException("Lịch sử sửa nguyên văn không hợp lệ.");
+            int archivedOffset = 0;
+            foreach (TranslationSegment archived in revision.PreviousSegments)
+            {
+                if (archived is null || archived.SourceText is null || archived.SourceText.Length == 0 ||
+                    archived.StartUtf16 != archivedOffset ||
+                    archived.Id != TextSegmenter.CreateStableId(chapter.Id, archivedOffset, archived.SourceText) ||
+                    archived.Attempts is null || archived.Approvals is null || archived.DraftHistory is null ||
+                    archived.NormalizationHistory is null)
+                    throw new InvalidDataException("Segment trong lịch sử sửa nguyên văn không hợp lệ.");
+                archivedOffset += archived.SourceText.Length;
+            }
+            if (!string.Equals(TextSegmenter.Reconstruct(revision.PreviousSegments), revision.PreviousOriginalText,
+                    StringComparison.Ordinal))
+                throw new InvalidDataException("Lịch sử sửa nguyên văn không tái tạo được source cũ.");
+        }
         if (translating > 1 || !string.Equals(TextSegmenter.Reconstruct(chapter.Segments), chapter.OriginalText, StringComparison.Ordinal))
             throw new InvalidDataException("Các đoạn không khôi phục đúng nguyên văn hoặc có nhiều đoạn đang dịch.");
     }
+
+    private static string SourceHash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 }

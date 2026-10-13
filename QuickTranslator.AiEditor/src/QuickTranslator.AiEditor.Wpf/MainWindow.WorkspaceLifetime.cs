@@ -16,6 +16,12 @@ public partial class MainWindow
         _autosave.Stop();
         try
         {
+            if (HasPendingSourceEdit)
+            {
+                SetStatus("Nguyên văn đang sửa chưa được lưu. Hãy chọn Lưu nguyên văn hoặc Hủy sửa nguồn trước khi chuyển.");
+                return false;
+            }
+            if (_sourceEditMode) EndSourceEditMode(assignSnapshot: true);
             if (_projectSession?.RecoveryReport.RequiresDecision == true)
                 await ReviewProjectRecoveryAsync(_projectSession); // Resolve the journal before guarded saves can resume.
             if (_service is null && !string.IsNullOrWhiteSpace(ChapterInput.Text))

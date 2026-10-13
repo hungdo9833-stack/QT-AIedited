@@ -93,6 +93,7 @@ public partial class ChapterManagerWindow : Window
     }
 
     private void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateCommands();
+    private void OnClearSelection(object sender, RoutedEventArgs e) => ChapterGrid.UnselectAll();
     private async void OnGridDoubleClick(object sender, MouseButtonEventArgs e) => await OpenSelectedAsync();
     private async void OnOpen(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
 
@@ -173,6 +174,7 @@ public partial class ChapterManagerWindow : Window
         DeleteButton.IsEnabled = !_working && active > 0 && deleted == 0;
         RestoreButton.IsEnabled = !_working && deleted > 0 && active == 0;
         QueueButton.IsEnabled = !_working && active > 0 && deleted == 0;
+        ClearSelectionButton.IsEnabled = !_working && selected.Length > 0;
         SelectionText.Text = $"Đã chọn {selected.Length:N0} · {active:N0} hoạt động · {deleted:N0} History";
     }
 

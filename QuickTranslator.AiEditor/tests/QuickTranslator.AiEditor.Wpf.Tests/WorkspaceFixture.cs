@@ -57,7 +57,9 @@ internal sealed class WorkspaceFixture : IDisposable
     public WorkspaceFixture()
     {
         Directory.CreateDirectory(Root);
-        Window = new MainWindow(null, initializeApplication: false) { WorkspaceConfirmation = (_, _) => true };
+        var backendManager = new OllamaBackendManager(
+            new OllamaProfileStore(Path.Combine(Root, "app", "ollama-profiles.json"), new TestProtector()));
+        Window = new MainWindow(null, initializeApplication: false, backendManager) { WorkspaceConfirmation = (_, _) => true };
         Set("_store", new ChapterFileStore(Path.Combine(Root, "Standalone")));
         Set("_presetStore", new PromptPresetStore(Path.Combine(Root, "app", "presets.qtaip.json")));
         Set("_readerStore", new ReaderPreferencesStore(Path.Combine(Root, "app", "reader.json")));
@@ -123,6 +125,12 @@ internal sealed class WorkspaceFixture : IDisposable
             !Path.GetFileName(resolved).StartsWith("qtaie-safety-wpf-", StringComparison.Ordinal))
             throw new InvalidOperationException("Refusing to clean outside the synthetic test root.");
         Directory.Delete(resolved, recursive: true);
+    }
+
+    private sealed class TestProtector : IOllamaSecretProtector
+    {
+        public string Protect(string value) => value;
+        public string Unprotect(string value) => value;
     }
 }
 

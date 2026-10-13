@@ -36,9 +36,10 @@ public partial class MainWindow
         if (selected.Length == 0) return;
         if (selected.Any(id => !session.Manifest.Chapters.Any(entry => entry.ChapterId == id && entry.DeletedAt is null)))
             throw new InvalidOperationException("Lựa chọn đã thay đổi; hãy chọn lại các chương đang hoạt động.");
+        EnsureChaptersNotOwnedByActiveTranslationJob(selected);
         bool completed = await RunWorkspaceTransitionAsync(async () =>
         {
-            foreach (Guid id in selected) await _projectRepository.SoftDeleteChapterAsync(session, id);
+            await _projectRepository.SoftDeleteChaptersAsync(session, selected);
             if (session.Manifest.CurrentChapterId is Guid current) await LoadProjectChapterCoreAsync(current);
             else { DetachChapter(); ClearChapterEditor(); RefreshProjectChapterList(); Refresh(); }
         });
@@ -61,10 +62,22 @@ public partial class MainWindow
                 string.Join(", ", duplicateNumbers.Concat(activeNumbers).Distinct().Order()));
         bool completed = await RunWorkspaceTransitionAsync(async () =>
         {
-            foreach (ProjectChapterEntry entry in selected)
-                await _projectRepository.RestoreDeletedChapterAsync(session, entry.ChapterId);
+            await _projectRepository.RestoreDeletedChaptersAsync(session, selected.Select(entry => entry.ChapterId).ToArray());
             RefreshProjectChapterList();
         });
         if (!completed) throw new OperationCanceledException("Chưa phục hồi vì workspace chưa sẵn sàng.");
+    }
+
+    private void EnsureChaptersNotOwnedByActiveTranslationJob(IReadOnlyCollection<Guid> chapterIds)
+    {
+        ProjectTranslationJob? job = _projectTranslationCoordinator?.CurrentJob;
+        if (job is null || job.Status is ProjectTranslationJobStatus.Completed or
+            ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled) return;
+        ProjectTranslationItem[] conflicts = job.Items.Where(item => chapterIds.Contains(item.ChapterId) &&
+            item.Status is not ProjectTranslationItemStatus.Completed and not ProjectTranslationItemStatus.Skipped and
+            not ProjectTranslationItemStatus.Cancelled).ToArray();
+        if (conflicts.Length == 0) return;
+        throw new InvalidOperationException($"Có {conflicts.Length:N0} chương còn thuộc Queue đang hoạt động hoặc có checkpoint chưa hoàn tất. " +
+            "Hãy Pause rồi hủy các mục pending hoặc hoàn tất Queue trước khi chuyển chương vào History.");
     }
 }

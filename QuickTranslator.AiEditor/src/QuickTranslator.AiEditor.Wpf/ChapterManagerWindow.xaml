@@ -44,6 +44,7 @@
         <Button x:Name="DeleteButton" Content="Chuyển vào History" Click="OnDelete"/>
         <Button x:Name="RestoreButton" Content="Phục hồi" Click="OnRestore"/>
         <Button x:Name="QueueButton" Content="Đưa vào hàng đợi dịch" Click="OnQueue" ToolTip="Xem Queue Plan trước khi bắt đầu dịch tuần tự."/>
+        <Button x:Name="ClearSelectionButton" Content="Bỏ chọn" Click="OnClearSelection"/>
       </WrapPanel>
       <TextBlock x:Name="SelectionText" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
     </DockPanel>

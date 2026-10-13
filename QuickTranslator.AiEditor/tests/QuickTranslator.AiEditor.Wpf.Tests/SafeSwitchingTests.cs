@@ -16,7 +16,8 @@ public sealed class SafeSwitchingTests
         fixture.Text("CharacterProjectNameInput").Text = "";
         await fixture.TaskCall("OpenProjectPathAsync", target.ManifestPath);
         var opened = fixture.Get<QuickTranslator.AiEditor.Core.Projects.ProjectSession?>("_projectSession");
-        Assert.NotNull(opened);
+        Assert.True(opened is not null,
+            ((System.Windows.Controls.TextBlock)fixture.Window.FindName("StatusText")).Text);
         Assert.Equal(target.Manifest.ProjectId, opened.Manifest.ProjectId);
     });
 

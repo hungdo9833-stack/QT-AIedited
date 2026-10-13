@@ -34,45 +34,79 @@ public sealed partial class ProjectRepository
     }
 
     public Task SoftDeleteChapterAsync(ProjectSession session, Guid chapterId, CancellationToken cancellationToken = default) =>
-        MoveChapterAsync(session, chapterId, restore: false, cancellationToken);
+        SoftDeleteChaptersAsync(session, [chapterId], cancellationToken);
 
     public Task RestoreDeletedChapterAsync(ProjectSession session, Guid chapterId, CancellationToken cancellationToken = default) =>
-        MoveChapterAsync(session, chapterId, restore: true, cancellationToken);
+        RestoreDeletedChaptersAsync(session, [chapterId], cancellationToken);
 
-    private async Task MoveChapterAsync(ProjectSession session, Guid chapterId, bool restore, CancellationToken token)
+    public Task SoftDeleteChaptersAsync(ProjectSession session, IReadOnlyCollection<Guid> chapterIds,
+        CancellationToken cancellationToken = default) => MoveChaptersAsync(session, chapterIds, restore: false, cancellationToken);
+
+    public Task RestoreDeletedChaptersAsync(ProjectSession session, IReadOnlyCollection<Guid> chapterIds,
+        CancellationToken cancellationToken = default) => MoveChaptersAsync(session, chapterIds, restore: true, cancellationToken);
+
+    private async Task MoveChaptersAsync(ProjectSession session, IReadOnlyCollection<Guid> chapterIds, bool restore,
+        CancellationToken token)
     {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(chapterIds);
+        Guid[] ids = chapterIds.Distinct().ToArray();
+        if (ids.Length == 0) return;
+        if (ids.Any(id => id == Guid.Empty)) throw new ArgumentException("ChapterId không hợp lệ.", nameof(chapterIds));
         await session.OperationGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
             var after = Clone(session.Manifest);
-            var entry = after.Chapters.SingleOrDefault(x => x.ChapterId == chapterId && (x.DeletedAt is not null) == restore)
-                ?? throw new FileNotFoundException("Không tìm thấy chương trong trạng thái cần chuyển.");
-            if (restore && after.Chapters.Any(x => x.DeletedAt is null && x.Number == entry.Number))
-                throw new InvalidOperationException("Số chương đã được dùng; không thể phục hồi.");
-            string source = session.Resolve(entry.RelativePath);
-            string relative = restore ? $"Chapters/{chapterId:D}.qtaie.json"
-                : $"History/Deleted/{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}-{chapterId:D}.qtaie.json";
-            string destination = session.Resolve(relative);
-            await EnsureDestinationEmptyAsync(destination, token).ConfigureAwait(false);
-            var primary = await ChapterFileStore.ReadVerifiedFileAsync(source, token).ConfigureAwait(false);
-            if (primary.Id != chapterId || primary.ProjectId != session.Manifest.ProjectId)
-                throw new InvalidDataException("File chương không thuộc liên kết manifest này.");
-            byte[] bytes = await File.ReadAllBytesAsync(source, token).ConfigureAwait(false);
-            byte[]? backup = await ProjectTransactionJournal.ReadOptionalAsync(source + ".bak", token).ConfigureAwait(false);
-            if (backup is not null)
+            ProjectChapterEntry[] entries = ids.Select(id => after.Chapters.SingleOrDefault(x =>
+                    x.ChapterId == id && (x.DeletedAt is not null) == restore)
+                ?? throw new FileNotFoundException($"Không tìm thấy chương {id:D} trong trạng thái cần chuyển.")).ToArray();
+            if (restore)
             {
-                var verified = await ChapterFileStore.ReadVerifiedFileAsync(source + ".bak", token).ConfigureAwait(false);
-                if (verified.Id != chapterId || verified.ProjectId != session.Manifest.ProjectId)
-                    throw new InvalidDataException("Backup chương có ID khác; giữ nguyên để đối chiếu.");
+                int[] duplicateSelected = entries.GroupBy(entry => entry.Number).Where(group => group.Count() > 1)
+                    .Select(group => group.Key).ToArray();
+                int[] activeCollisions = after.Chapters.Where(entry => entry.DeletedAt is null)
+                    .Select(entry => entry.Number).Intersect(entries.Select(entry => entry.Number)).ToArray();
+                if (duplicateSelected.Length > 0 || activeCollisions.Length > 0)
+                    throw new InvalidOperationException("Số chương đã được dùng; không thể phục hồi: " +
+                        string.Join(", ", duplicateSelected.Concat(activeCollisions).Distinct().Order()));
             }
-            var changes = new List<PlannedProjectFile> { new(entry.RelativePath, null), new(relative, bytes) };
-            if (backup is not null) { changes.Add(new(entry.RelativePath + ".bak", null)); changes.Add(new(relative + ".bak", backup)); }
-            entry.RelativePath = relative; entry.DeletedAt = restore ? null : DateTimeOffset.UtcNow;
-            if (restore) after.CurrentChapterId = chapterId;
-            else if (after.CurrentChapterId == chapterId) after.CurrentChapterId = after.Chapters.FirstOrDefault(x => x.DeletedAt is null)?.ChapterId;
+            DateTimeOffset movedAt = DateTimeOffset.UtcNow;
+            var changes = new List<PlannedProjectFile>(entries.Length * 4);
+            foreach (ProjectChapterEntry entry in entries)
+            {
+                token.ThrowIfCancellationRequested();
+                string source = session.Resolve(entry.RelativePath);
+                string relative = restore ? $"Chapters/{entry.ChapterId:D}.qtaie.json"
+                    : $"History/Deleted/{movedAt:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}-{entry.ChapterId:D}.qtaie.json";
+                await EnsureDestinationEmptyAsync(session.Resolve(relative), token).ConfigureAwait(false);
+                ChapterDocument primary = await ChapterFileStore.ReadVerifiedFileAsync(source, token).ConfigureAwait(false);
+                if (primary.Id != entry.ChapterId || primary.ProjectId != session.Manifest.ProjectId)
+                    throw new InvalidDataException("File chương không thuộc liên kết manifest này.");
+                byte[] bytes = await File.ReadAllBytesAsync(source, token).ConfigureAwait(false);
+                byte[]? backup = await ProjectTransactionJournal.ReadOptionalAsync(source + ".bak", token).ConfigureAwait(false);
+                if (backup is not null)
+                {
+                    ChapterDocument verified = await ChapterFileStore.ReadVerifiedFileAsync(source + ".bak", token).ConfigureAwait(false);
+                    if (verified.Id != entry.ChapterId || verified.ProjectId != session.Manifest.ProjectId)
+                        throw new InvalidDataException("Backup chương có ID khác; giữ nguyên để đối chiếu.");
+                }
+                changes.Add(new(entry.RelativePath, null));
+                changes.Add(new(relative, bytes));
+                if (backup is not null)
+                {
+                    changes.Add(new(entry.RelativePath + ".bak", null));
+                    changes.Add(new(relative + ".bak", backup));
+                }
+                entry.RelativePath = relative;
+                entry.DeletedAt = restore ? null : movedAt;
+            }
+            if (restore) after.CurrentChapterId = entries[^1].ChapterId;
+            else if (after.CurrentChapterId is Guid current && ids.Contains(current))
+                after.CurrentChapterId = after.Chapters.FirstOrDefault(x => x.DeletedAt is null)?.ChapterId;
             NormalizeManifest(after);
-            await Transactions.ExecuteAsync(session, restore ? "RestoreDeletedChapter" : "SoftDeleteChapter", after, changes, token).ConfigureAwait(false);
-            PublishManifestCommitted(session, restore ? "RestoreDeletedChapter" : "SoftDeleteChapter");
+            string operation = restore ? "RestoreDeletedChapters" : "SoftDeleteChapters";
+            await Transactions.ExecuteAsync(session, operation, after, changes, token).ConfigureAwait(false);
+            PublishManifestCommitted(session, operation);
         }
         catch (UnauthorizedAccessException ex) { throw new IOException("Không đủ quyền hoặc file bị khóa; thao tác chuyển chương chưa hoàn tất.", ex); }
         finally { session.OperationGate.Release(); }
