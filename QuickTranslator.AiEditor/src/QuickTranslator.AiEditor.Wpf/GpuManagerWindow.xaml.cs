@@ -12,18 +12,43 @@ public partial class GpuManagerWindow : Window
 {
     private readonly OllamaBackendManager _backends;
     private readonly GpuConnectionManager _connections;
+    private readonly GpuTranslationPreferences _preferences;
     private readonly RemoteOllamaSetupService _setup = new();
     private readonly LocalOllamaService _local = new();
     private readonly ObservableCollection<OllamaBackendProfile> _profiles = [];
     private string? _loadedPrivateKey;
+    private CancellationTokenSource? _setupCancellation;
     private bool _busy;
 
-    internal GpuManagerWindow(OllamaBackendManager backends, GpuConnectionManager connections)
+    internal GpuManagerWindow(OllamaBackendManager backends, GpuConnectionManager connections,
+        GpuTranslationPreferences? preferences = null)
     {
         _backends = backends; _connections = connections;
+        _preferences = preferences ?? new();
         InitializeComponent();
+        TranslationModeInput.SelectedIndex = (int)_preferences.Mode;
         ProfileList.ItemsSource = _profiles;
         RefreshProfiles();
+    }
+
+    private void OnTranslationModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (TranslationModeText is null) return;
+        _preferences.Mode = (GpuTranslationMode)Math.Max(0, TranslationModeInput.SelectedIndex);
+        TranslationModeText.Text = _preferences.Mode switch
+        {
+            GpuTranslationMode.LocalOnly => "Queue dùng một Ollama Local.",
+            GpuTranslationMode.RemoteOnly => "Queue dùng profile Remote đang kích hoạt.",
+            _ => "Một coordinator phân phối chapter động cho Local và Remote, tối đa hai request đồng thời."
+        };
+    }
+
+    private void OnUseForRemote(object sender, RoutedEventArgs e)
+    {
+        if (ProfileList.SelectedItem is not OllamaBackendProfile { Kind: OllamaBackendKind.Remote } profile)
+        { StatusText.Text = "Hãy chọn một profile Remote."; return; }
+        _preferences.RemoteProfileId = profile.Id;
+        StatusText.Text = $"Đã chọn “{profile.Name}” làm worker Remote cho chế độ Parallel.";
     }
 
     private void RefreshProfiles(Guid? selected = null)
@@ -112,6 +137,7 @@ public partial class GpuManagerWindow : Window
             GpuConnectionHandle handle = await _connections.ConnectAsync(profile);
             await _backends.AttachRuntimeClientAsync(profile.Id, handle.Client);
             await _backends.ActivateAsync(profile.Id);
+            _preferences.RemoteProfileId = profile.Id;
             RefreshProfiles(profile.Id); StatusText.Text = "Đã kết nối SSH tunnel loopback. Profile đang sẵn sàng.";
         }
         catch (SshHostKeyVerificationException error)
@@ -156,6 +182,11 @@ public partial class GpuManagerWindow : Window
     }
     private async void OnPullModel(object sender, RoutedEventArgs e) => await ConfirmSetupAsync(RemoteSetupAction.PullModel,
         $"Tải model “{ModelInput.Text}” trên server? Dung lượng và tính phí mạng do nhà cung cấp quyết định.", ModelInput.Text);
+    private void OnCancelSetup(object sender, RoutedEventArgs e)
+    {
+        _setupCancellation?.Cancel();
+        StatusText.Text = "Đang yêu cầu hủy thao tác Remote…";
+    }
 
     private async Task ConfirmSetupAsync(RemoteSetupAction action, string message, string? model = null)
     {
@@ -166,8 +197,15 @@ public partial class GpuManagerWindow : Window
             if (ProfileList.SelectedItem is not OllamaBackendProfile profile ||
                 !_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
                 throw new InvalidOperationException("Hãy kết nối SSH trước.");
-            SshCommandResult result = await _setup.ExecuteConfirmedAsync(handle.Session, action, true, model);
-            StatusText.Text = result.Success ? "Thao tác hoàn tất." : "Thao tác bị chặn/thất bại: " + result.Error;
+            using var cancellation = new CancellationTokenSource();
+            _setupCancellation = cancellation;
+            StatusText.Text = action == RemoteSetupAction.PullModel ? "Đang tải model trên Remote; có thể hủy…" : "Đang thực hiện thao tác Remote…";
+            try
+            {
+                SshCommandResult result = await _setup.ExecuteConfirmedAsync(handle.Session, action, true, model, cancellation.Token);
+                StatusText.Text = result.Success ? "Thao tác hoàn tất." : "Thao tác bị chặn/thất bại: " + result.Error;
+            }
+            finally { if (ReferenceEquals(_setupCancellation, cancellation)) _setupCancellation = null; }
         });
     }
 

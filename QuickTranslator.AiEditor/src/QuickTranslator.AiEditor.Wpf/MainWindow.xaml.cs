@@ -19,6 +19,7 @@ public partial class MainWindow : Window
 {
     private readonly OllamaBackendManager _ollamaBackends;
     private readonly GpuConnectionManager _gpuConnections = new();
+    private readonly GpuTranslationPreferences _gpuPreferences = new();
     private readonly IOllamaClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
     private readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromMilliseconds(500) };

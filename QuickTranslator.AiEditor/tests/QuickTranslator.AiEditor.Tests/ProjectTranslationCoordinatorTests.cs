@@ -301,6 +301,185 @@ public sealed class ProjectTranslationCoordinatorTests
         });
     }
 
+    [Fact]
+    public async Task Two_workers_claim_unique_chapters_and_faster_worker_takes_more_work()
+    {
+        await WithProjectAsync(8, async context =>
+        {
+            var concurrency = new ParallelConcurrency();
+            // Repository checkpoints are deliberately serialized; make the provider
+            // speed gap larger than disk latency so pull-based assignment is observable.
+            var slow = new ParallelFakeClient("local", concurrency, 1200);
+            var fast = new ParallelFakeClient("remote", concurrency, 1);
+            ProjectTranslationWorkerDefinition[] workers = Workers(context, slow, fast);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
+                context.LoadEnvironment);
+            ProjectTranslationJob plan = await coordinator.PlanAsync(context.ChapterIds);
+            Guid[] manifestOrder = context.Session.Manifest.Chapters.OrderBy(chapter => chapter.Number)
+                .Select(chapter => chapter.ChapterId).ToArray();
+
+            await coordinator.StartAsync(plan);
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(2, concurrency.Maximum);
+            Assert.Equal(8, slow.Calls + fast.Calls);
+            Assert.True(fast.Calls > slow.Calls);
+            Assert.Equal(8, coordinator.CurrentJob.Items.Select(item => item.ChapterId).Distinct().Count());
+            Assert.Equal(manifestOrder, context.Session.Manifest.Chapters.OrderBy(chapter => chapter.Number)
+                .Select(chapter => chapter.ChapterId));
+            foreach (Guid id in context.ChapterIds)
+            {
+                ChapterDocument chapter = (await context.Repository.LoadChapterAsync(context.Session, id)).Chapter;
+                Assert.Single(chapter.Segments[0].Attempts);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task Parallel_pause_waits_for_both_workers_and_resume_keeps_committed_checkpoints()
+    {
+        await WithProjectAsync(6, async context =>
+        {
+            var concurrency = new ParallelConcurrency();
+            var local = new ParallelFakeClient("local", concurrency, 0) { BlockFirst = true };
+            var remote = new ParallelFakeClient("remote", concurrency, 0) { BlockFirst = true };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                Workers(context, local, remote), context.LoadEnvironment);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await Task.WhenAll(local.FirstStarted.Task, remote.FirstStarted.Task).WaitAsync(TimeSpan.FromSeconds(5));
+
+            Task pause = coordinator.PauseAsync();
+            local.Release.TrySetResult(); remote.Release.TrySetResult();
+            await pause; await run;
+            Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob!.Status);
+            int committedAtPause = coordinator.CurrentJob.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed);
+
+            await coordinator.ResumeAsync();
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(6, coordinator.CurrentJob.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
+            Assert.InRange(committedAtPause, 0, 2);
+            Assert.Equal(6, local.Calls + remote.Calls);
+        });
+    }
+
+    [Fact]
+    public async Task Remote_failure_marks_unknown_chapter_needs_review_while_local_finishes_pending()
+    {
+        await WithProjectAsync(6, async context =>
+        {
+            var concurrency = new ParallelConcurrency();
+            var local = new ParallelFakeClient("local", concurrency, 8);
+            var remote = new ParallelFakeClient("remote", concurrency, 1) { FailWithConnection = true };
+            ProjectTranslationWorkerDefinition[] workers = Workers(context, local, remote);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
+                context.LoadEnvironment);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            ProjectTranslationJob result = coordinator.CurrentJob!;
+            Assert.Equal(ProjectTranslationJobStatus.CompletedWithErrors, result.Status);
+            Assert.Single(result.Items, item => item.Status == ProjectTranslationItemStatus.NeedsReview);
+            Assert.Equal(5, result.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
+            Assert.Equal(ProjectTranslationWorkerStatus.Offline,
+                result.Workers.Single(worker => worker.Backend.Kind == OllamaBackendKind.Remote).Status);
+            Assert.True(local.Calls >= 5);
+            Assert.Equal(1, remote.Calls);
+        });
+    }
+
+    [Fact]
+    public async Task Reopen_interrupts_each_running_worker_and_never_auto_resends()
+    {
+        await WithProjectAsync(3, async context =>
+        {
+            var local = new ParallelFakeClient("local", new(), 0);
+            var remote = new ParallelFakeClient("remote", new(), 0);
+            ProjectTranslationWorkerDefinition[] workers = Workers(context, local, remote);
+            var store = new ProjectTranslationJobStore(context.Session);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
+                context.LoadEnvironment, store);
+            ProjectTranslationJob saved = await store.SaveNewAsync(await coordinator.PlanAsync(context.ChapterIds));
+            saved.Status = ProjectTranslationJobStatus.Running;
+            for (int index = 0; index < 2; index++)
+            {
+                saved.Workers[index].Status = ProjectTranslationWorkerStatus.Running;
+                saved.Workers[index].CurrentChapterId = saved.Items[index].ChapterId;
+                saved.Items[index].Status = ProjectTranslationItemStatus.Running;
+                saved.Items[index].AssignedWorkerId = saved.Workers[index].WorkerId;
+            }
+            await store.SaveAsync(saved);
+
+            var reopened = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
+                context.LoadEnvironment, new(context.Session));
+            ProjectTranslationJob interrupted = Assert.IsType<ProjectTranslationJob>(await reopened.LoadAsync());
+
+            Assert.Equal(ProjectTranslationJobStatus.Interrupted, interrupted.Status);
+            Assert.Equal(2, interrupted.Items.Count(item => item.Status == ProjectTranslationItemStatus.Interrupted));
+            Assert.All(interrupted.Workers, worker => Assert.Equal(ProjectTranslationWorkerStatus.Interrupted, worker.Status));
+            Assert.Equal(0, local.Calls + remote.Calls);
+        });
+    }
+
+    [Fact]
+    public async Task Unknown_remote_result_requires_explicit_confirmation_before_retry()
+    {
+        await WithProjectAsync(2, async context =>
+        {
+            var local = new ParallelFakeClient("local", new(), 20);
+            var remote = new ParallelFakeClient("remote", new(), 1) { FailWithConnection = true };
+            ProjectTranslationWorkerDefinition[] workers = Workers(context, local, remote);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
+                context.LoadEnvironment);
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            Guid remoteId = coordinator.CurrentJob!.Workers.Single(worker => worker.Backend.Kind == OllamaBackendKind.Remote).WorkerId;
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.RetryWorkerAsync(remoteId, false));
+            await coordinator.RetryWorkerAsync(remoteId, true);
+
+            Assert.Contains(coordinator.CurrentJob!.Items, item => item.AssignedWorkerId == remoteId &&
+                item.Status == ProjectTranslationItemStatus.Pending);
+            Assert.Equal(ProjectTranslationJobStatus.Interrupted, coordinator.CurrentJob.Status);
+        });
+    }
+
+    [Fact]
+    public async Task Changed_ssh_backend_identity_blocks_old_parallel_plan_before_any_request()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            var local = new ParallelFakeClient("local", new(), 0);
+            var remote = new ParallelFakeClient("remote", new(), 0);
+            ProjectTranslationWorkerDefinition[] original = Workers(context, local, remote);
+            original[1] = original[1] with { BackendIdentity = "SHA256:original-host" };
+            var planner = new ProjectTranslationCoordinator(context.Session, context.Repository, original,
+                context.LoadEnvironment);
+            ProjectTranslationJob plan = await planner.PlanAsync(context.ChapterIds);
+            ProjectTranslationWorkerDefinition[] changed =
+            [original[0], original[1] with { BackendIdentity = "SHA256:different-host" }];
+            var starter = new ProjectTranslationCoordinator(context.Session, context.Repository, changed,
+                context.LoadEnvironment);
+
+            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => starter.StartAsync(plan));
+
+            Assert.Contains("đã đổi", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, local.Calls + remote.Calls);
+            Assert.Null(starter.CurrentJob);
+        });
+    }
+
+    private static ProjectTranslationWorkerDefinition[] Workers(TestProject context, IOllamaClient local, IOllamaClient remote)
+    {
+        ModelOptions options = context.Environment.ModelOptions;
+        return
+        [
+            new(Guid.NewGuid(), OllamaBackendSnapshot.LocalDefault(options.Model), local, options with { }),
+            new(Guid.NewGuid(), new OllamaBackendSnapshot(Guid.NewGuid(), OllamaBackendKind.Remote,
+                "EZYCloudX RTX 3090 Ti", "http://127.0.0.1:43117/api/chat", options.Model), remote,
+                options with { }, 0.45m)
+        ];
+    }
+
     private static async Task EditAsync(TestProject context, int index, Action<TranslationService> edit)
     {
         ChapterDocument chapter = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[index])).Chapter;
@@ -396,6 +575,51 @@ public sealed class ProjectTranslationCoordinatorTests
                 return FakeClient.Completion($"Bản dịch tuần tự {call}.");
             }
             finally { Interlocked.Decrement(ref _concurrency); }
+        }
+    }
+
+    private sealed class ParallelConcurrency
+    {
+        private int _current;
+        private int _maximum;
+        public int Maximum => Volatile.Read(ref _maximum);
+        public void Enter()
+        {
+            int active = Interlocked.Increment(ref _current);
+            int observed;
+            do { observed = _maximum; }
+            while (active > observed && Interlocked.CompareExchange(ref _maximum, active, observed) != observed);
+        }
+        public void Exit() => Interlocked.Decrement(ref _current);
+    }
+
+    private sealed class ParallelFakeClient(string name, ParallelConcurrency concurrency, int delayMilliseconds) : IOllamaClient
+    {
+        private int _calls;
+        public int Calls => Volatile.Read(ref _calls);
+        public bool BlockFirst { get; init; }
+        public bool FailWithConnection { get; init; }
+        public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            int call = Interlocked.Increment(ref _calls);
+            concurrency.Enter();
+            try
+            {
+                if (call == 1)
+                {
+                    FirstStarted.TrySetResult();
+                    if (BlockFirst) await Release.Task.WaitAsync(cancellationToken);
+                }
+                if (delayMilliseconds > 0) await Task.Delay(delayMilliseconds, cancellationToken);
+                if (FailWithConnection)
+                    throw new OllamaRequestException(OllamaErrorKind.Connection, "synthetic remote disconnect");
+                return FakeClient.Completion($"{name} translated {call}");
+            }
+            finally { concurrency.Exit(); }
         }
     }
 }

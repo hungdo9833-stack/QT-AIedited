@@ -24,14 +24,25 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
         {
             job.Status = ProjectTranslationJobStatus.Interrupted;
             job.LastError = "Hàng đợi bị gián đoạn. Chỉ tiếp tục sau khi người dùng bấm Resume.";
-            if (job.CurrentChapterId is Guid current)
+            Guid[] runningChapterIds = job.Items.Where(item => item.Status == ProjectTranslationItemStatus.Running)
+                .Select(item => item.ChapterId).ToArray();
+            if (job.CurrentChapterId is Guid legacyCurrent && !runningChapterIds.Contains(legacyCurrent))
+                runningChapterIds = [.. runningChapterIds, legacyCurrent];
+            foreach (Guid currentChapterId in runningChapterIds)
             {
-                ProjectTranslationItem? item = job.Items.SingleOrDefault(value => value.ChapterId == current);
+                ProjectTranslationItem? item = job.Items.SingleOrDefault(value => value.ChapterId == currentChapterId);
                 if (item?.Status == ProjectTranslationItemStatus.Running)
                 {
                     item.Status = ProjectTranslationItemStatus.Interrupted;
                     item.Error = job.LastError;
                 }
+            }
+            foreach (ProjectTranslationWorkerState worker in job.Workers)
+            {
+                if (worker.Status is ProjectTranslationWorkerStatus.Running or ProjectTranslationWorkerStatus.Pausing)
+                    worker.Status = ProjectTranslationWorkerStatus.Interrupted;
+                worker.CurrentChapterId = null;
+                worker.LastError = job.LastError;
             }
             job.CurrentChapterId = null;
             job = await SaveCoreAsync(job, cancellationToken).ConfigureAwait(false);

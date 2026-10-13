@@ -24,6 +24,7 @@ public sealed class GpuManagerUiTests
             Assert.NotNull(window.FindName("PrivateKeyInput"));
             Assert.NotNull(window.FindName("FingerprintInput"));
             Assert.NotNull(window.FindName("HourlyPriceInput"));
+            Assert.NotNull(window.FindName("TranslationModeInput"));
             Assert.True(window.DesiredSize.Width <= 1040);
             Assert.True(window.DesiredSize.Height <= 720);
         }

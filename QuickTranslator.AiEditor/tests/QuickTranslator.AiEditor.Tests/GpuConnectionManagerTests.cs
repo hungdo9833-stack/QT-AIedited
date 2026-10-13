@@ -15,6 +15,9 @@ public sealed class GpuConnectionManagerTests : IDisposable
         string path = Path.Combine(_root, "profiles.json");
         var store = new BackendProfileStore(path, new Protector());
         var remote = RemoteProfile();
+        remote.Ssh!.Authentication = SshAuthenticationKind.PrivateKey;
+        remote.Ssh.Password = null;
+        remote.Ssh.PrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic-key-only\n-----END OPENSSH PRIVATE KEY-----";
         remote.Ssh!.PrivateKeyPassphrase = "key-secret";
         var catalog = new OllamaProfileCatalog { ActiveProfileId = remote.Id, Profiles = [remote] };
 
@@ -22,9 +25,9 @@ public sealed class GpuConnectionManagerTests : IDisposable
         OllamaProfileCatalog reopened = await store.LoadAsync();
         string json = await File.ReadAllTextAsync(path);
 
-        Assert.Equal("ssh-secret", reopened.Profiles[0].Ssh!.Password);
+        Assert.Contains("synthetic-key-only", reopened.Profiles[0].Ssh!.PrivateKey, StringComparison.Ordinal);
         Assert.Equal("key-secret", reopened.Profiles[0].Ssh!.PrivateKeyPassphrase);
-        Assert.DoesNotContain("ssh-secret", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic-key-only", json, StringComparison.Ordinal);
         Assert.DoesNotContain("key-secret", json, StringComparison.Ordinal);
         Assert.Contains("protected:", json, StringComparison.Ordinal);
     }
@@ -49,6 +52,24 @@ public sealed class GpuConnectionManagerTests : IDisposable
         Assert.True(ssh.Session.Tunnel!.Disposed);
         Assert.True(ssh.Session.Disposed);
         Assert.True(clients.Single().Disposed);
+    }
+
+    [Fact]
+    public async Task Lost_tunnel_reconnects_with_a_new_session_without_resending_any_prompt()
+    {
+        var ssh = new FakeSshConnectionService();
+        await using var manager = new GpuConnectionManager(ssh, (_, _) => new FakeBackendClient(),
+            healthInterval: TimeSpan.FromMilliseconds(10));
+        OllamaBackendProfile profile = RemoteProfile();
+        await manager.ConnectAsync(profile);
+
+        ssh.Sessions[0].Connected = false;
+        await SpinWaitAsync(() => ssh.Calls >= 2 && manager.GetStatus(profile.Id).State == GpuConnectionState.Connected,
+            TimeSpan.FromSeconds(2));
+
+        Assert.True(ssh.Sessions[0].Disposed);
+        Assert.Equal(2, ssh.Calls);
+        Assert.True(ssh.Sessions[1].IsConnected);
     }
 
     [Fact]
@@ -154,6 +175,13 @@ public sealed class GpuConnectionManagerTests : IDisposable
 
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 
+    private static async Task SpinWaitAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + timeout;
+        while (!condition() && DateTimeOffset.UtcNow < until) await Task.Delay(10);
+        Assert.True(condition());
+    }
+
     private sealed class Protector : IOllamaSecretProtector
     {
         public string Protect(string value) => "protected:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
@@ -172,9 +200,11 @@ public sealed class GpuConnectionManagerTests : IDisposable
 
     private sealed class FakeSshConnectionService : ISshConnectionService
     {
-        public FakeSshSession? Session { get; private set; }
+        public int Calls { get; private set; }
+        public List<FakeSshSession> Sessions { get; } = [];
+        public FakeSshSession? Session => Sessions.LastOrDefault();
         public Task<ISshSession> ConnectAsync(GpuSshSettings settings, CancellationToken cancellationToken = default)
-        { Session = new(); return Task.FromResult<ISshSession>(Session); }
+        { Calls++; var session = new FakeSshSession(); Sessions.Add(session); return Task.FromResult<ISshSession>(session); }
     }
 
     private sealed class RejectingSshService : ISshConnectionService
@@ -192,7 +222,8 @@ public sealed class GpuConnectionManagerTests : IDisposable
 
     private sealed class FakeSshSession : ISshSession
     {
-        public bool IsConnected => !Disposed;
+        public bool Connected { get; set; } = true;
+        public bool IsConnected => Connected && !Disposed;
         public bool Disposed { get; private set; }
         public int RemotePort { get; private set; }
         public FakeTunnel? Tunnel { get; private set; }

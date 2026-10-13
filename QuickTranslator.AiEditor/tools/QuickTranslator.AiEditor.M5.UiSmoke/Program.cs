@@ -39,15 +39,12 @@ internal static class Program
         if (requestedHeight is > 0) window.Height = requestedHeight.Value;
         application.MainWindow = window;
         window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        window.Show();
-        PumpDispatcher(TimeSpan.FromMilliseconds(900));
         if (window is MainWindow)
         {
             if (string.Equals(mode, "reader", StringComparison.OrdinalIgnoreCase))
                 Invoke(window, "ShowReaderWorkspace");
             else
                 Invoke(window, "ShowTranslationWorkspace", string.Equals(mode, "four", StringComparison.OrdinalIgnoreCase));
-            PumpDispatcher(TimeSpan.FromMilliseconds(250));
         }
 
         if (!string.IsNullOrWhiteSpace(capturePath))
@@ -59,6 +56,8 @@ internal static class Program
             return;
         }
 
+        window.Show();
+        PumpDispatcher(TimeSpan.FromMilliseconds(900));
         window.Closed += (_, _) => application.Shutdown();
         application.Run();
     }
@@ -132,6 +131,28 @@ internal static class Program
                     .Select(chapter => chapter.ChapterId)).GetAwaiter().GetResult();
                 return new ProjectTranslationQueueWindow(session.Manifest.VietnameseTitle, coordinator, plan);
             }
+            case "parallel-queue":
+            {
+                var resources = new ProjectResources { ProjectId = session.Manifest.ProjectId, Revision = 3,
+                    Characters = new CharacterProject { Id = session.Manifest.ProjectId, Name = session.Manifest.VietnameseTitle } };
+                var options = new ModelOptions { Model = "translategemma:12b" };
+                ProjectTranslationWorkerDefinition[] workers =
+                [
+                    new(Guid.Parse("11111111-1111-4111-8111-111111111111"), OllamaBackendSnapshot.LocalDefault(options.Model),
+                        new SyntheticClient(), options, 0),
+                    new(Guid.Parse("22222222-2222-4222-8222-222222222222"),
+                        new OllamaBackendSnapshot(Guid.Parse("33333333-3333-4333-8333-333333333333"),
+                            OllamaBackendKind.Remote, "EZYCloudX RTX 3090 Ti", "http://127.0.0.1:43117/api/chat", options.Model),
+                        new SyntheticClient(), options, 0.45m, "synthetic-ssh-host")
+                ];
+                var coordinator = new ProjectTranslationCoordinator(session, repository, workers,
+                    _ => Task.FromResult(new ProjectTranslationEnvironment(options, PromptPreset.Default, resources)));
+                ProjectTranslationJob plan = coordinator.PlanAsync(session.Manifest.Chapters.Skip(8).Take(12)
+                    .Select(chapter => chapter.ChapterId)).GetAwaiter().GetResult();
+                return new ProjectTranslationQueueWindow(session.Manifest.VietnameseTitle, coordinator, plan);
+            }
+            case "gpu":
+                return CreateGpuManager(root);
             case "four":
                 return CreateEditor(session, root, fourPane: true);
             case "reader":
@@ -139,6 +160,26 @@ internal static class Program
             default:
                 return CreateEditor(session, root, fourPane: false);
         }
+    }
+
+    private static GpuManagerWindow CreateGpuManager(string root)
+    {
+        var store = new BackendProfileStore(Path.Combine(root, "gpu-profiles.json"), new SyntheticProtector());
+        var manager = new OllamaBackendManager(store, _ => new SyntheticBackendClient());
+        manager.LoadAsync().GetAwaiter().GetResult();
+        var remote = new OllamaBackendProfile
+        {
+            Id = Guid.Parse("33333333-3333-4333-8333-333333333333"), Name = "EZYCloudX RTX 3090 Ti",
+            Kind = OllamaBackendKind.Remote, Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b",
+            HourlyPrice = 0.45m, RemoteDisclosureAccepted = true,
+            Ssh = new() { Host = "gpu-rental.example", Port = 22022, Username = "ubuntu",
+                Authentication = SshAuthenticationKind.Password, Password = "synthetic",
+                HostKeyFingerprint = "SHA256:abcdefghijklmnopqrstuv", RemoteOllamaPort = 11434 }
+        };
+        manager.SaveProfileAsync(remote, activate: true).GetAwaiter().GetResult();
+        var preferences = new GpuTranslationPreferences { Mode = GpuTranslationMode.ParallelLocalRemote,
+            RemoteProfileId = remote.Id };
+        return new GpuManagerWindow(manager, new GpuConnectionManager(), preferences);
     }
 
     private static MainWindow CreateReader(ProjectSession session, string root)
@@ -214,13 +255,16 @@ internal static class Program
 
     private static void Capture(Window window, string path, double dpi)
     {
-        window.Activate();
-        window.UpdateLayout();
+        FrameworkElement visual = window.Content as FrameworkElement ?? window;
+        var available = new Size(window.Width, window.Height);
+        visual.Measure(available);
+        visual.Arrange(new Rect(0, 0, available.Width, available.Height));
+        visual.UpdateLayout();
         double scale = dpi / 96d;
-        int width = Math.Max(1, (int)Math.Ceiling(window.ActualWidth * scale));
-        int height = Math.Max(1, (int)Math.Ceiling(window.ActualHeight * scale));
+        int width = Math.Max(1, (int)Math.Ceiling(available.Width * scale));
+        int height = Math.Max(1, (int)Math.Ceiling(available.Height * scale));
         var bitmap = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
-        bitmap.Render(window);
+        bitmap.Render(visual);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
@@ -231,10 +275,9 @@ internal static class Program
     private static void PumpDispatcher(TimeSpan duration)
     {
         var frame = new DispatcherFrame();
-        var timer = new DispatcherTimer(DispatcherPriority.ApplicationIdle)
-        { Interval = duration };
-        timer.Tick += (_, _) => { timer.Stop(); frame.Continue = false; };
-        timer.Start();
+        Dispatcher dispatcher = Dispatcher.CurrentDispatcher;
+        using var timer = new System.Threading.Timer(_ => dispatcher.BeginInvoke(
+            DispatcherPriority.Send, () => frame.Continue = false), null, duration, Timeout.InfiniteTimeSpan);
         Dispatcher.PushFrame(frame);
     }
 
@@ -263,5 +306,22 @@ internal static class Program
         public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default) => Task.FromResult(new OllamaCompletion(
                 "Bản dịch tổng hợp.", true, "stop", new GenerationMetrics()));
+    }
+
+    private sealed class SyntheticBackendClient : IOllamaBackendClient
+    {
+        public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(["translategemma:12b"]);
+        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default) => Task.FromResult(new OllamaCompletion(
+                "Bản dịch tổng hợp.", true, "stop", new GenerationMetrics()));
+        public void Dispose() { }
+    }
+
+    private sealed class SyntheticProtector : IOllamaSecretProtector
+    {
+        public string Protect(string value) => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(value));
+        public string Unprotect(string value) => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(value));
     }
 }

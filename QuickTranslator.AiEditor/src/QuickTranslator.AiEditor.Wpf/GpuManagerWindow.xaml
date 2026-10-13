@@ -2,7 +2,7 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  Title="QT Studio · GPU Manager" Width="1040" Height="720" MinWidth="860" MinHeight="620"
  WindowStartupLocation="CenterOwner">
- <Grid Margin="14">
+ <Grid Margin="14" TextElement.Foreground="{DynamicResource TextBrush}">
   <Grid.ColumnDefinitions><ColumnDefinition Width="270"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
   <Border Style="{StaticResource Card}" Margin="0">
    <DockPanel>
@@ -17,6 +17,7 @@
   <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
    <StackPanel>
     <DockPanel Margin="0,0,0,10"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Lưu profile" Click="OnSaveProfile"/><Button Content="Kết nối" Click="OnConnect" Style="{StaticResource PrimaryButton}"/><Button Content="Ngắt" Click="OnDisconnect"/></StackPanel><StackPanel><TextBlock Text="GPU Connection Manager" FontSize="23" FontWeight="SemiBold"/><TextBlock x:Name="StatusText" Text="Chọn một profile để cấu hình." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></DockPanel>
+    <Border Style="{StaticResource Card}"><DockPanel><Button DockPanel.Dock="Right" Content="Dùng profile đang chọn cho Remote" Click="OnUseForRemote"/><StackPanel><TextBlock Text="CHẾ ĐỘ DỊCH" FontWeight="SemiBold"/><ComboBox x:Name="TranslationModeInput" Width="290" HorizontalAlignment="Left" SelectionChanged="OnTranslationModeChanged"><ComboBoxItem Content="Local Only"/><ComboBoxItem Content="Remote Only"/><ComboBoxItem Content="Parallel · Local + Remote"/></ComboBox><TextBlock x:Name="TranslationModeText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/></StackPanel></DockPanel></Border>
     <Border Style="{StaticResource Card}"><StackPanel>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
       <StackPanel Margin="0,0,8,0"><TextBlock Text="Tên máy chủ" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NameInput"/></StackPanel>
@@ -37,7 +38,7 @@
     <Border Style="{StaticResource Card}"><StackPanel>
      <DockPanel><Button DockPanel.Dock="Right" Content="Kiểm tra server" Click="OnInspect"/><TextBlock Text="SERVER &amp; OLLAMA" FontWeight="SemiBold"/></DockPanel>
      <TextBlock x:Name="InspectionText" Text="Chưa kiểm tra." TextWrapping="Wrap" Margin="3,9" Foreground="{DynamicResource MutedBrush}"/>
-     <WrapPanel><Button Content="Cài Ollama (Ubuntu)" Click="OnInstallOllama"/><Button Content="Khởi động Ollama" Click="OnStartOllama"/><Button Content="Tải model" Click="OnPullModel"/></WrapPanel>
+     <WrapPanel><Button Content="Cài Ollama (Ubuntu)" Click="OnInstallOllama"/><Button Content="Khởi động Ollama" Click="OnStartOllama"/><Button Content="Tải model" Click="OnPullModel"/><Button Content="Hủy thao tác" Click="OnCancelSetup"/></WrapPanel>
      <TextBlock Text="Cài đặt/start chỉ chạy sau xác nhận riêng. QT Studio không cài driver NVIDIA và không truyền sudo password qua shell." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,6"/>
     </StackPanel></Border>
     <TextBlock Text="Chi phí hiển thị trong QT Studio chỉ là ước tính. Ngắt SSH hoặc Ollama không đồng nghĩa nhà cung cấp ngừng tính phí." Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="5"/>

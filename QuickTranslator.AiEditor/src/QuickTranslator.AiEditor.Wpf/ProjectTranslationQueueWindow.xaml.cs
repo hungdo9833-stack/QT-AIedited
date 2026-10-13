@@ -42,12 +42,16 @@ public partial class ProjectTranslationQueueWindow : Window
         }
         bool planMode = _plan?.Status == ProjectTranslationJobStatus.Draft && _coordinator.CurrentJob is null;
         HeadingText.Text = planMode ? "Queue Plan · kiểm tra trước khi chạy" : "Translation Queue · tiến độ thật";
-        BackendText.Text = job.Backend is null ? "Local · legacy job" :
-            $"{job.Backend.Kind} · {job.Backend.ProfileName}";
-        ModelText.Text = job.ModelOptions.Model;
+        BackendText.Text = job.Workers.Count > 0 ? string.Join(" + ", job.Workers.Select(worker => worker.Name)) :
+            job.Backend is null ? "Local · legacy job" : $"{job.Backend.Kind} · {job.Backend.ProfileName}";
+        ModelText.Text = job.Workers.Count > 0 ? string.Join(" / ", job.Workers.Select(worker => worker.ModelOptions.Model).Distinct()) : job.ModelOptions.Model;
         PromptText.Text = $"{job.PromptPreset.Name} · revision {job.PromptPreset.Revision}";
         ResourceText.Text = job.ProjectResourceRevision.ToString();
-        QueueGrid.ItemsSource = job.Items.OrderBy(item => item.Order).Select(item => new QueueRow(item)).ToArray();
+        Dictionary<Guid, string> workerNames = job.Workers.ToDictionary(worker => worker.WorkerId, worker => worker.Name);
+        QueueGrid.ItemsSource = job.Items.OrderBy(item => item.Order).Select(item => new QueueRow(item,
+            item.AssignedWorkerId is Guid workerId && workerNames.TryGetValue(workerId, out string? name) ? name : "—")).ToArray();
+        WorkerCards.ItemsSource = planMode ? job.Workers.Select(worker => new ProjectTranslationWorkerProgress(worker.WorkerId,
+            worker.Name, worker.Status, null, null, 0, 0, 0, 0, 0, 0, null)).ToArray() : _coordinator.GetWorkerProgress();
         ProjectTranslationProgress progress = planMode
             ? new(ProjectTranslationJobStatus.Draft, job.Items.Count, 0, 0, 0, job.Items.Count, null, null, 0, 0, null)
             : _coordinator.GetProgress();
@@ -57,8 +61,16 @@ public partial class ProjectTranslationQueueWindow : Window
             (progress.CompletedChapters + progress.FailedChapters + progress.SkippedChapters) / progress.TotalChapters;
         CurrentText.Text = progress.CurrentChapterId is null ? "Không có chapter đang gửi request."
             : $"Đang dịch: {progress.CurrentChapterTitle} · segment {progress.CurrentCompletedSegments}/{progress.CurrentTotalSegments}";
+        if (job.Workers.Count > 0)
+        {
+            ProjectTranslationAggregateMetrics metrics = _coordinator.GetAggregateMetrics();
+            string eta = metrics.EstimatedRemaining is TimeSpan remaining
+                ? $"ETA {remaining:hh\\:mm\\:ss}" : "ETA đang học tốc độ";
+            CurrentText.Text = $"Tổng {metrics.HanCharactersPerMinute:N0} chữ Hán/phút · {eta} · " +
+                $"chi phí QT Studio ước tính {metrics.EstimatedCost:N2}";
+        }
         StatusText.Text = planMode
-            ? $"Sẽ dịch tuần tự {job.Items.Count:N0} chapter. Start mới tạo job bền vững và gửi request đầu tiên."
+            ? $"Sẽ dịch {job.Items.Count:N0} chapter bằng {Math.Max(1, job.Workers.Count)} worker. Start mới tạo job bền vững và gửi request đầu tiên."
             : progress.Error ?? "Checkpoint được lưu sau từng segment; đóng/mở lại không tự Resume.";
         StartButton.IsEnabled = !_commandBusy && planMode;
         PauseButton.IsEnabled = !_commandBusy && _coordinator.IsRunning;
@@ -66,6 +78,9 @@ public partial class ProjectTranslationQueueWindow : Window
             progress.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted;
         CancelButton.IsEnabled = !_commandBusy && _coordinator.IsRunning;
         RetryButton.IsEnabled = !_commandBusy && !_coordinator.IsRunning && progress.FailedChapters > 0;
+        RetryWorkerButton.IsEnabled = !_commandBusy && !_coordinator.IsRunning && job.Workers.Any(worker =>
+            worker.Status is ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted);
+        ReassignButton.IsEnabled = RetryWorkerButton.IsEnabled && job.Workers.Count == 2;
     }
 
     private async void OnStart(object sender, RoutedEventArgs e)
@@ -87,6 +102,29 @@ public partial class ProjectTranslationQueueWindow : Window
 
     private async void OnRetry(object sender, RoutedEventArgs e) =>
         await RunQueueAsync(() => _coordinator.RetryFailedAsync(), "Đã Retry các chapter lỗi.");
+
+    private async void OnRetryWorker(object sender, RoutedEventArgs e)
+    {
+        ProjectTranslationWorkerProgress? worker = _coordinator.GetWorkerProgress().FirstOrDefault(value =>
+            value.Status is ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted);
+        if (worker is null) return;
+        if (MessageBox.Show(this,
+            $"Retry worker “{worker.Name}”? Chapter có request Remote không chắc chắn sẽ được gửi lại sau khi bạn đã kiểm tra checkpoint.",
+            "Xác nhận Retry Remote", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        await RunControlAsync(() => _coordinator.RetryWorkerAsync(worker.WorkerId, true),
+            "Worker đã sẵn sàng; bấm Resume để tiếp tục.");
+    }
+
+    private async void OnReassignPending(object sender, RoutedEventArgs e)
+    {
+        ProjectTranslationWorkerProgress[] workers = _coordinator.GetWorkerProgress().ToArray();
+        ProjectTranslationWorkerProgress? offline = workers.FirstOrDefault(value =>
+            value.Status is ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted);
+        ProjectTranslationWorkerProgress? healthy = workers.FirstOrDefault(value => value.WorkerId != offline?.WorkerId);
+        if (offline is null || healthy is null) return;
+        await RunControlAsync(() => _coordinator.ReassignPendingAsync(offline.WorkerId, healthy.WorkerId),
+            $"Chỉ chapter Pending chưa gửi request được chuyển sang {healthy.Name}.");
+    }
 
     private async Task RunQueueAsync(Func<Task> launch, string success, ProjectTranslationJob? recoverPlan = null)
     {
@@ -152,10 +190,10 @@ public partial class ProjectTranslationQueueWindow : Window
         _coordinator.ProgressChanged -= OnProgressChanged;
     }
 
-    internal sealed record QueueRow(int Order, int Number, string Title, ProjectTranslationItemStatus Status,
+    internal sealed record QueueRow(int Order, int Number, string Title, string Worker, ProjectTranslationItemStatus Status,
         string StatusLabel, int CompletedSegments, int TotalSegments, string SegmentLabel, int ErrorSegments, string Error)
     {
-        public QueueRow(ProjectTranslationItem item) : this(item.Order, item.Number, item.Title, item.Status,
+        public QueueRow(ProjectTranslationItem item, string worker = "—") : this(item.Order, item.Number, item.Title, worker, item.Status,
             ItemStatusLabel(item.Status), item.CompletedSegments, item.TotalSegments,
             $"{item.CompletedSegments:N0}/{item.TotalSegments:N0}", item.ErrorSegments, item.Error ?? "") { }
     }

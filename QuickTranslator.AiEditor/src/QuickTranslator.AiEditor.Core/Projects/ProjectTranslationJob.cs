@@ -13,6 +13,11 @@ public enum ProjectTranslationItemStatus
     Pending, Running, Paused, Interrupted, Completed, Failed, Skipped, NeedsReview, Cancelled
 }
 
+public enum ProjectTranslationWorkerStatus
+{
+    Ready, Running, Pausing, Paused, Offline, Interrupted, Completed, Cancelled
+}
+
 public sealed class ProjectTranslationJob
 {
     public int SchemaVersion { get; set; } = 1;
@@ -28,6 +33,7 @@ public sealed class ProjectTranslationJob
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? CurrentChapterId { get; set; }
     public string? LastError { get; set; }
+    public List<ProjectTranslationWorkerState> Workers { get; set; } = [];
     public List<ProjectTranslationItem> Items { get; set; } = [];
 
     public void Validate()
@@ -42,7 +48,13 @@ public sealed class ProjectTranslationJob
         if (Backend is not null && !string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
             throw new InvalidDataException("Model trong backend snapshot không khớp Queue Plan.");
         PromptPreset.Validate();
+        if (Workers is null || Workers.Count > 2 || Workers.Any(worker => worker is null) ||
+            Workers.Select(worker => worker.WorkerId).Distinct().Count() != Workers.Count)
+            throw new InvalidDataException("Danh sách worker của translation job không hợp lệ.");
+        foreach (ProjectTranslationWorkerState worker in Workers) worker.Validate();
         foreach (ProjectTranslationItem item in Items) item.Validate();
+        if (Items.Any(item => item.AssignedWorkerId is Guid workerId && Workers.All(worker => worker.WorkerId != workerId)))
+            throw new InvalidDataException("Item tham chiếu worker không tồn tại.");
         if (CurrentChapterId is Guid current && !Items.Any(item => item.ChapterId == current))
             throw new InvalidDataException("Job tham chiếu chapter hiện tại không tồn tại.");
     }
@@ -59,6 +71,8 @@ public sealed class ProjectTranslationItem
     public string ProtectedFingerprint { get; set; } = "";
     public string EnqueuedDocumentFingerprint { get; set; } = "";
     public Guid? ChapterQueueRunId { get; set; }
+    public Guid? AssignedWorkerId { get; set; }
+    public int SourceHanCharacters { get; set; }
     public int TotalSegments { get; set; }
     public int CompletedSegments { get; set; }
     public int ErrorSegments { get; set; }
@@ -71,8 +85,40 @@ public sealed class ProjectTranslationItem
         if (ChapterId == Guid.Empty || Number <= 0 || Order <= 0 || string.IsNullOrWhiteSpace(Title) ||
             !Enum.IsDefined(Status) || SourceFingerprint.Length != 64 || ProtectedFingerprint.Length != 64 ||
             EnqueuedDocumentFingerprint.Length != 64 || TotalSegments < 0 || CompletedSegments < 0 ||
-            CompletedSegments > TotalSegments || ErrorSegments < 0 || ErrorSegments > TotalSegments)
+            CompletedSegments > TotalSegments || ErrorSegments < 0 || ErrorSegments > TotalSegments || SourceHanCharacters < 0)
             throw new InvalidDataException("Item trong Project translation job không hợp lệ.");
+    }
+}
+
+public sealed class ProjectTranslationWorkerState
+{
+    public Guid WorkerId { get; set; }
+    public Guid ProfileId { get; set; }
+    public string Name { get; set; } = "";
+    public OllamaBackendSnapshot Backend { get; set; } = OllamaBackendSnapshot.LocalDefault("translategemma:12b");
+    public ModelOptions ModelOptions { get; set; } = new();
+    public string BackendIdentity { get; set; } = "";
+    public ProjectTranslationWorkerStatus Status { get; set; } = ProjectTranslationWorkerStatus.Ready;
+    public Guid? CurrentChapterId { get; set; }
+    public int CompletedChapters { get; set; }
+    public int FailedChapters { get; set; }
+    public long CompletedHanCharacters { get; set; }
+    public double ActiveSeconds { get; set; }
+    public decimal? HourlyPrice { get; set; }
+    public string? LastError { get; set; }
+
+    internal void Validate()
+    {
+        if (WorkerId == Guid.Empty || ProfileId == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 100 ||
+            Backend is null || ModelOptions is null || BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl) ||
+            !Enum.IsDefined(Status) || CompletedChapters < 0 ||
+            FailedChapters < 0 || CompletedHanCharacters < 0 || ActiveSeconds < 0 || double.IsNaN(ActiveSeconds) ||
+            double.IsInfinity(ActiveSeconds) || HourlyPrice is < 0 or > 1_000_000)
+            throw new InvalidDataException("Worker trong translation job không hợp lệ.");
+        Backend.Validate();
+        ModelOptions.Validate();
+        if (ProfileId != Backend.ProfileId || !string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
+            throw new InvalidDataException("Snapshot worker không khớp profile/model.");
     }
 }
 
@@ -101,3 +147,25 @@ public sealed record ProjectTranslationProgress(ProjectTranslationJobStatus Stat
     int CompletedChapters, int FailedChapters, int SkippedChapters, int PendingChapters,
     Guid? CurrentChapterId, string? CurrentChapterTitle, int CurrentCompletedSegments,
     int CurrentTotalSegments, string? Error);
+
+public sealed record ProjectTranslationWorkerDefinition(Guid WorkerId, OllamaBackendSnapshot Backend,
+    IOllamaClient Client, ModelOptions ModelOptions, decimal? HourlyPrice = null, string BackendIdentity = "")
+{
+    public void Validate()
+    {
+        if (WorkerId == Guid.Empty || Backend is null || Client is null || ModelOptions is null ||
+            HourlyPrice is < 0 or > 1_000_000 || BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl))
+            throw new InvalidDataException("Cấu hình worker translation không hợp lệ.");
+        Backend.Validate(); ModelOptions.Validate();
+        if (!string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
+            throw new InvalidDataException("Model của worker không khớp backend snapshot.");
+    }
+}
+
+public sealed record ProjectTranslationWorkerProgress(Guid WorkerId, string Name,
+    ProjectTranslationWorkerStatus Status, Guid? CurrentChapterId, string? CurrentChapterTitle,
+    int CompletedSegments, int TotalSegments, double HanCharactersPerMinute,
+    int CompletedChapters, int FailedChapters, decimal EstimatedCost, string? Error);
+
+public sealed record ProjectTranslationAggregateMetrics(double HanCharactersPerMinute,
+    TimeSpan? EstimatedRemaining, decimal EstimatedCost);

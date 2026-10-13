@@ -41,7 +41,7 @@ public partial class MainWindow
         {
             await EnsureOllamaBackendsLoadedAsync();
             if (_gpuManagerWindow is { IsLoaded: true }) { _gpuManagerWindow.Activate(); return; }
-            _gpuManagerWindow = new GpuManagerWindow(_ollamaBackends, _gpuConnections) { Owner = this };
+            _gpuManagerWindow = new GpuManagerWindow(_ollamaBackends, _gpuConnections, _gpuPreferences) { Owner = this };
             _gpuManagerWindow.Closed += (_, _) => _gpuManagerWindow = null;
             _gpuManagerWindow.Show();
         }

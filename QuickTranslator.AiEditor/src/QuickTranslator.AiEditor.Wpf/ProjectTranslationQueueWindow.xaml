@@ -6,16 +6,16 @@
   <Window.Resources>
     <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource PrimaryBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   </Window.Resources>
-  <Grid Margin="14">
-    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid Margin="14" TextElement.Foreground="{DynamicResource TextBrush}">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <DockPanel Margin="4,0,4,10">
-      <StackPanel>
+      <StackPanel DockPanel.Dock="Left">
         <TextBlock x:Name="HeadingText" Text="Queue Plan" FontSize="25" FontWeight="SemiBold"/>
         <TextBlock x:Name="ProjectText" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/>
       </StackPanel>
-      <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
-        <TextBlock x:Name="SummaryText" HorizontalAlignment="Right" FontWeight="SemiBold"/>
-        <TextBlock Text="Dịch tuần tự · một chapter tại một thời điểm · checkpoint từng segment" Foreground="{DynamicResource MutedBrush}"/>
+      <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right" Width="430">
+        <TextBlock x:Name="SummaryText" HorizontalAlignment="Right" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="Tối đa hai GPU · mỗi GPU một chapter · checkpoint từng segment" Foreground="{DynamicResource MutedBrush}"/>
       </StackPanel>
     </DockPanel>
     <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
@@ -27,7 +27,11 @@
         <StackPanel Grid.Column="3"><TextBlock Text="Resource revision" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="ResourceText" FontWeight="SemiBold"/></StackPanel>
       </Grid>
     </Border>
-    <Grid Grid.Row="2" Margin="0,10,0,8">
+    <ItemsControl x:Name="WorkerCards" Grid.Row="2" Margin="0,9,0,0">
+      <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate><DataTemplate><Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9" Margin="3"><StackPanel><DockPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock DockPanel.Dock="Right" Text="{Binding Status}" Margin="10,0,0,0" Foreground="{DynamicResource MutedBrush}"/></DockPanel><TextBlock Text="{Binding CurrentChapterTitle, TargetNullValue=Đang chờ chapter}" TextTrimming="CharacterEllipsis"/><TextBlock Foreground="{DynamicResource MutedBrush}"><Run Text="Segment "/><Run Text="{Binding CompletedSegments}"/><Run Text="/"/><Run Text="{Binding TotalSegments}"/><Run Text=" · "/><Run Text="{Binding HanCharactersPerMinute, StringFormat={}{0:N0}}"/><Run Text=" chữ Hán/phút · Ước tính "/><Run Text="{Binding EstimatedCost, StringFormat={}{0:N2}}"/></TextBlock></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <Grid Grid.Row="3" Margin="0,10,0,8">
       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <StackPanel>
         <ProgressBar x:Name="ChapterProgress" Height="10" Minimum="0" Maximum="100" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
@@ -39,9 +43,11 @@
         <Button x:Name="ResumeButton" Content="Resume" Style="{StaticResource PrimaryButton}" Click="OnResume"/>
         <Button x:Name="CancelButton" Content="Hủy phần đang chờ" Click="OnCancel"/>
         <Button x:Name="RetryButton" Content="Retry chapter lỗi" Click="OnRetry"/>
+        <Button x:Name="RetryWorkerButton" Content="Retry GPU offline" Click="OnRetryWorker"/>
+        <Button x:Name="ReassignButton" Content="Chuyển Pending" Click="OnReassignPending"/>
       </WrapPanel>
     </Grid>
-    <DataGrid x:Name="QueueGrid" Grid.Row="3" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
+    <DataGrid x:Name="QueueGrid" Grid.Row="4" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
               HeadersVisibility="Column" GridLinesVisibility="Horizontal" Background="{DynamicResource PanelBrush}" Foreground="{DynamicResource TextBrush}"
               BorderBrush="{DynamicResource BorderBrush}" RowBackground="{DynamicResource PanelBrush}" AlternatingRowBackground="{DynamicResource PanelAltBrush}"
               EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
@@ -49,14 +55,15 @@
       <DataGrid.Columns>
         <DataGridTextColumn Header="#" Binding="{Binding Order}" Width="55"/>
         <DataGridTextColumn Header="Số" Binding="{Binding Number}" Width="65"/>
-        <DataGridTextColumn Header="Chapter" Binding="{Binding Title}" Width="2*"/>
+        <DataGridTextColumn Header="Chapter" Binding="{Binding Title}" Width="250"/>
+        <DataGridTextColumn Header="GPU" Binding="{Binding Worker}" Width="125"/>
         <DataGridTextColumn Header="Trạng thái" Binding="{Binding StatusLabel}" Width="145"/>
         <DataGridTextColumn Header="Segment" Binding="{Binding SegmentLabel}" Width="105"/>
         <DataGridTextColumn Header="Lỗi" Binding="{Binding ErrorSegments}" Width="60"/>
-        <DataGridTextColumn Header="Chi tiết" Binding="{Binding Error}" Width="2*"/>
+        <DataGridTextColumn Header="Chi tiết" Binding="{Binding Error}" Width="400"/>
       </DataGrid.Columns>
     </DataGrid>
-    <Border Grid.Row="4" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="10" Margin="0,8,0,0">
+    <Border Grid.Row="5" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="10" Margin="0,8,0,0">
       <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
     </Border>
   </Grid>

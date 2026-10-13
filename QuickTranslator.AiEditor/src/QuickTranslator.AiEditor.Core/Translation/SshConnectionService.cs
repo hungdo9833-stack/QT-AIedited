@@ -166,8 +166,7 @@ public sealed class SshConnectionService : ISshConnectionService
             try { if (port.IsStarted) port.Stop(); }
             finally
             {
-                try { client.RemoveForwardedPort(port); }
-                catch (ObjectDisposedException) { }
+                client.RemoveForwardedPort(port);
                 port.Dispose();
             }
             return ValueTask.CompletedTask;
@@ -185,7 +184,9 @@ internal static partial class SshCommands
         SshOperation.FindOllama => "command -v ollama",
         SshOperation.ReadOllamaService => "systemctl is-active ollama",
         SshOperation.ListOllamaModels => "ollama list",
-        SshOperation.InstallOllamaUbuntu => "curl -fsSL https://ollama.com/install.sh | sh",
+        SshOperation.InstallOllamaUbuntu => "curl -fsSL https://ollama.com/install.sh -o /tmp/qt-studio-ollama-install.sh && " +
+            "if [ \"$(id -u)\" -eq 0 ]; then sh /tmp/qt-studio-ollama-install.sh; else sudo -n sh /tmp/qt-studio-ollama-install.sh; fi; " +
+            "code=$?; rm -f /tmp/qt-studio-ollama-install.sh; exit $code",
         SshOperation.StartOllamaService => "sudo -n systemctl enable --now ollama",
         SshOperation.PullOllamaModel => "ollama pull " + QuoteModel(argument),
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
