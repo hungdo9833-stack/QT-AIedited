@@ -71,22 +71,59 @@ public partial class ProjectTranslationQueueWindow : Window
         if (_plan is null) return;
         ProjectTranslationJob plan = _plan;
         _plan = null;
-        await RunCommandAsync(() => _coordinator.StartAsync(plan), "Hàng đợi đã kết thúc.");
+        await RunQueueAsync(() => _coordinator.StartAsync(plan), "Hàng đợi đã kết thúc.", plan);
     }
 
     private async void OnPause(object sender, RoutedEventArgs e) =>
-        await RunCommandAsync(_coordinator.PauseAsync, "Đã Pause sau khi lưu checkpoint request hiện tại.");
+        await RunControlAsync(_coordinator.PauseAsync, "Đã Pause sau khi lưu checkpoint request hiện tại.");
 
     private async void OnResume(object sender, RoutedEventArgs e) =>
-        await RunCommandAsync(() => _coordinator.ResumeAsync(), "Hàng đợi Resume đã kết thúc.");
+        await RunQueueAsync(() => _coordinator.ResumeAsync(), "Hàng đợi Resume đã kết thúc.");
 
     private async void OnCancel(object sender, RoutedEventArgs e) =>
-        await RunCommandAsync(_coordinator.CancelPendingAsync, "Đã hủy phần đang chờ; checkpoint đã commit vẫn được giữ.");
+        await RunControlAsync(_coordinator.CancelPendingAsync, "Đã hủy phần đang chờ; checkpoint đã commit vẫn được giữ.");
 
     private async void OnRetry(object sender, RoutedEventArgs e) =>
-        await RunCommandAsync(() => _coordinator.RetryFailedAsync(), "Đã Retry các chapter lỗi.");
+        await RunQueueAsync(() => _coordinator.RetryFailedAsync(), "Đã Retry các chapter lỗi.");
 
-    private async Task RunCommandAsync(Func<Task> command, string success)
+    private async Task RunQueueAsync(Func<Task> launch, string success, ProjectTranslationJob? recoverPlan = null)
+    {
+        if (_commandBusy) return;
+        _commandBusy = true;
+        RefreshView();
+        Task run;
+        try
+        {
+            run = launch();
+        }
+        catch (Exception ex)
+        {
+            if (recoverPlan is not null && _coordinator.CurrentJob is null) _plan = recoverPlan;
+            _commandBusy = false;
+            ReportError(ex);
+            RefreshView();
+            return;
+        }
+        _commandBusy = false;
+        RefreshView();
+        try
+        {
+            await run;
+            if (!_closed) StatusText.Text = success;
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_closed) StatusText.Text = "Thao tác bị hủy; checkpoint đã commit vẫn được giữ.";
+        }
+        catch (Exception ex)
+        {
+            if (recoverPlan is not null && _coordinator.CurrentJob is null) _plan = recoverPlan;
+            ReportError(ex);
+        }
+        finally { if (!_closed) RefreshView(); }
+    }
+
+    private async Task RunControlAsync(Func<Task> command, string success)
     {
         if (_commandBusy) return;
         _commandBusy = true;
@@ -96,23 +133,15 @@ public partial class ProjectTranslationQueueWindow : Window
             await command();
             if (!_closed) StatusText.Text = success;
         }
-        catch (OperationCanceledException)
-        {
-            if (!_closed) StatusText.Text = "Thao tác bị hủy; checkpoint đã commit vẫn được giữ.";
-        }
-        catch (Exception ex)
-        {
-            if (!_closed)
-            {
-                StatusText.Text = "Translation Queue dừng: " + ex.Message;
-                MessageBox.Show(this, ex.Message, "Translation Queue", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-        finally
-        {
-            _commandBusy = false;
-            if (!_closed) RefreshView();
-        }
+        catch (Exception ex) { ReportError(ex); }
+        finally { _commandBusy = false; if (!_closed) RefreshView(); }
+    }
+
+    private void ReportError(Exception ex)
+    {
+        if (_closed) return;
+        StatusText.Text = "Translation Queue dừng: " + ex.Message;
+        MessageBox.Show(this, ex.Message, "Translation Queue", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     private void OnClosed(object? sender, EventArgs e)

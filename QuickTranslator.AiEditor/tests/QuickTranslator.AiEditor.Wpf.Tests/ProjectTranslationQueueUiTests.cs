@@ -73,4 +73,42 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.NotNull((await fixture.Repository.LoadChapterAsync(fixture.Project, first.Id)).Chapter.Segments[0].LatestAiAttempt);
         fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow").Close();
     });
+
+    [Fact]
+    public Task Start_button_keeps_pause_and_cancel_available_while_request_is_running() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        var first = await fixture.AddChapterAsync("Một", 1);
+        var second = await fixture.AddChapterAsync("Hai", 2);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<OllamaCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Client.Respond = (_, _) =>
+        {
+            started.TrySetResult();
+            return release.Task;
+        };
+
+        await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id, second.Id });
+        var window = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
+        ((Button)window.FindName("StartButton")).RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+
+        Assert.True(((Button)window.FindName("PauseButton")).IsEnabled);
+        Assert.True(((Button)window.FindName("CancelButton")).IsEnabled);
+
+        ((Button)window.FindName("PauseButton")).RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
+        release.TrySetResult(FakeClient.Completion("Checkpoint trước khi Pause."));
+        ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
+        for (int count = 0; count < 100 && coordinator.IsRunning; count++)
+        {
+            await Task.Delay(20);
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+        }
+
+        Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob?.Status);
+        Assert.False(coordinator.IsRunning);
+        window.Close();
+    });
 }
