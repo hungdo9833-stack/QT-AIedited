@@ -14,6 +14,7 @@ public partial class GpuManagerWindow : Window
     private readonly GpuConnectionManager _connections;
     private readonly GpuTranslationPreferences _preferences;
     private readonly RemoteOllamaSetupService _setup = new();
+    private readonly RemoteOllamaModelPullService _modelPull = new();
     private readonly LocalOllamaService _local = new();
     private readonly ObservableCollection<OllamaBackendProfile> _profiles = [];
     private string? _loadedPrivateKey;
@@ -181,7 +182,7 @@ public partial class GpuManagerWindow : Window
             "Bật Ollama service bằng sudo -n? Nếu server yêu cầu password, thao tác sẽ dừng an toàn.");
     }
     private async void OnPullModel(object sender, RoutedEventArgs e) => await ConfirmSetupAsync(RemoteSetupAction.PullModel,
-        $"Tải model “{ModelInput.Text}” trên server? Dung lượng và tính phí mạng do nhà cung cấp quyết định.", ModelInput.Text);
+        $"Tải model “{ModelInput.Text}” qua SSH tunnel? QT Studio sẽ hiển thị dung lượng Ollama báo về; tính phí mạng do nhà cung cấp quyết định.", ModelInput.Text);
     private void OnCancelSetup(object sender, RoutedEventArgs e)
     {
         _setupCancellation?.Cancel();
@@ -192,7 +193,13 @@ public partial class GpuManagerWindow : Window
     {
         if (MessageBox.Show(this, message, "Xác nhận thao tác Remote GPU", MessageBoxButton.YesNo,
             MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        await RunAsync(async () =>
+        if (_busy) return;
+        _busy = true;
+        CancelSetupButton.IsEnabled = true;
+        ModelPullProgress.Visibility = action == RemoteSetupAction.PullModel ? Visibility.Visible : Visibility.Collapsed;
+        ModelPullProgress.IsIndeterminate = action == RemoteSetupAction.PullModel;
+        ModelPullProgress.Value = 0;
+        try
         {
             if (ProfileList.SelectedItem is not OllamaBackendProfile profile ||
                 !_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
@@ -202,11 +209,45 @@ public partial class GpuManagerWindow : Window
             StatusText.Text = action == RemoteSetupAction.PullModel ? "Đang tải model trên Remote; có thể hủy…" : "Đang thực hiện thao tác Remote…";
             try
             {
-                SshCommandResult result = await _setup.ExecuteConfirmedAsync(handle.Session, action, true, model, cancellation.Token);
-                StatusText.Text = result.Success ? "Thao tác hoàn tất." : "Thao tác bị chặn/thất bại: " + result.Error;
+                if (action == RemoteSetupAction.PullModel)
+                {
+                    var progress = new Progress<OllamaModelPullProgress>(UpdateModelPullProgress);
+                    await _modelPull.PullAsync(handle.TunnelEndpoint, model ?? "", progress, cancellation.Token);
+                    ModelPullProgress.IsIndeterminate = false;
+                    ModelPullProgress.Value = 100;
+                    StatusText.Text = "Tải model hoàn tất.";
+                }
+                else
+                {
+                    SshCommandResult result = await _setup.ExecuteConfirmedAsync(handle.Session, action, true, model, cancellation.Token);
+                    StatusText.Text = result.Success ? "Thao tác hoàn tất." : "Thao tác bị chặn/thất bại: " + result.Error;
+                }
             }
             finally { if (ReferenceEquals(_setupCancellation, cancellation)) _setupCancellation = null; }
-        });
+        }
+        catch (OperationCanceledException) { StatusText.Text = "Đã hủy thao tác Remote theo yêu cầu."; }
+        catch (Exception error) { StatusText.Text = error.Message; }
+        finally { CancelSetupButton.IsEnabled = false; _busy = false; }
+    }
+
+    private void UpdateModelPullProgress(OllamaModelPullProgress progress)
+    {
+        if (progress.Percentage is double percentage)
+        {
+            ModelPullProgress.IsIndeterminate = false;
+            ModelPullProgress.Value = percentage;
+            StatusText.Text = $"{progress.Status} · {FormatBytes(progress.CompletedBytes ?? 0)} / " +
+                $"{FormatBytes(progress.TotalBytes ?? 0)} ({percentage:0.0}%) · có thể hủy";
+        }
+        else StatusText.Text = progress.Status + " · đang chờ Ollama báo dung lượng · có thể hủy";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double value = Math.Max(0, bytes); int unit = 0;
+        while (value >= 1024 && unit < units.Length - 1) { value /= 1024; unit++; }
+        return $"{value:0.##} {units[unit]}";
     }
 
     private void OnChoosePrivateKey(object sender, RoutedEventArgs e)

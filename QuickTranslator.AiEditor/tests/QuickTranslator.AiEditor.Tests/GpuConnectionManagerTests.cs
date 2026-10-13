@@ -1,4 +1,6 @@
 using System.Text;
+using System.Net;
+using System.Net.Http.Json;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Translation;
 
@@ -113,6 +115,47 @@ public sealed class GpuConnectionManagerTests : IDisposable
             RemoteSetupAction.PullModel, confirmed: true, "safe; curl bad.example"));
 
         Assert.Equal([(SshOperation.PullOllamaModel, "translategemma:12b")], session.Executed);
+    }
+
+    [Fact]
+    public async Task Model_pull_streams_real_byte_progress_only_through_loopback()
+    {
+        const string body = "{\"status\":\"pulling layer\",\"completed\":524288,\"total\":1048576}\n" +
+                            "{\"status\":\"success\"}\n";
+        var handler = new StubHttpHandler((request, _) =>
+        {
+            Assert.Equal("http://127.0.0.1:43117/api/pull", request.RequestUri!.ToString());
+            Assert.Equal(HttpMethod.Post, request.Method);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+        });
+        var observed = new List<OllamaModelPullProgress>();
+        var service = new RemoteOllamaModelPullService(() => new HttpClient(handler, disposeHandler: false));
+
+        await service.PullAsync(new Uri("http://127.0.0.1:43117/api/chat"), "translategemma:12b",
+            new InlineProgress<OllamaModelPullProgress>(observed.Add));
+
+        Assert.Equal(2, observed.Count);
+        Assert.Equal(50, observed[0].Percentage);
+        Assert.Equal(1048576, observed[0].TotalBytes);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.PullAsync(
+            new Uri("http://gpu.example.test:11434/api/chat"), "translategemma:12b"));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.PullAsync(
+            new Uri("http://127.0.0.1:43117/api/chat"), "safe;curl-bad"));
+    }
+
+    [Fact]
+    public async Task Model_pull_honors_cancellation()
+    {
+        var handler = new StubHttpHandler(async (_, cancellationToken) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        });
+        var service = new RemoteOllamaModelPullService(() => new HttpClient(handler, disposeHandler: false));
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.PullAsync(
+            new Uri("http://127.0.0.1:43117/api/chat"), "translategemma:12b", cancellationToken: cancellation.Token));
     }
 
     [Fact]
@@ -246,5 +289,17 @@ public sealed class GpuConnectionManagerTests : IDisposable
         public bool IsStarted => !Disposed;
         public bool Disposed { get; private set; }
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+    }
+
+    private sealed class StubHttpHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken) => send(request, cancellationToken);
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 }
