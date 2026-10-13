@@ -206,6 +206,27 @@ public sealed class SafeBulkImportTests : IDisposable
         Assert.Equal(4, reopened.Manifest.Chapters.Select(x => x.ChapterId).Distinct().Count());
     }
 
+    [Fact]
+    public async Task Unordered_source_imports_in_numeric_order_and_keeps_the_first_duplicate()
+    {
+        var repository = new ProjectRepository();
+        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "unordered"), "Synthetic unordered");
+        const string source = "第4章 四\n正文四。\n第2章 二（前）\n正文二前。\n第3章 三\n正文三。\n第2章 二（后）\n正文二后。\n第1章 一\n正文一。";
+        ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source, "unordered.txt")).Current;
+
+        BulkImportReport report = await new SafeBulkImportService(repository).ImportAsync(session, plan, Defaults());
+
+        Assert.True(report.Completed);
+        Assert.Equal([1, 2, 3, 4], report.Chapters.Select(chapter => chapter.Number));
+        Assert.Equal([1, 2, 3, 4], session.Manifest.Chapters.Select(chapter => chapter.Number));
+        ProjectChapterEntry chapterTwo = session.Manifest.Chapters.Single(chapter => chapter.Number == 2);
+        ChapterDocument loaded = (await repository.LoadChapterAsync(session, chapterTwo.ChapterId)).Chapter;
+        Assert.Equal("二（前）", loaded.Title);
+        Assert.Contains("正文二前。", loaded.OriginalText, StringComparison.Ordinal);
+        Assert.DoesNotContain("正文二后。", loaded.OriginalText, StringComparison.Ordinal);
+        Assert.Equal(source, plan.ReconstructSource());
+    }
+
     private static ImportPreviewPlan Plan(int count, int firstNumber = 1)
     {
         string source = string.Concat(Enumerable.Range(firstNumber, count).Select(number => $"第{number}章 标题{number}\n原文{number}。\n"));

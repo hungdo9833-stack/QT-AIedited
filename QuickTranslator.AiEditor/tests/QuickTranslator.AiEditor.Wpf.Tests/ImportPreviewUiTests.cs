@@ -68,4 +68,35 @@ public sealed class ImportPreviewUiTests
         }
         finally { window.Close(); }
     });
+
+    [Fact]
+    public Task Preview_displays_unordered_chapters_by_number_and_reports_automatic_duplicate_resolution() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        string path = Path.Combine(fixture.Root, "unordered.txt");
+        await File.WriteAllTextAsync(path,
+            "第3章 三\n正文三。\n第1章 一（前）\n正文一前。\n第2章 二\n正文二。\n第1章 一（后）\n正文一后。\n");
+        var window = new ImportPreviewWindow(fixture.Project);
+        try
+        {
+            await window.LoadSourceAsync(path, SourceTextEncoding.Auto);
+
+            Assert.Equal([1, 2, 3], window.CurrentPlan!.ImportableChapters.Select(chapter => chapter.Number));
+            Assert.Equal(1, window.CurrentPlan.AutomaticallySkippedDuplicateCount);
+            Assert.True(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.Contains("tự sắp xếp", ((TextBlock)window.FindName("PreviewStatusText")).Text,
+                StringComparison.CurrentCultureIgnoreCase);
+            Assert.Contains("bỏ qua 1 bản trùng", ((TextBlock)window.FindName("PreviewStatusText")).Text,
+                StringComparison.CurrentCultureIgnoreCase);
+
+            var grid = (DataGrid)window.FindName("PreviewGrid");
+            int?[] displayedNumbers = grid.Items.Cast<object>()
+                .Select(row => row.GetType().GetProperty("NumberLabel")?.GetValue(row)?.ToString())
+                .Where(value => int.TryParse(value, out _))
+                .Select(value => (int?)int.Parse(value!)).ToArray();
+            Assert.Equal([1, 1, 2, 3], displayedNumbers);
+        }
+        finally { window.Close(); }
+    });
 }

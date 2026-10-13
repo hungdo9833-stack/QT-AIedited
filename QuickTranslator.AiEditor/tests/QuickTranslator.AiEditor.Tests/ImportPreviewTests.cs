@@ -74,6 +74,40 @@ public sealed class ImportPreviewTests
     }
 
     [Fact]
+    public void Unordered_chapters_are_planned_by_number_and_later_duplicates_are_skipped_automatically()
+    {
+        const string source = "第4章 四\n正文四。\n第2章 二（前）\n正文二前。\n第3章 三\n正文三。\n第2章 二（后）\n正文二后。\n第1章 一\n正文一。";
+
+        ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source, "unordered.txt")).Current;
+
+        Assert.Equal([1, 2, 3, 4], plan.ImportableChapters.Select(chapter => chapter.Number));
+        ImportPreviewItem[] duplicateTwos = plan.Chapters.Where(chapter => chapter.Number == 2)
+            .OrderBy(chapter => chapter.Span.StartUtf16).ToArray();
+        Assert.True(duplicateTwos[0].Included);
+        Assert.False(duplicateTwos[1].Included);
+        Assert.False(plan.HasBlockingIssues);
+        Assert.Contains(plan.Issues, issue => issue.Code == ImportPreviewIssueCode.DuplicateNumber &&
+            issue.Severity == DetectionIssueSeverity.Information);
+        Assert.DoesNotContain(plan.Issues, issue => issue.Code == ImportPreviewIssueCode.ReversedNumber &&
+            issue.Severity != DetectionIssueSeverity.Information);
+        AssertExact(source, plan);
+    }
+
+    [Fact]
+    public void Five_thousand_reversed_chapters_are_sorted_without_thousands_of_manual_warnings()
+    {
+        string source = string.Concat(Enumerable.Range(1, 5_000).Reverse()
+            .Select(number => $"第{number}章 标题{number}\n正文{number}。\n"));
+
+        ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source, "reversed-5000.txt")).Current;
+
+        Assert.Equal(Enumerable.Range(1, 5_000), plan.ImportableChapters.Select(chapter => chapter.Number!.Value));
+        Assert.Single(plan.Issues, issue => issue.Code == ImportPreviewIssueCode.ReversedNumber);
+        Assert.False(plan.HasBlockingIssues);
+        AssertExact(source, plan);
+    }
+
+    [Fact]
     public void Split_requires_a_line_boundary_inside_content()
     {
         const string source = "第1章 一\n甲。\n乙。";

@@ -93,7 +93,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         plan.ValidateExactCoverage();
         ValidateSourceSnapshot(plan.Source);
 
-        ImportPreviewItem[] selected = plan.ImportableChapters.OrderBy(x => x.Span.StartUtf16).ToArray();
+        ImportPreviewItem[] selected = plan.ImportableChapters.ToArray();
         if (selected.Length == 0)
             throw new BulkImportValidationException("Chưa có chương hợp lệ được chọn để nhập.", ["Hãy include ít nhất một chương có số và nội dung."]);
         var previewErrors = plan.Issues.Where(x => x.Severity == DetectionIssueSeverity.Error).Select(x => x.Message).Distinct().ToArray();

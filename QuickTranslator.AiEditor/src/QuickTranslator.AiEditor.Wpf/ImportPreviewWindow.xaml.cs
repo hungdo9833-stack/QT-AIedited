@@ -44,7 +44,7 @@ public partial class ImportPreviewWindow : Window
             SourcePath = Path.GetFullPath(path);
             SourcePathInput.Text = SourcePath;
             RefreshRows();
-            PreviewStatusText.Text = "Đã nhận diện. Kiểm tra các cảnh báo trước khi nhập.";
+            PreviewStatusText.Text = PreviewStatus(_editor.Current);
         }
         finally { _loading = false; }
     }
@@ -82,7 +82,9 @@ public partial class ImportPreviewWindow : Window
         string filter = (FilterInput.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
         _rows.Clear();
         var projectIssues = new List<string>();
-        foreach (ImportPreviewItem item in plan.Items)
+        IEnumerable<ImportPreviewItem> displayItems = plan.ChaptersInImportOrder
+            .Concat(plan.Items.Where(item => !item.IsChapter).OrderBy(item => item.Span.StartUtf16));
+        foreach (ImportPreviewItem item in displayItems)
         {
             string[] problems = plan.Issues.Where(x => x.ItemIds.Contains(item.Id)).Select(x => x.Message).ToArray();
             string? collision = ProjectCollision(item);
@@ -110,7 +112,7 @@ public partial class ImportPreviewWindow : Window
         UndoButton.IsEnabled = _editor.CanUndo;
         ConfirmButton.IsEnabled = !plan.HasBlockingIssues && collisions == 0 && plan.ImportableChapters.Any();
         FooterHintText.Text = ConfirmButton.IsEnabled
-            ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương. Source hash {plan.Source.RawSha256[..12]}…"
+            ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương theo thứ tự số. Source hash {plan.Source.RawSha256[..12]}…"
             : "Cần xử lý lỗi màu cảnh báo hoặc collision trước khi nhập. Nguồn TXT vẫn giữ nguyên.";
         UpdateSelection();
     }
@@ -251,6 +253,16 @@ public partial class ImportPreviewWindow : Window
     private void OnCancel(object sender, RoutedEventArgs e) => DialogResult = false;
     private void ShowError(string message) { PreviewStatusText.Text = "Lỗi: " + message; MessageBox.Show(this, message, "Import Preview", MessageBoxButton.OK, MessageBoxImage.Error); }
     private static string SeverityLabel(DetectionIssueSeverity severity) => severity switch { DetectionIssueSeverity.Error => "●", DetectionIssueSeverity.Warning => "▲", _ => "ℹ" };
+    private static string PreviewStatus(ImportPreviewPlan plan)
+    {
+        var details = new List<string>();
+        if (plan.WasAutomaticallyReordered) details.Add("đã tự sắp xếp theo số chương");
+        if (plan.AutomaticallySkippedDuplicateCount > 0)
+            details.Add($"đã bỏ qua {plan.AutomaticallySkippedDuplicateCount:N0} bản trùng phía sau");
+        return details.Count == 0
+            ? "Đã nhận diện. Kiểm tra các cảnh báo trước khi nhập."
+            : "Đã nhận diện và " + string.Join("; ", details) + ". Nguyên văn nguồn được giữ nguyên.";
+    }
     private static string Short(string value) => value.Length <= 70 ? value : value[..67] + "…";
 
     private sealed record LineChoice(int Offset, string Label);
@@ -262,6 +274,7 @@ public partial class ImportPreviewWindow : Window
             item.VolumeTitle ?? "", item.Kind switch
             {
                 PlannedRegionKind.Volume => "Quyển", PlannedRegionKind.Unclassified => "Chưa phân loại",
+                _ when item.AutomaticallyExcludedDuplicate => "Bỏ qua bản trùng",
                 _ when item.Decision == CandidateDecision.NeedsReview => "Cần xem", _ => "Tin cậy"
             }, problems.Length == 0 ? "" : string.Join(" · ", problems), problems) { }
     }

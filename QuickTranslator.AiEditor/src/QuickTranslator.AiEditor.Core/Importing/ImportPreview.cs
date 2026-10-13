@@ -40,6 +40,7 @@ public sealed record ImportPreviewItem(
     int? OriginalCandidateIndex)
 {
     public bool IsChapter => Kind is PlannedRegionKind.Chapter or PlannedRegionKind.SpecialChapter;
+    public bool AutomaticallyExcludedDuplicate { get; init; }
 }
 
 public sealed class ImportPreviewPlan
@@ -63,7 +64,11 @@ public sealed class ImportPreviewPlan
     public int Revision { get; }
     public string Fingerprint { get; }
     public IEnumerable<ImportPreviewItem> Chapters => Items.Where(x => x.IsChapter);
-    public IEnumerable<ImportPreviewItem> ImportableChapters => Chapters.Where(x => x.Included);
+    public IEnumerable<ImportPreviewItem> ChaptersInImportOrder => OrderForImport(Chapters);
+    public IEnumerable<ImportPreviewItem> ImportableChapters => ChaptersInImportOrder.Where(x => x.Included);
+    public int AutomaticallySkippedDuplicateCount => Chapters.Count(x => x.AutomaticallyExcludedDuplicate);
+    public bool WasAutomaticallyReordered => !Chapters.Where(x => x.Included).Select(x => x.Id)
+        .SequenceEqual(ImportableChapters.Select(x => x.Id));
     public bool HasBlockingIssues => Issues.Any(x => x.Severity == DetectionIssueSeverity.Error);
 
     public string Slice(SourceSpan span) => Source.Text.Substring(span.StartUtf16, span.LengthUtf16);
@@ -131,24 +136,35 @@ public sealed class ImportPreviewPlan
                     "Chương được chọn không có nội dung nguyên văn.", [item.Id]));
         }
 
-        foreach (IGrouping<int, ImportPreviewItem> duplicate in included.Where(x => x.Number > 0)
+        foreach (IGrouping<int, ImportPreviewItem> duplicate in chapters.Where(x => x.Number > 0)
                      .GroupBy(x => x.Number!.Value).Where(x => x.Count() > 1))
-            issues.Add(new(ImportPreviewIssueCode.DuplicateNumber, DetectionIssueSeverity.Error,
-                $"Số chương {duplicate.Key} xuất hiện {duplicate.Count()} lần; Project hiện yêu cầu số active duy nhất.",
-                duplicate.Select(x => x.Id).ToImmutableArray()));
+        {
+            ImportPreviewItem[] duplicateItems = duplicate.OrderBy(x => x.Span.StartUtf16).ToArray();
+            int includedCount = duplicateItems.Count(x => x.Included);
+            if (includedCount > 1)
+                issues.Add(new(ImportPreviewIssueCode.DuplicateNumber, DetectionIssueSeverity.Error,
+                    $"Số chương {duplicate.Key} đang được chọn {includedCount} lần; chỉ được nhập một bản.",
+                    duplicateItems.Select(x => x.Id).ToImmutableArray()));
+            else if (duplicateItems.Any(x => x.AutomaticallyExcludedDuplicate))
+                issues.Add(new(ImportPreviewIssueCode.DuplicateNumber, DetectionIssueSeverity.Information,
+                    $"Số chương {duplicate.Key} xuất hiện {duplicateItems.Length} lần; giữ bản xuất hiện đầu tiên và bỏ qua bản phía sau.",
+                    duplicateItems.Select(x => x.Id).ToImmutableArray()));
+        }
 
         foreach (IGrouping<string, ImportPreviewItem> volume in included.Where(x => x.Number > 0)
                      .GroupBy(x => x.VolumeTitle ?? "", StringComparer.Ordinal))
         {
-            ImportPreviewItem[] ordered = volume.OrderBy(x => x.Span.StartUtf16).ToArray();
+            ImportPreviewItem[] sourceOrdered = volume.OrderBy(x => x.Span.StartUtf16).ToArray();
+            ImportPreviewItem[] ordered = sourceOrdered.OrderBy(x => x.Number).ThenBy(x => x.Span.StartUtf16).ToArray();
+            if (!sourceOrdered.Select(x => x.Id).SequenceEqual(ordered.Select(x => x.Id)))
+                issues.Add(new(ImportPreviewIssueCode.ReversedNumber, DetectionIssueSeverity.Information,
+                    "Các chương lộn thứ tự đã được tự động sắp theo số; nguyên văn nguồn vẫn được giữ nguyên.",
+                    []));
             for (int index = 1; index < ordered.Length; index++)
             {
                 int previous = ordered[index - 1].Number!.Value;
                 int current = ordered[index].Number!.Value;
-                if (current < previous)
-                    issues.Add(new(ImportPreviewIssueCode.ReversedNumber, DetectionIssueSeverity.Warning,
-                        $"Thứ tự giảm từ chương {previous} xuống {current}.", [ordered[index - 1].Id, ordered[index].Id]));
-                else if (current > previous + 1)
+                if (current > previous + 1)
                     issues.Add(new(ImportPreviewIssueCode.NumberJump, DetectionIssueSeverity.Warning,
                         $"Thiếu số giữa chương {previous} và {current}.", [ordered[index - 1].Id, ordered[index].Id]));
             }
@@ -173,6 +189,17 @@ public sealed class ImportPreviewPlan
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
     }
 
+    private IEnumerable<ImportPreviewItem> OrderForImport(IEnumerable<ImportPreviewItem> chapters)
+    {
+        Dictionary<string, int> volumeOrder = Items.Where(x => x.IsChapter)
+            .GroupBy(x => x.VolumeTitle ?? "", StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Min(x => x.Span.StartUtf16), StringComparer.Ordinal);
+        return chapters.OrderBy(x => volumeOrder[x.VolumeTitle ?? ""])
+            .ThenBy(x => x.Number is > 0 ? 0 : 1)
+            .ThenBy(x => x.Number ?? int.MaxValue)
+            .ThenBy(x => x.Span.StartUtf16);
+    }
+
     private static void ValidateSpan(SourceSpan span, int length, string label)
     {
         if (span.StartUtf16 < 0 || span.LengthUtf16 < 0 || span.EndUtf16 > length)
@@ -193,7 +220,8 @@ public sealed class ImportPreviewEditor
     {
         ArgumentNullException.ThrowIfNull(detected);
         detected.ValidateExactCoverage();
-        var items = detected.Regions.Select(region => FromRegion(detected, region)).ToImmutableArray();
+        ImmutableArray<ImportPreviewItem> items = AutomaticallyResolveDuplicates(
+            detected.Regions.Select(region => FromRegion(detected, region)).ToImmutableArray());
         return new(new ImportPreviewPlan(detected.Source, detected.Lines, items, 0));
     }
 
@@ -201,13 +229,18 @@ public sealed class ImportPreviewEditor
     {
         ImportPreviewItem item = RequireChapter(itemId);
         if (number is <= 0) throw new ArgumentOutOfRangeException(nameof(number), "Số chương phải lớn hơn 0 hoặc để trống.");
-        Replace(itemId, item with { Number = number, Title = title?.Trim() ?? "" });
+        Replace(itemId, item with
+        {
+            Number = number,
+            Title = title?.Trim() ?? "",
+            AutomaticallyExcludedDuplicate = false
+        });
     }
 
     public void SetIncluded(Guid itemId, bool included)
     {
         ImportPreviewItem item = RequireChapter(itemId);
-        Replace(itemId, item with { Included = included });
+        Replace(itemId, item with { Included = included, AutomaticallyExcludedDuplicate = false });
     }
 
     public void Split(Guid itemId, int splitAtUtf16, int? newNumber, string newTitle)
@@ -321,6 +354,20 @@ public sealed class ImportPreviewEditor
         return new(StableId(detected.Source.RawSha256, "preview-item", region.Span, region.Kind), chapterId,
             region.Kind, region.Span, region.HeadingSpan, region.BodySpan, region.ChapterNumber, title,
             region.VolumeTitle, rawHeading, included, candidate?.Decision ?? CandidateDecision.Rejected, region.CandidateIndex);
+    }
+
+    private static ImmutableArray<ImportPreviewItem> AutomaticallyResolveDuplicates(ImmutableArray<ImportPreviewItem> items)
+    {
+        var seenNumbers = new HashSet<int>();
+        var resolved = items.ToBuilder();
+        for (int index = 0; index < resolved.Count; index++)
+        {
+            ImportPreviewItem item = resolved[index];
+            if (!item.IsChapter || !item.Included || item.Number is not > 0) continue;
+            if (seenNumbers.Add(item.Number.Value)) continue;
+            resolved[index] = item with { Included = false, AutomaticallyExcludedDuplicate = true };
+        }
+        return resolved.ToImmutable();
     }
 
     private static Guid StableId(string sourceHash, string purpose, SourceSpan span, PlannedRegionKind kind)
