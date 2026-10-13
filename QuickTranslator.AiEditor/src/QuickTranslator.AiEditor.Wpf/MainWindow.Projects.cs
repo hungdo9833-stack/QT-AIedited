@@ -286,9 +286,9 @@ public partial class MainWindow
             _projectChapters.Clear();
             if (_projectSession is null)
             {
-                ProjectSidebar.Visibility = Visibility.Collapsed; ActiveProjectTitle.Text = "Dự án"; return;
+                ApplyProjectSidebarVisibility(); ActiveProjectTitle.Text = "Dự án"; return;
             }
-            ProjectSidebar.Visibility = Visibility.Visible; ActiveProjectTitle.Text = _projectSession.Manifest.VietnameseTitle;
+            ApplyProjectSidebarVisibility(); ActiveProjectTitle.Text = _projectSession.Manifest.VietnameseTitle;
             string query = ChapterSearchInput.Text.Trim();
             string filter = (ChapterStateFilter.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
             ProjectChapterState? state = Enum.TryParse(filter, out ProjectChapterState parsed) ? parsed : null;
@@ -418,59 +418,80 @@ public partial class MainWindow
     }
 
     private void OnShowProjectLibrary(object sender, RoutedEventArgs e) => ShowProjectLibraryWindow();
-    private void ShowProjectLibraryWindow()
+    private async void ShowProjectLibraryWindow()
     {
-        var list = new ListBox { DisplayMemberPath = "Title", Margin = new Thickness(4) };
-        var search = new TextBox { ToolTip = "Tìm dự án", Margin = new Thickness(4) };
-        void Reload() { list.ItemsSource = ProjectLibraryStore.Search(_projectLibrary, search.Text); }
-        search.TextChanged += (_, _) => Reload(); Reload();
-        var open = new Button { Content = "Mở", Style = (Style)FindResource("PrimaryButton") };
-        var create = new Button { Content = "Tạo mới" }; var locate = new Button { Content = "Tìm lại vị trí…" };
-        var remove = new Button { Content = "Bỏ khỏi danh sách" }; var delete = new Button { Content = "Chuyển dự án vào Thùng rác", Style = (Style)FindResource("DangerButton") };
-        var buttons = new WrapPanel(); foreach (var button in new[] { open, create, locate, remove, delete }) buttons.Children.Add(button);
-        var panel = new DockPanel { Margin = new Thickness(12) }; DockPanel.SetDock(search, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom); panel.Children.Add(search); panel.Children.Add(buttons); panel.Children.Add(list);
-        var window = new Window { Owner = this, Title = "Thư viện dự án", Width = 820, Height = 520, Content = panel };
-        open.Click += async (_, _) => { if (list.SelectedItem is RecentProject selected && !selected.Missing) { window.Close(); await OpenProjectPathAsync(selected.ManifestPath); } };
-        list.MouseDoubleClick += (_, _) => open.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        create.Click += (_, _) => { window.Close(); OnNewProject(create, new RoutedEventArgs()); };
-        locate.Click += async (_, _) =>
+        while (!_closing)
         {
-            if (list.SelectedItem is not RecentProject selected) return;
-            var dialog = new OpenFileDialog { Filter = "Dự án QuickTranslator (*.qtproj)|*.qtproj" };
-            if (dialog.ShowDialog(window) != true) return;
+            IReadOnlyList<ProjectLibraryCard> cards = await BuildProjectLibraryCardsAsync();
+            var window = new ProjectLibraryWindow(cards, _projectSession?.Manifest.ProjectId) { Owner = this };
+            if (window.ShowDialog() != true || window.RequestedAction is not ProjectLibraryAction action) return;
+            ProjectLibraryCard? selected = window.RequestedProject;
             try
             {
-                var opened = await _projectRepository.OpenAsync(dialog.FileName);
-                if (opened.Session.Manifest.ProjectId != selected.ProjectId) throw new InvalidDataException("Tệp được chọn có Project ID khác.");
-                ProjectLibraryStore.Relocate(_projectLibrary, selected.ProjectId, dialog.FileName); await _projectLibraryStore.SaveAsync(_projectLibrary); Reload(); RefreshProjectSwitcher();
-            }
-            catch (Exception ex) { MessageBox.Show(window, ex.Message, "Không thể định vị", MessageBoxButton.OK, MessageBoxImage.Error); }
-        };
-        remove.Click += async (_, _) =>
-        {
-            if (list.SelectedItem is not RecentProject selected || !BeginUiOperation(allowDuringTranslation: true)) return;
-            try
-            {
-                ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
-                await _projectLibraryStore.SaveAsync(_projectLibrary); Reload(); RefreshProjectSwitcher();
+                if (action == ProjectLibraryAction.Continue && selected is not null)
+                { await OpenProjectPathAsync(selected.ManifestPath); return; }
+                if (action == ProjectLibraryAction.Create)
+                { OnNewProject(this, new RoutedEventArgs()); return; }
+                if (selected is null) continue;
+                if (action == ProjectLibraryAction.Locate)
+                {
+                    var dialog = new OpenFileDialog { Filter = "Dự án QuickTranslator (*.qtproj)|*.qtproj" };
+                    if (dialog.ShowDialog(this) != true) continue;
+                    ProjectLibrarySummary summary = await ProjectRepository.ReadLibrarySummaryAsync(dialog.FileName);
+                    if (summary.ProjectId != selected.ProjectId) throw new InvalidDataException("Tệp được chọn có Project ID khác.");
+                    ProjectLibraryStore.Relocate(_projectLibrary, selected.ProjectId, dialog.FileName);
+                    await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher(); continue;
+                }
+                if (action == ProjectLibraryAction.Remove)
+                {
+                    if (!BeginUiOperation(allowDuringTranslation: true)) return;
+                    try { ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
+                        await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher(); }
+                    finally { EndUiOperation(); }
+                    continue;
+                }
+                if (action == ProjectLibraryAction.Delete)
+                {
+                    if (selected.ProjectId == _projectSession?.Manifest.ProjectId)
+                    { MessageBox.Show(this, "Hãy đóng dự án đang mở trước."); continue; }
+                    if (MessageBox.Show(this, $"Chuyển toàn bộ thư mục “{selected.Title}” vào Thùng rác của Windows?\nBạn có thể phục hồi từ Thùng rác.",
+                        "Xóa dự án", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) continue;
+                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(Path.GetDirectoryName(selected.ManifestPath)!,
+                        Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
+                    await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher();
+                }
             }
             catch (Exception ex) { ShowError(ex); }
-            finally { EndUiOperation(); }
-        };
-        delete.Click += async (_, _) =>
+        }
+    }
+
+    private async Task<IReadOnlyList<ProjectLibraryCard>> BuildProjectLibraryCardsAsync()
+    {
+        var cards = new List<ProjectLibraryCard>();
+        foreach (RecentProject recent in _projectLibrary.RecentProjects.OrderByDescending(project => project.LastOpenedAt))
         {
-            if (list.SelectedItem is not RecentProject selected || selected.Missing) return;
-            if (selected.ProjectId == _projectSession?.Manifest.ProjectId) { MessageBox.Show(window, "Hãy đóng dự án đang mở trước."); return; }
-            if (MessageBox.Show(window, $"Chuyển toàn bộ thư mục “{selected.Title}” vào Thùng rác của Windows?\nBạn có thể phục hồi từ Thùng rác.", "Xóa dự án", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            if (recent.Missing || !File.Exists(recent.ManifestPath))
+            {
+                cards.Add(new(recent.ProjectId, recent.Title, "", null, recent.ManifestPath, null,
+                    0, 0, 0, null, recent.LastOpenedAt, true, null));
+                continue;
+            }
             try
             {
-                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(Path.GetDirectoryName(selected.ManifestPath)!,
-                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-                ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId); await _projectLibraryStore.SaveAsync(_projectLibrary); Reload(); RefreshProjectSwitcher();
+                ProjectLibrarySummary summary = await ProjectRepository.ReadLibrarySummaryAsync(recent.ManifestPath);
+                cards.Add(new(summary.ProjectId, summary.VietnameseTitle, summary.Author, summary.Status,
+                    recent.ManifestPath, summary.CoverImagePath, summary.ChapterCount, summary.CompletedChapterCount,
+                    summary.Progress, summary.CurrentChapterTitle, recent.LastOpenedAt, false,
+                    summary.RecoveredFromBackup ? "Đang hiển thị metadata từ backup đã kiểm tra." : null));
             }
-            catch (Exception ex) { MessageBox.Show(window, ex.Message, "Không thể xóa", MessageBoxButton.OK, MessageBoxImage.Error); }
-        };
-        window.ShowDialog();
+            catch (Exception ex)
+            {
+                cards.Add(new(recent.ProjectId, recent.Title, "", null, recent.ManifestPath, null,
+                    0, 0, 0, null, recent.LastOpenedAt, false, "Không đọc được metadata: " + ex.Message));
+            }
+        }
+        return cards;
     }
 
     private async void OnEditProjectProperties(object sender, RoutedEventArgs e)

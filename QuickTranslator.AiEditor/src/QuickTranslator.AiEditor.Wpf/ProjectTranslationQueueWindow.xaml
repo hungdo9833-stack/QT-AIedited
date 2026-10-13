@@ -1,43 +1,36 @@
 <Window x:Class="QuickTranslator.AiEditor.Wpf.ProjectTranslationQueueWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="QT Studio · Translation Queue" Width="1120" Height="760" MinWidth="900" MinHeight="600"
-        WindowStartupLocation="CenterOwner" Background="#07111F" Foreground="#E8EEF7">
+        Title="QT Studio · Translation Queue" Width="1120" Height="760" MinWidth="820" MinHeight="500"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
   <Window.Resources>
-    <SolidColorBrush x:Key="Panel" Color="#0E1B2D"/>
-    <SolidColorBrush x:Key="PanelAlt" Color="#12243A"/>
-    <SolidColorBrush x:Key="Border" Color="#263D59"/>
-    <SolidColorBrush x:Key="Muted" Color="#91A4BC"/>
-    <SolidColorBrush x:Key="Accent" Color="#2F80ED"/>
-    <Style TargetType="Button"><Setter Property="Margin" Value="4"/><Setter Property="Padding" Value="13,8"/><Setter Property="Background" Value="{StaticResource PanelAlt}"/><Setter Property="Foreground" Value="#E8EEF7"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/></Style>
-    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{StaticResource Accent}"/><Setter Property="BorderBrush" Value="{StaticResource Accent}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-    <Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="#152943"/><Setter Property="Foreground" Value="#C8D5E5"/><Setter Property="Padding" Value="7,8"/><Setter Property="BorderBrush" Value="{StaticResource Border}"/><Setter Property="BorderThickness" Value="0,0,1,1"/></Style>
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource PrimaryBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
   </Window.Resources>
   <Grid Margin="14">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <DockPanel Margin="4,0,4,10">
       <StackPanel>
         <TextBlock x:Name="HeadingText" Text="Queue Plan" FontSize="25" FontWeight="SemiBold"/>
-        <TextBlock x:Name="ProjectText" Foreground="{StaticResource Muted}" Margin="0,3,0,0"/>
+        <TextBlock x:Name="ProjectText" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/>
       </StackPanel>
       <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
         <TextBlock x:Name="SummaryText" HorizontalAlignment="Right" FontWeight="SemiBold"/>
-        <TextBlock Text="Dịch tuần tự · một chapter tại một thời điểm · checkpoint từng segment" Foreground="{StaticResource Muted}"/>
+        <TextBlock Text="Dịch tuần tự · một chapter tại một thời điểm · checkpoint từng segment" Foreground="{DynamicResource MutedBrush}"/>
       </StackPanel>
     </DockPanel>
-    <Border Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="8" Padding="10">
+    <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
       <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <StackPanel><TextBlock Text="Model" Foreground="{StaticResource Muted}"/><TextBlock x:Name="ModelText" FontWeight="SemiBold"/></StackPanel>
-        <StackPanel Grid.Column="1"><TextBlock Text="Prompt snapshot" Foreground="{StaticResource Muted}"/><TextBlock x:Name="PromptText" FontWeight="SemiBold"/></StackPanel>
-        <StackPanel Grid.Column="2"><TextBlock Text="Resource revision" Foreground="{StaticResource Muted}"/><TextBlock x:Name="ResourceText" FontWeight="SemiBold"/></StackPanel>
+        <StackPanel><TextBlock Text="Model" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="ModelText" FontWeight="SemiBold"/></StackPanel>
+        <StackPanel Grid.Column="1"><TextBlock Text="Prompt snapshot" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="PromptText" FontWeight="SemiBold"/></StackPanel>
+        <StackPanel Grid.Column="2"><TextBlock Text="Resource revision" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="ResourceText" FontWeight="SemiBold"/></StackPanel>
       </Grid>
     </Border>
     <Grid Grid.Row="2" Margin="0,10,0,8">
       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <StackPanel>
-        <ProgressBar x:Name="ChapterProgress" Height="10" Minimum="0" Maximum="100" Foreground="{StaticResource Accent}" Background="#17283E"/>
-        <TextBlock x:Name="CurrentText" Foreground="{StaticResource Muted}" Margin="0,6,0,0"/>
+        <ProgressBar x:Name="ChapterProgress" Height="10" Minimum="0" Maximum="100" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
+        <TextBlock x:Name="CurrentText" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,0"/>
       </StackPanel>
       <WrapPanel Grid.Column="1" Margin="12,0,0,0">
         <Button x:Name="StartButton" Content="Start" Style="{StaticResource PrimaryButton}" Click="OnStart"/>
@@ -48,8 +41,8 @@
       </WrapPanel>
     </Grid>
     <DataGrid x:Name="QueueGrid" Grid.Row="3" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False"
-              HeadersVisibility="Column" GridLinesVisibility="Horizontal" Background="{StaticResource Panel}" Foreground="#E8EEF7"
-              BorderBrush="{StaticResource Border}" RowBackground="#0E1B2D" AlternatingRowBackground="#102036"
+              HeadersVisibility="Column" GridLinesVisibility="Horizontal" Background="{DynamicResource PanelBrush}" Foreground="{DynamicResource TextBrush}"
+              BorderBrush="{DynamicResource BorderBrush}" RowBackground="{DynamicResource PanelBrush}" AlternatingRowBackground="{DynamicResource PanelAltBrush}"
               EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
               ScrollViewer.CanContentScroll="True">
       <DataGrid.Columns>
@@ -62,8 +55,8 @@
         <DataGridTextColumn Header="Chi tiết" Binding="{Binding Error}" Width="2*"/>
       </DataGrid.Columns>
     </DataGrid>
-    <Border Grid.Row="4" Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="7" Padding="10" Margin="0,8,0,0">
-      <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{StaticResource Muted}"/>
+    <Border Grid.Row="4" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="10" Margin="0,8,0,0">
+      <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
     </Border>
   </Grid>
 </Window>

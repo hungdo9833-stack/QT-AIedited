@@ -14,8 +14,11 @@ public partial class MainWindow
     private void InitializeProjectTranslationCoordinator(ProjectSession session)
     {
         _projectTranslationWindow?.Close();
+        if (_projectTranslationCoordinator is not null)
+            _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
         var coordinator = new ProjectTranslationCoordinator(session, _projectRepository, _translationClient,
             cancellationToken => LoadProjectTranslationEnvironmentAsync(session, cancellationToken));
+        coordinator.ProgressChanged += OnProjectTranslationProgressChanged;
         _projectTranslationCoordinator = coordinator;
         _projectTranslationLoadTask = coordinator.LoadAsync();
     }
@@ -98,7 +101,10 @@ public partial class MainWindow
     {
         _projectTranslationWindow?.Close();
         _projectTranslationWindow = null;
+        if (_projectTranslationCoordinator is not null)
+            _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
         _projectTranslationCoordinator = null;
         _projectTranslationLoadTask = null;
+        RefreshShellQueueStatus();
     }
 }

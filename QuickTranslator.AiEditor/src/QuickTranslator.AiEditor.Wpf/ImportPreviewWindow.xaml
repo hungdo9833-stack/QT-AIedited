@@ -1,19 +1,11 @@
 <Window x:Class="QuickTranslator.AiEditor.Wpf.ImportPreviewWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="QT Studio · Import Preview" Width="1380" Height="860" MinWidth="1120" MinHeight="680"
-        WindowStartupLocation="CenterOwner" Background="#07111F" Foreground="#E6EEF8">
+        Title="QT Studio · Import Preview" Width="1380" Height="860" MinWidth="900" MinHeight="540"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
  <Window.Resources>
-  <SolidColorBrush x:Key="Panel" Color="#0E1B2D"/><SolidColorBrush x:Key="Panel2" Color="#13243A"/>
-  <SolidColorBrush x:Key="Line" Color="#263A53"/><SolidColorBrush x:Key="Muted" Color="#91A4BC"/>
-  <SolidColorBrush x:Key="Accent" Color="#2F80ED"/><SolidColorBrush x:Key="Warn" Color="#F5B942"/>
-  <Style TargetType="Button"><Setter Property="Margin" Value="4"/><Setter Property="Padding" Value="12,7"/><Setter Property="MinHeight" Value="34"/><Setter Property="Foreground" Value="#E6EEF8"/><Setter Property="Background" Value="#172A42"/><Setter Property="BorderBrush" Value="#304967"/></Style>
-  <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{StaticResource Accent}"/><Setter Property="BorderBrush" Value="{StaticResource Accent}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-  <Style TargetType="TextBox"><Setter Property="Margin" Value="4"/><Setter Property="Padding" Value="8"/><Setter Property="Foreground" Value="#E6EEF8"/><Setter Property="Background" Value="#091625"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="CaretBrush" Value="White"/></Style>
-  <Style TargetType="ComboBox"><Setter Property="Margin" Value="4"/><Setter Property="Padding" Value="7"/><Setter Property="MinHeight" Value="34"/><Setter Property="Foreground" Value="#0B1726"/></Style>
-  <Style TargetType="DataGrid"><Setter Property="Background" Value="{StaticResource Panel}"/><Setter Property="Foreground" Value="#E6EEF8"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="RowBackground" Value="#0E1B2D"/><Setter Property="AlternatingRowBackground" Value="#112138"/><Setter Property="HorizontalGridLinesBrush" Value="#1E334C"/><Setter Property="VerticalGridLinesBrush" Value="#1E334C"/><Setter Property="HeadersVisibility" Value="Column"/></Style>
-  <Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="#172A42"/><Setter Property="Foreground" Value="#DDE9F7"/><Setter Property="Padding" Value="8"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/></Style>
-  <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{StaticResource Panel}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="12"/></Style>
+  <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource PrimaryBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+  <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="12"/></Style>
  </Window.Resources>
  <Grid Margin="14">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -26,14 +18,14 @@
    </Grid>
   </Border>
   <Grid Grid.Row="1" Margin="0,10"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-   <Border Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="SẼ NHẬP" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="ImportCountText" Text="0 chương" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="CẦN KIỂM TRA" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="ProblemCountText" Text="0 mục" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="NGUYÊN VĂN" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="SourceSummaryText" Text="Chưa chọn tệp" FontSize="14" TextWrapping="Wrap"/></StackPanel></Border>
-   <Border Grid.Column="3" Style="{StaticResource Card}"><StackPanel><TextBlock Text="TRẠNG THÁI" Foreground="{StaticResource Muted}" FontSize="11"/><TextBlock x:Name="PreviewStatusText" Text="Chọn TXT để bắt đầu" FontSize="14" TextWrapping="Wrap"/></StackPanel></Border>
+   <Border Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="SẼ NHẬP" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="ImportCountText" Text="0 chương" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+   <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="CẦN KIỂM TRA" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="ProblemCountText" Text="0 mục" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+   <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="NGUYÊN VĂN" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="SourceSummaryText" Text="Chưa chọn tệp" FontSize="14" TextWrapping="Wrap"/></StackPanel></Border>
+   <Border Grid.Column="3" Style="{StaticResource Card}"><StackPanel><TextBlock Text="TRẠNG THÁI" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="PreviewStatusText" Text="Chọn TXT để bắt đầu" FontSize="14" TextWrapping="Wrap"/></StackPanel></Border>
   </Grid>
   <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="1.15*"/></Grid.ColumnDefinitions>
    <Border Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,10,0"><DockPanel>
-    <StackPanel DockPanel.Dock="Top"><TextBlock Text="Lọc danh sách" FontSize="17" FontWeight="SemiBold" Margin="4,2,4,8"/><TextBox x:Name="SearchInput" ToolTip="Tìm số, tên hoặc quyển" TextChanged="OnFilterChanged"/><ComboBox x:Name="FilterInput" SelectedIndex="0" SelectionChanged="OnFilterChanged"><ComboBoxItem Tag="All">Tất cả vùng</ComboBoxItem><ComboBoxItem Tag="Problems">Chỉ mục có vấn đề</ComboBoxItem><ComboBoxItem Tag="Included">Chỉ chương sẽ nhập</ComboBoxItem><ComboBoxItem Tag="Unclassified">Vùng chưa phân loại</ComboBoxItem></ComboBox><TextBlock Text="Cảnh báo" Foreground="{StaticResource Muted}" Margin="4,14,4,4"/></StackPanel>
+    <StackPanel DockPanel.Dock="Top"><TextBlock Text="Lọc danh sách" FontSize="17" FontWeight="SemiBold" Margin="4,2,4,8"/><TextBox x:Name="SearchInput" ToolTip="Tìm số, tên hoặc quyển" TextChanged="OnFilterChanged"/><ComboBox x:Name="FilterInput" SelectedIndex="0" SelectionChanged="OnFilterChanged"><ComboBoxItem Tag="All">Tất cả vùng</ComboBoxItem><ComboBoxItem Tag="Problems">Chỉ mục có vấn đề</ComboBoxItem><ComboBoxItem Tag="Included">Chỉ chương sẽ nhập</ComboBoxItem><ComboBoxItem Tag="Unclassified">Vùng chưa phân loại</ComboBoxItem></ComboBox><TextBlock Text="Cảnh báo" Foreground="{DynamicResource MutedBrush}" Margin="4,14,4,4"/></StackPanel>
     <ListBox x:Name="IssuesList" Background="Transparent" Foreground="#F5C86A" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="3,5"/></DataTemplate></ListBox.ItemTemplate></ListBox>
    </DockPanel></Border>
    <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,10,0"><DataGrid x:Name="PreviewGrid" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single" SelectionChanged="OnSelectionChanged" EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" AlternationCount="2">
@@ -41,17 +33,17 @@
    </DataGrid></Border>
    <Border Grid.Column="2" Style="{StaticResource Card}"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
     <TextBlock Text="Kiểm tra &amp; sửa" FontSize="17" FontWeight="SemiBold" Margin="4,2,4,8"/>
-    <TextBlock Text="Số chương" Foreground="{StaticResource Muted}" Margin="4,5,4,0"/><TextBox x:Name="NumberInput"/>
-    <TextBlock Text="Tên chương" Foreground="{StaticResource Muted}" Margin="4,5,4,0"/><TextBox x:Name="TitleInput"/>
+    <TextBlock Text="Số chương" Foreground="{DynamicResource MutedBrush}" Margin="4,5,4,0"/><TextBox x:Name="NumberInput"/>
+    <TextBlock Text="Tên chương" Foreground="{DynamicResource MutedBrush}" Margin="4,5,4,0"/><TextBox x:Name="TitleInput"/>
     <WrapPanel><Button Content="Áp dụng số / tên" Style="{StaticResource Primary}" Click="OnApplyEdit"/><Button x:Name="IncludeButton" Content="Include / Exclude" Click="OnToggleInclude"/></WrapPanel>
     <WrapPanel><Button Content="Tách tại dòng…" Click="OnSplit"/><Button Content="Gộp với chương sau" Click="OnMerge"/><Button Content="Dời ranh giới…" Click="OnMoveBoundary"/><Button x:Name="UndoButton" Content="Hoàn tác" Click="OnUndo"/></WrapPanel>
-    <TextBlock Text="Quanh điểm bắt đầu" Foreground="{StaticResource Muted}" Margin="4,14,4,2"/><TextBox x:Name="StartContextText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="145" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
-    <TextBlock Text="Quanh điểm kết thúc" Foreground="{StaticResource Muted}" Margin="4,10,4,2"/><TextBox x:Name="EndContextText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="145" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
-    <TextBlock x:Name="SelectedDetailText" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="4,10"/>
+    <TextBlock Text="Quanh điểm bắt đầu" Foreground="{DynamicResource MutedBrush}" Margin="4,14,4,2"/><TextBox x:Name="StartContextText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="145" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+    <TextBlock Text="Quanh điểm kết thúc" Foreground="{DynamicResource MutedBrush}" Margin="4,10,4,2"/><TextBox x:Name="EndContextText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="145" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+    <TextBlock x:Name="SelectedDetailText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="4,10"/>
    </StackPanel></ScrollViewer></Border>
   </Grid>
-  <Border Grid.Row="3" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="0,10,0,0"><DockPanel>
-   <TextBlock x:Name="FooterHintText" Text="Nguồn chỉ được đọc; mọi sửa trong preview không đổi file TXT." Foreground="{StaticResource Muted}" VerticalAlignment="Center" TextWrapping="Wrap"/>
+  <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="0,10,0,0"><DockPanel>
+   <TextBlock x:Name="FooterHintText" Text="Nguồn chỉ được đọc; mọi sửa trong preview không đổi file TXT." Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Hủy" Click="OnCancel"/><Button x:Name="ConfirmButton" Content="Nhập các chương đã chọn" Style="{StaticResource Primary}" Click="OnConfirm" IsEnabled="False"/></StackPanel>
   </DockPanel></Border>
  </Grid>

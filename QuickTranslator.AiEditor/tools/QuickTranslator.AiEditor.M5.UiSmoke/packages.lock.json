@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows7.0": {
+      "QuickTranslator.AiEditor": {
+        "type": "Project",
+        "dependencies": {
+          "QuickTranslator.AiEditor.Core": "[1.0.0, )"
+        }
+      },
+      "quicktranslator.aieditor.core": {
+        "type": "Project"
+      }
+    }
+  }
+}

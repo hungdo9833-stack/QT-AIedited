@@ -243,6 +243,13 @@ public partial class MainWindow
     {
         if (ChapterWorkspace is null) return;
         bool active = ReaderModeButton.IsChecked == true;
+        if (!active)
+        {
+            ChapterWorkspace.Background = (Brush)FindResource("AppBackgroundBrush");
+            ChapterModeBar.Background = (Brush)FindResource("AppBackgroundBrush");
+            ChapterModeHint.Foreground = (Brush)FindResource("MutedBrush");
+            return;
+        }
         bool dark = active && _readerPreferences.Theme == ReaderTheme.Dark;
         var palette = ReaderThemePalette.For(dark ? ReaderTheme.Dark : ReaderTheme.Light);
         var background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ChromeBackground));
@@ -430,6 +437,14 @@ public partial class MainWindow
     {
         if (e.Key == Key.F11) { OnToggleFullScreen(sender, e); e.Handled = true; return; }
         if (e.Key == Key.Escape && _focusMode) { OnToggleFocusMode(sender, e); e.Handled = true; return; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.D1)
+        { ShowTranslationWorkspace(false); e.Handled = true; return; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.D2)
+        { ShowTranslationWorkspace(true); e.Handled = true; return; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.S)
+        { OnSaveProgress(sender, e); e.Handled = true; return; }
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.I)
+        { OnToggleInspector(sender, e); e.Handled = true; return; }
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.H)
         {
             OnOpenBatchReplace(sender, e); e.Handled = true; return;

@@ -220,6 +220,8 @@ public partial class MainWindow
         _syncingTraditionalSelection = true;
         try { HanVietText.Text = hanViet; VietPhraseText.Text = vietPhrase; }
         finally { _syncingTraditionalSelection = false; }
+        if (_initialized && _service?.GetSnapshot().Segments.SingleOrDefault(segment => segment.Id == _selectedId) is { } selected)
+            RefreshTranslationInspector(selected);
     }
 
     private void OnTraditionalSelectionChanged(object sender, RoutedEventArgs e)
@@ -363,10 +365,10 @@ public partial class MainWindow
         bool right = HanVietPane.Visibility == Visibility.Visible || AiPane.Visibility == Visibility.Visible;
         bool top = ChinesePane.Visibility == Visibility.Visible || HanVietPane.Visibility == Visibility.Visible;
         bool bottom = VietPhrasePane.Visibility == Visibility.Visible || AiPane.Visibility == Visibility.Visible;
-        TraditionalLeftColumn.Width = left ? new(1, GridUnitType.Star) : new(0);
+        TraditionalLeftColumn.Width = left ? new(_workspaceLayout.FourPaneLeftStar, GridUnitType.Star) : new(0);
         TraditionalRightColumn.Width = right ? new(1, GridUnitType.Star) : new(0);
         TraditionalVerticalSplitterColumn.Width = left && right ? new(6) : new(0);
-        TraditionalTopRow.Height = top ? new(1, GridUnitType.Star) : new(0);
+        TraditionalTopRow.Height = top ? new(_workspaceLayout.FourPaneTopStar, GridUnitType.Star) : new(0);
         TraditionalBottomRow.Height = bottom ? new(1.2, GridUnitType.Star) : new(0);
         TraditionalHorizontalSplitterRow.Height = top && bottom ? new(6) : new(0);
         _chineseHighlight?.InvalidateVisual();

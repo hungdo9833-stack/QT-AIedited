@@ -51,6 +51,7 @@ public partial class MainWindow : Window
         InitializeSourceContextMenus();
         InitializeTraditionalEditor();
         InitializeProjectWorkspace();
+        InitializeProductionShell();
         SavePathText.Text = "Dữ liệu riêng tư chỉ lưu tại: " + ChapterFileStore.DefaultDirectory;
         Refresh();
     }
@@ -378,6 +379,7 @@ public partial class MainWindow : Window
             SavePathText.Text = _service is not null ? "Lưu tại: " + _service.SavePath
                 : _projectSession is not null ? "Dự án: " + _projectSession.RootDirectory
                 : "Dữ liệu riêng tư chỉ lưu tại: " + ChapterFileStore.DefaultDirectory;
+            UpdateShellChrome();
         }
         finally { _rendering = false; }
         UpdateButtons();
@@ -401,6 +403,7 @@ public partial class MainWindow : Window
         bool processingSelected = selectedSegment?.Status == SegmentStatus.Translating;
         UseAiButton.IsEnabled = selected && !processingSelected && !string.IsNullOrWhiteSpace(AiText.Text) && available;
         ApproveButton.IsEnabled = selected && !processingSelected && !string.IsNullOrWhiteSpace(DraftText.Text) && available;
+        ApproveCurrentButton.IsEnabled = ApproveButton.IsEnabled;
         PromptButton.IsEnabled = selected && (HistoryList.SelectedItem as AttemptItem)?.Kind == 0;
         if ((HistoryList.SelectedItem as AttemptItem)?.Kind == 3) UseAiButton.IsEnabled = false;
         DraftText.IsReadOnly = !selected || !available;

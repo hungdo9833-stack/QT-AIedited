@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>QuickTranslator.AiEditor.M5.UiSmoke</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/QuickTranslator.AiEditor.Core/QuickTranslator.AiEditor.Core.csproj" />
+    <ProjectReference Include="../../src/QuickTranslator.AiEditor.Wpf/QuickTranslator.AiEditor.Wpf.csproj" />
+  </ItemGroup>
+</Project>
