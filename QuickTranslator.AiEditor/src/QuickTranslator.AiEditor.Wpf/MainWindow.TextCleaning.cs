@@ -116,7 +116,7 @@ public partial class MainWindow
         var retranslate = new Button
         {
             Content = "Dịch lại…",
-            ToolTip = "Dịch lại toàn bộ segment chứa chữ Hán hoặc chỉ dịch cụm chữ Hán đang chọn"
+            ToolTip = "Dịch lại các vị trí chọn bằng Ctrl/Shift hoặc toàn bộ Project; có thể dịch cả segment hoặc chỉ cụm chữ Hán"
         };
         var cancelRetranslation = new Button { Content = "Hủy dịch lại", IsEnabled = false };
         var selectEligible = new Button { Content = "Chọn vị trí đủ điều kiện" };
@@ -170,9 +170,22 @@ public partial class MainWindow
             var current = _service!.GetWorkingSnapshot();
             var selectedScope = ((ScopeOption)scope.SelectedItem).Scope;
             if (selectedScope != BatchReplacementScope.CurrentProject) return [current];
+            return await ReadProjectScopeAsync();
+        }
+
+        async Task<IReadOnlyList<ChapterDocument>> ReadProjectScopeAsync()
+        {
+            var current = _service!.GetWorkingSnapshot();
             await SaveCurrentAsync();
             var coordinator = new BatchProjectReplacementService(_store);
-            var chapters = await coordinator.LoadProjectChaptersAsync(current.CharacterProject.Id, current);
+            IReadOnlyList<ChapterDocument> chapters = await coordinator.LoadProjectChaptersAsync(current.CharacterProject.Id, current);
+            if (_projectSession is not null)
+            {
+                var readingOrder = _projectSession.Manifest.Chapters.Where(entry => entry.DeletedAt is null)
+                    .Select((entry, index) => (entry.ChapterId, index))
+                    .ToDictionary(item => item.ChapterId, item => item.index);
+                chapters = chapters.OrderBy(chapter => readingOrder.GetValueOrDefault(chapter.Id, int.MaxValue)).ToArray();
+            }
             return _projectResources is null ? chapters : chapters.Select(chapter =>
                 chapter.ProjectId == _projectResources.ProjectId ? _projectResources.CreateWorkingChapter(chapter) : chapter).ToArray();
         }
@@ -262,21 +275,19 @@ public partial class MainWindow
             finally { SetWorking(false); }
         }
 
-        async Task<BatchReplacementPreviewItem> CreateRetranslationPreviewAsync(ChineseOccurrenceRow row,
+        async Task<BatchReplacementPreviewItem> CreateRetranslationPreviewAsync(ChapterDocument chapter,
+            ChineseTextOccurrence occurrence,
             ChineseRetranslationChoice choice, CancellationToken cancellationToken)
         {
-            loadedChapters = await ReadScopeAsync();
-            ChapterDocument chapter = loadedChapters.SingleOrDefault(item => item.Id == row.Item.ChapterId)
-                ?? throw new InvalidOperationException("Chapter của kết quả quét không còn trong phạm vi; hãy quét lại.");
-            TranslationSegment segment = chapter.Segments.SingleOrDefault(item => item.Id == row.Item.SegmentId)
+            TranslationSegment segment = chapter.Segments.SingleOrDefault(item => item.Id == occurrence.SegmentId)
                 ?? throw new InvalidOperationException("Segment đã thay đổi; hãy quét lại.");
             string editable = segment.EditableText;
-            if (row.Item.StartUtf16 < 0 || row.Item.LengthUtf16 <= 0 ||
-                row.Item.StartUtf16 > editable.Length - row.Item.LengthUtf16 ||
-                !editable.AsSpan(row.Item.StartUtf16, row.Item.LengthUtf16).SequenceEqual(row.Item.Text))
+            if (occurrence.StartUtf16 < 0 || occurrence.LengthUtf16 <= 0 ||
+                occurrence.StartUtf16 > editable.Length - occurrence.LengthUtf16 ||
+                !editable.AsSpan(occurrence.StartUtf16, occurrence.LengthUtf16).SequenceEqual(occurrence.Text))
                 throw new InvalidOperationException("Nội dung chữ Hán đã đổi sau lần quét; hãy quét lại.");
             string source = choice.Mode == ChineseRetranslationMode.EntireSegment
-                ? segment.SourceText : row.Item.Text;
+                ? segment.SourceText : occurrence.Text;
             string translated;
             if (choice.Method == ChineseRetranslationMethod.Ollama)
             {
@@ -284,24 +295,20 @@ public partial class MainWindow
                 EnsureOllamaBackendReady();
                 OllamaBackendProfile profile = _ollamaBackends.ActiveProfile;
                 AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
-                string prompt = BuildChineseRetranslationPrompt(chapter, segment, row.Item, choice.Mode,
+                string prompt = BuildChineseRetranslationPrompt(chapter, segment, occurrence, choice.Mode,
                     _presetManager.Selected);
-                status.Text = $"Đang dịch bằng {profile.Name} · {runtime.ModelOptions.Model}; chưa ghi dữ liệu…";
                 OllamaCompletion completion = await _translationClient.TranslateAsync(prompt,
                     runtime.ModelOptions, cancellationToken);
                 translated = CleanRetranslationOutput(completion.Text);
             }
             else
             {
-                status.Text = choice.Method == ChineseRetranslationMethod.VietPhrase
-                    ? "Đang tạo bản VietPhrase; chưa ghi dữ liệu…"
-                    : "Đang tạo bản Hán Việt; chưa ghi dữ liệu…";
                 TraditionalTranslationResult result = await _traditionalService.TranslateAsync(source,
                     cancellationToken: cancellationToken);
                 translated = choice.Method == ChineseRetranslationMethod.VietPhrase
                     ? result.VietPhraseText : result.HanVietText;
             }
-            return ChineseRetranslationPreviewBuilder.Build(chapter, row.Item, choice.Mode, choice.Method, translated);
+            return ChineseRetranslationPreviewBuilder.Build(chapter, occurrence, choice.Mode, choice.Method, translated);
         }
 
         void ApplyFilter()
@@ -323,7 +330,9 @@ public partial class MainWindow
             if (rows.Count == 0) { status.Text = "Chưa chọn vị trí nào."; return; }
             if (rows.Any(x => x.Item.Conflict)) { status.Text = "Bỏ chọn hoặc giải quyết các ánh xạ xung đột trước."; return; }
             bool protectedText = rows.Any(x => x.Item.Protected);
-            bool project = ((ScopeOption)scope.SelectedItem).Scope == BatchReplacementScope.CurrentProject;
+            Guid currentChapterId = _service!.GetSnapshot().Id;
+            bool project = ((ScopeOption)scope.SelectedItem).Scope == BatchReplacementScope.CurrentProject ||
+                           rows.Any(row => row.Item.ChapterId != currentChapterId);
             string warning = $"Áp dụng {rows.Count} vị trí trong {rows.Select(x => x.Item.ChapterId).Distinct().Count()} chương?";
             if (protectedText) warning += "\n\nCó bản đã sửa/duyệt được bảo vệ. Tiếp tục sẽ tạo revision mới và đưa về chờ duyệt.";
             if (project) warning += "\n\nỨng dụng sẽ sao lưu các chương trước khi ghi và báo riêng từng chương thất bại.";
@@ -365,39 +374,77 @@ public partial class MainWindow
         retranslate.Click += async (_, _) =>
         {
             if (working) return;
-            if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row)
-            {
-                status.Text = "Hãy chọn một vị trí chữ Hán trong tab Chữ Hán còn sót.";
-                tabs.SelectedIndex = 1;
-                return;
-            }
-            ChineseRetranslationChoice? choice = ShowChineseRetranslationOptions(window, row);
+            ChineseOccurrenceRow[] selectedRows = chineseGrid.SelectedItems.Cast<ChineseOccurrenceRow>().ToArray();
+            ChineseRetranslationChoice? choice = ShowChineseRetranslationOptions(window, selectedRows);
             if (choice is null) return;
             retranslationCancellation = new CancellationTokenSource();
             cancelRetranslation.IsEnabled = true;
             SetWorking(true, "Đang chuẩn bị bản dịch lại; chưa ghi dữ liệu…");
             try
             {
-                BatchReplacementPreviewItem item = await CreateRetranslationPreviewAsync(row, choice,
-                    retranslationCancellation.Token);
+                Guid currentChapterId = _service!.GetSnapshot().Id;
+                bool needsProject = choice.ChapterScope == ChineseRetranslationChapterScope.EntireProject ||
+                                    selectedRows.Any(row => row.Item.ChapterId != currentChapterId);
+                loadedChapters = needsProject ? await ReadProjectScopeAsync() : [_service.GetWorkingSnapshot()];
+                IReadOnlyList<ChineseTextOccurrence> sourceOccurrences;
+                if (choice.ChapterScope == ChineseRetranslationChapterScope.EntireProject)
+                {
+                    Guid projectId = _service.GetSnapshot().CharacterProject.Id;
+                    ChineseTextScanReport scan = await Task.Run(() => _chineseTextScanner.Scan(loadedChapters, projectId),
+                        retranslationCancellation.Token);
+                    sourceOccurrences = scan.Occurrences
+                        .Where(item => item.Classification != ChineseTextClassification.Ignored).ToArray();
+                    scope.SelectedIndex = 2;
+                }
+                else sourceOccurrences = selectedRows.Select(row => row.Item).ToArray();
+                IReadOnlyList<ChineseTextOccurrence> targets = ChineseRetranslationPreviewBuilder.PlanTargets(
+                    loadedChapters, sourceOccurrences, choice.Mode);
+                if (targets.Count == 0)
+                    throw new InvalidOperationException("Không có vị trí chữ Hán cần dịch lại trong phạm vi đã chọn.");
+
                 previewRows.Clear();
-                var previewRow = new BatchPreviewRow(item);
-                previewRows.Add(previewRow);
-                previewGrid.SelectedItem = previewRow;
+                var failures = new List<string>();
+                for (int index = 0; index < targets.Count; index++)
+                {
+                    retranslationCancellation.Token.ThrowIfCancellationRequested();
+                    ChineseTextOccurrence target = targets[index];
+                    ChapterDocument chapter = loadedChapters.Single(item => item.Id == target.ChapterId);
+                    string method = choice.Method switch
+                    {
+                        ChineseRetranslationMethod.Ollama => "Ollama",
+                        ChineseRetranslationMethod.VietPhrase => "VietPhrase",
+                        _ => "Hán Việt"
+                    };
+                    status.Text = $"Đang tạo preview {index + 1:N0}/{targets.Count:N0} bằng {method}; chưa ghi dữ liệu…";
+                    try
+                    {
+                        BatchReplacementPreviewItem item = await CreateRetranslationPreviewAsync(chapter, target, choice,
+                            retranslationCancellation.Token);
+                        previewRows.Add(new(item));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        failures.Add($"{chapter.Title} · đoạn {target.SegmentOrder}: {ex.Message}");
+                    }
+                }
+                if (previewRows.Count == 0 && failures.Count > 0)
+                    throw new InvalidOperationException("Không tạo được preview nào. " + failures[0]);
+                previewGrid.SelectedItem = previewRows.FirstOrDefault();
                 tabs.SelectedIndex = 0;
-                status.Foreground = Brushes.DarkSlateGray;
-                status.Text = "Đã tạo preview dịch lại. Kiểm tra câu trước/sau rồi bấm Thay vị trí đang chọn; " +
-                    "chưa có dữ liệu nào được ghi.";
+                status.Foreground = failures.Count == 0 ? Brushes.DarkSlateGray : Brushes.DarkOrange;
+                status.Text = $"Đã tạo {previewRows.Count:N0} preview; lỗi/bỏ qua {failures.Count:N0}. " +
+                    "Kiểm tra câu trước/sau rồi chọn các dòng cần áp dụng; chưa có dữ liệu nào được ghi." +
+                    (failures.Count == 0 ? "" : "\n" + string.Join("\n", failures.Take(3)));
             }
             catch (OperationCanceledException)
             {
                 status.Foreground = Brushes.DarkSlateGray;
-                status.Text = "Đã hủy dịch lại; nội dung chapter chưa thay đổi.";
+                status.Text = $"Đã hủy dịch lại sau {previewRows.Count:N0} preview; nội dung chapter chưa thay đổi.";
             }
             catch (Exception ex)
             {
                 status.Foreground = Brushes.Firebrick;
-                status.Text = "Lỗi dịch lại: " + ex.Message;
+                status.Text = $"Lỗi dịch lại sau {previewRows.Count:N0} preview: {ex.Message} Nội dung chapter chưa thay đổi.";
             }
             finally
             {
@@ -558,8 +605,18 @@ public partial class MainWindow
             MessageBoxButton.OK, report.FailedChapters == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
-    private static ChineseRetranslationChoice? ShowChineseRetranslationOptions(Window owner, ChineseOccurrenceRow row)
+    private static ChineseRetranslationChoice? ShowChineseRetranslationOptions(Window owner,
+        IReadOnlyList<ChineseOccurrenceRow> selectedRows)
     {
+        var chapterScope = new ComboBox { MinWidth = 390, DisplayMemberPath = nameof(RetranslationChapterScopeOption.Label) };
+        var chapterScopeOptions = new List<RetranslationChapterScopeOption>();
+        if (selectedRows.Count > 0)
+            chapterScopeOptions.Add(new(ChineseRetranslationChapterScope.SelectedOccurrences,
+                $"Các vị trí đã chọn ({selectedRows.Count:N0})"));
+        chapterScopeOptions.Add(new(ChineseRetranslationChapterScope.EntireProject,
+            "Toàn bộ dự án · mọi chapter còn chữ Hán"));
+        chapterScope.ItemsSource = chapterScopeOptions;
+        chapterScope.SelectedIndex = 0;
         var mode = new ComboBox { MinWidth = 330, DisplayMemberPath = nameof(RetranslationModeOption.Label) };
         mode.ItemsSource = new[]
         {
@@ -585,27 +642,33 @@ public partial class MainWindow
         var panel = new StackPanel { Margin = new Thickness(18) };
         panel.Children.Add(new TextBlock
         {
-            Text = $"Chương: {row.Chapter} · đoạn {row.Segment}\nCụm đang chọn: {row.Text}",
+            Text = selectedRows.Count == 1
+                ? $"Đã chọn: {selectedRows[0].Chapter} · đoạn {selectedRows[0].Segment} · {selectedRows[0].Text}"
+                : selectedRows.Count > 1
+                    ? $"Đã chọn {selectedRows.Count:N0} vị trí trong {selectedRows.Select(row => row.Item.ChapterId).Distinct().Count():N0} chapter."
+                    : "Chưa chọn vị trí riêng; QT Studio sẽ quét và tạo preview cho toàn bộ dự án.",
             TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 12)
         });
-        panel.Children.Add(new TextBlock { Text = "Phạm vi dịch lại", Margin = new Thickness(0, 4, 0, 3) });
+        panel.Children.Add(new TextBlock { Text = "Phạm vi chapter", Margin = new Thickness(0, 4, 0, 3) });
+        panel.Children.Add(chapterScope);
+        panel.Children.Add(new TextBlock { Text = "Phần văn bản cần dịch", Margin = new Thickness(0, 12, 0, 3) });
         panel.Children.Add(mode);
         panel.Children.Add(new TextBlock { Text = "Phương pháp", Margin = new Thickness(0, 12, 0, 3) });
         panel.Children.Add(method);
         panel.Children.Add(new TextBlock
         {
-            Text = row.Item.Protected
+            Text = selectedRows.Any(row => row.Item.Protected)
                 ? "Đoạn này có bản sửa hoặc Approval. Preview vẫn được tạo; khi áp dụng QT Studio sẽ yêu cầu xác nhận và giữ lịch sử cũ."
-                : "Kết quả chỉ được đưa vào preview. Chapter chưa thay đổi cho tới khi bạn xác nhận áp dụng.",
+                : "Toàn bộ dự án sẽ bỏ qua các cụm đã đánh dấu Giữ nguyên. Kết quả chỉ được đưa vào preview; dữ liệu chưa đổi cho tới khi xác nhận áp dụng.",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 14, 0, 14),
-            Foreground = row.Item.Protected ? Brushes.DarkOrange : Brushes.DarkSlateGray
+            Foreground = selectedRows.Any(row => row.Item.Protected) ? Brushes.DarkOrange : Brushes.DarkSlateGray
         });
         panel.Children.Add(actions);
         var dialog = new Window
         {
             Owner = owner,
             Title = "Dịch lại nội dung còn chữ Hán",
-            Width = 480,
+            Width = 540,
             SizeToContent = SizeToContent.Height,
             MinHeight = 300,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -615,7 +678,8 @@ public partial class MainWindow
         ChineseRetranslationChoice? result = null;
         create.Click += (_, _) =>
         {
-            result = new(((RetranslationModeOption)mode.SelectedItem).Mode,
+            result = new(((RetranslationChapterScopeOption)chapterScope.SelectedItem).Scope,
+                ((RetranslationModeOption)mode.SelectedItem).Mode,
                 ((RetranslationMethodOption)method.SelectedItem).Method);
             dialog.DialogResult = true;
         };
@@ -681,6 +745,7 @@ public partial class MainWindow
     {
         var grid = BaseGrid();
         grid.IsReadOnly = true;
+        grid.SelectionMode = DataGridSelectionMode.Extended;
         grid.Columns.Add(TextColumn("Cụm", nameof(ChineseOccurrenceRow.Text), 130));
         grid.Columns.Add(TextColumn("Số lần", nameof(ChineseOccurrenceRow.Count), 70));
         grid.Columns.Add(TextColumn("Phân loại", nameof(ChineseOccurrenceRow.Classification), 130));
@@ -738,9 +803,12 @@ public partial class MainWindow
 
     private sealed record ScopeOption(BatchReplacementScope Scope, string Label);
     private sealed record NavigationRequest(Guid ChapterId, Guid SegmentId, int StartUtf16, int LengthUtf16);
+    private enum ChineseRetranslationChapterScope { SelectedOccurrences, EntireProject }
+    private sealed record RetranslationChapterScopeOption(ChineseRetranslationChapterScope Scope, string Label);
     private sealed record RetranslationModeOption(ChineseRetranslationMode Mode, string Label);
     private sealed record RetranslationMethodOption(ChineseRetranslationMethod Method, string Label);
-    private sealed record ChineseRetranslationChoice(ChineseRetranslationMode Mode, ChineseRetranslationMethod Method);
+    private sealed record ChineseRetranslationChoice(ChineseRetranslationChapterScope ChapterScope,
+        ChineseRetranslationMode Mode, ChineseRetranslationMethod Method);
 
     private sealed class BatchPreviewRow(BatchReplacementPreviewItem item) : INotifyPropertyChanged
     {

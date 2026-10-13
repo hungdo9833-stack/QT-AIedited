@@ -7,6 +7,25 @@ namespace QuickTranslator.AiEditor.Tests;
 public sealed class ChineseRetranslationTests
 {
     [Fact]
+    public void Planner_keeps_multiple_selected_clusters_and_deduplicates_whole_segments()
+    {
+        ChapterDocument first = Chapter("Còn 老公 rồi 上次在酒店.");
+        ChapterDocument second = Chapter("Tiếp theo là 问道.");
+        ChineseTextOccurrence[] occurrences = Scan(first).Concat(Scan(second)).Reverse().ToArray();
+
+        IReadOnlyList<ChineseTextOccurrence> residual = ChineseRetranslationPreviewBuilder.PlanTargets(
+            [first, second], occurrences.Concat([occurrences[0]]), ChineseRetranslationMode.ResidualHanOnly);
+        IReadOnlyList<ChineseTextOccurrence> wholeSegments = ChineseRetranslationPreviewBuilder.PlanTargets(
+            [first, second], occurrences, ChineseRetranslationMode.EntireSegment);
+
+        Assert.Equal(3, residual.Count);
+        Assert.Equal(first.Id, residual[0].ChapterId);
+        Assert.Equal(["老公", "上次在酒店", "问道"], residual.Select(item => item.Text));
+        Assert.Equal(2, wholeSegments.Count);
+        Assert.Equal([first.Id, second.Id], wholeSegments.Select(item => item.ChapterId));
+    }
+
+    [Fact]
     public void Residual_mode_previews_and_replaces_only_the_selected_han_cluster()
     {
         ChapterDocument chapter = Chapter("Anh ấy nói 老公, 上次在酒店 rồi rời đi.");

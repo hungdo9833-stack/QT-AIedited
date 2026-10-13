@@ -22,6 +22,32 @@ public enum ChineseRetranslationMethod
 /// </summary>
 public static class ChineseRetranslationPreviewBuilder
 {
+    public static IReadOnlyList<ChineseTextOccurrence> PlanTargets(IEnumerable<ChapterDocument> chapters,
+        IEnumerable<ChineseTextOccurrence> occurrences, ChineseRetranslationMode mode)
+    {
+        ArgumentNullException.ThrowIfNull(chapters);
+        ArgumentNullException.ThrowIfNull(occurrences);
+        ChapterDocument[] chapterList = chapters.ToArray();
+        var chapterOrder = chapterList.Select((chapter, index) => (chapter.Id, index))
+            .ToDictionary(item => item.Id, item => item.index);
+        var segmentOrder = chapterList.SelectMany(chapter => chapter.Segments.Select(segment =>
+                (Key: (chapter.Id, segment.Id), segment.Order)))
+            .ToDictionary(item => item.Key, item => item.Order);
+        ChineseTextOccurrence[] selected = occurrences
+            .DistinctBy(item => (item.ChapterId, item.SegmentId, item.StartUtf16, item.LengthUtf16))
+            .ToArray();
+        if (selected.Any(item => !chapterOrder.ContainsKey(item.ChapterId)))
+            throw new InvalidOperationException("Có kết quả quét thuộc chapter không còn trong phạm vi; hãy quét lại.");
+        if (selected.Any(item => !segmentOrder.ContainsKey((item.ChapterId, item.SegmentId))))
+            throw new InvalidOperationException("Có kết quả quét thuộc segment không còn trong chapter; hãy quét lại.");
+        if (mode == ChineseRetranslationMode.EntireSegment)
+            selected = selected.GroupBy(item => (item.ChapterId, item.SegmentId))
+                .Select(group => group.OrderBy(item => item.StartUtf16).First()).ToArray();
+        return selected.OrderBy(item => chapterOrder[item.ChapterId])
+            .ThenBy(item => segmentOrder[(item.ChapterId, item.SegmentId)])
+            .ThenBy(item => item.StartUtf16).ToArray();
+    }
+
     public static BatchReplacementPreviewItem Build(ChapterDocument chapter, ChineseTextOccurrence occurrence,
         ChineseRetranslationMode mode, ChineseRetranslationMethod method, string translatedText)
     {
