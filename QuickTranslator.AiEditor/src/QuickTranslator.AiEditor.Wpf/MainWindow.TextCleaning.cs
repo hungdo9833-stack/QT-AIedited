@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
@@ -10,6 +11,8 @@ using System.Windows.Media;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.TextCleaning;
+using QuickTranslator.AiEditor.Core.Traditional;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -110,6 +113,12 @@ public partial class MainWindow
 
         var findButton = new Button { Content = "Tìm tất cả / Xem trước", Style = (Style)FindResource("PrimaryButton") };
         var scanButton = new Button { Content = "Quét chữ Hán" };
+        var retranslate = new Button
+        {
+            Content = "Dịch lại…",
+            ToolTip = "Dịch lại toàn bộ segment chứa chữ Hán hoặc chỉ dịch cụm chữ Hán đang chọn"
+        };
+        var cancelRetranslation = new Button { Content = "Hủy dịch lại", IsEnabled = false };
         var selectEligible = new Button { Content = "Chọn vị trí đủ điều kiện" };
         var applyCurrent = new Button { Content = "Thay vị trí đang chọn" };
         var applySelected = new Button { Content = "Thay tất cả vị trí được chọn", Style = (Style)FindResource("PrimaryButton") };
@@ -131,7 +140,8 @@ public partial class MainWindow
         var filter = new WrapPanel(); filter.Children.Add(LabelFor("Lọc", search)); filter.Children.Add(search);
         filter.Children.Add(classification); top.Children.Add(filter); top.Children.Add(progress); top.Children.Add(status);
         var bottom = new WrapPanel();
-        foreach (var button in new[] { selectEligible, applyCurrent, applySelected, undo, keep, addGlossary, addCharacter, close }) bottom.Children.Add(button);
+        foreach (var button in new[] { selectEligible, retranslate, cancelRetranslation, applyCurrent, applySelected,
+                     undo, keep, addGlossary, addCharacter, close }) bottom.Children.Add(button);
         var root = new DockPanel { Margin = new Thickness(10) };
         DockPanel.SetDock(top, Dock.Top); root.Children.Add(top);
         DockPanel.SetDock(bottom, Dock.Bottom); root.Children.Add(bottom); root.Children.Add(tabs);
@@ -143,13 +153,15 @@ public partial class MainWindow
 
         IReadOnlyList<ChapterDocument> loadedChapters = [_service.GetSnapshot()];
         NavigationRequest? navigation = null;
+        CancellationTokenSource? retranslationCancellation = null;
         bool working = false;
 
         void SetWorking(bool value, string message = "")
         {
             working = value; progress.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
             findButton.IsEnabled = scanButton.IsEnabled = applyCurrent.IsEnabled = applySelected.IsEnabled =
-                undo.IsEnabled = keep.IsEnabled = addGlossary.IsEnabled = addCharacter.IsEnabled = !value;
+                undo.IsEnabled = keep.IsEnabled = addGlossary.IsEnabled = addCharacter.IsEnabled =
+                    retranslate.IsEnabled = !value;
             if (message.Length > 0) status.Text = message;
         }
 
@@ -250,6 +262,48 @@ public partial class MainWindow
             finally { SetWorking(false); }
         }
 
+        async Task<BatchReplacementPreviewItem> CreateRetranslationPreviewAsync(ChineseOccurrenceRow row,
+            ChineseRetranslationChoice choice, CancellationToken cancellationToken)
+        {
+            loadedChapters = await ReadScopeAsync();
+            ChapterDocument chapter = loadedChapters.SingleOrDefault(item => item.Id == row.Item.ChapterId)
+                ?? throw new InvalidOperationException("Chapter của kết quả quét không còn trong phạm vi; hãy quét lại.");
+            TranslationSegment segment = chapter.Segments.SingleOrDefault(item => item.Id == row.Item.SegmentId)
+                ?? throw new InvalidOperationException("Segment đã thay đổi; hãy quét lại.");
+            string editable = segment.EditableText;
+            if (row.Item.StartUtf16 < 0 || row.Item.LengthUtf16 <= 0 ||
+                row.Item.StartUtf16 > editable.Length - row.Item.LengthUtf16 ||
+                !editable.AsSpan(row.Item.StartUtf16, row.Item.LengthUtf16).SequenceEqual(row.Item.Text))
+                throw new InvalidOperationException("Nội dung chữ Hán đã đổi sau lần quét; hãy quét lại.");
+            string source = choice.Mode == ChineseRetranslationMode.EntireSegment
+                ? segment.SourceText : row.Item.Text;
+            string translated;
+            if (choice.Method == ChineseRetranslationMethod.Ollama)
+            {
+                await EnsureOllamaBackendsLoadedAsync();
+                EnsureOllamaBackendReady();
+                OllamaBackendProfile profile = _ollamaBackends.ActiveProfile;
+                AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
+                string prompt = BuildChineseRetranslationPrompt(chapter, segment, row.Item, choice.Mode,
+                    _presetManager.Selected);
+                status.Text = $"Đang dịch bằng {profile.Name} · {runtime.ModelOptions.Model}; chưa ghi dữ liệu…";
+                OllamaCompletion completion = await _translationClient.TranslateAsync(prompt,
+                    runtime.ModelOptions, cancellationToken);
+                translated = CleanRetranslationOutput(completion.Text);
+            }
+            else
+            {
+                status.Text = choice.Method == ChineseRetranslationMethod.VietPhrase
+                    ? "Đang tạo bản VietPhrase; chưa ghi dữ liệu…"
+                    : "Đang tạo bản Hán Việt; chưa ghi dữ liệu…";
+                TraditionalTranslationResult result = await _traditionalService.TranslateAsync(source,
+                    cancellationToken: cancellationToken);
+                translated = choice.Method == ChineseRetranslationMethod.VietPhrase
+                    ? result.VietPhraseText : result.HanVietText;
+            }
+            return ChineseRetranslationPreviewBuilder.Build(chapter, row.Item, choice.Mode, choice.Method, translated);
+        }
+
         void ApplyFilter()
         {
             string query = search.Text.Trim();
@@ -308,6 +362,52 @@ public partial class MainWindow
 
         findButton.Click += async (_, _) => await PreviewAsync();
         scanButton.Click += async (_, _) => await ScanAsync();
+        retranslate.Click += async (_, _) =>
+        {
+            if (working) return;
+            if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row)
+            {
+                status.Text = "Hãy chọn một vị trí chữ Hán trong tab Chữ Hán còn sót.";
+                tabs.SelectedIndex = 1;
+                return;
+            }
+            ChineseRetranslationChoice? choice = ShowChineseRetranslationOptions(window, row);
+            if (choice is null) return;
+            retranslationCancellation = new CancellationTokenSource();
+            cancelRetranslation.IsEnabled = true;
+            SetWorking(true, "Đang chuẩn bị bản dịch lại; chưa ghi dữ liệu…");
+            try
+            {
+                BatchReplacementPreviewItem item = await CreateRetranslationPreviewAsync(row, choice,
+                    retranslationCancellation.Token);
+                previewRows.Clear();
+                var previewRow = new BatchPreviewRow(item);
+                previewRows.Add(previewRow);
+                previewGrid.SelectedItem = previewRow;
+                tabs.SelectedIndex = 0;
+                status.Foreground = Brushes.DarkSlateGray;
+                status.Text = "Đã tạo preview dịch lại. Kiểm tra câu trước/sau rồi bấm Thay vị trí đang chọn; " +
+                    "chưa có dữ liệu nào được ghi.";
+            }
+            catch (OperationCanceledException)
+            {
+                status.Foreground = Brushes.DarkSlateGray;
+                status.Text = "Đã hủy dịch lại; nội dung chapter chưa thay đổi.";
+            }
+            catch (Exception ex)
+            {
+                status.Foreground = Brushes.Firebrick;
+                status.Text = "Lỗi dịch lại: " + ex.Message;
+            }
+            finally
+            {
+                retranslationCancellation.Dispose();
+                retranslationCancellation = null;
+                cancelRetranslation.IsEnabled = false;
+                SetWorking(false);
+            }
+        };
+        cancelRetranslation.Click += (_, _) => retranslationCancellation?.Cancel();
         selectEligible.Click += (_, _) =>
         {
             foreach (var row in previewRows) row.IsSelected = row.Item.RuleConfirmed && !row.Item.Protected && !row.Item.Conflict;
@@ -458,6 +558,111 @@ public partial class MainWindow
             MessageBoxButton.OK, report.FailedChapters == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
+    private static ChineseRetranslationChoice? ShowChineseRetranslationOptions(Window owner, ChineseOccurrenceRow row)
+    {
+        var mode = new ComboBox { MinWidth = 330, DisplayMemberPath = nameof(RetranslationModeOption.Label) };
+        mode.ItemsSource = new[]
+        {
+            new RetranslationModeOption(ChineseRetranslationMode.ResidualHanOnly,
+                "Chỉ dịch cụm chữ Hán còn sót (ít thay đổi)"),
+            new RetranslationModeOption(ChineseRetranslationMode.EntireSegment,
+                "Dịch lại toàn bộ đoạn từ nguyên văn Trung")
+        };
+        mode.SelectedIndex = 0;
+        var method = new ComboBox { MinWidth = 330, DisplayMemberPath = nameof(RetranslationMethodOption.Label) };
+        method.ItemsSource = new[]
+        {
+            new RetranslationMethodOption(ChineseRetranslationMethod.Ollama, "Ollama · profile AI đang chọn"),
+            new RetranslationMethodOption(ChineseRetranslationMethod.VietPhrase, "VietPhrase · Data QuickTranslator"),
+            new RetranslationMethodOption(ChineseRetranslationMethod.HanViet, "Hán Việt · Data QuickTranslator")
+        };
+        method.SelectedIndex = 0;
+        var create = new Button { Content = "Tạo preview", IsDefault = true, MinWidth = 110 };
+        if (owner.TryFindResource("PrimaryButton") is Style primary) create.Style = primary;
+        var cancel = new Button { Content = "Hủy", IsCancel = true, MinWidth = 80 };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        actions.Children.Add(create); actions.Children.Add(cancel);
+        var panel = new StackPanel { Margin = new Thickness(18) };
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"Chương: {row.Chapter} · đoạn {row.Segment}\nCụm đang chọn: {row.Text}",
+            TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 12)
+        });
+        panel.Children.Add(new TextBlock { Text = "Phạm vi dịch lại", Margin = new Thickness(0, 4, 0, 3) });
+        panel.Children.Add(mode);
+        panel.Children.Add(new TextBlock { Text = "Phương pháp", Margin = new Thickness(0, 12, 0, 3) });
+        panel.Children.Add(method);
+        panel.Children.Add(new TextBlock
+        {
+            Text = row.Item.Protected
+                ? "Đoạn này có bản sửa hoặc Approval. Preview vẫn được tạo; khi áp dụng QT Studio sẽ yêu cầu xác nhận và giữ lịch sử cũ."
+                : "Kết quả chỉ được đưa vào preview. Chapter chưa thay đổi cho tới khi bạn xác nhận áp dụng.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 14, 0, 14),
+            Foreground = row.Item.Protected ? Brushes.DarkOrange : Brushes.DarkSlateGray
+        });
+        panel.Children.Add(actions);
+        var dialog = new Window
+        {
+            Owner = owner,
+            Title = "Dịch lại nội dung còn chữ Hán",
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            MinHeight = 300,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            Content = panel
+        };
+        ChineseRetranslationChoice? result = null;
+        create.Click += (_, _) =>
+        {
+            result = new(((RetranslationModeOption)mode.SelectedItem).Mode,
+                ((RetranslationMethodOption)method.SelectedItem).Method);
+            dialog.DialogResult = true;
+        };
+        return dialog.ShowDialog() == true ? result : null;
+    }
+
+    private static string BuildChineseRetranslationPrompt(ChapterDocument chapter, TranslationSegment segment,
+        ChineseTextOccurrence occurrence, ChineseRetranslationMode mode, PromptPreset preset)
+    {
+        string target = mode == ChineseRetranslationMode.EntireSegment ? segment.SourceText : occurrence.Text;
+        GlossaryEntry[] glossary = chapter.ConfirmedTerms
+            .Where(term => target.Contains(term.Chinese, StringComparison.Ordinal) ||
+                           occurrence.Sentence.Contains(term.Chinese, StringComparison.Ordinal))
+            .Select(term => new GlossaryEntry(term.Chinese, term.Vietnamese)).DistinctBy(term => term.Chinese).ToArray();
+        if (mode == ChineseRetranslationMode.EntireSegment)
+            return new TranslationPromptBuilder().Build(segment.SourceText, glossary,
+                chapter.ConfirmedContextNotes, preset);
+        var prompt = new StringBuilder();
+        prompt.AppendLine("Dịch chính xác cụm chữ Hán còn sót sau sang tiếng Việt để chèn vào câu đã dịch.");
+        prompt.AppendLine("Chỉ trả phần tiếng Việt thay thế cho cụm đó; không giải thích, không Markdown, không thêm dấu ngoặc.");
+        prompt.AppendLine("Cụm chữ Hán: " + occurrence.Text);
+        prompt.AppendLine("Câu hiện tại để tham khảo ngữ cảnh: " + occurrence.Sentence);
+        if (glossary.Length > 0)
+        {
+            prompt.AppendLine("Thuật ngữ đã xác nhận:");
+            foreach (GlossaryEntry term in glossary) prompt.AppendLine($"{term.Chinese} = {term.Vietnamese}");
+        }
+        if (!string.IsNullOrWhiteSpace(chapter.ConfirmedContextNotes))
+            prompt.AppendLine("Ghi chú ngữ cảnh: " + chapter.ConfirmedContextNotes);
+        return prompt.ToString();
+    }
+
+    private static string CleanRetranslationOutput(string output)
+    {
+        string text = output?.Trim() ?? "";
+        if (text.StartsWith("```", StringComparison.Ordinal))
+        {
+            int firstLine = text.IndexOf('\n');
+            int lastFence = text.LastIndexOf("```", StringComparison.Ordinal);
+            if (firstLine >= 0 && lastFence > firstLine) text = text[(firstLine + 1)..lastFence].Trim();
+        }
+        if (text.Length >= 2 && text[0] == '"' && text[^1] == '"' && !text.Contains('\n'))
+            text = text[1..^1].Trim();
+        if (text.Length == 0) throw new InvalidDataException("Backend trả kết quả dịch lại rỗng.");
+        return text;
+    }
+
     private static DataGrid CreatePreviewGrid()
     {
         var grid = BaseGrid();
@@ -533,6 +738,9 @@ public partial class MainWindow
 
     private sealed record ScopeOption(BatchReplacementScope Scope, string Label);
     private sealed record NavigationRequest(Guid ChapterId, Guid SegmentId, int StartUtf16, int LengthUtf16);
+    private sealed record RetranslationModeOption(ChineseRetranslationMode Mode, string Label);
+    private sealed record RetranslationMethodOption(ChineseRetranslationMethod Method, string Label);
+    private sealed record ChineseRetranslationChoice(ChineseRetranslationMode Mode, ChineseRetranslationMethod Method);
 
     private sealed class BatchPreviewRow(BatchReplacementPreviewItem item) : INotifyPropertyChanged
     {
