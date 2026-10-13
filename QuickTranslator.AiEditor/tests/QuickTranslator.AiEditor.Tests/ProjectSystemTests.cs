@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Persistence;
@@ -124,6 +126,25 @@ public sealed class ProjectSystemTests : IDisposable
     }
 
     [Fact]
+    public async Task Legacy_project_settings_without_profile_id_keep_default_local_backend()
+    {
+        var project = await _repository.CreateAsync(Path.Combine(_root, "LegacyBackend"), "Truyện cũ");
+        var value = new ProjectTranslationSettings { TraditionalDataDirectory = "LegacyData" };
+        JsonObject json = Assert.IsType<JsonObject>(JsonNode.Parse(JsonSerializer.Serialize(value, DocumentJson.Options)));
+        Assert.True(json.Remove("ollamaProfileId"));
+        string path = project.Resolve(project.Manifest.Files.TranslationSettings);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, json.ToJsonString(DocumentJson.Options));
+
+        ProjectTranslationSettings reopened = await new ProjectSettingsStore(project).LoadTranslationAsync();
+        using var manager = new OllamaBackendManager(new OllamaProfileStore(
+            Path.Combine(_root, "legacy-profiles.json"), new PassThroughProtector()));
+
+        Assert.Null(reopened.OllamaProfileId);
+        Assert.Equal(OllamaBackendProfile.DefaultLocalId, manager.GetProfile(reopened.OllamaProfileId).Id);
+    }
+
+    [Fact]
     public async Task Library_RememberSearchRemoveAndRelocateOnlyChangesShortcut()
     {
         var project = await _repository.CreateAsync(Path.Combine(_root, "Library"), "Tiên hiệp");
@@ -226,4 +247,10 @@ public sealed class ProjectSystemTests : IDisposable
     private static ProjectManifest ValidManifest() => new() { ProjectId = Guid.NewGuid(), VietnameseTitle = "Hợp lệ", CreatedAt = DateTimeOffset.UtcNow };
     private static ProjectChapterEntry Entry(int number) => new() { ChapterId = Guid.NewGuid(), Number = number, RelativePath = $"Chapters/{Guid.NewGuid():D}.qtaie.json" };
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
+
+    private sealed class PassThroughProtector : IOllamaSecretProtector
+    {
+        public string Protect(string value) => value;
+        public string Unprotect(string value) => value;
+    }
 }

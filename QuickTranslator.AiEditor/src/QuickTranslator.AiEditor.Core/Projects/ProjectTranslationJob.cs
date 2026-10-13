@@ -1,4 +1,5 @@
 using QuickTranslator.AiEditor.Core.Models;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Core.Projects;
 
@@ -20,6 +21,7 @@ public sealed class ProjectTranslationJob
     public long Revision { get; set; }
     public ProjectTranslationJobStatus Status { get; set; } = ProjectTranslationJobStatus.Draft;
     public ModelOptions ModelOptions { get; set; } = new();
+    public OllamaBackendSnapshot? Backend { get; set; }
     public PromptPreset PromptPreset { get; set; } = PromptPreset.Default;
     public long ProjectResourceRevision { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -36,6 +38,9 @@ public sealed class ProjectTranslationJob
             Items.Any(item => item is null) || Items.Select(item => item.ChapterId).Distinct().Count() != Items.Count)
             throw new InvalidDataException("Project translation job không hợp lệ.");
         ModelOptions.Validate();
+        Backend?.Validate();
+        if (Backend is not null && !string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
+            throw new InvalidDataException("Model trong backend snapshot không khớp Queue Plan.");
         PromptPreset.Validate();
         foreach (ProjectTranslationItem item in Items) item.Validate();
         if (CurrentChapterId is Guid current && !Items.Any(item => item.ChapterId == current))
@@ -71,8 +76,26 @@ public sealed class ProjectTranslationItem
     }
 }
 
+public sealed record OllamaBackendSnapshot(Guid ProfileId, OllamaBackendKind Kind, string ProfileName,
+    string Endpoint, string Model)
+{
+    public static OllamaBackendSnapshot LocalDefault(string model) => new(OllamaBackendProfile.DefaultLocalId,
+        OllamaBackendKind.Local, "Ollama Local", OllamaClient.DefaultEndpoint.ToString(), model);
+
+    public void Validate()
+    {
+        if (ProfileId == Guid.Empty || !Enum.IsDefined(Kind) || string.IsNullOrWhiteSpace(ProfileName) ||
+            ProfileName.Length > 100 || string.IsNullOrWhiteSpace(Model) || Model.Length > 200 ||
+            !Uri.TryCreate(Endpoint, UriKind.Absolute, out Uri? endpoint))
+            throw new InvalidDataException("Backend snapshot của translation queue không hợp lệ.");
+        _ = Kind == OllamaBackendKind.Local
+            ? OllamaClient.ValidateLocalEndpoint(endpoint)
+            : OllamaClient.ValidateRemoteEndpoint(endpoint);
+    }
+}
+
 public sealed record ProjectTranslationEnvironment(ModelOptions ModelOptions, PromptPreset PromptPreset,
-    ProjectResources Resources);
+    ProjectResources Resources, OllamaBackendSnapshot? Backend = null);
 
 public sealed record ProjectTranslationProgress(ProjectTranslationJobStatus Status, int TotalChapters,
     int CompletedChapters, int FailedChapters, int SkippedChapters, int PendingChapters,

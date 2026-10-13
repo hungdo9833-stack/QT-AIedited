@@ -84,6 +84,7 @@ public sealed class ProjectTranslationSettings
     public ModelOptions Model { get; set; } = new();
     public SegmenterOptions Segmentation { get; set; } = new();
     public Guid? SelectedPromptPresetId { get; set; }
+    public Guid? OllamaProfileId { get; set; }
     public string TraditionalDataDirectory { get; set; } = "";
 }
 

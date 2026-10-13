@@ -85,6 +85,7 @@ public sealed class ProjectTranslationCoordinator
             ProjectId = _session.Manifest.ProjectId,
             Status = ProjectTranslationJobStatus.Draft,
             ModelOptions = environment.ModelOptions with { },
+            Backend = (environment.Backend ?? OllamaBackendSnapshot.LocalDefault(environment.ModelOptions.Model)) with { },
             PromptPreset = environment.PromptPreset with { },
             ProjectResourceRevision = environment.Resources.Revision,
             CreatedAt = now,
@@ -206,6 +207,9 @@ public sealed class ProjectTranslationCoordinator
     private async Task RunAsync(ProjectTranslationJob requested, bool isNew, bool retryFailed,
         CancellationToken cancellationToken)
     {
+        ProjectTranslationEnvironment launchEnvironment = await LoadEnvironmentAsync(cancellationToken).ConfigureAwait(false);
+        string? launchConflict = ValidateEnvironment(requested, launchEnvironment);
+        if (launchConflict is not null) throw new InvalidOperationException(launchConflict);
         if (!ActiveProjects.TryAdd(_session.Manifest.ProjectId, _coordinatorId))
             throw new InvalidOperationException("Project đã có coordinator khác đang ghi translation queue.");
         try
@@ -422,6 +426,19 @@ public sealed class ProjectTranslationCoordinator
             return "Model options đã đổi sau khi enqueue.";
         if (environment.PromptPreset != job.PromptPreset)
             return "Prompt preset đã đổi sau khi enqueue.";
+        string? environmentConflict = ValidateEnvironment(job, environment);
+        if (environmentConflict is not null) return environmentConflict;
+        return null;
+    }
+
+    private static string? ValidateEnvironment(ProjectTranslationJob job, ProjectTranslationEnvironment environment)
+    {
+        OllamaBackendSnapshot planned = job.Backend ?? OllamaBackendSnapshot.LocalDefault(job.ModelOptions.Model);
+        OllamaBackendSnapshot current = environment.Backend ?? OllamaBackendSnapshot.LocalDefault(environment.ModelOptions.Model);
+        if (planned.ProfileId != current.ProfileId || planned.Kind != current.Kind ||
+            !string.Equals(planned.Endpoint, current.Endpoint, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(planned.Model, current.Model, StringComparison.Ordinal))
+            return "Backend/model Ollama đã đổi sau khi tạo Queue Plan. Hãy xác nhận server mới và tạo lại Queue Plan; job cũ không tự gửi request.";
         return null;
     }
 
@@ -431,6 +448,7 @@ public sealed class ProjectTranslationCoordinator
         environment.ModelOptions.Validate();
         environment.PromptPreset.Validate();
         environment.Resources.Validate();
+        environment.Backend?.Validate();
         if (environment.Resources.ProjectId != _session.Manifest.ProjectId)
             throw new InvalidOperationException("Tài nguyên translation queue thuộc Project khác.");
         return environment;

@@ -36,7 +36,7 @@ public partial class MainWindow
         return _projectTranslationCoordinator!;
     }
 
-    private static async Task<ProjectTranslationEnvironment> LoadProjectTranslationEnvironmentAsync(
+    private async Task<ProjectTranslationEnvironment> LoadProjectTranslationEnvironmentAsync(
         ProjectSession session, CancellationToken cancellationToken)
     {
         var settings = new ProjectSettingsStore(session);
@@ -45,7 +45,10 @@ public partial class MainWindow
         PresetLibrary library = await presetStore.LoadAsync(cancellationToken);
         var presets = new PromptPresetManager(library);
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync(cancellationToken);
-        return new(translation.Model with { }, presets.Selected, resources);
+        OllamaBackendProfile profile = _ollamaBackends.GetProfile(translation.OllamaProfileId);
+        if (_ollamaBackends.ActiveProfile.Id != profile.Id)
+            throw new InvalidOperationException("Profile Ollama của Project chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại backend.");
+        return new(translation.Model with { }, presets.Selected, resources, BackendSnapshot(profile, translation.Model.Model));
     }
 
     private async Task OpenProjectTranslationQueueAsync(IReadOnlyList<Guid> chapterIds)
@@ -55,6 +58,7 @@ public partial class MainWindow
             throw new InvalidOperationException("Ứng dụng đang xử lý thao tác khác; hãy thử lại sau.");
         try
         {
+            EnsureOllamaBackendReady();
             await SaveCurrentAsync();
             await SaveProjectAssetsAsync();
             ProjectTranslationCoordinator coordinator = await EnsureProjectTranslationCoordinatorAsync();

@@ -21,9 +21,10 @@ public partial class MainWindow
     private void InitializeSettingsUi()
     {
         GlossaryGrid.ItemsSource = _glossaryRows;
-        foreach (var input in new[] { ModelInput, TemperatureInput, ContextInput, OutputTokensInput, TimeoutInput,
+        foreach (var input in new[] { TemperatureInput, ContextInput, OutputTokensInput, TimeoutInput,
                      MinimumInput, TargetInput, MaximumInput, CharacterProjectNameInput })
             input.TextChanged += OnSettingsInputChanged;
+        InitializeOllamaBackendUi();
         NormalizeAfterTranslationCheck.Checked += OnSettingsInputChanged;
         NormalizeAfterTranslationCheck.Unchecked += OnSettingsInputChanged;
         UpdateSettingsCounters();
@@ -55,26 +56,6 @@ public partial class MainWindow
         if (TermsCountText is null) return;
         TermsCountText.Text = $"{_glossaryRows.Count} thuật ngữ";
         ContextCountText.Text = $"{ContextNotesInput.Text.Length}/1.000 ký tự";
-    }
-
-    private async void OnTestOllamaConnection(object sender, RoutedEventArgs e)
-    {
-        if (!BeginUiOperation(allowDuringTranslation: true)) return;
-        OllamaConnectionStatus.Text = "Đang kiểm tra…";
-        OllamaConnectionStatus.Foreground = Brushes.DarkSlateGray;
-        try
-        {
-            await _client.CheckConnectionAsync(ModelInput.Text, TimeSpan.FromSeconds(8));
-            OllamaConnectionStatus.Text = "Đã kết nối · model cục bộ sẵn sàng";
-            OllamaConnectionStatus.Foreground = Brushes.SeaGreen;
-        }
-        catch (Exception ex)
-        {
-            OllamaConnectionStatus.Text = "Không sẵn sàng";
-            OllamaConnectionStatus.Foreground = Brushes.Firebrick;
-            ShowError(ex);
-        }
-        finally { EndUiOperation(); }
     }
 
     private async void OnImportGlossary(object sender, RoutedEventArgs e)

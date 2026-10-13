@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -7,18 +8,31 @@ using QuickTranslator.AiEditor.Core.Models;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
 
-public sealed class OllamaClient : IOllamaClient, IDisposable
+public sealed class OllamaClient : IOllamaBackendClient
 {
     public static Uri DefaultEndpoint { get; } = new("http://127.0.0.1:11434/api/chat");
     private readonly HttpClient _httpClient;
     private readonly Uri _endpoint;
     private readonly bool _ownsHttpClient;
+    private readonly OllamaBackendKind _backendKind;
+    private readonly string? _bearerToken;
     private readonly SemaphoreSlim _requestGate = new(1, 1);
 
     public OllamaClient(HttpClient httpClient, Uri? endpoint = null, bool ownsHttpClient = false)
+        : this(httpClient, endpoint ?? DefaultEndpoint, OllamaBackendKind.Local, null, ownsHttpClient) { }
+
+    public OllamaClient(HttpClient httpClient, Uri endpoint, OllamaBackendKind backendKind,
+        string? bearerToken = null, bool ownsHttpClient = false)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _endpoint = ValidateLocalEndpoint(endpoint ?? DefaultEndpoint);
+        _backendKind = backendKind;
+        _endpoint = backendKind == OllamaBackendKind.Local
+            ? ValidateLocalEndpoint(endpoint)
+            : ValidateRemoteEndpoint(endpoint);
+        if (backendKind == OllamaBackendKind.Local && !string.IsNullOrEmpty(bearerToken))
+            throw new ArgumentException("Ollama local không dùng token.", nameof(bearerToken));
+        if (bearerToken?.Any(char.IsControl) == true) throw new ArgumentException("Token chứa ký tự không hợp lệ.", nameof(bearerToken));
+        _bearerToken = string.IsNullOrEmpty(bearerToken) ? null : bearerToken;
         _ownsHttpClient = ownsHttpClient;
     }
 
@@ -34,6 +48,25 @@ public sealed class OllamaClient : IOllamaClient, IDisposable
         return new(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, ownsHttpClient: true);
     }
 
+    public static IOllamaBackendClient Create(OllamaBackendProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        OllamaBackendProfile copy = profile.Clone();
+        copy.Validate();
+        if (copy.Kind == OllamaBackendKind.Local) return CreateLocal();
+        var handler = CreateRemoteHandler();
+        return new OllamaClient(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, new(copy.Endpoint),
+            OllamaBackendKind.Remote, copy.Token, ownsHttpClient: true);
+    }
+
+    internal static SocketsHttpHandler CreateRemoteHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        ConnectTimeout = TimeSpan.FromSeconds(8)
+        // Keep the platform TLS validator. In particular, never assign
+        // SslOptions.RemoteCertificateValidationCallback here.
+    };
+
     public static Uri ValidateLocalEndpoint(Uri endpoint)
     {
         if (!endpoint.IsAbsoluteUri || endpoint.Scheme != "http" || endpoint.UserInfo.Length != 0 ||
@@ -45,6 +78,31 @@ public sealed class OllamaClient : IOllamaClient, IDisposable
         if (!IPAddress.TryParse(host, out var address) || !IPAddress.IsLoopback(address))
             throw new ArgumentException("Chỉ cho phép Ollama trên máy này (127.0.0.1 hoặc ::1); không gửi chương lên cloud.");
         return endpoint;
+    }
+
+    public static Uri ValidateRemoteEndpoint(Uri endpoint)
+    {
+        if (!endpoint.IsAbsoluteUri || endpoint.UserInfo.Length != 0 || endpoint.Query.Length != 0 ||
+            endpoint.Fragment.Length != 0 || endpoint.Scheme is not ("http" or "https"))
+            throw new ArgumentException("Remote Ollama cần URL HTTP(S) tuyệt đối, không chứa user/password, query hoặc fragment.");
+        string path = endpoint.AbsolutePath.TrimEnd('/');
+        if (path.Length > 0 && path is not "/api" and not "/api/chat")
+            throw new ArgumentException("Remote URL chỉ nhận địa chỉ server, /api hoặc /api/chat.");
+        if (endpoint.Scheme == "http" && !IsPrivateHost(endpoint.Host))
+            throw new ArgumentException("HTTP chỉ được phép cho địa chỉ loopback hoặc IP mạng riêng. Server Internet phải dùng HTTPS hợp lệ.");
+        return new UriBuilder(endpoint) { Path = "/api/chat", Query = "", Fragment = "" }.Uri;
+    }
+
+    private static bool IsPrivateHost(string host)
+    {
+        host = host.Trim('[', ']');
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!IPAddress.TryParse(host, out IPAddress? address)) return false;
+        if (IPAddress.IsLoopback(address)) return true;
+        byte[] bytes = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            return bytes[0] == 10 || bytes[0] == 192 && bytes[1] == 168 || bytes[0] == 172 && bytes[1] is >= 16 and <= 31;
+        return address.IsIPv6LinkLocal || bytes[0] is 0xFC or 0xFD;
     }
 
     public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
@@ -76,6 +134,7 @@ public sealed class OllamaClient : IOllamaClient, IDisposable
                         }
                     })
                 };
+                AddAuthorization(request);
                 using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -106,8 +165,9 @@ public sealed class OllamaClient : IOllamaClient, IDisposable
             }
             catch (HttpRequestException ex)
             {
-                throw new OllamaRequestException(OllamaErrorKind.Connection,
-                    "Không kết nối được Ollama tại localhost:11434. Hãy mở Ollama hoặc chạy ollama serve; không có dịch vụ cloud thay thế.", ex);
+                throw new OllamaRequestException(OllamaErrorKind.Connection, _backendKind == OllamaBackendKind.Local
+                    ? "Không kết nối được Ollama tại localhost:11434. Hãy mở Ollama hoặc chạy ollama serve; không có dịch vụ cloud thay thế."
+                    : "Không kết nối được remote Ollama. Kiểm tra URL, TLS, firewall, VPN và trạng thái máy GPU; không tự chuyển provider.", ex);
             }
             catch (JsonException ex)
             {
@@ -134,30 +194,64 @@ public sealed class OllamaClient : IOllamaClient, IDisposable
             }
             catch (HttpRequestException ex)
             {
-                throw new OllamaRequestException(OllamaErrorKind.Connection,
-                    "Không kết nối được Ollama tại localhost:11434. Hãy mở Ollama hoặc chạy ollama serve.", ex);
+                throw new OllamaRequestException(OllamaErrorKind.Connection, _backendKind == OllamaBackendKind.Local
+                    ? "Không kết nối được Ollama tại localhost:11434. Hãy mở Ollama hoặc chạy ollama serve."
+                    : "Không kết nối được remote Ollama. Kiểm tra URL, TLS, token và firewall.", ex);
             }
         }
         finally { _requestGate.Release(); }
     }
 
+    public async Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+        await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            linked.CancelAfter(timeout);
+            ModelList list = await ReadModelsAsync(linked.Token).ConfigureAwait(false);
+            return list.Models!.Where(IsInstalledModel).Select(model => model.Name ?? model.Model!)
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { throw new OllamaRequestException(OllamaErrorKind.Timeout, "Ollama không trả danh sách model đúng thời hạn."); }
+        catch (HttpRequestException ex)
+        { throw new OllamaRequestException(OllamaErrorKind.Connection, "Không kết nối được Ollama để lấy danh sách model.", ex); }
+        finally { _requestGate.Release(); }
+    }
+
     private async Task VerifyInstalledLocalModelAsync(string model, CancellationToken cancellationToken)
     {
+        ModelList tags = await ReadModelsAsync(cancellationToken).ConfigureAwait(false);
+        var installed = tags.Models!.FirstOrDefault(m => (m.Name == model || m.Model == model) && IsInstalledModel(m));
+        if (installed is null)
+            throw new OllamaRequestException(OllamaErrorKind.Http,
+                "Model chưa sẵn sàng trên server đã chọn. Kiểm tra đúng tên bằng /api/tags hoặc ollama list; chưa gửi nguyên văn.");
+    }
+
+    private async Task<ModelList> ReadModelsAsync(CancellationToken cancellationToken)
+    {
         var tagsEndpoint = new UriBuilder(_endpoint) { Path = "/api/tags" }.Uri;
-        using var response = await _httpClient.GetAsync(tagsEndpoint, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, tagsEndpoint);
+        AddAuthorization(request);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
             throw new OllamaRequestException(OllamaErrorKind.Http,
-                $"HTTP {(int)response.StatusCode}: không kiểm tra được model cục bộ qua /api/tags; chưa gửi nguyên văn.");
+                $"HTTP {(int)response.StatusCode}: không kiểm tra được model qua /api/tags; chưa gửi nguyên văn.");
         var tags = await response.Content.ReadFromJsonAsync<ModelList>(cancellationToken: cancellationToken).ConfigureAwait(false);
         if (tags?.Models is null)
             throw new OllamaRequestException(OllamaErrorKind.InvalidResponse, "Ollama không trả danh sách model hợp lệ; chưa gửi nguyên văn.");
-        var installed = tags.Models.FirstOrDefault(m => m.Name == model || m.Model == model);
-        if (installed is null)
-            throw new OllamaRequestException(OllamaErrorKind.Http, "Model chưa được cài trên máy này. Kiểm tra đúng tên đầy đủ bằng ollama list; chưa gửi nguyên văn.");
-        if (!string.IsNullOrWhiteSpace(installed.RemoteHost) || !string.IsNullOrWhiteSpace(installed.RemoteModel) ||
-            installed.Size is null or <= 0 || model.Contains("cloud", StringComparison.OrdinalIgnoreCase))
-            throw new OllamaRequestException(OllamaErrorKind.InvalidResponse,
-                "Chỉ dùng model có dữ liệu cục bộ; model cloud/từ xa hoặc thiếu thông tin bị từ chối trước khi gửi nguyên văn. Hãy chọn translategemma:12b và tắt cloud trong Ollama.");
+        return tags;
+    }
+
+    private static bool IsInstalledModel(InstalledModel model) =>
+        string.IsNullOrWhiteSpace(model.RemoteHost) && string.IsNullOrWhiteSpace(model.RemoteModel) &&
+        model.Size is > 0 && !(model.Name ?? model.Model ?? "").Contains("cloud", StringComparison.OrdinalIgnoreCase);
+
+    private void AddAuthorization(HttpRequestMessage request)
+    {
+        if (_bearerToken is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
     }
 
     public void Dispose()

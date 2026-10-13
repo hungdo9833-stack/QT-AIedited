@@ -42,6 +42,8 @@ public partial class ProjectTranslationQueueWindow : Window
         }
         bool planMode = _plan?.Status == ProjectTranslationJobStatus.Draft && _coordinator.CurrentJob is null;
         HeadingText.Text = planMode ? "Queue Plan · kiểm tra trước khi chạy" : "Translation Queue · tiến độ thật";
+        BackendText.Text = job.Backend is null ? "Local · legacy job" :
+            $"{job.Backend.Kind} · {job.Backend.ProfileName}";
         ModelText.Text = job.ModelOptions.Model;
         PromptText.Text = $"{job.PromptPreset.Name} · revision {job.PromptPreset.Revision}";
         ResourceText.Text = job.ProjectResourceRevision.ToString();

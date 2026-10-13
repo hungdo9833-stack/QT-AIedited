@@ -20,10 +20,11 @@
     </DockPanel>
     <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
       <Grid>
-        <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <StackPanel><TextBlock Text="Model" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="ModelText" FontWeight="SemiBold"/></StackPanel>
-        <StackPanel Grid.Column="1"><TextBlock Text="Prompt snapshot" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="PromptText" FontWeight="SemiBold"/></StackPanel>
-        <StackPanel Grid.Column="2"><TextBlock Text="Resource revision" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="ResourceText" FontWeight="SemiBold"/></StackPanel>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+        <StackPanel><TextBlock Text="Backend snapshot" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="BackendText" FontWeight="SemiBold" TextWrapping="Wrap"/></StackPanel>
+        <StackPanel Grid.Column="1"><TextBlock Text="Model" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="ModelText" FontWeight="SemiBold"/></StackPanel>
+        <StackPanel Grid.Column="2"><TextBlock Text="Prompt snapshot" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="PromptText" FontWeight="SemiBold"/></StackPanel>
+        <StackPanel Grid.Column="3"><TextBlock Text="Resource revision" Foreground="{DynamicResource MutedBrush}"/><TextBlock x:Name="ResourceText" FontWeight="SemiBold"/></StackPanel>
       </Grid>
     </Border>
     <Grid Grid.Row="2" Margin="0,10,0,8">

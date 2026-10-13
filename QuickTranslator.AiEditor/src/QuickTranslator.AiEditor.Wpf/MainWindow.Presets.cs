@@ -145,7 +145,7 @@ public partial class MainWindow
             {
                 var chapter = TranslationService.CreateChapter(TitleInput.Text, _importedOriginalText ?? ChapterInput.Text, ReadSegmenterOptions(), ReadModelOptions());
                 chapter.ConfirmedTerms = ReadTerms().ToList(); chapter.ConfirmedContextNotes = ContextNotesInput.Text;
-                service = new(chapter, _client, _store);
+                service = new(chapter, _translationClient, _store);
             }
             string preview = service.PreviewPrompt(_selectedId ?? service.GetSnapshot().Segments[0].Id, preset, ReadTerms(), ContextNotesInput.Text);
             ShowTextWindow("Prompt thực tế cho đoạn đang chọn (hoặc đoạn đầu) — chưa gửi Ollama", preview);

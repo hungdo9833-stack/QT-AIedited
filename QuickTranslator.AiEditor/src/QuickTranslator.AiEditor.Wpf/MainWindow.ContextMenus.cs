@@ -299,7 +299,11 @@ public partial class MainWindow
     {
         if (WorkActive || _uiOperation) return;
         string selected;
-        try { selected = SourceContextActions.ValidateTranslationSelection(GetSourceSelection(textBox)); }
+        try
+        {
+            selected = SourceContextActions.ValidateTranslationSelection(GetSourceSelection(textBox));
+            EnsureOllamaBackendReady();
+        }
         catch (Exception ex) { ShowError(ex); return; }
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _activeWorkCompletion = completion.Task;
@@ -312,7 +316,7 @@ public partial class MainWindow
             var glossary = ReadTerms().Where(t => selected.Contains(t.Chinese, StringComparison.Ordinal))
                 .Select(t => new GlossaryEntry(t.Chinese, t.Vietnamese)).ToArray();
             string prompt = new TranslationPromptBuilder().Build(selected, glossary, ContextNotesInput.Text, _presetManager.Selected);
-            var translation = _client.TranslateAsync(prompt, options, cancellation.Token);
+            var translation = _translationClient.TranslateAsync(prompt, options, cancellation.Token);
             request = translation;
             _activeRequest = request;
             SetStatus("Đang dịch riêng vùng chọn; kết quả chỉ để xem và không ghi đè bản dịch chương.");

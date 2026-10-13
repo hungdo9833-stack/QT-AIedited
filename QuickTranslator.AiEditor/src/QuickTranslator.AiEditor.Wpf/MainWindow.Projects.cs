@@ -40,6 +40,7 @@ public partial class MainWindow
 
     private async Task InitializeProjectsAsync()
     {
+        await EnsureOllamaBackendsLoadedAsync();
         _projectLibraryReady = false;
         try
         {
@@ -82,6 +83,7 @@ public partial class MainWindow
         await _projectRepository.InspectRecoveryAsync(candidate);
         await ReviewProjectRecoveryAsync(candidate);
         var assets = await ReadProjectAssetsAsync(candidate);
+        await PrepareOllamaProfileForProjectAsync(assets.Translation.OllamaProfileId);
         ChapterDocument? chapter = candidate.Manifest.CurrentChapterId is Guid current
             ? (await _projectRepository.LoadChapterAsync(candidate, current)).Chapter : null;
         // Validate the service before touching the live context.
@@ -190,6 +192,7 @@ public partial class MainWindow
         {
             Model = ReadModelOptions(), Segmentation = ReadSegmenterOptions(),
             SelectedPromptPresetId = _presetsReady ? _presetManager.Selected.Id : null,
+            OllamaProfileId = SelectedOllamaProfileId,
             TraditionalDataDirectory = TraditionalDataDirectoryInput.Text
         });
         await _projectRepository.SaveManifestAsync(_projectSession);
@@ -216,6 +219,7 @@ public partial class MainWindow
 
     private void ApplyProjectDefaults(ProjectTranslationSettings settings)
     {
+        SelectOllamaProfileInUi(settings.OllamaProfileId);
         ModelInput.Text = settings.Model.Model;
         TemperatureInput.Text = settings.Model.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture);
         ContextInput.Text = settings.Model.ContextSize.ToString(); OutputTokensInput.Text = settings.Model.MaximumOutputTokens.ToString();
@@ -224,6 +228,7 @@ public partial class MainWindow
         TargetInput.Text = settings.Segmentation.TargetHanCharacters.ToString(); MaximumInput.Text = settings.Segmentation.MaximumHanCharacters.ToString();
         if (settings.SelectedPromptPresetId is Guid preset && _presetManager.Presets.Any(x => x.Id == preset))
         { _presetManager.Select(preset); RefreshPresetEditor(); }
+        UpdateOllamaBackendStatus();
     }
 
     private async Task<ChapterDocument> RegisterChapterIfNeededAsync(ChapterDocument chapter)

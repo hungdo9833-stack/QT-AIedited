@@ -71,7 +71,8 @@ public sealed class ProjectSettingsStore(ProjectSession session)
     }
     private static ProjectTranslationSettings DecodeTranslation(byte[] bytes) => RecoveryFiles.DecodeJson<ProjectTranslationSettings>(bytes, value =>
     {
-        if (value.Model is null || value.Segmentation is null || value.TraditionalDataDirectory is null || value.SelectedPromptPresetId == Guid.Empty)
+        if (value.Model is null || value.Segmentation is null || value.TraditionalDataDirectory is null ||
+            value.SelectedPromptPresetId == Guid.Empty || value.OllamaProfileId == Guid.Empty)
             throw new InvalidDataException("Thiết lập dịch thiếu dữ liệu.");
         value.Model.Validate(); value.Segmentation.Validate();
     }, "model", "segmentation");

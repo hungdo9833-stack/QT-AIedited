@@ -17,7 +17,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow : Window
 {
-    private readonly OllamaClient _client = OllamaClient.CreateLocal();
+    private readonly OllamaBackendManager _ollamaBackends;
     private readonly IOllamaClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
     private readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromMilliseconds(500) };
@@ -32,13 +32,14 @@ public partial class MainWindow : Window
 
     private readonly string? _startupProjectPath;
 
-    public MainWindow(string? startupProjectPath = null) : this(startupProjectPath, initializeApplication: true) { }
+    public MainWindow(string? startupProjectPath = null) : this(startupProjectPath, initializeApplication: true, null) { }
 
     // Integration tests construct controls on an STA dispatcher without loading any real user stores.
-    internal MainWindow(string? startupProjectPath, bool initializeApplication)
+    internal MainWindow(string? startupProjectPath, bool initializeApplication, OllamaBackendManager? ollamaBackends = null)
     {
         _startupProjectPath = startupProjectPath;
-        _translationClient = _client;
+        _ollamaBackends = ollamaBackends ?? new OllamaBackendManager();
+        _translationClient = _ollamaBackends;
         InitializeComponent();
         _projectCatalog = new(_projectRepository);
         _projectCatalog.Changed += OnProjectCatalogChanged;
@@ -161,6 +162,7 @@ public partial class MainWindow : Window
         Task? request = null;
         try
         {
+            EnsureOllamaBackendReady();
             if (!BeginUiOperation()) return;
             try { await SaveSelectedSettingsAsync(); } finally { EndUiOperation(); }
             var options = ReadModelOptions();
@@ -585,7 +587,7 @@ public partial class MainWindow : Window
         ClearProjectTranslationCoordinator();
         _projectCatalog.Changed -= OnProjectCatalogChanged;
         _projectCatalog.Dispose();
-        _client.Dispose();
+        _ollamaBackends.Dispose();
     }
     private sealed record SegmentItem(Guid Id, string Label);
     private sealed record AttemptItem(Guid Id, string Label, int Kind = 0, DateTimeOffset Date = default);

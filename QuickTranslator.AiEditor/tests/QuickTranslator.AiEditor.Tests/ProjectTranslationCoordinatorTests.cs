@@ -217,6 +217,90 @@ public sealed class ProjectTranslationCoordinatorTests
         });
     }
 
+    [Fact]
+    public async Task Backend_snapshot_blocks_start_or_resume_after_profile_changes()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            OllamaBackendSnapshot local = OllamaBackendSnapshot.LocalDefault(context.Environment.ModelOptions.Model);
+            OllamaBackendSnapshot current = local;
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(
+                context.Environment with { Backend = current });
+            var client = new ProjectQueueFakeClient();
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load);
+            ProjectTranslationJob plan = await coordinator.PlanAsync(context.ChapterIds);
+            Assert.Equal(local, plan.Backend);
+
+            current = new(Guid.NewGuid(), OllamaBackendKind.Remote, "GPU thuê", "https://gpu.example.com/api/chat",
+                context.Environment.ModelOptions.Model);
+            InvalidOperationException startError = await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.StartAsync(plan));
+
+            Assert.Contains("backend", startError.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, client.Calls);
+            Assert.Null(coordinator.CurrentJob);
+        });
+    }
+
+    [Fact]
+    public async Task Reopened_interrupted_job_keeps_backend_snapshot_and_blocks_resume_on_another_server()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            OllamaBackendSnapshot local = OllamaBackendSnapshot.LocalDefault(context.Environment.ModelOptions.Model);
+            OllamaBackendSnapshot current = local;
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(
+                context.Environment with { Backend = current });
+            var store = new ProjectTranslationJobStore(context.Session);
+            var first = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                new ProjectQueueFakeClient(), Load, store);
+            ProjectTranslationJob saved = await store.SaveNewAsync(await first.PlanAsync(context.ChapterIds));
+            saved.Status = ProjectTranslationJobStatus.Interrupted;
+            saved = await store.SaveAsync(saved);
+
+            current = new(Guid.NewGuid(), OllamaBackendKind.Remote, "GPU sau restart",
+                "https://gpu.example.com/api/chat", context.Environment.ModelOptions.Model);
+            var client = new ProjectQueueFakeClient();
+            var reopened = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load,
+                new ProjectTranslationJobStore(context.Session));
+            ProjectTranslationJob loaded = Assert.IsType<ProjectTranslationJob>(await reopened.LoadAsync());
+
+            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => reopened.ResumeAsync());
+
+            Assert.Equal(local, loaded.Backend);
+            Assert.Contains("Queue Plan", error.Message, StringComparison.Ordinal);
+            Assert.Equal(0, client.Calls);
+            Assert.Equal(ProjectTranslationJobStatus.Interrupted,
+                Assert.IsType<ProjectTranslationJob>(await new ProjectTranslationJobStore(context.Session).LoadAsync()).Status);
+        });
+    }
+
+    [Fact]
+    public async Task Legacy_job_without_backend_snapshot_resumes_on_default_local_backend()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(context.Environment);
+            var store = new ProjectTranslationJobStore(context.Session);
+            var first = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                new ProjectQueueFakeClient(), Load, store);
+            ProjectTranslationJob legacy = await first.PlanAsync(context.ChapterIds);
+            legacy.Backend = null;
+            ProjectTranslationJob saved = await store.SaveNewAsync(legacy);
+            saved.Status = ProjectTranslationJobStatus.Interrupted;
+            await store.SaveAsync(saved);
+            var client = new ProjectQueueFakeClient();
+            var reopened = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load,
+                new ProjectTranslationJobStore(context.Session));
+
+            ProjectTranslationJob loaded = Assert.IsType<ProjectTranslationJob>(await reopened.LoadAsync());
+            await reopened.ResumeAsync();
+
+            Assert.Null(loaded.Backend);
+            Assert.Equal(1, client.Calls);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, reopened.CurrentJob!.Status);
+        });
+    }
+
     private static async Task EditAsync(TestProject context, int index, Action<TranslationService> edit)
     {
         ChapterDocument chapter = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[index])).Chapter;
@@ -265,7 +349,8 @@ public sealed class ProjectTranslationCoordinatorTests
             PromptPreset preset = PromptPreset.Default with { UpdatedAt = DateTimeOffset.UnixEpoch };
             Task<ProjectTranslationEnvironment> Load(CancellationToken _) =>
                 Task.FromResult(new ProjectTranslationEnvironment(options with { }, preset with { }, resources.Clone()));
-            await test(new TestProject(session, repository, ids, Load));
+            var environment = new ProjectTranslationEnvironment(options with { }, preset with { }, resources.Clone());
+            await test(new TestProject(session, repository, ids, Load, environment));
         }
         finally
         {
@@ -274,7 +359,7 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     private sealed record TestProject(ProjectSession Session, ProjectRepository Repository, IReadOnlyList<Guid> ChapterIds,
-        Func<CancellationToken, Task<ProjectTranslationEnvironment>> LoadEnvironment)
+        Func<CancellationToken, Task<ProjectTranslationEnvironment>> LoadEnvironment, ProjectTranslationEnvironment Environment)
     {
         public ProjectTranslationCoordinator Coordinator(IOllamaClient client) =>
             new(Session, Repository, client, LoadEnvironment);
