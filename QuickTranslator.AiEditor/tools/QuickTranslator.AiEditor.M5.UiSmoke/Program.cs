@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using QuickTranslator.AiEditor.Core.Importing;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
@@ -49,6 +50,7 @@ internal static class Program
 
         if (!string.IsNullOrWhiteSpace(capturePath))
         {
+            PrepareCaptureLayout(window);
             Capture(window, capturePath, captureDpi);
             AllowClose(window);
             window.Close();
@@ -136,15 +138,19 @@ internal static class Program
             {
                 var resources = new ProjectResources { ProjectId = session.Manifest.ProjectId, Revision = 3,
                     Characters = new CharacterProject { Id = session.Manifest.ProjectId, Name = session.Manifest.VietnameseTitle } };
-                var options = new ModelOptions { Model = "translategemma:12b" };
+                var options = new ModelOptions { Model = "translategemma:12b", ContextSize = 4096,
+                    MaximumOutputTokens = 2048, Temperature = 0.1 };
+                var remoteOptions = options with { ContextSize = 8192 };
                 ProjectTranslationWorkerDefinition[] workers =
                 [
                     new(Guid.Parse("11111111-1111-4111-8111-111111111111"), OllamaBackendSnapshot.LocalDefault(options.Model),
-                        new SyntheticClient(), options, 0),
+                        new SyntheticClient(), options, new SegmenterOptions { MinimumHanCharacters = 250,
+                            TargetHanCharacters = 375, MaximumHanCharacters = 500 }, 0),
                     new(Guid.Parse("22222222-2222-4222-8222-222222222222"),
                         new OllamaBackendSnapshot(Guid.Parse("33333333-3333-4333-8333-333333333333"),
-                            OllamaBackendKind.Remote, "EZYCloudX RTX 3090 Ti", "http://127.0.0.1:43117/api/chat", options.Model),
-                        new SyntheticClient(), options, 0.45m, "synthetic-ssh-host")
+                            OllamaBackendKind.Remote, "RTX 5060 Ti Remote", "http://127.0.0.1:43117/api/chat", remoteOptions.Model),
+                        new SyntheticClient(), remoteOptions, new SegmenterOptions { MinimumHanCharacters = 350,
+                            TargetHanCharacters = 550, MaximumHanCharacters = 750 }, 0.45m, "synthetic-ssh-host")
                 ];
                 var coordinator = new ProjectTranslationCoordinator(session, repository, workers,
                     _ => Task.FromResult(new ProjectTranslationEnvironment(options, PromptPreset.Default, resources)));
@@ -154,6 +160,8 @@ internal static class Program
             }
             case "gpu":
                 return CreateGpuManager(root);
+            case "titles":
+                return CreateTitleTranslationWindow(session, root);
             case "four":
                 return CreateEditor(session, root, fourPane: true);
             case "reader":
@@ -170,8 +178,15 @@ internal static class Program
         manager.LoadAsync().GetAwaiter().GetResult();
         var remote = new OllamaBackendProfile
         {
-            Id = Guid.Parse("33333333-3333-4333-8333-333333333333"), Name = "EZYCloudX RTX 3090 Ti",
+            Id = Guid.Parse("33333333-3333-4333-8333-333333333333"), Name = "RTX 5060 Ti Remote",
             Kind = OllamaBackendKind.Remote, Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b",
+            Runtime = new AiRuntimeProfile
+            {
+                ModelOptions = new ModelOptions { Model = "translategemma:12b", ContextSize = 8192,
+                    MaximumOutputTokens = 2048, Temperature = 0.1, RequestTimeout = TimeSpan.FromSeconds(300) },
+                SegmentationOptions = new SegmenterOptions { MinimumHanCharacters = 350,
+                    TargetHanCharacters = 550, MaximumHanCharacters = 750 }
+            },
             HourlyPrice = 0.45m, RemoteDisclosureAccepted = true,
             Ssh = new() { Host = "gpu-rental.example", Port = 22022, Username = "ubuntu",
                 Authentication = SshAuthenticationKind.Password, Password = "synthetic",
@@ -181,6 +196,35 @@ internal static class Program
         var preferences = new GpuTranslationPreferences { Mode = GpuTranslationMode.ParallelLocalRemote,
             RemoteProfileId = remote.Id };
         return new GpuManagerWindow(manager, new GpuConnectionManager(), preferences);
+    }
+
+    private static ChapterTitleTranslationWindow CreateTitleTranslationWindow(ProjectSession session, string root)
+    {
+        ChapterTitleTranslationSource[] sources = session.Manifest.Chapters.Take(20).Select((entry, index) =>
+            new ChapterTitleTranslationSource(entry.ChapterId, entry.Number, entry.ChineseTitle,
+                index is 3 or 11 ? entry.VietnameseTitle : "", index is 3 or 11)).ToArray();
+        var window = new ChapterTitleTranslationWindow(session.Manifest.ProjectId, "smoke-titles", sources,
+            (method, _) => Task.FromResult(new ChapterTitleRuntime(new KeepChineseChapterTitleTranslationBackend(),
+                new ModelOptions(), null, "none")), Path.Combine(root, "title-draft.json"));
+        ChapterTitleTranslationDraft draft = ChapterTitleTranslationDraft.Create(session.Manifest.ProjectId,
+            "smoke-titles", ChapterTitleTranslationMethod.Ollama, sources, Guid.NewGuid(), "translategemma:12b");
+        for (int index = 0; index < draft.Items.Count; index++)
+        {
+            ChapterTitleTranslationItem item = draft.Items[index];
+            if (item.ExistingTitleProtected) continue;
+            if (index == 7)
+            {
+                item.Status = ChapterTitleTranslationStatus.Failed;
+                item.Error = "Timeout · có thể Retry riêng batch lỗi";
+                continue;
+            }
+            item.TranslatedName = "Tên chương Việt " + item.ChapterNumber;
+            item.VietnameseTitle = $"Chương {item.ChapterNumber}: Tên chương Việt {item.ChapterNumber}";
+            item.Status = ChapterTitleTranslationStatus.Completed;
+        }
+        Set(window, "_draft", draft);
+        Invoke(window, "RefreshRows");
+        return window;
     }
 
     private static MainWindow CreateReader(ProjectSession session, string root)
@@ -261,6 +305,12 @@ internal static class Program
         visual.Measure(available);
         visual.Arrange(new Rect(0, 0, available.Width, available.Height));
         visual.UpdateLayout();
+        // Star-sized DataGrid columns settle after their parent has an actual size.
+        // Run a second layout pass so off-screen acceptance captures match a shown window.
+        visual.InvalidateMeasure();
+        visual.Measure(available);
+        visual.Arrange(new Rect(0, 0, available.Width, available.Height));
+        visual.UpdateLayout();
         double scale = dpi / 96d;
         int width = Math.Max(1, (int)Math.Ceiling(available.Width * scale));
         int height = Math.Max(1, (int)Math.Ceiling(available.Height * scale));
@@ -271,6 +321,24 @@ internal static class Program
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    private static void PrepareCaptureLayout(Window window)
+    {
+        // Star column sizing is normally finalized by PresentationSource when a window is
+        // shown. The smoke tool renders off-screen, so give those columns their equivalent
+        // acceptance-capture widths without changing production XAML.
+        if (window.FindName("TitleGrid") is DataGrid titleGrid && titleGrid.Columns.Count == 6)
+        {
+            double[] widths = [75, 220, 220, 300, 125, 190];
+            for (int index = 0; index < widths.Length; index++)
+                titleGrid.Columns[index].Width = widths[index];
+        }
+        if (window.FindName("ChapterGrid") is DataGrid chapterGrid && chapterGrid.Columns.Count == 10)
+        {
+            chapterGrid.Columns[2].Width = 210;
+            chapterGrid.Columns[3].Width = 180;
+        }
     }
 
     private static void PumpDispatcher(TimeSpan duration)
