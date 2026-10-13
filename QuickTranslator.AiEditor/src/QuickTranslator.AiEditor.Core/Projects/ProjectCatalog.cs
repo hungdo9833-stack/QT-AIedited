@@ -75,9 +75,13 @@ public sealed class ProjectCatalog : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(session);
         ProjectManifest manifest = session.Manifest;
-        string revision = ComputeRevision(manifest);
         lock (_sync)
         {
+            if (_cache.TryGetValue(manifest.ProjectId, out ProjectCatalogSnapshot? current) &&
+                current.ManifestUpdatedAt == manifest.UpdatedAt &&
+                current.Chapters.Length == manifest.Chapters.Count)
+                return current;
+            string revision = ComputeRevision(manifest);
             if (_cache.TryGetValue(manifest.ProjectId, out ProjectCatalogSnapshot? cached) && cached.Revision == revision)
                 return cached;
             ProjectCatalogSnapshot rebuilt = Build(manifest, revision);

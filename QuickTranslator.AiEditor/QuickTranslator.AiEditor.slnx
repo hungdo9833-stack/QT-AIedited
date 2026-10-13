@@ -4,4 +4,5 @@
   <Project Path="tests/QuickTranslator.AiEditor.Tests/QuickTranslator.AiEditor.Tests.csproj" />
   <Project Path="tests/QuickTranslator.AiEditor.Wpf.Tests/QuickTranslator.AiEditor.Wpf.Tests.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.ChapterDetector.Demo/QuickTranslator.AiEditor.ChapterDetector.Demo.csproj" />
+  <Project Path="tools/QuickTranslator.AiEditor.ProjectCatalog.Benchmark/QuickTranslator.AiEditor.ProjectCatalog.Benchmark.csproj" />
 </Solution>
