@@ -10,6 +10,62 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 public sealed class ChineseRetranslationUiTests
 {
     [Fact]
+    public Task Protected_replacements_require_explicit_override_and_can_then_be_selected_in_bulk() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        ChapterDocument chapter = TranslationService.CreateChapter("Chương bảo vệ", "老公说了一句话。");
+        chapter.Segments[0].UserDraft = "Bản người dùng còn 老公.";
+        chapter.Segments[0].DraftRevision = 1;
+        fixture.Attach(chapter);
+        Window? dialog = null;
+        Task? showing = null;
+        try
+        {
+            fixture.Window.ShowInTaskbar = false;
+            fixture.Window.Left = -30000;
+            fixture.Window.Show();
+            showing = fixture.Window.Dispatcher.InvokeAsync(() => fixture.Call("ShowTextCleanerWindow", false)).Task;
+            await UntilAsync(() => fixture.Window.OwnedWindows.Count > 0);
+            dialog = fixture.Window.OwnedWindows.Cast<Window>().Single();
+            TextBox find = Descendants<TextBox>(dialog).Single(control => Equals(control.ToolTip, "Văn bản cần tìm"));
+            TextBox replace = Descendants<TextBox>(dialog).Single(control =>
+                control.ToolTip?.ToString()?.StartsWith("Văn bản thay thế") == true);
+            find.Text = "老公";
+            replace.Text = "chồng";
+            Descendants<Button>(dialog).Single(button => Equals(button.Content, "Tìm tất cả / Xem trước"))
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            DataGrid preview = Descendants<DataGrid>(dialog).Single(grid => !grid.IsReadOnly);
+            await UntilAsync(() => preview.Items.Count == 1);
+            object row = preview.Items[0];
+            var selected = row.GetType().GetProperty("IsSelected")!;
+            var allow = Descendants<CheckBox>(dialog).Single(checkBox =>
+                checkBox.Content?.ToString()?.StartsWith("Cho phép thay nội dung") == true);
+
+            Assert.False(allow.IsChecked);
+            Assert.False((bool)selected.GetValue(row)!);
+            selected.SetValue(row, true);
+            preview.SelectedItem = row;
+            Descendants<Button>(dialog).Single(button => Equals(button.Content, "Thay vị trí đang chọn"))
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await UntilAsync(() => Descendants<TextBlock>(dialog).Any(text =>
+                text.Text.Contains("Hãy bật “Cho phép thay nội dung")));
+            Assert.Equal("Bản người dùng còn 老公.", fixture.Service.GetSnapshot().Segments[0].EditableText);
+            selected.SetValue(row, false);
+            allow.IsChecked = true;
+            Assert.True((bool)selected.GetValue(row)!);
+            allow.IsChecked = false;
+            Assert.False((bool)selected.GetValue(row)!);
+            Assert.Equal("Bản người dùng còn 老公.", fixture.Service.GetSnapshot().Segments[0].EditableText);
+            Assert.Empty(fixture.Service.GetSnapshot().BatchReplacementHistory);
+        }
+        finally
+        {
+            if (dialog is not null) dialog.Close();
+            if (showing is not null) await showing;
+        }
+    });
+
+    [Fact]
     public Task Chinese_scan_exposes_retranslate_command_without_writing_the_chapter() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();

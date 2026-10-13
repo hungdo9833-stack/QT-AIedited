@@ -93,6 +93,12 @@ public partial class MainWindow
         scope.SelectedIndex = 1;
         var useConfirmed = new CheckBox { Content = "Glossary & hồ sơ đã xác nhận", IsChecked = true, Margin = new Thickness(8, 3, 4, 3) };
         var useTraditional = new CheckBox { Content = "Kèm gợi ý Data truyền thống (không tự chọn)", Margin = new Thickness(8, 3, 4, 3) };
+        var allowProtected = new CheckBox
+        {
+            Content = "Cho phép thay nội dung đã sửa/duyệt (tạo revision mới)",
+            ToolTip = "Bật để chọn và thay cả UserDraft/Approval được bảo vệ; lịch sử và Approval cũ vẫn được giữ",
+            Margin = new Thickness(8, 3, 4, 3)
+        };
         var search = new TextBox { Width = 220, ToolTip = "Lọc kết quả" };
         var classification = new ComboBox { Width = 175 };
         classification.ItemsSource = new[] { "Tất cả trạng thái", "Đã xác nhận", "Chưa biết", "Xung đột", "Giữ nguyên", "Được bảo vệ" };
@@ -136,6 +142,7 @@ public partial class MainWindow
         top.Children.Add(new TextBlock { Text = "Nhiều quy tắc (mỗi dòng: Trung => Việt)", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 4, 4, 0) });
         top.Children.Add(manualRules);
         var options = new WrapPanel(); options.Children.Add(useConfirmed); options.Children.Add(useTraditional);
+        options.Children.Add(allowProtected);
         options.Children.Add(findButton); options.Children.Add(scanButton); top.Children.Add(options);
         var filter = new WrapPanel(); filter.Children.Add(LabelFor("Lọc", search)); filter.Children.Add(search);
         filter.Children.Add(classification); top.Children.Add(filter); top.Children.Add(progress); top.Children.Add(status);
@@ -162,6 +169,7 @@ public partial class MainWindow
             findButton.IsEnabled = scanButton.IsEnabled = applyCurrent.IsEnabled = applySelected.IsEnabled =
                 undo.IsEnabled = keep.IsEnabled = addGlossary.IsEnabled = addCharacter.IsEnabled =
                     retranslate.IsEnabled = !value;
+            allowProtected.IsEnabled = !value;
             if (message.Length > 0) status.Text = message;
         }
 
@@ -244,9 +252,10 @@ public partial class MainWindow
                 var preview = await Task.Run(() => _batchReplacementEngine.Preview(loadedChapters, rules,
                     selectedScope, _selectedId));
                 previewRows.Clear();
-                foreach (var item in preview) previewRows.Add(new(item));
+                foreach (var item in preview) previewRows.Add(new(item, allowProtected.IsChecked == true));
                 status.Text = $"Tìm thấy {preview.Count} vị trí trong {loadedChapters.Count} chương. " +
-                    $"Đã chọn sẵn {previewRows.Count(x => x.IsSelected)} ánh xạ xác nhận, không xung đột và không được bảo vệ.";
+                    $"Đã chọn sẵn {previewRows.Count(x => x.IsSelected)} ánh xạ xác nhận, không xung đột" +
+                    (allowProtected.IsChecked == true ? ", bao gồm nội dung được bảo vệ." : " và không được bảo vệ.");
                 tabs.SelectedIndex = 0; ApplyFilter();
             }
             catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = Brushes.Firebrick; }
@@ -330,11 +339,19 @@ public partial class MainWindow
             if (rows.Count == 0) { status.Text = "Chưa chọn vị trí nào."; return; }
             if (rows.Any(x => x.Item.Conflict)) { status.Text = "Bỏ chọn hoặc giải quyết các ánh xạ xung đột trước."; return; }
             bool protectedText = rows.Any(x => x.Item.Protected);
+            bool allowProtectedChanges = allowProtected.IsChecked == true;
+            if (protectedText && !allowProtectedChanges)
+            {
+                status.Foreground = Brushes.DarkOrange;
+                status.Text = "Có nội dung đã sửa/duyệt được bảo vệ. Hãy bật “Cho phép thay nội dung đã sửa/duyệt” rồi chọn lại các dòng cần thay.";
+                return;
+            }
             Guid currentChapterId = _service!.GetSnapshot().Id;
             bool project = ((ScopeOption)scope.SelectedItem).Scope == BatchReplacementScope.CurrentProject ||
                            rows.Any(row => row.Item.ChapterId != currentChapterId);
             string warning = $"Áp dụng {rows.Count} vị trí trong {rows.Select(x => x.Item.ChapterId).Distinct().Count()} chương?";
-            if (protectedText) warning += "\n\nCó bản đã sửa/duyệt được bảo vệ. Tiếp tục sẽ tạo revision mới và đưa về chờ duyệt.";
+            if (protectedText) warning += "\n\nBạn đã cho phép ghi lên bản sửa/duyệt được bảo vệ. QT Studio sẽ tạo revision mới, " +
+                                           "lưu draft hiện tại vào lịch sử, giữ nguyên Approval cũ và đưa nội dung mới về chờ duyệt.";
             if (project) warning += "\n\nỨng dụng sẽ sao lưu các chương trước khi ghi và báo riêng từng chương thất bại.";
             if (MessageBox.Show(window, warning, "Xác nhận thay thế", MessageBoxButton.YesNo,
                     protectedText || project ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes) return;
@@ -347,7 +364,7 @@ public partial class MainWindow
                     await SaveCurrentAsync();
                     var currentId = _service!.GetSnapshot().Id;
                     var coordinator = new BatchProjectReplacementService(_store);
-                    var report = await coordinator.ApplyAsync(loadedChapters, items, protectedText);
+                    var report = await coordinator.ApplyAsync(loadedChapters, items, allowProtectedChanges);
                     await ReloadCurrentChapterAfterProjectBatchAsync(currentId);
                     ShowProjectReport(report, "Thay thế nhiều chương");
                     status.Text = $"Đã thay {report.Chapters.Sum(x => x.OccurrencesChanged)} vị trí; " +
@@ -355,7 +372,7 @@ public partial class MainWindow
                 }
                 else
                 {
-                    var result = await _service!.ApplyBatchReplacementAsync(items, protectedText,
+                    var result = await _service!.ApplyBatchReplacementAsync(items, allowProtectedChanges,
                         ((ScopeOption)scope.SelectedItem).Scope);
                     status.Text = $"Đã thay {result.OccurrencesChanged} vị trí trong {result.SegmentsChanged} segment. Bản AI gốc vẫn nằm trong lịch sử.";
                 }
@@ -420,7 +437,7 @@ public partial class MainWindow
                     {
                         BatchReplacementPreviewItem item = await CreateRetranslationPreviewAsync(chapter, target, choice,
                             retranslationCancellation.Token);
-                        previewRows.Add(new(item));
+                        previewRows.Add(new(item, allowProtected.IsChecked == true));
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
@@ -455,9 +472,25 @@ public partial class MainWindow
             }
         };
         cancelRetranslation.Click += (_, _) => retranslationCancellation?.Cancel();
+        allowProtected.Checked += (_, _) =>
+        {
+            foreach (BatchPreviewRow row in previewRows.Where(row => row.Item.Protected))
+                row.IsSelected = row.Item.RuleConfirmed && !row.Item.Conflict;
+            status.Foreground = Brushes.DarkOrange;
+            status.Text = $"Đã bật thay nội dung được bảo vệ và chọn {previewRows.Count(row => row.Item.Protected && row.IsSelected):N0} vị trí. " +
+                          "Khi áp dụng vẫn phải xác nhận lần cuối; Approval và lịch sử cũ được giữ.";
+        };
+        allowProtected.Unchecked += (_, _) =>
+        {
+            foreach (BatchPreviewRow row in previewRows.Where(row => row.Item.Protected)) row.IsSelected = false;
+            status.Foreground = Brushes.DarkSlateGray;
+            status.Text = "Đã bật lại cơ chế bảo vệ; các vị trí đã sửa/duyệt được bỏ chọn.";
+        };
         selectEligible.Click += (_, _) =>
         {
-            foreach (var row in previewRows) row.IsSelected = row.Item.RuleConfirmed && !row.Item.Protected && !row.Item.Conflict;
+            bool includeProtected = allowProtected.IsChecked == true;
+            foreach (var row in previewRows)
+                row.IsSelected = row.Item.RuleConfirmed && (includeProtected || !row.Item.Protected) && !row.Item.Conflict;
             status.Text = $"Đã chọn {previewRows.Count(x => x.IsSelected)} vị trí đủ điều kiện.";
         };
         applyCurrent.Click += async (_, _) =>
@@ -810,9 +843,9 @@ public partial class MainWindow
     private sealed record ChineseRetranslationChoice(ChineseRetranslationChapterScope ChapterScope,
         ChineseRetranslationMode Mode, ChineseRetranslationMethod Method);
 
-    private sealed class BatchPreviewRow(BatchReplacementPreviewItem item) : INotifyPropertyChanged
+    private sealed class BatchPreviewRow(BatchReplacementPreviewItem item, bool includeProtected) : INotifyPropertyChanged
     {
-        private bool _isSelected = item.RuleConfirmed && !item.Protected && !item.Conflict;
+        private bool _isSelected = item.RuleConfirmed && (includeProtected || !item.Protected) && !item.Conflict;
         public BatchReplacementPreviewItem Item { get; } = item;
         public bool IsSelected { get => _isSelected; set { if (_isSelected == value) return; _isSelected = value; OnChanged(); } }
         public string Chapter => Item.ChapterTitle;
@@ -821,7 +854,7 @@ public partial class MainWindow
         public string After => Item.AfterSentence;
         public string Change => $"【{Item.Original}】 → 【{Item.Replacement ?? "XUNG ĐỘT"}】";
         public string Source => Item.SourceLabel + (Item.RuleConfirmed ? " · đã xác nhận" : " · chỉ gợi ý");
-        public string Protection => Item.Conflict ? Item.ConflictMessage : Item.Protected ? "Đã sửa/duyệt · mặc định bỏ chọn" : StatusLabel(Item.SegmentStatus);
+        public string Protection => Item.Conflict ? Item.ConflictMessage : Item.Protected ? "Đã sửa/duyệt · cần bật cho phép thay" : StatusLabel(Item.SegmentStatus);
         public string SearchText => string.Join(" ", Chapter, Segment, Before, After, Change, Source, Protection);
         public event PropertyChangedEventHandler? PropertyChanged;
         private void OnChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
