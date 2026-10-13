@@ -101,6 +101,7 @@ public sealed class ChapterManagerUiTests
         (_, _, _) => Task.CompletedTask,
         _ => Task.CompletedTask,
         _ => Task.CompletedTask,
+        _ => Task.CompletedTask,
         _ => Task.CompletedTask);
 
     private static void AddManifestEntries(ProjectSession session, int count)

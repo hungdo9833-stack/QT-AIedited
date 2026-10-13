@@ -118,7 +118,7 @@ internal static class Program
             case "chapter":
                 return new ChapterManagerWindow(session, new ProjectCatalog(repository), new ChapterManagerCommands(
                     _ => Task.CompletedTask, (_, _, _) => Task.CompletedTask, _ => Task.CompletedTask,
-                    _ => Task.CompletedTask, _ => Task.CompletedTask));
+                    _ => Task.CompletedTask, _ => Task.CompletedTask, _ => Task.CompletedTask));
             case "queue":
             {
                 var client = new SyntheticClient();

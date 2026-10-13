@@ -11,6 +11,7 @@ internal sealed record ChapterManagerCommands(
     Func<Guid, string, string, Task> Rename,
     Func<IReadOnlyList<Guid>, Task> SoftDelete,
     Func<IReadOnlyList<Guid>, Task> Restore,
+    Func<IReadOnlyList<Guid>, Task> Resegment,
     Func<IReadOnlyList<Guid>, Task> Queue);
 
 public partial class ChapterManagerWindow : Window
@@ -150,11 +151,24 @@ public partial class ChapterManagerWindow : Window
             "Đã mở Queue Plan. Hàng đợi chỉ chạy sau khi bạn xác nhận Start.");
     }
 
+    private async void OnResegment(object sender, RoutedEventArgs e)
+    {
+        ChapterManagerRow[] rows = SelectedRows().Where(row => !row.IsDeleted)
+            .OrderBy(row => row.DisplayOrder).ToArray();
+        if (rows.Length == 0) return;
+        await RunAsync(() => _commands.Resegment(rows.Select(row => row.ChapterId).ToArray()),
+            "Đã chia lại đoạn cho các chương đã chọn.");
+    }
+
     private async Task RunAsync(Func<Task> operation, string success)
     {
         if (_working) return;
         _working = true; UpdateCommands(); StatusText.Text = "Đang ghi an toàn…";
         try { await operation(); StatusText.Text = success; RefreshRows(); }
+        catch (OperationCanceledException ex)
+        {
+            StatusText.Text = ex.Message;
+        }
         catch (Exception ex)
         {
             StatusText.Text = "Thao tác chưa hoàn tất: " + ex.Message;
@@ -173,6 +187,7 @@ public partial class ChapterManagerWindow : Window
         RenameButton.IsEnabled = OpenButton.IsEnabled;
         DeleteButton.IsEnabled = !_working && active > 0 && deleted == 0;
         RestoreButton.IsEnabled = !_working && deleted > 0 && active == 0;
+        ResegmentButton.IsEnabled = !_working && active > 0 && deleted == 0;
         QueueButton.IsEnabled = !_working && active > 0 && deleted == 0;
         ClearSelectionButton.IsEnabled = !_working && selected.Length > 0;
         SelectionText.Text = $"Đã chọn {selected.Length:N0} · {active:N0} hoạt động · {deleted:N0} History";

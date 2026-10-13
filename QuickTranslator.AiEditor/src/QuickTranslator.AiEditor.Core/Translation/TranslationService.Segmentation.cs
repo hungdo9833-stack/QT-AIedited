@@ -83,15 +83,14 @@ public sealed partial class TranslationService
         _chapter.SegmentationHistory.Add(new()
         {
             ChangedAt = _clock.GetUtcNow(), Description = description, PreviousSegments = previous,
-            ReplacementIds = replacements.Select(s => s.Id).ToList()
+            ReplacementIds = replacements.Select(s => s.Id).ToList(),
+            PreviousQueue = DocumentJson.Clone(_chapter).Queue
         });
         _chapter.Segments.RemoveRange(index, count);
         _chapter.Segments.InsertRange(index, replacements);
         for (int i = 0; i < _chapter.Segments.Count; i++) _chapter.Segments[i].Order = i + 1;
         _chapter.SelectedSegmentId = replacements[0].Id;
-        _chapter.Queue.CandidateIds.Clear();
-        _chapter.Queue.NextIndex = 0;
-        _chapter.Queue.CurrentSegmentId = null;
+        _chapter.Queue = new QueueCheckpoint();
         Touch();
         DocumentJson.Validate(_chapter);
     }

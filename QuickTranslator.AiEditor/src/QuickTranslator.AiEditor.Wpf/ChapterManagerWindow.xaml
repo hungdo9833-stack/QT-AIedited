@@ -43,6 +43,7 @@
         <Button x:Name="RenameButton" Content="Đổi tên" Click="OnRename"/>
         <Button x:Name="DeleteButton" Content="Chuyển vào History" Click="OnDelete"/>
         <Button x:Name="RestoreButton" Content="Phục hồi" Click="OnRestore"/>
+        <Button x:Name="ResegmentButton" Content="Chia lại đoạn" Click="OnResegment" ToolTip="Xem trước ranh giới mới; giữ nguyên các segment đã có dữ liệu dịch/duyệt."/>
         <Button x:Name="QueueButton" Content="Đưa vào hàng đợi dịch" Click="OnQueue" ToolTip="Xem Queue Plan trước khi bắt đầu dịch tuần tự."/>
         <Button x:Name="ClearSelectionButton" Content="Bỏ chọn" Click="OnClearSelection"/>
       </WrapPanel>

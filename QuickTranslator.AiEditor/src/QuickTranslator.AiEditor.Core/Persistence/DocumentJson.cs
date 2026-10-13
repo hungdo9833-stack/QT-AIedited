@@ -144,7 +144,7 @@ public static class DocumentJson
         foreach (var change in chapter.SegmentationHistory)
         {
             if (change is null || change.PreviousSegments is null || change.PreviousSegments.Count == 0 ||
-                change.ReplacementIds is null || change.ReplacementIds.Count == 0)
+                change.ReplacementIds is null || change.ReplacementIds.Count == 0 || change.PreviousQueue is null)
                 throw new InvalidDataException("Lịch sử thay đổi đoạn không hợp lệ.");
             int previousOffset = change.PreviousSegments[0].StartUtf16;
             if (previousOffset < 0) throw new InvalidDataException("Vị trí lưu trữ không hợp lệ.");

@@ -99,6 +99,7 @@ public sealed class SegmentationChange
     public string Description { get; set; } = "";
     public List<TranslationSegment> PreviousSegments { get; set; } = [];
     public List<Guid> ReplacementIds { get; set; } = [];
+    public QueueCheckpoint PreviousQueue { get; set; } = new();
 }
 
 public sealed class ChapterDocument
