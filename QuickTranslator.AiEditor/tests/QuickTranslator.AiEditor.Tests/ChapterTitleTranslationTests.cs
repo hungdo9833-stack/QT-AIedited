@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using QuickTranslator.AiEditor.Core.Importing;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
@@ -103,10 +104,11 @@ public sealed class ChapterTitleTranslationTests : IDisposable
         ChapterTitleTranslationDraft draft = Draft(50);
         var backend = new FailFirstBatchBackend();
         var service = new ChapterTitleTranslationService();
+        int failedBatchSize = ChapterTitleBatchPlanner.Plan(draft.Items, Options)[0].Length;
 
         await service.TranslateAsync(draft, backend, Options);
-        Assert.Equal(30, draft.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Failed));
-        Assert.Equal(20, draft.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Completed));
+        Assert.Equal(failedBatchSize, draft.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Failed));
+        Assert.Equal(50 - failedBatchSize, draft.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Completed));
         int callsBeforeRetry = backend.Calls;
 
         await service.TranslateAsync(draft, backend, Options, retryFailedOnly: true);
@@ -122,13 +124,14 @@ public sealed class ChapterTitleTranslationTests : IDisposable
         ChapterTitleTranslationDraft draft = Draft(50);
         using var cancellation = new CancellationTokenSource();
         var backend = new CancelSecondBatchBackend(cancellation);
+        int firstBatchSize = ChapterTitleBatchPlanner.Plan(draft.Items, Options)[0].Length;
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             new ChapterTitleTranslationService().TranslateAsync(draft, backend, Options,
                 cancellationToken: cancellation.Token));
 
-        Assert.Equal(30, draft.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Completed));
-        Assert.Equal(20, draft.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Pending));
+        Assert.Equal(firstBatchSize, draft.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Completed));
+        Assert.Equal(50 - firstBatchSize, draft.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Pending));
     }
 
     [Fact]
@@ -149,6 +152,52 @@ public sealed class ChapterTitleTranslationTests : IDisposable
         Assert.Equal(second, output[0].Id);
         Assert.Contains("青木堂 => Thanh Mộc Đường", client.Prompt);
         Assert.Contains("translated_title", client.Prompt);
+    }
+
+    [Fact]
+    public void Ollama_parser_accepts_prose_fence_container_and_common_property_casing()
+    {
+        Guid id = Guid.NewGuid();
+        string response = $$"""
+            Tôi đã dịch xong:
+            ```json
+            {"results":[{"id":"{{id:D}}","translatedTitle":"Thanh Mộc Đường"}]}
+            ```
+            """;
+
+        ChapterTitleBackendOutput item = Assert.Single(OllamaChapterTitleTranslationBackend.Parse(response));
+
+        Assert.Equal(id, item.Id);
+        Assert.Equal("Thanh Mộc Đường", item.TranslatedTitle);
+    }
+
+    [Fact]
+    public async Task Ollama_backend_retries_malformed_large_response_as_smaller_verified_batches()
+    {
+        ChapterTitleBackendInput[] input = Enumerable.Range(1, 20)
+            .Select(number => new ChapterTitleBackendInput(Guid.NewGuid(), $"标题{number}"))
+            .ToArray();
+        var client = new MalformedThenValidClient();
+        var backend = new OllamaChapterTitleTranslationBackend(client, Options);
+
+        IReadOnlyList<ChapterTitleBackendOutput> output = await backend.TranslateBatchAsync(input);
+
+        Assert.Equal(input.Select(item => item.Id).Order(), output.Select(item => item.Id).Order());
+        Assert.Equal(3, client.Calls);
+        Assert.Equal([20, 10, 10], client.RequestSizes);
+    }
+
+    [Fact]
+    public void Batch_planner_reduces_batch_size_when_output_budget_is_small()
+    {
+        ChapterTitleTranslationItem[] items = Draft(30).Items.ToArray();
+        ModelOptions constrained = Options with { MaximumOutputTokens = 512 };
+
+        IReadOnlyList<ChapterTitleTranslationItem[]> batches = ChapterTitleBatchPlanner.Plan(items, constrained);
+
+        Assert.True(batches.Count > 2);
+        Assert.All(batches, batch => Assert.InRange(batch.Length, 1, 10));
+        Assert.Equal(items.Select(item => item.Id), batches.SelectMany(batch => batch).Select(item => item.Id));
     }
 
     [Fact]
@@ -324,6 +373,24 @@ public sealed class ChapterTitleTranslationTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             Prompt = prompt;
+            return Task.FromResult(new OllamaCompletion(response, true, "stop", new GenerationMetrics()));
+        }
+    }
+
+    private sealed class MalformedThenValidClient : IOllamaClient
+    {
+        public int Calls { get; private set; }
+        public List<int> RequestSizes { get; } = [];
+
+        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            Guid[] ids = Regex.Matches(prompt, "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+                .Select(match => Guid.Parse(match.Value)).Distinct().ToArray();
+            RequestSizes.Add(ids.Length);
+            string response = Calls == 1 ? "JSON bị cắt: [{\"id\":" :
+                JsonSerializer.Serialize(ids.Select(id => new { id, translated_title = "Tên Việt" }), DocumentJson.Options);
             return Task.FromResult(new OllamaCompletion(response, true, "stop", new GenerationMetrics()));
         }
     }

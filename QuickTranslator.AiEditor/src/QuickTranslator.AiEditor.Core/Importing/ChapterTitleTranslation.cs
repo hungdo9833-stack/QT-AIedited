@@ -215,22 +215,32 @@ public sealed class ChapterTitleTranslationService
 public static class ChapterTitleBatchPlanner
 {
     public static IReadOnlyList<ChapterTitleTranslationItem[]> Plan(IReadOnlyList<ChapterTitleTranslationItem> items,
-        ModelOptions options, int maximumBatchSize = 30)
+        ModelOptions options, int maximumBatchSize = 20)
     {
         ArgumentNullException.ThrowIfNull(items); ArgumentNullException.ThrowIfNull(options); options.Validate();
         maximumBatchSize = Math.Clamp(maximumBatchSize, 1, 40);
         int inputBudget = Math.Max(256, options.ContextSize - options.MaximumOutputTokens - 512);
+        int outputBudget = Math.Max(64, options.MaximumOutputTokens - 128);
         var result = new List<ChapterTitleTranslationItem[]>();
         var current = new List<ChapterTitleTranslationItem>();
-        int estimatedTokens = 0;
+        int estimatedInputTokens = 0, estimatedOutputTokens = 0;
         foreach (ChapterTitleTranslationItem item in items)
         {
-            int itemTokens = 24 + Math.Max(1, item.SourceName.EnumerateRunes().Count());
-            if (current.Count > 0 && (current.Count >= maximumBatchSize || estimatedTokens + itemTokens > inputBudget))
+            int runes = Math.Max(1, item.SourceName.EnumerateRunes().Count());
+            int itemInputTokens = 24 + runes;
+            // Output repeats a GUID and JSON property names. Vietnamese can also require
+            // more tokens than the source, so reserve a conservative per-title budget.
+            int itemOutputTokens = 32 + runes * 2;
+            if (current.Count > 0 && (current.Count >= maximumBatchSize ||
+                                     estimatedInputTokens + itemInputTokens > inputBudget ||
+                                     estimatedOutputTokens + itemOutputTokens > outputBudget))
             {
-                result.Add(current.ToArray()); current.Clear(); estimatedTokens = 0;
+                result.Add(current.ToArray()); current.Clear();
+                estimatedInputTokens = 0; estimatedOutputTokens = 0;
             }
-            current.Add(item); estimatedTokens += itemTokens;
+            current.Add(item);
+            estimatedInputTokens += itemInputTokens;
+            estimatedOutputTokens += itemOutputTokens;
         }
         if (current.Count > 0) result.Add(current.ToArray());
         return result;
@@ -243,6 +253,40 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
     public async Task<IReadOnlyList<ChapterTitleBackendOutput>> TranslateBatchAsync(
         IReadOnlyList<ChapterTitleBackendInput> titles, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(titles);
+        if (titles.Count == 0) return [];
+        try
+        {
+            return await TranslateOnceAsync(titles, false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidDataException firstError) when (titles.Count > 1)
+        {
+            // Some models occasionally add prose or truncate a large JSON array. Retry only
+            // this failed batch as small groups; completed batches remain checkpointed.
+            int recoverySize = Math.Min(10, Math.Max(1, (titles.Count + 1) / 2));
+            var recovered = new List<ChapterTitleBackendOutput>(titles.Count);
+            try
+            {
+                for (int start = 0; start < titles.Count; start += recoverySize)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ChapterTitleBackendInput[] group = titles.Skip(start).Take(recoverySize).ToArray();
+                    recovered.AddRange(await TranslateOnceAsync(group, true, cancellationToken).ConfigureAwait(false));
+                }
+                return recovered;
+            }
+            catch (InvalidDataException retryError)
+            {
+                throw new InvalidDataException(
+                    "Ollama trả JSON tiêu đề không hợp lệ sau khi QT Studio đã thử lại bằng batch nhỏ. " +
+                    "Hãy tăng Output Tokens hoặc dùng Dịch lại mục lỗi. " + retryError.Message, firstError);
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<ChapterTitleBackendOutput>> TranslateOnceAsync(
+        IReadOnlyList<ChapterTitleBackendInput> titles, bool recovery, CancellationToken cancellationToken)
+    {
         string terms = glossary is null || glossary.Count == 0 ? "(không có)" : string.Join("\n",
             glossary.Take(200).Select(term => $"- {term.Chinese} => {term.Vietnamese}"));
         string input = JsonSerializer.Serialize(titles.Select(title => new
@@ -250,39 +294,166 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
             id = title.Id.ToString("D"), chinese_title = title.ChineseName
         }), DocumentJson.Options);
         string prompt = "Bạn dịch tên chương tiểu thuyết Trung-Việt. Chỉ dịch phần tên, không thêm số chương. " +
-            "Giữ đúng id. Trả duy nhất JSON array, mỗi phần tử có id và translated_title; không Markdown.\n" +
+            "Giữ nguyên chính xác mọi id. Trả duy nhất JSON array, mỗi phần tử có id và translated_title; " +
+            "không giải thích, không Markdown, không bỏ mục.\n" +
+            (recovery ? "Đây là lần thử lại batch nhỏ: bắt buộc đóng đầy đủ dấu ngoặc JSON.\n" : "") +
             "Thuật ngữ đã xác nhận:\n" + terms + "\nDữ liệu:\n" + input;
         OllamaCompletion completion = await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
-        return Parse(completion.Text);
+        IReadOnlyList<ChapterTitleBackendOutput> output = Parse(completion.Text);
+        ValidateExpectedIds(titles, output);
+        return output;
     }
 
     internal static IReadOnlyList<ChapterTitleBackendOutput> Parse(string response)
     {
-        string json = response?.Trim() ?? "";
-        if (json.StartsWith("```", StringComparison.Ordinal))
+        string text = response?.Trim().TrimStart('\uFEFF') ?? "";
+        Exception? lastError = null;
+        foreach (string candidate in EnumerateJsonCandidates(text))
         {
-            int firstLine = json.IndexOf('\n'); int lastFence = json.LastIndexOf("```", StringComparison.Ordinal);
-            if (firstLine >= 0 && lastFence > firstLine) json = json[(firstLine + 1)..lastFence].Trim();
+            try { return ParseCandidate(candidate); }
+            catch (Exception error) when (error is JsonException or InvalidDataException) { lastError = error; }
         }
-        try
+        throw new InvalidDataException(
+            "Ollama không trả được JSON tiêu đề hoàn chỉnh; phản hồi có thể kèm giải thích hoặc bị cắt do giới hạn Output Tokens.",
+            lastError);
+    }
+
+    private static IReadOnlyList<ChapterTitleBackendOutput> ParseCandidate(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions
         {
-            using JsonDocument document = JsonDocument.Parse(json);
-            JsonElement array = document.RootElement;
-            if (array.ValueKind == JsonValueKind.Object && array.TryGetProperty("translations", out JsonElement nested)) array = nested;
-            if (array.ValueKind != JsonValueKind.Array) throw new InvalidDataException("Ollama không trả JSON array tiêu đề.");
-            var result = new List<ChapterTitleBackendOutput>();
-            foreach (JsonElement item in array.EnumerateArray())
+            AllowTrailingCommas = true,
+            CommentHandling = JsonCommentHandling.Skip
+        });
+        JsonElement root = document.RootElement;
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in root.EnumerateObject())
             {
-                if (!item.TryGetProperty("id", out JsonElement idElement) ||
-                    !Guid.TryParse(idElement.GetString(), out Guid id) ||
-                    !item.TryGetProperty("translated_title", out JsonElement titleElement) ||
-                    titleElement.ValueKind != JsonValueKind.String)
-                    throw new InvalidDataException("Ollama trả mục tiêu đề sai cấu trúc.");
-                result.Add(new(id, titleElement.GetString() ?? ""));
+                string name = NormalizePropertyName(property.Name);
+                if (name is "translations" or "results" or "items" or "data" or "titles")
+                    return ParseCollection(property.Value);
             }
-            return result;
+            if (TryParseItem(root, out ChapterTitleBackendOutput single)) return [single];
+            if (TryParseIdMap(root, out IReadOnlyList<ChapterTitleBackendOutput>? mapped)) return mapped!;
         }
-        catch (JsonException error) { throw new InvalidDataException("Ollama trả JSON tiêu đề không hợp lệ.", error); }
+        if (root.ValueKind == JsonValueKind.Array) return ParseCollection(root);
+        throw new InvalidDataException("JSON Ollama không chứa danh sách id và translated_title.");
+    }
+
+    private static IReadOnlyList<ChapterTitleBackendOutput> ParseCollection(JsonElement collection)
+    {
+        if (collection.ValueKind == JsonValueKind.Object &&
+            TryParseIdMap(collection, out IReadOnlyList<ChapterTitleBackendOutput>? mapped)) return mapped!;
+        if (collection.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Trường kết quả của Ollama không phải JSON array.");
+        var result = new List<ChapterTitleBackendOutput>();
+        foreach (JsonElement item in collection.EnumerateArray())
+        {
+            if (!TryParseItem(item, out ChapterTitleBackendOutput parsed))
+                throw new InvalidDataException("Ollama trả mục tiêu đề thiếu id hoặc translated_title.");
+            result.Add(parsed);
+        }
+        return result;
+    }
+
+    private static bool TryParseItem(JsonElement item, out ChapterTitleBackendOutput output)
+    {
+        output = default!;
+        if (item.ValueKind != JsonValueKind.Object ||
+            !TryGetProperty(item, out JsonElement idElement, "id", "chapterid") ||
+            idElement.ValueKind != JsonValueKind.String || !Guid.TryParse(idElement.GetString(), out Guid id) ||
+            !TryGetProperty(item, out JsonElement titleElement, "translatedtitle", "vietnamesetitle", "translation", "title") ||
+            titleElement.ValueKind != JsonValueKind.String)
+            return false;
+        output = new(id, titleElement.GetString() ?? "");
+        return true;
+    }
+
+    private static bool TryParseIdMap(JsonElement value, out IReadOnlyList<ChapterTitleBackendOutput>? output)
+    {
+        output = null;
+        if (value.ValueKind != JsonValueKind.Object) return false;
+        var result = new List<ChapterTitleBackendOutput>();
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            if (!Guid.TryParse(property.Name, out Guid id) || property.Value.ValueKind != JsonValueKind.String)
+                return false;
+            result.Add(new(id, property.Value.GetString() ?? ""));
+        }
+        if (result.Count == 0) return false;
+        output = result;
+        return true;
+    }
+
+    private static bool TryGetProperty(JsonElement item, out JsonElement value, params string[] normalizedNames)
+    {
+        foreach (JsonProperty property in item.EnumerateObject())
+            if (normalizedNames.Contains(NormalizePropertyName(property.Name), StringComparer.Ordinal))
+            {
+                value = property.Value;
+                return true;
+            }
+        value = default;
+        return false;
+    }
+
+    private static string NormalizePropertyName(string name) =>
+        new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static IEnumerable<string> EnumerateJsonCandidates(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) yield break;
+        yield return text;
+        for (int start = 0; start < text.Length; start++)
+        {
+            if (text[start] is not ('[' or '{')) continue;
+            if (TryFindJsonEnd(text, start, out int end))
+            {
+                string candidate = text[start..(end + 1)];
+                if (!string.Equals(candidate, text, StringComparison.Ordinal)) yield return candidate;
+                start = end;
+            }
+        }
+    }
+
+    private static bool TryFindJsonEnd(string text, int start, out int end)
+    {
+        var stack = new Stack<char>();
+        bool inString = false, escaped = false;
+        for (int index = start; index < text.Length; index++)
+        {
+            char current = text[index];
+            if (inString)
+            {
+                if (escaped) { escaped = false; continue; }
+                if (current == '\\') { escaped = true; continue; }
+                if (current == '"') inString = false;
+                continue;
+            }
+            if (current == '"') { inString = true; continue; }
+            if (current is '[' or '{') stack.Push(current);
+            else if (current is ']' or '}')
+            {
+                if (stack.Count == 0 || current == ']' && stack.Peek() != '[' || current == '}' && stack.Peek() != '{')
+                    break;
+                stack.Pop();
+                if (stack.Count == 0) { end = index; return true; }
+            }
+        }
+        end = -1;
+        return false;
+    }
+
+    private static void ValidateExpectedIds(IReadOnlyList<ChapterTitleBackendInput> input,
+        IReadOnlyList<ChapterTitleBackendOutput> output)
+    {
+        if (output.Any(item => item.Id == Guid.Empty || string.IsNullOrWhiteSpace(item.TranslatedTitle)) ||
+            output.GroupBy(item => item.Id).Any(group => group.Count() != 1))
+            throw new InvalidDataException("Ollama trả ID trùng hoặc tiêu đề rỗng.");
+        HashSet<Guid> expected = input.Select(item => item.Id).ToHashSet();
+        if (output.Count != expected.Count || output.Any(item => !expected.Remove(item.Id)) || expected.Count != 0)
+            throw new InvalidDataException("Ollama trả thiếu, thừa hoặc sai ID; batch chưa được áp dụng.");
     }
 }
 
