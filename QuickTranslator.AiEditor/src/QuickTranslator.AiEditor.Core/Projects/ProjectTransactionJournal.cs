@@ -316,13 +316,21 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
         string manifest = Path.GetRelativePath(session.RootDirectory, session.ManifestPath).Replace('\\', '/');
         var chapterPaths = journal.Before.Chapters.Concat(journal.After.Chapters).SelectMany(x => new[] { x.RelativePath, x.RelativePath + ".bak" })
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var workerQueuePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ProjectTranslationJobStore.RelativePath,
+            ProjectTranslationJobStore.RelativePath + ".bak"
+        };
         foreach (var file in journal.Files)
         {
             ProjectPath.EnsureSafeRelative(file.Path);
+            bool workerQueueFile = journal.Operation == "WorkerSegmentationPreflight" &&
+                                   workerQueuePaths.Contains(file.Path);
             if (file.Path != manifest && file.Path != manifest + ".bak" &&
-                !chapterPaths.Contains(file.Path))
-                throw new InvalidDataException("Journal nhắm vào file ngoài phạm vi chapter/manifest.");
+                !chapterPaths.Contains(file.Path) && !workerQueueFile)
+                throw new InvalidDataException("Journal nhắm vào file ngoài phạm vi chapter/manifest/queue được phép.");
             if (file.Path != manifest && file.Path != manifest + ".bak" &&
+                !workerQueueFile &&
                 !(file.Path.EndsWith(".qtaie.json", StringComparison.OrdinalIgnoreCase) || file.Path.EndsWith(".qtaie.json.bak", StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidDataException("Journal có file ngoài định dạng chapter.");
             foreach (var pair in new[] { (file.BeforeCopy, file.BeforeSha), (file.AfterCopy, file.AfterSha) })

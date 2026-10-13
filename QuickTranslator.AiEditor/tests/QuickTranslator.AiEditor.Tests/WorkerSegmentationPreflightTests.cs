@@ -53,6 +53,11 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
         Assert.All(remoteClient.Options, options => Assert.Equal(remoteModel, options));
         Assert.NotEmpty(localClient.Options);
         Assert.NotEmpty(remoteClient.Options);
+
+        ProjectSession reopened = (await new ProjectRepository().OpenAsync(session.ManifestPath)).Session;
+        Assert.False(reopened.RecoveryReport.RequiresDecision);
+        Assert.DoesNotContain(reopened.RecoveryReport.Transactions,
+            transaction => transaction.Operation == "Journal không đọc được");
     }
 
     [Fact]

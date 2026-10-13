@@ -8,9 +8,10 @@ namespace QuickTranslator.AiEditor.Core.Projects;
 
 public sealed class ProjectTranslationJobStore(ProjectSession session)
 {
+    internal const string RelativePath = "Queue/project-translation-job.json";
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.OrdinalIgnoreCase);
-    private readonly SemaphoreSlim _gate = Gates.GetOrAdd(session.Resolve("Queue/project-translation-job.json"), _ => new(1, 1));
-    public string PathName { get; } = session.Resolve("Queue/project-translation-job.json");
+    private readonly SemaphoreSlim _gate = Gates.GetOrAdd(session.Resolve(RelativePath), _ => new(1, 1));
+    public string PathName { get; } = session.Resolve(RelativePath);
     public RecoveryInfo? LastRecovery { get; private set; }
 
     public async Task<ProjectTranslationJob?> LoadAsync(CancellationToken cancellationToken = default)
