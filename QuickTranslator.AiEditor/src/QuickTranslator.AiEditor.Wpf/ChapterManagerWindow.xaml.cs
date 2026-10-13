@@ -12,7 +12,8 @@ internal sealed record ChapterManagerCommands(
     Func<IReadOnlyList<Guid>, Task> SoftDelete,
     Func<IReadOnlyList<Guid>, Task> Restore,
     Func<IReadOnlyList<Guid>, Task> Resegment,
-    Func<IReadOnlyList<Guid>, Task> Queue);
+    Func<IReadOnlyList<Guid>, Task> Queue,
+    Func<IReadOnlyList<Guid>, Task> TranslateTitles);
 
 public partial class ChapterManagerWindow : Window
 {
@@ -160,6 +161,22 @@ public partial class ChapterManagerWindow : Window
             "Đã chia lại đoạn cho các chương đã chọn.");
     }
 
+    private async void OnTranslateSelectedTitles(object sender, RoutedEventArgs e)
+    {
+        Guid[] ids = SelectedRows().Where(row => !row.IsDeleted).OrderBy(row => row.DisplayOrder)
+            .Select(row => row.ChapterId).ToArray();
+        if (ids.Length == 0) return;
+        await RunAsync(() => _commands.TranslateTitles(ids), "Đã cập nhật tiêu đề các chương được chọn.");
+    }
+
+    private async void OnTranslateAllTitles(object sender, RoutedEventArgs e)
+    {
+        Guid[] ids = _catalog.GetSnapshot(_session).Chapters.Where(chapter => !chapter.IsDeleted)
+            .OrderBy(chapter => chapter.DisplayOrder).Select(chapter => chapter.ChapterId).ToArray();
+        if (ids.Length == 0) return;
+        await RunAsync(() => _commands.TranslateTitles(ids), "Đã cập nhật tiêu đề toàn bộ chương hoạt động.");
+    }
+
     private async Task RunAsync(Func<Task> operation, string success)
     {
         if (_working) return;
@@ -189,6 +206,8 @@ public partial class ChapterManagerWindow : Window
         RestoreButton.IsEnabled = !_working && deleted > 0 && active == 0;
         ResegmentButton.IsEnabled = !_working && active > 0 && deleted == 0;
         QueueButton.IsEnabled = !_working && active > 0 && deleted == 0;
+        TranslateSelectedTitlesButton.IsEnabled = !_working && active > 0 && deleted == 0;
+        TranslateAllTitlesButton.IsEnabled = !_working && _session.Manifest.Chapters.Any(entry => entry.DeletedAt is null);
         ClearSelectionButton.IsEnabled = !_working && selected.Length > 0;
         SelectionText.Text = $"Đã chọn {selected.Length:N0} · {active:N0} hoạt động · {deleted:N0} History";
     }

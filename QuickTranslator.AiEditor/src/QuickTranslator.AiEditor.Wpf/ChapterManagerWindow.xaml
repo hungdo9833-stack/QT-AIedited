@@ -45,6 +45,8 @@
         <Button x:Name="RestoreButton" Content="Phục hồi" Click="OnRestore"/>
         <Button x:Name="ResegmentButton" Content="Chia lại đoạn" Click="OnResegment" ToolTip="Xem trước ranh giới mới; giữ nguyên các segment đã có dữ liệu dịch/duyệt."/>
         <Button x:Name="QueueButton" Content="Đưa vào hàng đợi dịch" Click="OnQueue" ToolTip="Xem Queue Plan trước khi bắt đầu dịch tuần tự."/>
+        <Button x:Name="TranslateSelectedTitlesButton" Content="Dịch tiêu đề đã chọn" Click="OnTranslateSelectedTitles"/>
+        <Button x:Name="TranslateAllTitlesButton" Content="Dịch tất cả tiêu đề" Click="OnTranslateAllTitles"/>
         <Button x:Name="ClearSelectionButton" Content="Bỏ chọn" Click="OnClearSelection"/>
       </WrapPanel>
       <TextBlock x:Name="SelectionText" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>

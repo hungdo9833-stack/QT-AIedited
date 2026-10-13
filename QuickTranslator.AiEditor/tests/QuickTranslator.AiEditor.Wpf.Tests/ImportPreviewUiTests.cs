@@ -23,6 +23,11 @@ public sealed class ImportPreviewUiTests
             Assert.Equal(2, window.CurrentPlan!.Chapters.Count());
             Assert.Equal("版权信息\r\n第1章 冲突\r\n甲。\r\n第2章 新章\r\n乙。", window.CurrentPlan.ReconstructSource());
             Assert.False(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.NotNull(window.FindName("TranslateTitlesCheck"));
+            Assert.NotNull(window.FindName("TitleMethodInput"));
+            Assert.NotNull(window.FindName("TranslateAllTitlesButton"));
+            Assert.NotNull(window.FindName("RetryFailedTitlesButton"));
+            Assert.NotNull(window.FindName("RetrySelectedTitlesButton"));
             Assert.Contains("Số 1", ((TextBlock)window.FindName("FooterHintText")).Text +
                 string.Join(" ", ((ListBox)window.FindName("IssuesList")).Items.Cast<object>()), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(System.Windows.Media.Color.FromRgb(7, 17, 31),

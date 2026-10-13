@@ -24,6 +24,8 @@ public sealed class ChapterManagerUiTests
             Assert.True(window.UsesRecyclingVirtualization);
             Assert.Equal(10000, ((DataGrid)window.FindName("ChapterGrid")).Items.Count);
             Assert.False(((Button)window.FindName("QueueButton")).IsEnabled);
+            Assert.True(((Button)window.FindName("TranslateAllTitlesButton")).IsEnabled);
+            Assert.False(((Button)window.FindName("TranslateSelectedTitlesButton")).IsEnabled);
         }
         finally { window.Close(); }
     });
@@ -48,6 +50,7 @@ public sealed class ChapterManagerUiTests
             grid.SelectedItems.Add(grid.Items[0]); grid.SelectedItems.Add(grid.Items[1]);
             Assert.Contains("Đã chọn 2", ((TextBlock)window.FindName("SelectionText")).Text);
             Assert.True(((Button)window.FindName("QueueButton")).IsEnabled);
+            Assert.True(((Button)window.FindName("TranslateSelectedTitlesButton")).IsEnabled);
         }
         finally { window.Close(); }
     });
@@ -99,6 +102,7 @@ public sealed class ChapterManagerUiTests
     private static ChapterManagerCommands NoOpCommands() => new(
         _ => Task.CompletedTask,
         (_, _, _) => Task.CompletedTask,
+        _ => Task.CompletedTask,
         _ => Task.CompletedTask,
         _ => Task.CompletedTask,
         _ => Task.CompletedTask,

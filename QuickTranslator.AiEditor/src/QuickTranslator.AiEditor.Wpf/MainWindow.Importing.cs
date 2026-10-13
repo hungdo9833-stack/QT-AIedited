@@ -16,7 +16,8 @@ public partial class MainWindow
             return;
         }
 
-        var preview = new ImportPreviewWindow(_projectSession) { Owner = this };
+        await EnsureOllamaBackendsLoadedAsync();
+        var preview = new ImportPreviewWindow(_projectSession, CreateChapterTitleRuntimeAsync) { Owner = this };
         if (preview.ShowDialog() != true || preview.ConfirmedPlan is not ImportPreviewPlan plan) return;
         try
         {

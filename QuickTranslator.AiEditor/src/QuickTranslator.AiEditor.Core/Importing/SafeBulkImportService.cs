@@ -202,7 +202,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
                 }
                 ChapterDocument existing = (await repository.LoadChapterAsync(session, item.ChapterId, token).ConfigureAwait(false)).Chapter;
                 if (sameId.Number == number && existing.ChapterNumber == number && existing.ProjectId == session.Manifest.ProjectId &&
-                    existing.Title == expectedTitle && existing.ChineseTitle == expectedTitle && existing.OriginalText == expectedText)
+                    existing.Title == expectedTitle && existing.ChineseTitle == ChineseTitle(item) && existing.OriginalText == expectedText)
                 {
                     outcome.State = BulkImportChapterState.AlreadyImported;
                     continue;
@@ -228,7 +228,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         chapter.Segments = new TextSegmenter().Segment(text, chapter.Id, defaults.Segmentation).ToList();
         chapter.SelectedSegmentId = chapter.Segments[0].Id;
         chapter.SelectedPreset = defaults.Preset;
-        chapter.ChineseTitle = Title(item);
+        chapter.ChineseTitle = ChineseTitle(item);
         chapter.ProjectId = session.Manifest.ProjectId;
         chapter.ChapterNumber = item.Number;
         resources.ApplyTo(chapter);
@@ -343,6 +343,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             ContentLengthUtf16 = x.ContentSpan.LengthUtf16,
             Number = x.Number,
             Title = x.Title,
+            VietnameseTitle = x.VietnameseTitle,
             VolumeTitle = x.VolumeTitle,
             Included = x.Included
         }).ToList()
@@ -365,7 +366,9 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             outcomes.Select(x => new BulkImportChapterOutcome(x.Item.Id, x.Item.ChapterId, x.Item.Number!.Value,
                 Title(x.Item), x.State, x.Error)).ToArray(), error, canResume);
 
-    private static string Title(ImportPreviewItem item) => item.Title.Trim();
+    private static string Title(ImportPreviewItem item) => string.IsNullOrWhiteSpace(item.VietnameseTitle)
+        ? item.Title.Trim() : item.VietnameseTitle.Trim();
+    private static string ChineseTitle(ImportPreviewItem item) => item.Title.Trim();
 
     private static Guid StableGuid(string value) => new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
 
@@ -400,6 +403,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         public int ContentLengthUtf16 { get; set; }
         public int? Number { get; set; }
         public string Title { get; set; } = "";
+        public string? VietnameseTitle { get; set; }
         public string? VolumeTitle { get; set; }
         public bool Included { get; set; }
     }

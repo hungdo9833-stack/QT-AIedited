@@ -25,7 +25,8 @@ public partial class MainWindow
             SoftDelete: SoftDeleteFromManagerAsync,
             Restore: RestoreFromManagerAsync,
             Resegment: ResegmentFromManagerAsync,
-            Queue: OpenProjectTranslationQueueAsync)) { Owner = this };
+            Queue: OpenProjectTranslationQueueAsync,
+            TranslateTitles: TranslateChapterTitlesFromManagerAsync)) { Owner = this };
         _chapterManagerWindow.Closed += (_, _) => _chapterManagerWindow = null;
         _chapterManagerWindow.Show();
     }

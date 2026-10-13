@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 using QuickTranslator.AiEditor.Core.Importing;
+using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
 
 namespace QuickTranslator.AiEditor.Wpf;
@@ -12,13 +13,21 @@ namespace QuickTranslator.AiEditor.Wpf;
 public partial class ImportPreviewWindow : Window
 {
     private readonly ProjectSession _project;
+    private readonly ChapterTitleRuntimeFactory? _titleRuntimeFactory;
     private readonly ObservableCollection<PreviewRow> _rows = [];
     private ImportPreviewEditor? _editor;
+    private ChapterTitleTranslationDraft? _titleDraft;
+    private ChapterTitleTranslationDraftStore? _titleDraftStore;
+    private CancellationTokenSource? _titleTranslationCancellation;
     private bool _loading;
+    private bool _translatingTitles;
 
-    public ImportPreviewWindow(ProjectSession project)
+    public ImportPreviewWindow(ProjectSession project) : this(project, null) { }
+
+    internal ImportPreviewWindow(ProjectSession project, ChapterTitleRuntimeFactory? titleRuntimeFactory)
     {
         _project = project ?? throw new ArgumentNullException(nameof(project));
+        _titleRuntimeFactory = titleRuntimeFactory;
         InitializeComponent();
         PreviewGrid.ItemsSource = _rows;
     }
@@ -43,6 +52,7 @@ public partial class ImportPreviewWindow : Window
             _editor = ImportPreviewEditor.Create(detected);
             SourcePath = Path.GetFullPath(path);
             SourcePathInput.Text = SourcePath;
+            await RestoreTitleDraftAsync(token);
             RefreshRows();
             PreviewStatusText.Text = PreviewStatus(_editor.Current);
         }
@@ -87,9 +97,12 @@ public partial class ImportPreviewWindow : Window
         foreach (ImportPreviewItem item in displayItems)
         {
             string[] problems = plan.Issues.Where(x => x.ItemIds.Contains(item.Id)).Select(x => x.Message).ToArray();
+            ChapterTitleTranslationItem? translated = _titleDraft?.Items.SingleOrDefault(x => x.Id == item.Id);
+            if (translated?.Status == ChapterTitleTranslationStatus.Failed && translated.Error is not null)
+                problems = [.. problems, "Dịch tiêu đề: " + translated.Error];
             string? collision = ProjectCollision(item);
             if (collision is not null) { problems = [.. problems, collision]; projectIssues.Add(collision); }
-            var row = new PreviewRow(item, problems);
+            var row = new PreviewRow(item, problems, translated?.Status);
             bool matchesQuery = query.Length == 0 || row.NumberLabel.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 row.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) || row.VolumeTitle.Contains(query, StringComparison.CurrentCultureIgnoreCase);
             bool matchesFilter = filter switch
@@ -110,10 +123,21 @@ public partial class ImportPreviewWindow : Window
         ProblemCountText.Text = $"{problemsCount:N0} mục";
         SourceSummaryText.Text = $"{plan.Source.EncodingName} · {plan.Source.Text.Length:N0} ký tự · {plan.Source.NewLineStyle}";
         UndoButton.IsEnabled = _editor.CanUndo;
-        ConfirmButton.IsEnabled = !plan.HasBlockingIssues && collisions == 0 && plan.ImportableChapters.Any();
+        bool titlesReady = TranslateTitlesCheck.IsChecked != true || plan.ImportableChapters.All(item =>
+            !string.IsNullOrWhiteSpace(item.VietnameseTitle));
+        ConfirmButton.IsEnabled = !_translatingTitles && !plan.HasBlockingIssues && collisions == 0 &&
+            plan.ImportableChapters.Any() && titlesReady;
         FooterHintText.Text = ConfirmButton.IsEnabled
             ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương theo thứ tự số. Source hash {plan.Source.RawSha256[..12]}…"
-            : "Cần xử lý lỗi màu cảnh báo hoặc collision trước khi nhập. Nguồn TXT vẫn giữ nguyên.";
+            : titlesReady ? "Cần xử lý lỗi màu cảnh báo hoặc collision trước khi nhập. Nguồn TXT vẫn giữ nguyên."
+                : "Còn tiêu đề chưa dịch. Hãy retry mục lỗi hoặc bỏ chọn dịch tiêu đề để chủ động nhập tên gốc.";
+        int translatedCount = plan.ImportableChapters.Count(item => !string.IsNullOrWhiteSpace(item.VietnameseTitle));
+        int failedTitles = _titleDraft?.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Failed) ?? 0;
+        TitleTranslationProgressText.Text = $"{translatedCount:N0}/{plan.ImportableChapters.Count():N0} tiêu đề · {failedTitles:N0} lỗi";
+        TranslateAllTitlesButton.IsEnabled = !_translatingTitles && plan.ImportableChapters.Any();
+        RetryFailedTitlesButton.IsEnabled = !_translatingTitles && failedTitles > 0;
+        RetrySelectedTitlesButton.IsEnabled = !_translatingTitles && PreviewGrid.SelectedItems.Count > 0;
+        CancelTitleTranslationButton.IsEnabled = _translatingTitles;
         UpdateSelection();
     }
 
@@ -153,6 +177,7 @@ public partial class ImportPreviewWindow : Window
         {
             int? number = string.IsNullOrWhiteSpace(NumberInput.Text) ? null : int.Parse(NumberInput.Text);
             _editor!.UpdateChapter(row.Id, number, TitleInput.Text);
+            InvalidateTitleDraft();
             RefreshRows(row.Id);
         }
         catch (Exception ex) when (ex is FormatException or ArgumentException or InvalidOperationException) { ShowError(ex.Message); }
@@ -173,14 +198,14 @@ public partial class ImportPreviewWindow : Window
         LineChoice[] choices = _editor.Current.Lines.Where(x => x.FullSpan.StartUtf16 > item.ContentSpan.StartUtf16 && x.FullSpan.StartUtf16 < item.Span.EndUtf16)
             .Select(x => new LineChoice(x.FullSpan.StartUtf16, $"Dòng {x.Number}: {Short(x.Content)}")).ToArray();
         if (!TryChooseBoundary("Tách chương", choices, (item.Number ?? 0) + 1, "Chương tách mới", out int offset, out int number, out string title)) return;
-        try { _editor.Split(row.Id, offset, number, title); RefreshRows(row.Id); }
+        try { _editor.Split(row.Id, offset, number, title); InvalidateTitleDraft(); RefreshRows(row.Id); }
         catch (Exception ex) { ShowError(ex.Message); }
     }
 
     private void OnMerge(object sender, RoutedEventArgs e)
     {
         if (!TrySelectedChapter(out PreviewRow? row)) return;
-        try { _editor!.MergeWithNext(row.Id); RefreshRows(row.Id); }
+        try { _editor!.MergeWithNext(row.Id); InvalidateTitleDraft(); RefreshRows(row.Id); }
         catch (Exception ex) { ShowError(ex.Message); }
     }
 
@@ -195,11 +220,162 @@ public partial class ImportPreviewWindow : Window
         LineChoice[] choices = _editor.Current.Lines.Where(x => x.FullSpan.StartUtf16 > item.ContentSpan.StartUtf16 && x.FullSpan.StartUtf16 < next.Span.EndUtf16)
             .Select(x => new LineChoice(x.FullSpan.StartUtf16, $"Dòng {x.Number}: {Short(x.Content)}")).ToArray();
         if (!TryChooseBoundary("Dời ranh giới", choices, next.Number ?? 1, next.Title, out int offset, out _, out _)) return;
-        try { _editor.MoveBoundary(row.Id, offset); RefreshRows(row.Id); }
+        try { _editor.MoveBoundary(row.Id, offset); InvalidateTitleDraft(); RefreshRows(row.Id); }
         catch (Exception ex) { ShowError(ex.Message); }
     }
 
-    private void OnUndo(object sender, RoutedEventArgs e) { _editor?.Undo(); RefreshRows(); }
+    private void OnUndo(object sender, RoutedEventArgs e) { _editor?.Undo(); InvalidateTitleDraft(); RefreshRows(); }
+
+    private void OnTitleTranslationOptionChanged(object sender, RoutedEventArgs e)
+    {
+        if (IsInitialized && _editor is not null) RefreshRows();
+    }
+
+    private async void OnTranslateAllTitles(object sender, RoutedEventArgs e) =>
+        await TranslateTitlesAsync(retryFailedOnly: false, selectedIds: null);
+
+    private async void OnRetryFailedTitles(object sender, RoutedEventArgs e) =>
+        await TranslateTitlesAsync(retryFailedOnly: true, selectedIds: null);
+
+    private async void OnRetrySelectedTitles(object sender, RoutedEventArgs e)
+    {
+        Guid[] selected = PreviewGrid.SelectedItems.Cast<PreviewRow>().Select(row => row.Id).ToArray();
+        if (_titleDraft is not null)
+            foreach (ChapterTitleTranslationItem item in _titleDraft.Items.Where(item => selected.Contains(item.Id) &&
+                         !item.ExistingTitleProtected))
+                item.Status = ChapterTitleTranslationStatus.Pending;
+        await TranslateTitlesAsync(retryFailedOnly: false, selectedIds: selected);
+    }
+
+    private void OnCancelTitleTranslation(object sender, RoutedEventArgs e) => _titleTranslationCancellation?.Cancel();
+
+    private async Task TranslateTitlesAsync(bool retryFailedOnly, IReadOnlyCollection<Guid>? selectedIds)
+    {
+        if (_editor is null || _translatingTitles) return;
+        TranslateTitlesCheck.IsChecked = true;
+        ChapterTitleTranslationMethod method = SelectedTitleMethod();
+        try
+        {
+            ChapterTitleRuntime runtime = await CreateTitleRuntimeAsync(method, CancellationToken.None);
+            EnsureTitleDraft(method, runtime);
+            _titleTranslationCancellation = new();
+            _translatingTitles = true;
+            RefreshRows();
+            if (_titleDraftStore is not null) await _titleDraftStore.SaveAsync(_titleDraft!);
+            var service = new ChapterTitleTranslationService();
+            var progress = new Progress<ChapterTitleTranslationProgress>(value =>
+                TitleTranslationProgressText.Text = $"{value.Completed:N0}/{value.Total:N0} tiêu đề · {value.Failed:N0} lỗi");
+            await service.TranslateAsync(_titleDraft!, runtime.Backend, runtime.ModelOptions, retryFailedOnly,
+                selectedIds, overwriteProtected: false, progress,
+                _titleDraftStore is null ? null : _titleDraftStore.SaveAsync,
+                _titleTranslationCancellation.Token);
+            ApplyCompletedTitles();
+        }
+        catch (OperationCanceledException)
+        {
+            PreviewStatusText.Text = "Đã hủy dịch tiêu đề; các batch hoàn tất vẫn nằm trong draft.";
+            ApplyCompletedTitles();
+        }
+        catch (Exception ex) { ShowError(ex.Message); }
+        finally
+        {
+            _titleTranslationCancellation?.Dispose(); _titleTranslationCancellation = null;
+            _translatingTitles = false; RefreshRows();
+        }
+    }
+
+    private void EnsureTitleDraft(ChapterTitleTranslationMethod method, ChapterTitleRuntime runtime)
+    {
+        ImportPreviewItem[] chapters = _editor!.Current.ImportableChapters.ToArray();
+        Guid[] ids = chapters.Select(item => item.Id).ToArray();
+        bool compatible = _titleDraft is not null && _titleDraft.Method == method &&
+            _titleDraft.Items.Select(item => item.Id).SequenceEqual(ids);
+        if (compatible) return;
+        _titleDraft = ChapterTitleTranslationDraft.Create(_project.Manifest.ProjectId,
+            "import:" + _editor.Current.Source.RawSha256, method,
+            chapters.Select(item => new ChapterTitleTranslationSource(item.Id, item.Number, item.Title,
+                item.VietnameseTitle ?? "")), runtime.BackendProfileId, runtime.Model);
+    }
+
+    private async Task<ChapterTitleRuntime> CreateTitleRuntimeAsync(ChapterTitleTranslationMethod method,
+        CancellationToken cancellationToken)
+    {
+        if (_titleRuntimeFactory is not null) return await _titleRuntimeFactory(method, cancellationToken);
+        if (method == ChapterTitleTranslationMethod.KeepChinese)
+            return new(new KeepChineseChapterTitleTranslationBackend(), new ModelOptions(), null, "none");
+        throw new InvalidOperationException("Phiên thử UI chưa có backend dịch tiêu đề. Hãy mở từ cửa sổ chính của QT Studio.");
+    }
+
+    private ChapterTitleTranslationMethod SelectedTitleMethod() => Enum.Parse<ChapterTitleTranslationMethod>(
+        (TitleMethodInput.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Ollama", true);
+
+    private async Task RestoreTitleDraftAsync(CancellationToken cancellationToken)
+    {
+        _titleDraft = null;
+        string sourceKey = "import:" + _editor!.Current.Source.RawSha256;
+        _titleDraftStore = new ChapterTitleTranslationDraftStore(_project.Resolve(
+            $"Cache/title-translation-import-{_editor.Current.Source.RawSha256[..24]}.json"));
+        try
+        {
+            ChapterTitleTranslationDraft? loaded = await _titleDraftStore.LoadAsync(cancellationToken);
+            if (loaded is null || loaded.ProjectId != _project.Manifest.ProjectId || loaded.SourceKey != sourceKey) return;
+            HashSet<Guid> current = _editor.Current.Chapters.Select(item => item.Id).ToHashSet();
+            if (loaded.Items.Any(item => !current.Contains(item.Id))) return;
+            _titleDraft = loaded;
+            TitleMethodInput.SelectedIndex = (int)loaded.Method;
+            TranslateTitlesCheck.IsChecked = true;
+            ApplyCompletedTitles();
+        }
+        catch (InvalidDataException ex) { PreviewStatusText.Text = "Draft tiêu đề cần kiểm tra: " + ex.Message; }
+    }
+
+    private void ApplyCompletedTitles()
+    {
+        if (_editor is null || _titleDraft is null) return;
+        Dictionary<Guid, string> completed = _titleDraft.Items.Where(item =>
+                item.Status is ChapterTitleTranslationStatus.Completed or ChapterTitleTranslationStatus.Protected &&
+                !string.IsNullOrWhiteSpace(item.VietnameseTitle))
+            .ToDictionary(item => item.Id, item => item.VietnameseTitle);
+        if (completed.Count > 0) _editor.ApplyVietnameseTitles(completed);
+    }
+
+    private void InvalidateTitleDraft()
+    {
+        _titleTranslationCancellation?.Cancel();
+        _titleDraft = null;
+    }
+
+    private void OnPreviewCellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
+    {
+        if (_editor is null || e.EditAction != DataGridEditAction.Commit ||
+            e.Row.Item is not PreviewRow row || e.EditingElement is not TextBox input ||
+            e.Column.Header?.ToString() != "Tiêu đề Việt") return;
+        try
+        {
+            _editor.UpdateVietnameseTitle(row.Id, input.Text);
+            if (_titleDraft?.Items.SingleOrDefault(item => item.Id == row.Id) is ChapterTitleTranslationItem item)
+            {
+                item.VietnameseTitle = input.Text.Trim();
+                item.TranslatedName = input.Text.Trim();
+                item.Status = string.IsNullOrWhiteSpace(input.Text)
+                    ? ChapterTitleTranslationStatus.Pending : ChapterTitleTranslationStatus.Completed;
+                item.Error = null;
+            }
+            Dispatcher.BeginInvoke(async () => await SaveManualTitleEditAsync(row.Id));
+        }
+        catch (Exception ex) { ShowError(ex.Message); }
+    }
+
+    private async Task SaveManualTitleEditAsync(Guid selectedId)
+    {
+        try
+        {
+            if (_titleDraftStore is not null && _titleDraft is not null)
+                await _titleDraftStore.SaveAsync(_titleDraft);
+            RefreshRows(selectedId);
+        }
+        catch (Exception ex) { ShowError("Không lưu được draft tiêu đề: " + ex.Message); }
+    }
 
     private bool TryChooseBoundary(string title, LineChoice[] choices, int suggestedNumber, string suggestedTitle,
         out int offset, out int number, out string chapterTitle)
@@ -266,15 +442,18 @@ public partial class ImportPreviewWindow : Window
     private static string Short(string value) => value.Length <= 70 ? value : value[..67] + "…";
 
     private sealed record LineChoice(int Offset, string Label);
-    private sealed record PreviewRow(Guid Id, string IncludedLabel, string NumberLabel, string Title, string VolumeTitle,
-        string Status, string ProblemLabel, string[] Problems)
+    private sealed record PreviewRow(Guid Id, string IncludedLabel, string NumberLabel, string Title,
+        string VietnameseTitle, string VolumeTitle, string Status, string ProblemLabel, string[] Problems)
     {
-        public PreviewRow(ImportPreviewItem item, string[] problems) : this(item.Id, item.Included ? "✓" : "—",
+        public PreviewRow(ImportPreviewItem item, string[] problems, ChapterTitleTranslationStatus? titleStatus) : this(
+            item.Id, item.Included ? "✓" : "—",
             item.Number?.ToString() ?? "—", item.Kind == PlannedRegionKind.Unclassified ? "Vùng chưa phân loại" : item.Title,
-            item.VolumeTitle ?? "", item.Kind switch
+            item.VietnameseTitle ?? "", item.VolumeTitle ?? "", item.Kind switch
             {
                 PlannedRegionKind.Volume => "Quyển", PlannedRegionKind.Unclassified => "Chưa phân loại",
                 _ when item.AutomaticallyExcludedDuplicate => "Bỏ qua bản trùng",
+                _ when titleStatus == ChapterTitleTranslationStatus.Failed => "Lỗi dịch tên",
+                _ when titleStatus == ChapterTitleTranslationStatus.Completed => "Đã dịch tên",
                 _ when item.Decision == CandidateDecision.NeedsReview => "Cần xem", _ => "Tin cậy"
             }, problems.Length == 0 ? "" : string.Join(" · ", problems), problems) { }
     }

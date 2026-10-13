@@ -41,6 +41,7 @@ public sealed record ImportPreviewItem(
 {
     public bool IsChapter => Kind is PlannedRegionKind.Chapter or PlannedRegionKind.SpecialChapter;
     public bool AutomaticallyExcludedDuplicate { get; init; }
+    public string? VietnameseTitle { get; init; }
 }
 
 public sealed class ImportPreviewPlan
@@ -185,7 +186,8 @@ public sealed class ImportPreviewPlan
                 .Append('|').Append(item.Kind).Append('|').Append(item.Span.StartUtf16).Append(':').Append(item.Span.LengthUtf16)
                 .Append('|').Append(item.ContentSpan.StartUtf16).Append(':').Append(item.ContentSpan.LengthUtf16)
                 .Append('|').Append(item.Number?.ToString(CultureInfo.InvariantCulture) ?? "-")
-                .Append('|').Append(item.Included ? '1' : '0').Append('|').Append(item.Title).Append('|').Append(item.VolumeTitle);
+                .Append('|').Append(item.Included ? '1' : '0').Append('|').Append(item.Title).Append('|')
+                .Append(item.VietnameseTitle).Append('|').Append(item.VolumeTitle);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
     }
 
@@ -233,8 +235,39 @@ public sealed class ImportPreviewEditor
         {
             Number = number,
             Title = title?.Trim() ?? "",
+            VietnameseTitle = null,
             AutomaticallyExcludedDuplicate = false
         });
+    }
+
+    public void UpdateVietnameseTitle(Guid itemId, string? title)
+    {
+        ImportPreviewItem item = RequireChapter(itemId);
+        Replace(itemId, item with { VietnameseTitle = string.IsNullOrWhiteSpace(title) ? null : title.Trim() });
+    }
+
+    public void ApplyVietnameseTitles(IReadOnlyDictionary<Guid, string> titles)
+    {
+        ArgumentNullException.ThrowIfNull(titles);
+        if (titles.Count == 0) return;
+        ImmutableArray<ImportPreviewItem>.Builder items = Current.Items.ToBuilder();
+        var applied = new HashSet<Guid>();
+        bool changed = false;
+        for (int index = 0; index < items.Count; index++)
+        {
+            ImportPreviewItem item = items[index];
+            if (!item.IsChapter || !titles.TryGetValue(item.Id, out string? title)) continue;
+            if (string.IsNullOrWhiteSpace(title)) throw new ArgumentException("Tên tiếng Việt không được rỗng.", nameof(titles));
+            string normalized = title.Trim();
+            if (!string.Equals(item.VietnameseTitle, normalized, StringComparison.Ordinal))
+            {
+                items[index] = item with { VietnameseTitle = normalized };
+                changed = true;
+            }
+            applied.Add(item.Id);
+        }
+        if (applied.Count != titles.Count) throw new KeyNotFoundException("Có ID tiêu đề không thuộc preview hiện tại.");
+        if (changed) Mutate(items.ToImmutable());
     }
 
     public void SetIncluded(Guid itemId, bool included)
