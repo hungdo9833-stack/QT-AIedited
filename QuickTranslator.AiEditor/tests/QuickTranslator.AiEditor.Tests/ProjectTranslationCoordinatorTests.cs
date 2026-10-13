@@ -362,6 +362,9 @@ public sealed class ProjectTranslationCoordinatorTests
             Assert.Equal(8, slow.Calls + fast.Calls);
             Assert.True(fast.Calls > slow.Calls);
             Assert.Equal(8, coordinator.CurrentJob.Items.Select(item => item.ChapterId).Distinct().Count());
+            Assert.All(coordinator.CurrentJob.Items, item => Assert.True(item.WorkerMetricsRecorded));
+            Assert.Equal(8 * 200, coordinator.GetWorkerProgress().Sum(worker => worker.InputTokens));
+            Assert.Equal(8 * 80, coordinator.GetWorkerProgress().Sum(worker => worker.OutputTokens));
             Assert.Equal(manifestOrder, context.Session.Manifest.Chapters.OrderBy(chapter => chapter.Number)
                 .Select(chapter => chapter.ChapterId));
             foreach (Guid id in context.ChapterIds)

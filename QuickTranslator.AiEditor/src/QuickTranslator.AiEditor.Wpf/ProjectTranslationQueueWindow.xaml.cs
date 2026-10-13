@@ -54,8 +54,17 @@ public partial class ProjectTranslationQueueWindow : Window
         Dictionary<Guid, string> workerNames = job.Workers.ToDictionary(worker => worker.WorkerId, worker => worker.Name);
         QueueGrid.ItemsSource = job.Items.OrderBy(item => item.Order).Select(item => new QueueRow(item,
             item.AssignedWorkerId is Guid workerId && workerNames.TryGetValue(workerId, out string? name) ? name : "—")).ToArray();
-        WorkerCards.ItemsSource = planMode ? job.Workers.Select(worker => new ProjectTranslationWorkerProgress(worker.WorkerId,
-            worker.Name, worker.Status, null, null, 0, 0, 0, 0, 0, 0, null)).ToArray() : _coordinator.GetWorkerProgress();
+        IReadOnlyList<ProjectTranslationWorkerProgress> workerProgress = planMode
+            ? job.Workers.Select(worker => new ProjectTranslationWorkerProgress(worker.WorkerId,
+                worker.Name, worker.Status, null, null, 0, 0, 0, 0, 0, 0, null)).ToArray()
+            : _coordinator.GetWorkerProgress();
+        Dictionary<Guid, ProjectTranslationWorkerState> workerDefinitions = job.Workers
+            .ToDictionary(worker => worker.WorkerId);
+        WorkerCards.ItemsSource = workerProgress.Select(progress =>
+        {
+            workerDefinitions.TryGetValue(progress.WorkerId, out ProjectTranslationWorkerState? definition);
+            return new WorkerCard(progress, definition);
+        }).ToArray();
         ProjectTranslationProgress progress = planMode
             ? new(ProjectTranslationJobStatus.Draft, job.Items.Count, 0, 0, 0, job.Items.Count, null, null, 0, 0, null)
             : _coordinator.GetProgress();
@@ -237,7 +246,27 @@ public partial class ProjectTranslationQueueWindow : Window
     {
         public QueueRow(ProjectTranslationItem item, string worker = "—") : this(item.Order, item.Number, item.Title, worker, item.Status,
             ItemStatusLabel(item.Status), item.CompletedSegments, item.TotalSegments,
-            $"{item.CompletedSegments:N0}/{item.TotalSegments:N0}", item.ErrorSegments, item.Error ?? "") { }
+            $"{item.CompletedSegments:N0}/{item.TotalSegments:N0}", item.ErrorSegments,
+            item.Error ?? item.PreflightWarning ?? "") { }
+    }
+
+    internal sealed record WorkerCard(Guid WorkerId, string Name, ProjectTranslationWorkerStatus Status,
+        string BackendLabel, string Model, int ContextSize, int OutputBudget, string Segmentation,
+        string? CurrentChapterTitle, int CompletedSegments, int TotalSegments,
+        double HanCharactersPerMinute, double TokensPerSecond, long InputTokens, long GeneratedTokens,
+        int QualityErrors, decimal EstimatedCost)
+    {
+        public WorkerCard(ProjectTranslationWorkerProgress progress, ProjectTranslationWorkerState? definition) : this(
+            progress.WorkerId, progress.Name, progress.Status,
+            definition is null ? "Legacy worker" : $"{definition.Backend.Kind} · {definition.Backend.ProfileName}",
+            definition?.ModelOptions.Model ?? "—", definition?.ModelOptions.ContextSize ?? 0,
+            definition?.ModelOptions.MaximumOutputTokens ?? 0,
+            definition is null ? "—" : $"{definition.SegmentationOptions.MinimumHanCharacters}/" +
+                $"{definition.SegmentationOptions.TargetHanCharacters}/{definition.SegmentationOptions.MaximumHanCharacters}",
+            progress.CurrentChapterTitle, progress.CompletedSegments, progress.TotalSegments,
+            progress.HanCharactersPerMinute, progress.TokensPerSecond, progress.InputTokens,
+            progress.OutputTokens, progress.ErrorSegments + progress.TruncatedOutputCount +
+                progress.PossibleMissingContentCount + progress.TimeoutCount, progress.EstimatedCost) { }
     }
 
     private static string StatusLabel(ProjectTranslationJobStatus status) => status switch

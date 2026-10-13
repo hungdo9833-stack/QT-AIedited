@@ -313,9 +313,13 @@ public sealed class ProjectTranslationCoordinator
             double rate = worker.ActiveSeconds > 0 ? worker.CompletedHanCharacters / worker.ActiveSeconds * 60d : 0;
             decimal cost = worker.HourlyPrice is decimal hourly
                 ? hourly * (decimal)(worker.ActiveSeconds / 3600d) : 0;
+            double tokensPerSecond = worker.EvaluationSeconds > 0
+                ? worker.OutputTokens / worker.EvaluationSeconds : 0;
             return new ProjectTranslationWorkerProgress(worker.WorkerId, worker.Name, worker.Status,
                 current?.ChapterId, current?.Title, current?.CompletedSegments ?? 0, current?.TotalSegments ?? 0,
-                rate, worker.CompletedChapters, worker.FailedChapters, cost, worker.LastError);
+                rate, worker.CompletedChapters, worker.FailedChapters, cost, worker.LastError,
+                tokensPerSecond, worker.InputTokens, worker.OutputTokens, worker.ErrorSegments,
+                worker.TruncatedOutputCount, worker.PossibleMissingContentCount, worker.TimeoutCount);
         }).ToArray();
     }
 
@@ -696,7 +700,7 @@ public sealed class ProjectTranslationCoordinator
                     ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
                     job.Status = ProjectTranslationJobStatus.Paused;
                     ClearCurrent(job, workerDefinition);
-                    UpdateWorkerCompletion(job, workerDefinition, target, workerStarted);
+                    UpdateWorkerCompletion(job, workerDefinition, target, after, workerStarted);
                 }, CancellationToken.None).ConfigureAwait(false);
                 return;
             }
@@ -710,7 +714,7 @@ public sealed class ProjectTranslationCoordinator
                     ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
                     job.Status = ProjectTranslationJobStatus.Cancelled;
                     ClearCurrent(job, workerDefinition);
-                    UpdateWorkerCompletion(job, workerDefinition, target, workerStarted);
+                    UpdateWorkerCompletion(job, workerDefinition, target, after, workerStarted);
                 }, CancellationToken.None).ConfigureAwait(false);
                 return;
             }
@@ -723,7 +727,7 @@ public sealed class ProjectTranslationCoordinator
                     failed ? after.Queue.LastError ?? "Chapter còn segment lỗi hoặc chưa hoàn tất." : null);
                 ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
                 ClearCurrent(job, workerDefinition);
-                UpdateWorkerCompletion(job, workerDefinition, target, workerStarted);
+                UpdateWorkerCompletion(job, workerDefinition, target, after, workerStarted);
                 if (uncertainRemote && workerDefinition is not null)
                 {
                     ProjectTranslationWorkerState worker = job.Workers.Single(value => value.WorkerId == workerDefinition.WorkerId);
@@ -742,7 +746,7 @@ public sealed class ProjectTranslationCoordinator
                     conflictFailure ? ProjectTranslationItemStatus.NeedsReview : ProjectTranslationItemStatus.Failed, ex.Message);
                 ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
                 ClearCurrent(job, workerDefinition);
-                UpdateWorkerCompletion(job, workerDefinition, target, workerStarted);
+                UpdateWorkerCompletion(job, workerDefinition, target, snapshot, workerStarted);
             }, CancellationToken.None).ConfigureAwait(false);
             if (ex is IOException or UnauthorizedAccessException)
             {
@@ -916,7 +920,8 @@ public sealed class ProjectTranslationCoordinator
     }
 
     private static void UpdateWorkerCompletion(ProjectTranslationJob job,
-        ProjectTranslationWorkerDefinition? workerDefinition, ProjectTranslationItem item, DateTimeOffset started)
+        ProjectTranslationWorkerDefinition? workerDefinition, ProjectTranslationItem item,
+        ChapterDocument chapter, DateTimeOffset started)
     {
         if (workerDefinition is null) return;
         ProjectTranslationWorkerState worker = job.Workers.Single(value => value.WorkerId == workerDefinition.WorkerId);
@@ -928,6 +933,26 @@ public sealed class ProjectTranslationCoordinator
         }
         else if (item.Status is ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview)
             worker.FailedChapters++;
+        if (!item.WorkerMetricsRecorded && item.Status is ProjectTranslationItemStatus.Completed or
+            ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview or
+            ProjectTranslationItemStatus.Cancelled)
+        {
+            TranslationAttempt[] attempts = chapter.Segments.SelectMany(segment => segment.Attempts)
+                .Where(attempt => attempt.StartedAt >= (item.StartedAt ?? started)).ToArray();
+            worker.InputTokens += attempts.Sum(attempt => (long)(attempt.Metrics?.InputTokens ?? 0));
+            worker.OutputTokens += attempts.Sum(attempt => (long)(attempt.Metrics?.OutputTokens ?? 0));
+            worker.EvaluationSeconds += attempts.Sum(attempt =>
+                Math.Max(0, (attempt.Metrics?.EvaluationDurationNanoseconds ?? 0) / 1_000_000_000d));
+            worker.ErrorSegments += item.ErrorSegments;
+            worker.TruncatedOutputCount += attempts.Sum(attempt =>
+                attempt.Issues.Count(issue => issue.Code == IssueCode.TruncatedOutput));
+            worker.PossibleMissingContentCount += attempts.Sum(attempt =>
+                attempt.Issues.Count(issue => issue.Code == IssueCode.PossibleMissingContent));
+            worker.TimeoutCount += attempts.Count(attempt => attempt.Error?.Contains("timeout",
+                StringComparison.OrdinalIgnoreCase) == true || attempt.Error?.Contains("timed out",
+                StringComparison.OrdinalIgnoreCase) == true);
+            item.WorkerMetricsRecorded = true;
+        }
         worker.LastError = item.Error;
     }
 

@@ -25,6 +25,17 @@ public sealed class GpuManagerUiTests
             Assert.NotNull(window.FindName("FingerprintInput"));
             Assert.NotNull(window.FindName("HourlyPriceInput"));
             Assert.NotNull(window.FindName("TranslationModeInput"));
+            Assert.NotNull(window.FindName("RuntimeTemperatureInput"));
+            Assert.NotNull(window.FindName("RuntimeContextInput"));
+            Assert.NotNull(window.FindName("RuntimeOutputInput"));
+            Assert.NotNull(window.FindName("RuntimeTimeoutInput"));
+            Assert.NotNull(window.FindName("RuntimeMinimumInput"));
+            Assert.NotNull(window.FindName("RuntimeTargetInput"));
+            Assert.NotNull(window.FindName("RuntimeMaximumInput"));
+            Assert.NotNull(window.FindName("AdvancedConnectionExpander"));
+            Assert.NotNull(window.FindName("ConnectionTypeInput"));
+            Assert.NotNull(window.FindName("EndpointInput"));
+            Assert.NotNull(window.FindName("TokenInput"));
             Assert.False(((Button)window.FindName("CancelSetupButton")).IsEnabled);
             Assert.Equal(Visibility.Collapsed, ((ProgressBar)window.FindName("ModelPullProgress")).Visibility);
             Assert.True(window.DesiredSize.Width <= 1040);

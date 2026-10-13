@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
+using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
@@ -67,10 +68,22 @@ public partial class GpuManagerWindow : Window
     private void OnProfileSelected(object sender, SelectionChangedEventArgs e)
     {
         if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
-        NameInput.Text = profile.Name; ModelInput.Text = profile.Model;
+        AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
+        NameInput.Text = profile.Name; ModelInput.Text = runtime.ModelOptions.Model;
+        RuntimeTemperatureInput.Text = runtime.ModelOptions.Temperature.ToString(CultureInfo.InvariantCulture);
+        RuntimeContextInput.Text = runtime.ModelOptions.ContextSize.ToString(CultureInfo.InvariantCulture);
+        RuntimeOutputInput.Text = runtime.ModelOptions.MaximumOutputTokens.ToString(CultureInfo.InvariantCulture);
+        RuntimeTimeoutInput.Text = runtime.ModelOptions.RequestTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
+        RuntimeMinimumInput.Text = runtime.SegmentationOptions.MinimumHanCharacters.ToString(CultureInfo.InvariantCulture);
+        RuntimeTargetInput.Text = runtime.SegmentationOptions.TargetHanCharacters.ToString(CultureInfo.InvariantCulture);
+        RuntimeMaximumInput.Text = runtime.SegmentationOptions.MaximumHanCharacters.ToString(CultureInfo.InvariantCulture);
+        RuntimeTextElementsInput.Text = runtime.SegmentationOptions.MaximumTextElements.ToString(CultureInfo.InvariantCulture);
         bool remote = profile.Kind == OllamaBackendKind.Remote;
-        HostInput.IsEnabled = PortInput.IsEnabled = UsernameInput.IsEnabled = AuthenticationInput.IsEnabled = remote;
-        FingerprintInput.IsEnabled = RemoteOllamaPortInput.IsEnabled = HourlyPriceInput.IsEnabled = remote;
+        AdvancedConnectionExpander.IsEnabled = remote;
+        UseForRemoteButton.IsEnabled = remote;
+        ConnectionTypeInput.SelectedIndex = profile.Ssh is null ? 1 : 0;
+        EndpointInput.Text = profile.Endpoint;
+        TokenInput.Password = profile.Token ?? "";
         if (profile.Ssh is { } ssh)
         {
             HostInput.Text = ssh.Host; PortInput.Text = ssh.Port.ToString(CultureInfo.InvariantCulture);
@@ -88,9 +101,19 @@ public partial class GpuManagerWindow : Window
         HourlyPriceInput.Text = (profile.HourlyPrice ?? 0).ToString(CultureInfo.InvariantCulture);
         StatusText.Text = remote ? _connections.GetStatus(profile.Id).Message : "Ollama Local trên máy Windows này.";
         ApplyAuthenticationUi();
+        ApplyConnectionUi();
     }
 
     private void OnAuthenticationChanged(object sender, SelectionChangedEventArgs e) => ApplyAuthenticationUi();
+    private void OnConnectionTypeChanged(object sender, SelectionChangedEventArgs e) => ApplyConnectionUi();
+    private void ApplyConnectionUi()
+    {
+        if (SshConnectionPanel is null || DirectConnectionPanel is null) return;
+        bool remote = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote };
+        bool ssh = remote && ConnectionTypeInput.SelectedIndex != 1;
+        SshConnectionPanel.Visibility = ssh ? Visibility.Visible : Visibility.Collapsed;
+        DirectConnectionPanel.Visibility = remote && !ssh ? Visibility.Visible : Visibility.Collapsed;
+    }
     private void ApplyAuthenticationUi()
     {
         if (PasswordPanel is null) return;
@@ -102,7 +125,8 @@ public partial class GpuManagerWindow : Window
     private void OnNewProfile(object sender, RoutedEventArgs e)
     {
         var profile = new OllamaBackendProfile { Name = "GPU Remote mới", Kind = OllamaBackendKind.Remote,
-            Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b", Ssh = new() };
+            Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b",
+            Runtime = AiRuntimeProfile.CreateDefault("translategemma:12b"), Ssh = new() };
         _profiles.Add(profile); ProfileList.SelectedItem = profile;
     }
 
@@ -136,6 +160,17 @@ public partial class GpuManagerWindow : Window
             LocalOllamaStatus status = await _local.CheckAsync(profile.Model);
             StatusText.Text = status.Message; return;
         }
+        if (profile.Ssh is null)
+        {
+            await _backends.SaveProfileAsync(profile, activate: false);
+            using IOllamaBackendClient client = OllamaClient.Create(profile);
+            await client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10));
+            await _backends.ActivateAsync(profile.Id);
+            _preferences.RemoteProfileId = profile.Id;
+            RefreshProfiles(profile.Id);
+            StatusText.Text = "Connected · Ollama Active · Model Installed · Ready.";
+            return;
+        }
         try
         {
             await _backends.SaveProfileAsync(profile, activate: false);
@@ -156,8 +191,9 @@ public partial class GpuManagerWindow : Window
     {
         if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
         await _backends.DetachRuntimeClientAsync(profile.Id);
-        await _connections.DisconnectAsync(profile.Id);
-        StatusText.Text = "Đã ngắt tunnel. Máy thuê có thể vẫn tiếp tục tính phí.";
+        if (profile.Ssh is not null) await _connections.DisconnectAsync(profile.Id);
+        StatusText.Text = profile.Ssh is null ? "Đã ngắt runtime client trực tiếp." :
+            "Đã ngắt tunnel. Máy thuê có thể vẫn tiếp tục tính phí.";
     });
 
     private async void OnInspect(object sender, RoutedEventArgs e) => await RunAsync(async () =>
@@ -166,6 +202,15 @@ public partial class GpuManagerWindow : Window
         if (profile.Kind == OllamaBackendKind.Local)
         {
             InspectionText.Text = (await _local.CheckAsync(profile.Model)).Message; return;
+        }
+        if (profile.Ssh is null)
+        {
+            using IOllamaBackendClient client = OllamaClient.Create(profile);
+            IReadOnlyList<string> models = await client.ListModelsAsync(TimeSpan.FromSeconds(10));
+            await client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10));
+            InspectionText.Text = $"Endpoint phản hồi · Model sẵn sàng: {profile.Model}\nModels: " +
+                (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models));
+            return;
         }
         if (!_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
             throw new InvalidOperationException("Hãy kết nối SSH trước khi kiểm tra server.");
@@ -266,26 +311,68 @@ public partial class GpuManagerWindow : Window
     {
         OllamaBackendProfile original = ProfileList.SelectedItem as OllamaBackendProfile
             ?? throw new InvalidOperationException("Chưa chọn profile.");
+        AiRuntimeProfile runtime = ReadRuntimeProfile();
         if (original.Kind == OllamaBackendKind.Local)
         {
-            OllamaBackendProfile local = original.Clone(); local.Name = NameInput.Text; local.Model = ModelInput.Text; local.Validate(); return local;
+            OllamaBackendProfile local = original.Clone();
+            local.Name = NameInput.Text; local.Runtime = runtime; local.Model = runtime.ModelOptions.Model;
+            local.Validate(); return local;
         }
-        var profile = original.Clone(); profile.Name = NameInput.Text; profile.Model = ModelInput.Text;
-        AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
-        runtime.ModelOptions = runtime.ModelOptions with { Model = ModelInput.Text.Trim() };
+        var profile = original.Clone(); profile.Name = NameInput.Text; profile.Runtime = runtime;
         profile.Runtime = runtime;
         profile.Model = runtime.ModelOptions.Model;
-        profile.Endpoint = "http://127.0.0.1:11434"; profile.HourlyPrice = decimal.Parse(HourlyPriceInput.Text, CultureInfo.InvariantCulture);
-        profile.Ssh = new()
+        profile.HourlyPrice = decimal.Parse(HourlyPriceInput.Text, CultureInfo.InvariantCulture);
+        if (ConnectionTypeInput.SelectedIndex == 1)
         {
-            Host = HostInput.Text, Port = int.Parse(PortInput.Text, CultureInfo.InvariantCulture), Username = UsernameInput.Text,
-            Authentication = AuthenticationInput.SelectedIndex == 1 ? SshAuthenticationKind.PrivateKey : SshAuthenticationKind.Password,
-            Password = PasswordInput.Password, PrivateKey = _loadedPrivateKey,
-            PrivateKeyPassphrase = PrivateKeyPassphraseInput.Password, HostKeyFingerprint = FingerprintInput.Text,
-            RemoteOllamaPort = int.Parse(RemoteOllamaPortInput.Text, CultureInfo.InvariantCulture)
-        };
+            profile.Endpoint = EndpointInput.Text.Trim();
+            profile.Token = TokenInput.Password;
+            profile.Ssh = null;
+        }
+        else
+        {
+            profile.Endpoint = "http://127.0.0.1:11434";
+            profile.Token = null;
+            profile.Ssh = new()
+            {
+                Host = HostInput.Text, Port = int.Parse(PortInput.Text, CultureInfo.InvariantCulture), Username = UsernameInput.Text,
+                Authentication = AuthenticationInput.SelectedIndex == 1 ? SshAuthenticationKind.PrivateKey : SshAuthenticationKind.Password,
+                Password = PasswordInput.Password, PrivateKey = _loadedPrivateKey,
+                PrivateKeyPassphrase = PrivateKeyPassphraseInput.Password, HostKeyFingerprint = FingerprintInput.Text,
+                RemoteOllamaPort = int.Parse(RemoteOllamaPortInput.Text, CultureInfo.InvariantCulture)
+            };
+        }
         profile.Validate(); return profile;
     }
+
+    private AiRuntimeProfile ReadRuntimeProfile()
+    {
+        var model = new ModelOptions
+        {
+            Model = ModelInput.Text.Trim(),
+            Temperature = ReadDouble(RuntimeTemperatureInput, "Temperature"),
+            ContextSize = ReadInt(RuntimeContextInput, "Context"),
+            MaximumOutputTokens = ReadInt(RuntimeOutputInput, "Output Tokens"),
+            RequestTimeout = TimeSpan.FromSeconds(ReadInt(RuntimeTimeoutInput, "Timeout"))
+        };
+        var segmentation = new SegmenterOptions
+        {
+            MinimumHanCharacters = ReadInt(RuntimeMinimumInput, "Minimum Han"),
+            TargetHanCharacters = ReadInt(RuntimeTargetInput, "Target Han"),
+            MaximumHanCharacters = ReadInt(RuntimeMaximumInput, "Maximum Han"),
+            MaximumTextElements = ReadInt(RuntimeTextElementsInput, "Maximum Text Elements")
+        };
+        var runtime = new AiRuntimeProfile { ModelOptions = model, SegmentationOptions = segmentation };
+        runtime.Validate();
+        return runtime;
+    }
+
+    private static int ReadInt(TextBox input, string name) =>
+        int.TryParse(input.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
+            ? value : throw new ArgumentException($"{name} phải là số nguyên.");
+
+    private static double ReadDouble(TextBox input, string name) =>
+        double.TryParse(input.Text.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+            ? value : throw new ArgumentException($"{name} phải là số.");
 
     private async Task RunAsync(Func<Task> action)
     {

@@ -82,6 +82,7 @@ public sealed class ProjectTranslationItem
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? FinishedAt { get; set; }
     public string? Error { get; set; }
+    public bool WorkerMetricsRecorded { get; set; }
 
     internal void Validate()
     {
@@ -110,6 +111,13 @@ public sealed class ProjectTranslationWorkerState
     public int FailedChapters { get; set; }
     public long CompletedHanCharacters { get; set; }
     public double ActiveSeconds { get; set; }
+    public long InputTokens { get; set; }
+    public long OutputTokens { get; set; }
+    public double EvaluationSeconds { get; set; }
+    public int ErrorSegments { get; set; }
+    public int TruncatedOutputCount { get; set; }
+    public int PossibleMissingContentCount { get; set; }
+    public int TimeoutCount { get; set; }
     public decimal? HourlyPrice { get; set; }
     public string? LastError { get; set; }
 
@@ -120,7 +128,10 @@ public sealed class ProjectTranslationWorkerState
             BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl) ||
             !Enum.IsDefined(Status) || CompletedChapters < 0 ||
             FailedChapters < 0 || CompletedHanCharacters < 0 || ActiveSeconds < 0 || double.IsNaN(ActiveSeconds) ||
-            double.IsInfinity(ActiveSeconds) || HourlyPrice is < 0 or > 1_000_000)
+            double.IsInfinity(ActiveSeconds) || InputTokens < 0 || OutputTokens < 0 || EvaluationSeconds < 0 ||
+            double.IsNaN(EvaluationSeconds) || double.IsInfinity(EvaluationSeconds) || ErrorSegments < 0 ||
+            TruncatedOutputCount < 0 || PossibleMissingContentCount < 0 || TimeoutCount < 0 ||
+            HourlyPrice is < 0 or > 1_000_000)
             throw new InvalidDataException("Worker trong translation job không hợp lệ.");
         Backend.Validate();
         ModelOptions.Validate();
@@ -178,7 +189,10 @@ public sealed record ProjectTranslationWorkerDefinition(Guid WorkerId, OllamaBac
 public sealed record ProjectTranslationWorkerProgress(Guid WorkerId, string Name,
     ProjectTranslationWorkerStatus Status, Guid? CurrentChapterId, string? CurrentChapterTitle,
     int CompletedSegments, int TotalSegments, double HanCharactersPerMinute,
-    int CompletedChapters, int FailedChapters, decimal EstimatedCost, string? Error);
+    int CompletedChapters, int FailedChapters, decimal EstimatedCost, string? Error,
+    double TokensPerSecond = 0, long InputTokens = 0, long OutputTokens = 0,
+    int ErrorSegments = 0, int TruncatedOutputCount = 0,
+    int PossibleMissingContentCount = 0, int TimeoutCount = 0);
 
 public sealed record ProjectTranslationAggregateMetrics(double HanCharactersPerMinute,
     TimeSpan? EstimatedRemaining, decimal EstimatedCost);
