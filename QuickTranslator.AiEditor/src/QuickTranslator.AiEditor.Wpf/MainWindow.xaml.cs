@@ -18,6 +18,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 public partial class MainWindow : Window
 {
     private readonly OllamaBackendManager _ollamaBackends;
+    private readonly GpuConnectionManager _gpuConnections = new();
     private readonly IOllamaClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
     private readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromMilliseconds(500) };
@@ -587,6 +588,7 @@ public partial class MainWindow : Window
         ClearProjectTranslationCoordinator();
         _projectCatalog.Changed -= OnProjectCatalogChanged;
         _projectCatalog.Dispose();
+        _gpuConnections.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _ollamaBackends.Dispose();
     }
     private sealed record SegmentItem(Guid Id, string Label);

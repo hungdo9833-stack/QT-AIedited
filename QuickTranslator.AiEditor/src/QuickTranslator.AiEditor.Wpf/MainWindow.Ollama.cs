@@ -9,6 +9,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow
 {
+    private GpuManagerWindow? _gpuManagerWindow;
     private readonly ObservableCollection<OllamaProfileItem> _ollamaProfileItems = [];
     private Task? _ollamaLoadTask;
     private bool _ollamaProfilesReady;
@@ -32,6 +33,19 @@ public partial class MainWindow
             RefreshOllamaProfileList(_ollamaBackends.ActiveProfile.Id);
             UpdateOllamaBackendStatus();
         });
+    }
+
+    private async void OnOpenGpuManager(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await EnsureOllamaBackendsLoadedAsync();
+            if (_gpuManagerWindow is { IsLoaded: true }) { _gpuManagerWindow.Activate(); return; }
+            _gpuManagerWindow = new GpuManagerWindow(_ollamaBackends, _gpuConnections) { Owner = this };
+            _gpuManagerWindow.Closed += (_, _) => _gpuManagerWindow = null;
+            _gpuManagerWindow.Show();
+        }
+        catch (Exception error) { ShowError(error); }
     }
 
     private async Task EnsureOllamaBackendsLoadedAsync()

@@ -19,6 +19,8 @@ public sealed class OllamaBackendProfile
     public OllamaBackendKind Kind { get; set; }
     public string Endpoint { get; set; } = OllamaClient.DefaultEndpoint.ToString();
     public string Model { get; set; } = "translategemma:12b";
+    public decimal? HourlyPrice { get; set; }
+    public GpuSshSettings? Ssh { get; set; }
     public bool RemoteDisclosureAccepted { get; set; }
     [JsonIgnore] public string? Token { get; set; }
 
@@ -47,12 +49,16 @@ public sealed class OllamaBackendProfile
             throw new InvalidDataException("Profile Local không lưu hoặc gửi token.");
         if (Token?.Length > 8192 || Token?.Any(char.IsControl) == true)
             throw new InvalidDataException("Token xác thực không hợp lệ.");
+        if (HourlyPrice is < 0 or > 1_000_000) throw new InvalidDataException("Giá thuê GPU theo giờ không hợp lệ.");
+        Ssh?.Validate();
+        if (Ssh is not null && Kind != OllamaBackendKind.Remote)
+            throw new InvalidDataException("Chỉ profile Remote mới có cấu hình SSH.");
     }
 
     public OllamaBackendProfile Clone() => new()
     {
         Id = Id, Name = Name, Kind = Kind, Endpoint = Endpoint, Model = Model,
-        RemoteDisclosureAccepted = RemoteDisclosureAccepted, Token = Token
+        RemoteDisclosureAccepted = RemoteDisclosureAccepted, Token = Token, HourlyPrice = HourlyPrice, Ssh = Ssh?.Clone()
     };
 }
 
@@ -148,7 +154,7 @@ public sealed class WindowsDpapiOllamaSecretProtector : IOllamaSecretProtector
     [DllImport("kernel32.dll")] private static extern IntPtr LocalFree(IntPtr memory);
 }
 
-public sealed class OllamaProfileStore
+public class OllamaProfileStore
 {
     private readonly IOllamaSecretProtector _protector;
     public OllamaProfileStore(string? path = null, IOllamaSecretProtector? protector = null)
@@ -188,7 +194,15 @@ public sealed class OllamaProfileStore
         {
             Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Endpoint = profile.Endpoint,
             Model = profile.Model, RemoteDisclosureAccepted = profile.RemoteDisclosureAccepted,
-            ProtectedToken = string.IsNullOrEmpty(profile.Token) ? null : _protector.Protect(profile.Token)
+            ProtectedToken = Protect(profile.Token), HourlyPrice = profile.HourlyPrice,
+            Ssh = profile.Ssh is null ? null : new StoredSsh
+            {
+                Host = profile.Ssh.Host, Port = profile.Ssh.Port, Username = profile.Ssh.Username,
+                Authentication = profile.Ssh.Authentication, HostKeyFingerprint = profile.Ssh.HostKeyFingerprint,
+                RemoteOllamaPort = profile.Ssh.RemoteOllamaPort, ProtectedPassword = Protect(profile.Ssh.Password),
+                ProtectedPrivateKey = Protect(profile.Ssh.PrivateKey),
+                ProtectedPrivateKeyPassphrase = Protect(profile.Ssh.PrivateKeyPassphrase)
+            }
         }).ToList()
     };
 
@@ -202,7 +216,15 @@ public sealed class OllamaProfileStore
             {
                 Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Endpoint = profile.Endpoint,
                 Model = profile.Model, RemoteDisclosureAccepted = profile.RemoteDisclosureAccepted,
-                Token = string.IsNullOrEmpty(profile.ProtectedToken) ? null : _protector.Unprotect(profile.ProtectedToken)
+                Token = Unprotect(profile.ProtectedToken), HourlyPrice = profile.HourlyPrice,
+                Ssh = profile.Ssh is null ? null : new GpuSshSettings
+                {
+                    Host = profile.Ssh.Host, Port = profile.Ssh.Port, Username = profile.Ssh.Username,
+                    Authentication = profile.Ssh.Authentication, HostKeyFingerprint = profile.Ssh.HostKeyFingerprint,
+                    RemoteOllamaPort = profile.Ssh.RemoteOllamaPort, Password = Unprotect(profile.Ssh.ProtectedPassword),
+                    PrivateKey = Unprotect(profile.Ssh.ProtectedPrivateKey),
+                    PrivateKeyPassphrase = Unprotect(profile.Ssh.ProtectedPrivateKeyPassphrase)
+                }
             }).ToList()
         };
         catalog.Validate();
@@ -235,8 +257,29 @@ public sealed class OllamaProfileStore
         public string Model { get; set; } = "";
         public bool RemoteDisclosureAccepted { get; set; }
         public string? ProtectedToken { get; set; }
+        public decimal? HourlyPrice { get; set; }
+        public StoredSsh? Ssh { get; set; }
     }
+
+    private sealed class StoredSsh
+    {
+        public string Host { get; set; } = "";
+        public int Port { get; set; } = 22;
+        public string Username { get; set; } = "";
+        public SshAuthenticationKind Authentication { get; set; }
+        public string? HostKeyFingerprint { get; set; }
+        public int RemoteOllamaPort { get; set; } = 11434;
+        public string? ProtectedPassword { get; set; }
+        public string? ProtectedPrivateKey { get; set; }
+        public string? ProtectedPrivateKeyPassphrase { get; set; }
+    }
+
+    private string? Protect(string? value) => string.IsNullOrEmpty(value) ? null : _protector.Protect(value);
+    private string? Unprotect(string? value) => string.IsNullOrEmpty(value) ? null : _protector.Unprotect(value);
 }
+
+public sealed class BackendProfileStore(string? path = null, IOllamaSecretProtector? protector = null)
+    : OllamaProfileStore(path, protector);
 
 public interface IOllamaBackendClient : IOllamaClient, IDisposable
 {
@@ -249,6 +292,8 @@ public sealed class OllamaBackendManager : IOllamaBackendClient
     private readonly OllamaProfileStore _store;
     private readonly Func<OllamaBackendProfile, IOllamaBackendClient> _factory;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Dictionary<Guid, IOllamaBackendClient> _runtimeClients = [];
+    private readonly bool _usesDefaultFactory;
     private OllamaProfileCatalog _catalog = OllamaProfileCatalog.CreateDefault();
     private IOllamaBackendClient _client;
     private bool _disposed;
@@ -257,8 +302,9 @@ public sealed class OllamaBackendManager : IOllamaBackendClient
         Func<OllamaBackendProfile, IOllamaBackendClient>? clientFactory = null)
     {
         _store = store ?? new OllamaProfileStore();
+        _usesDefaultFactory = clientFactory is null;
         _factory = clientFactory ?? OllamaClient.Create;
-        _client = _factory(_catalog.Profiles[0]);
+        _client = BuildClient(_catalog.Profiles[0]);
     }
 
     public event EventHandler? ActiveProfileChanged;
@@ -320,6 +366,50 @@ public sealed class OllamaBackendManager : IOllamaBackendClient
         ActiveProfileChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    public async Task DeleteProfileAsync(Guid profileId, CancellationToken cancellationToken = default)
+    {
+        if (profileId == OllamaBackendProfile.DefaultLocalId)
+            throw new InvalidOperationException("Không thể xóa profile Ollama Local mặc định.");
+        OllamaProfileCatalog next = _catalog.Clone();
+        if (next.Profiles.RemoveAll(profile => profile.Id == profileId) == 0)
+            throw new KeyNotFoundException("Không tìm thấy profile Ollama cần xóa.");
+        if (next.ActiveProfileId == profileId) next.ActiveProfileId = OllamaBackendProfile.DefaultLocalId;
+        next.Validate();
+        await _store.SaveAsync(next, cancellationToken).ConfigureAwait(false);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { _runtimeClients.Remove(profileId); Replace(next); }
+        finally { _gate.Release(); }
+        ActiveProfileChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task AttachRuntimeClientAsync(Guid profileId, IOllamaBackendClient client,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_catalog.Profiles.All(profile => profile.Id != profileId))
+                throw new KeyNotFoundException("Không tìm thấy profile Ollama cho SSH tunnel.");
+            _runtimeClients[profileId] = client;
+            if (_catalog.ActiveProfileId == profileId) ReplaceClient(_catalog.Profiles.Single(profile => profile.Id == profileId));
+        }
+        finally { _gate.Release(); }
+        ActiveProfileChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task DetachRuntimeClientAsync(Guid profileId, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _runtimeClients.Remove(profileId);
+            if (_catalog.ActiveProfileId == profileId) ReplaceClient(_catalog.Profiles.Single(profile => profile.Id == profileId));
+        }
+        finally { _gate.Release(); }
+        ActiveProfileChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
         CancellationToken cancellationToken = default)
     {
@@ -351,11 +441,25 @@ public sealed class OllamaBackendManager : IOllamaBackendClient
     {
         catalog.Validate();
         OllamaBackendProfile profile = catalog.Profiles.Single(item => item.Id == catalog.ActiveProfileId);
-        IOllamaBackendClient replacement = _factory(profile.Clone());
-        IOllamaBackendClient old = _client;
         _catalog = catalog.Clone();
+        ReplaceClient(profile);
+    }
+
+    private void ReplaceClient(OllamaBackendProfile profile)
+    {
+        IOllamaBackendClient replacement = BuildClient(profile);
+        IOllamaBackendClient old = _client;
         _client = replacement;
         old.Dispose();
+    }
+
+    private IOllamaBackendClient BuildClient(OllamaBackendProfile profile)
+    {
+        if (_runtimeClients.TryGetValue(profile.Id, out IOllamaBackendClient? runtime))
+            return new NonOwningOllamaBackendClient(runtime);
+        if (_usesDefaultFactory && profile.Ssh is not null)
+            return new UnavailableOllamaBackendClient("SSH tunnel chưa kết nối. Mở GPU Manager và bấm Kết nối trước khi dịch.");
+        return _factory(profile.Clone());
     }
 
     public void Dispose()
@@ -365,4 +469,26 @@ public sealed class OllamaBackendManager : IOllamaBackendClient
         _client.Dispose();
         _gate.Dispose();
     }
+}
+
+internal sealed class NonOwningOllamaBackendClient(IOllamaBackendClient inner) : IOllamaBackendClient
+{
+    public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default) =>
+        inner.TranslateAsync(prompt, options, cancellationToken);
+    public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default) =>
+        inner.CheckConnectionAsync(model, timeout, cancellationToken);
+    public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
+        inner.ListModelsAsync(timeout, cancellationToken);
+    public void Dispose() { }
+}
+
+internal sealed class UnavailableOllamaBackendClient(string message) : IOllamaBackendClient
+{
+    private InvalidOperationException Error() => new(message);
+    public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default) =>
+        Task.FromException<OllamaCompletion>(Error());
+    public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default) => Task.FromException(Error());
+    public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
+        Task.FromException<IReadOnlyList<string>>(Error());
+    public void Dispose() { }
 }
