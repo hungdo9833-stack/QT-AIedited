@@ -8,7 +8,7 @@
   </Window.Resources>
   <Grid Margin="14" TextElement.Foreground="{DynamicResource TextBrush}">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <DockPanel Margin="4,0,4,10">
+    <DockPanel Margin="4,0,4,10" LastChildFill="False">
       <StackPanel DockPanel.Dock="Left">
         <TextBlock x:Name="HeadingText" Text="Queue Plan" FontSize="25" FontWeight="SemiBold"/>
         <TextBlock x:Name="ProjectText" Foreground="{DynamicResource MutedBrush}" Margin="0,3,0,0"/>
@@ -29,7 +29,7 @@
     </Border>
     <ItemsControl x:Name="WorkerCards" Grid.Row="2" Margin="0,9,0,0">
       <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-      <ItemsControl.ItemTemplate><DataTemplate><Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9" Margin="3"><StackPanel><DockPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock DockPanel.Dock="Right" Text="{Binding Status}" Margin="10,0,0,0" Foreground="{DynamicResource MutedBrush}"/></DockPanel><TextBlock Text="{Binding CurrentChapterTitle, TargetNullValue=Đang chờ chapter}" TextTrimming="CharacterEllipsis"/><TextBlock Foreground="{DynamicResource MutedBrush}"><Run Text="Segment "/><Run Text="{Binding CompletedSegments}"/><Run Text="/"/><Run Text="{Binding TotalSegments}"/><Run Text=" · "/><Run Text="{Binding HanCharactersPerMinute, StringFormat={}{0:N0}}"/><Run Text=" chữ Hán/phút · Ước tính "/><Run Text="{Binding EstimatedCost, StringFormat={}{0:N2}}"/></TextBlock></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate>
+      <ItemsControl.ItemTemplate><DataTemplate><Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9" Margin="3"><StackPanel><DockPanel LastChildFill="False"><TextBlock DockPanel.Dock="Left" Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock DockPanel.Dock="Right" Text="{Binding Status}" Margin="10,0,0,0" Foreground="{DynamicResource MutedBrush}"/></DockPanel><TextBlock Text="{Binding CurrentChapterTitle, TargetNullValue=Đang chờ chapter}" TextTrimming="CharacterEllipsis"/><TextBlock Foreground="{DynamicResource MutedBrush}"><Run Text="Segment "/><Run Text="{Binding CompletedSegments}"/><Run Text="/"/><Run Text="{Binding TotalSegments}"/><Run Text=" · "/><Run Text="{Binding HanCharactersPerMinute, StringFormat={}{0:N0}}"/><Run Text=" chữ Hán/phút · Ước tính "/><Run Text="{Binding EstimatedCost, StringFormat={}{0:N2}}"/></TextBlock></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate>
     </ItemsControl>
     <Grid Grid.Row="3" Margin="0,10,0,8">
       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
