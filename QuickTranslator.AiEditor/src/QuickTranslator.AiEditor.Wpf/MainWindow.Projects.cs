@@ -22,6 +22,8 @@ public partial class MainWindow
     private bool _projectLibraryReady = true;
     private ProjectSession? _projectSession;
     private ProjectResources? _projectResources;
+    private readonly ProjectCatalog _projectCatalog;
+    private ChapterManagerWindow? _chapterManagerWindow;
     private readonly ObservableCollection<ProjectChapterItem> _projectChapters = [];
     private bool _syncingProjectUi;
     private bool _syncingProjectSummary;
@@ -83,7 +85,7 @@ public partial class MainWindow
         ChapterDocument? chapter = candidate.Manifest.CurrentChapterId is Guid current
             ? (await _projectRepository.LoadChapterAsync(candidate, current)).Chapter : null;
         // Validate the service before touching the live context.
-        if (chapter is not null) _ = new TranslationService(chapter, _translationClient, new RegisteredChapterStore(candidate));
+        if (chapter is not null) _ = new TranslationService(chapter, _translationClient, new RegisteredChapterStore(candidate, _projectRepository));
         var chapterRecovery = candidate.ChapterStore.LastRecovery;
         var recoverySources = assets.RecoverySources.Concat(chapterRecovery is null ? [] : new[] { chapterRecovery }).ToArray();
         var repairs = assets.Repairs.Concat(chapterRecovery?.Source == RecoverySource.Backup
@@ -100,6 +102,7 @@ public partial class MainWindow
         }
 
         // No await after the context commit: all target stores/chapter have been checked.
+        _chapterManagerWindow?.Close();
         DetachChapter();
         _projectSession = candidate; _projectLibrary = library; _store = candidate.ChapterStore;
         _presetStore = new(candidate.Resolve(candidate.Manifest.Files.PromptPresets));
@@ -284,18 +287,17 @@ public partial class MainWindow
             ProjectSidebar.Visibility = Visibility.Visible; ActiveProjectTitle.Text = _projectSession.Manifest.VietnameseTitle;
             string query = ChapterSearchInput.Text.Trim();
             string filter = (ChapterStateFilter.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
-            IEnumerable<ProjectChapterEntry> entries = _projectSession.Manifest.Chapters.Where(x => x.DeletedAt is null)
-                .Where(x => query.Length == 0 || x.Number.ToString().Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                    x.VietnameseTitle.Contains(query, StringComparison.CurrentCultureIgnoreCase) || x.ChineseTitle.Contains(query, StringComparison.OrdinalIgnoreCase))
-                .Where(x => filter == "All" || string.Equals(x.State.ToString(), filter, StringComparison.Ordinal));
-            entries = (ProjectChapterSort.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
+            ProjectChapterState? state = Enum.TryParse(filter, out ProjectChapterState parsed) ? parsed : null;
+            ProjectCatalogSort sort = (ProjectChapterSort.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
             {
-                "Title" => entries.OrderBy(x => x.VietnameseTitle, StringComparer.CurrentCultureIgnoreCase).ThenBy(x => x.Number),
-                "Updated" => entries.OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.Number),
-                _ => entries.OrderBy(x => x.Number)
+                "Title" => ProjectCatalogSort.Title,
+                "Updated" => ProjectCatalogSort.Updated,
+                _ => ProjectCatalogSort.ReadingOrder
             };
-            foreach (var entry in entries)
-                _projectChapters.Add(new(entry.ChapterId, $"{entry.Number:0000} · {entry.VietnameseTitle}\n{ProjectStateLabel(entry.State)}"));
+            foreach (ProjectCatalogChapter entry in _projectCatalog.Query(_projectSession,
+                         new(Search: query, State: state, Sort: sort)))
+                _projectChapters.Add(new(entry.ChapterId,
+                    $"{entry.Number:0000} · {entry.VietnameseTitle}\n{ProjectStateLabel(entry.TranslationState)}"));
             ProjectChapterList.SelectedItem = _projectChapters.FirstOrDefault(x => x.Id == _projectSession.Manifest.CurrentChapterId);
             ProjectAutosaveStatus.Text = $"{_projectSession.Manifest.Chapters.Count(x => x.DeletedAt is null)} chương · lưu tại {Path.GetFileName(_projectSession.ManifestPath)}";
         }
@@ -335,6 +337,16 @@ public partial class MainWindow
     }
     private void OnChapterSearchChanged(object sender, RoutedEventArgs e) { if (_initialized) RefreshProjectChapterList(); }
 
+    private void OnProjectCatalogChanged(object? sender, ProjectCatalogChangedEventArgs change)
+    {
+        if (_projectSession?.Manifest.ProjectId != change.ProjectId || _closing) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_projectSession?.Manifest.ProjectId == change.ProjectId && !_closing)
+                RefreshProjectChapterList();
+        });
+    }
+
     private async void OnNewProject(object sender, RoutedEventArgs e)
     {
         var title = AskText("Dự án mới", "Tên truyện tiếng Việt", "Truyện mới"); if (title is null) return;
@@ -370,6 +382,7 @@ public partial class MainWindow
             {
                 var presets = new PromptPresetManager(await new PromptPresetStore(PromptPresetStore.DefaultPath).LoadAsync());
                 var reader = await new ReaderPreferencesStore(ReaderPreferencesStore.DefaultPath).LoadAsync();
+                _chapterManagerWindow?.Close();
                 DetachChapter(); _projectSession = null; _projectResources = null;
                 _store = new(ChapterFileStore.DefaultDirectory); _presetStore = new(PromptPresetStore.DefaultPath);
                 _readerStore = new(ReaderPreferencesStore.DefaultPath); _characterStore = new(CharacterProjectStore.DefaultDirectory);
@@ -544,7 +557,9 @@ public partial class MainWindow
 
     internal async Task RenameProjectChapterAsync(Guid chapterId, string title, string chineseTitle)
     {
-        if (_projectSession is null || !BeginUiOperation(allowDuringTranslation: true)) return;
+        if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (!BeginUiOperation(allowDuringTranslation: true))
+            throw new InvalidOperationException("Editor đang xử lý một thao tác khác. Hãy thử lại sau khi thao tác đó hoàn tất.");
         try
         {
             var session = _projectSession;
@@ -603,7 +618,7 @@ public partial class MainWindow
     private async Task MoveProjectChapterAsync(int delta)
     {
         if (_projectSession?.Manifest.CurrentChapterId is not Guid current) return;
-        var ordered = _projectSession.Manifest.Chapters.Where(x => x.DeletedAt is null).OrderBy(x => x.Number).ToList(); int index = ordered.FindIndex(x => x.ChapterId == current);
+        var ordered = _projectCatalog.Query(_projectSession, new()).ToList(); int index = ordered.FindIndex(x => x.ChapterId == current);
         int next = index + delta; if (next >= 0 && next < ordered.Count) await LoadProjectChapterAsync(ordered[next].ChapterId);
     }
 

@@ -40,6 +40,8 @@ public partial class MainWindow : Window
         _startupProjectPath = startupProjectPath;
         _translationClient = _client;
         InitializeComponent();
+        _projectCatalog = new(_projectRepository);
+        _projectCatalog.Changed += OnProjectCatalogChanged;
         _initialized = true;
         if (!initializeApplication) return;
         _autosave.Tick += OnAutosave;
@@ -137,7 +139,7 @@ public partial class MainWindow : Window
                 var openedChapter = await RegisterChapterIfNeededAsync(loaded.Chapter);
                 // Persist crash recovery before replacing the previous live service.
                 var prepared = new TranslationService(openedChapter, _translationClient,
-                    _projectSession is null ? _store : new RegisteredChapterStore(_projectSession));
+                    _projectSession is null ? _store : new RegisteredChapterStore(_projectSession, _projectRepository));
                 await prepared.SaveAsync();
                 AttachChapter(prepared.GetSnapshot());
                 _selectedId = openedChapter.SelectedSegmentId ?? openedChapter.Segments[0].Id; _shownAttemptId = null;
@@ -572,7 +574,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnWindowClosed(object? sender, EventArgs e) { _progressTimer.Stop(); _readerSaveTimer.Stop(); _client.Dispose(); }
+    private void OnWindowClosed(object? sender, EventArgs e)
+    {
+        _progressTimer.Stop(); _readerSaveTimer.Stop();
+        _chapterManagerWindow?.Close();
+        _projectCatalog.Changed -= OnProjectCatalogChanged;
+        _projectCatalog.Dispose();
+        _client.Dispose();
+    }
     private sealed record SegmentItem(Guid Id, string Label);
     private sealed record AttemptItem(Guid Id, string Label, int Kind = 0, DateTimeOffset Date = default);
 }

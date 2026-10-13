@@ -34,7 +34,7 @@ public partial class MainWindow
             !_projectSession.Manifest.Chapters.Any(x => x.ChapterId == chapter.Id && x.DeletedAt is null)))
             throw new InvalidOperationException("Đăng ký chương trong manifest trước khi mở editor.");
         if (_queue is not null) _queue.ProgressChanged -= OnQueueProgress;
-        _service = new(chapter, _translationClient, _projectSession is null ? _store : new RegisteredChapterStore(_projectSession));
+        _service = new(chapter, _translationClient, _projectSession is null ? _store : new RegisteredChapterStore(_projectSession, _projectRepository));
         _queue = new(_service);
         _queue.ProgressChanged += OnQueueProgress;
         if (_projectSession is null) LoadCharacterProject(_service.GetSnapshot().CharacterProject);
