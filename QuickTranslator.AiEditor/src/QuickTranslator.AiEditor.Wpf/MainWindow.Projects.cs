@@ -103,11 +103,13 @@ public partial class MainWindow
 
         // No await after the context commit: all target stores/chapter have been checked.
         _chapterManagerWindow?.Close();
+        ClearProjectTranslationCoordinator();
         DetachChapter();
         _projectSession = candidate; _projectLibrary = library; _store = candidate.ChapterStore;
         _presetStore = new(candidate.Resolve(candidate.Manifest.Files.PromptPresets));
         _readerStore = new(candidate.Resolve(candidate.Manifest.Files.ReaderSettings));
         _characterStore = new(Path.Combine(candidate.RootDirectory, "Characters"));
+        InitializeProjectTranslationCoordinator(candidate);
         ApplyProjectAssets(assets);
         if (chapter is not null)
         {
@@ -255,6 +257,8 @@ public partial class MainWindow
     private async Task LoadProjectChapterAsync(Guid chapterId)
     {
         if (_projectSession is null) return;
+        if (_projectTranslationCoordinator?.IsRunning == true)
+            throw new InvalidOperationException("Hãy Pause Translation Queue trước khi mở chapter trong Editor.");
         if (_service?.GetSnapshot().Id == chapterId) return;
         await RunWorkspaceTransitionAsync(() => LoadProjectChapterCoreAsync(chapterId));
     }
@@ -383,6 +387,7 @@ public partial class MainWindow
                 var presets = new PromptPresetManager(await new PromptPresetStore(PromptPresetStore.DefaultPath).LoadAsync());
                 var reader = await new ReaderPreferencesStore(ReaderPreferencesStore.DefaultPath).LoadAsync();
                 _chapterManagerWindow?.Close();
+                ClearProjectTranslationCoordinator();
                 DetachChapter(); _projectSession = null; _projectResources = null;
                 _store = new(ChapterFileStore.DefaultDirectory); _presetStore = new(PromptPresetStore.DefaultPath);
                 _readerStore = new(ReaderPreferencesStore.DefaultPath); _characterStore = new(CharacterProjectStore.DefaultDirectory);

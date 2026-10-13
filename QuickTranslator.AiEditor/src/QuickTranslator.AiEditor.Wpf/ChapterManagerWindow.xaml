@@ -52,7 +52,7 @@
         <Button x:Name="RenameButton" Content="Đổi tên" Click="OnRename"/>
         <Button x:Name="DeleteButton" Content="Chuyển vào History" Click="OnDelete"/>
         <Button x:Name="RestoreButton" Content="Phục hồi" Click="OnRestore"/>
-        <Button x:Name="QueueButton" Content="Dịch các chương đã chọn · M4" IsEnabled="False" ToolTip="Command surface đã sẵn sàng; Translation Queue được triển khai ở M4."/>
+        <Button x:Name="QueueButton" Content="Đưa vào hàng đợi dịch" Click="OnQueue" ToolTip="Xem Queue Plan trước khi bắt đầu dịch tuần tự."/>
       </WrapPanel>
       <TextBlock x:Name="SelectionText" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{StaticResource Muted}"/>
     </DockPanel>

@@ -29,7 +29,7 @@ public sealed class ChapterManagerUiTests
     });
 
     [Fact]
-    public Task Search_filter_multiselect_and_m4_command_surface_are_ready() => StaHost.Run(async () =>
+    public Task Search_filter_multiselect_and_m4_queue_command_are_ready() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
         await fixture.CreateProjectAsync();
@@ -47,7 +47,7 @@ public sealed class ChapterManagerUiTests
             var grid = (DataGrid)window.FindName("ChapterGrid");
             grid.SelectedItems.Add(grid.Items[0]); grid.SelectedItems.Add(grid.Items[1]);
             Assert.Contains("Đã chọn 2", ((TextBlock)window.FindName("SelectionText")).Text);
-            Assert.False(((Button)window.FindName("QueueButton")).IsEnabled);
+            Assert.True(((Button)window.FindName("QueueButton")).IsEnabled);
         }
         finally { window.Close(); }
     });
@@ -99,6 +99,7 @@ public sealed class ChapterManagerUiTests
     private static ChapterManagerCommands NoOpCommands() => new(
         _ => Task.CompletedTask,
         (_, _, _) => Task.CompletedTask,
+        _ => Task.CompletedTask,
         _ => Task.CompletedTask,
         _ => Task.CompletedTask);
 

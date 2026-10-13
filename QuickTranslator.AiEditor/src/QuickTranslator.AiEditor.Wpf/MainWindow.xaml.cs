@@ -539,6 +539,7 @@ public partial class MainWindow : Window
         UpdateButtons();
         try
         {
+            await PauseProjectTranslationForContextChangeAsync();
             if (_activeRequest is not null)
             {
                 if (_queue?.IsRunning == true) await _queue.CancelAsync();
@@ -578,6 +579,7 @@ public partial class MainWindow : Window
     {
         _progressTimer.Stop(); _readerSaveTimer.Stop();
         _chapterManagerWindow?.Close();
+        ClearProjectTranslationCoordinator();
         _projectCatalog.Changed -= OnProjectCatalogChanged;
         _projectCatalog.Dispose();
         _client.Dispose();

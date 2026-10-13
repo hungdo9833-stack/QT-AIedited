@@ -33,6 +33,7 @@ public partial class MainWindow
 
     private async Task WaitForCurrentWorkAsync()
     {
+        await PauseProjectTranslationForContextChangeAsync();
         var queue = _queue;
         var request = _activeRequest;
         var completion = _activeWorkCompletion;

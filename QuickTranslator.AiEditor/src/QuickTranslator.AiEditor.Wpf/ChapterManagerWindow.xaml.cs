@@ -10,7 +10,8 @@ internal sealed record ChapterManagerCommands(
     Func<Guid, Task> Open,
     Func<Guid, string, string, Task> Rename,
     Func<IReadOnlyList<Guid>, Task> SoftDelete,
-    Func<IReadOnlyList<Guid>, Task> Restore);
+    Func<IReadOnlyList<Guid>, Task> Restore,
+    Func<IReadOnlyList<Guid>, Task> Queue);
 
 public partial class ChapterManagerWindow : Window
 {
@@ -140,6 +141,14 @@ public partial class ChapterManagerWindow : Window
             "Đã phục hồi các chương đã chọn.");
     }
 
+    private async void OnQueue(object sender, RoutedEventArgs e)
+    {
+        ChapterManagerRow[] rows = SelectedRows().Where(row => !row.IsDeleted).OrderBy(row => row.DisplayOrder).ToArray();
+        if (rows.Length == 0) return;
+        await RunAsync(() => _commands.Queue(rows.Select(row => row.ChapterId).ToArray()),
+            "Đã mở Queue Plan. Hàng đợi chỉ chạy sau khi bạn xác nhận Start.");
+    }
+
     private async Task RunAsync(Func<Task> operation, string success)
     {
         if (_working) return;
@@ -163,6 +172,7 @@ public partial class ChapterManagerWindow : Window
         RenameButton.IsEnabled = OpenButton.IsEnabled;
         DeleteButton.IsEnabled = !_working && active > 0 && deleted == 0;
         RestoreButton.IsEnabled = !_working && deleted > 0 && active == 0;
+        QueueButton.IsEnabled = !_working && active > 0 && deleted == 0;
         SelectionText.Text = $"Đã chọn {selected.Length:N0} · {active:N0} hoạt động · {deleted:N0} History";
     }
 

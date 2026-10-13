@@ -241,7 +241,25 @@ public sealed class ProjectTranslationCoordinator
                 ProjectTranslationItem? next = CurrentJob!.Items.FirstOrDefault(item => item.Status is
                     ProjectTranslationItemStatus.Pending or ProjectTranslationItemStatus.Paused or ProjectTranslationItemStatus.Interrupted);
                 if (next is null) break;
-                await RunChapterAsync(next.ChapterId, retryFailed, cancellationToken).ConfigureAwait(false);
+                try { await RunChapterAsync(next.ChapterId, retryFailed, cancellationToken).ConfigureAwait(false); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    bool staleChapter = ContainsConflict(ex) || ex is FileNotFoundException;
+                    await PersistAsync(job =>
+                    {
+                        ProjectTranslationItem target = job.Items.Single(item => item.ChapterId == next.ChapterId);
+                        target.Status = staleChapter ? ProjectTranslationItemStatus.NeedsReview : ProjectTranslationItemStatus.Failed;
+                        target.Error = ex.Message;
+                        target.FinishedAt = DateTimeOffset.UtcNow;
+                        job.CurrentChapterId = null;
+                    }, CancellationToken.None).ConfigureAwait(false);
+                    if (!staleChapter && ex is (IOException or UnauthorizedAccessException))
+                    {
+                        await FinishAsync(ProjectTranslationJobStatus.Interrupted,
+                            "Đã dừng sau lỗi đọc/lưu chapter: " + ex.Message).ConfigureAwait(false);
+                        return;
+                    }
+                }
                 if (CurrentJob!.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Cancelled)
                     return;
             }

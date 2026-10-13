@@ -22,7 +22,8 @@ public partial class MainWindow
             Open: LoadProjectChapterAsync,
             Rename: RenameProjectChapterAsync,
             SoftDelete: SoftDeleteFromManagerAsync,
-            Restore: RestoreFromManagerAsync)) { Owner = this };
+            Restore: RestoreFromManagerAsync,
+            Queue: OpenProjectTranslationQueueAsync)) { Owner = this };
         _chapterManagerWindow.Closed += (_, _) => _chapterManagerWindow = null;
         _chapterManagerWindow.Show();
     }
