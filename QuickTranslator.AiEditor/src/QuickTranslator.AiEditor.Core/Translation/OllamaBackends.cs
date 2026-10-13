@@ -19,6 +19,7 @@ public sealed class OllamaBackendProfile
     public OllamaBackendKind Kind { get; set; }
     public string Endpoint { get; set; } = OllamaClient.DefaultEndpoint.ToString();
     public string Model { get; set; } = "translategemma:12b";
+    public AiRuntimeProfile? Runtime { get; set; }
     public decimal? HourlyPrice { get; set; }
     public GpuSshSettings? Ssh { get; set; }
     public bool RemoteDisclosureAccepted { get; set; }
@@ -30,11 +31,15 @@ public sealed class OllamaBackendProfile
         Name = "Ollama Local",
         Kind = OllamaBackendKind.Local,
         Endpoint = OllamaClient.DefaultEndpoint.ToString(),
-        Model = "translategemma:12b"
+        Model = "translategemma:12b",
+        Runtime = AiRuntimeProfile.CreateDefault("translategemma:12b")
     };
 
     public void Validate()
     {
+        Runtime ??= AiRuntimeProfile.CreateDefault(Model);
+        Runtime.Validate();
+        Model = Runtime.ModelOptions.Model.Trim();
         if (Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Trim().Length > 100 ||
             !Enum.IsDefined(Kind) || string.IsNullOrWhiteSpace(Model) || Model.Trim().Length > 200)
             throw new InvalidDataException("Profile Ollama thiếu tên, ID, loại backend hoặc model hợp lệ.");
@@ -58,6 +63,7 @@ public sealed class OllamaBackendProfile
     public OllamaBackendProfile Clone() => new()
     {
         Id = Id, Name = Name, Kind = Kind, Endpoint = Endpoint, Model = Model,
+        Runtime = (Runtime ?? AiRuntimeProfile.CreateDefault(Model)).Clone(),
         RemoteDisclosureAccepted = RemoteDisclosureAccepted, Token = Token, HourlyPrice = HourlyPrice, Ssh = Ssh?.Clone()
     };
 }
@@ -194,6 +200,7 @@ public class OllamaProfileStore
         {
             Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Endpoint = profile.Endpoint,
             Model = profile.Model, RemoteDisclosureAccepted = profile.RemoteDisclosureAccepted,
+            Runtime = (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).Clone(),
             ProtectedToken = Protect(profile.Token), HourlyPrice = profile.HourlyPrice,
             Ssh = profile.Ssh is null ? null : new StoredSsh
             {
@@ -216,6 +223,7 @@ public class OllamaProfileStore
             {
                 Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Endpoint = profile.Endpoint,
                 Model = profile.Model, RemoteDisclosureAccepted = profile.RemoteDisclosureAccepted,
+                Runtime = profile.Runtime?.Clone() ?? AiRuntimeProfile.CreateDefault(profile.Model),
                 Token = Unprotect(profile.ProtectedToken), HourlyPrice = profile.HourlyPrice,
                 Ssh = profile.Ssh is null ? null : new GpuSshSettings
                 {
@@ -255,6 +263,7 @@ public class OllamaProfileStore
         public OllamaBackendKind Kind { get; set; }
         public string Endpoint { get; set; } = "";
         public string Model { get; set; } = "";
+        public AiRuntimeProfile? Runtime { get; set; }
         public bool RemoteDisclosureAccepted { get; set; }
         public string? ProtectedToken { get; set; }
         public decimal? HourlyPrice { get; set; }

@@ -49,7 +49,9 @@ public partial class MainWindow
         OllamaBackendProfile profile = _ollamaBackends.GetProfile(translation.OllamaProfileId);
         if (_ollamaBackends.ActiveProfile.Id != profile.Id)
             throw new InvalidOperationException("Profile Ollama của Project chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại backend.");
-        return new(translation.Model with { }, presets.Selected, resources, BackendSnapshot(profile, translation.Model.Model));
+        AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
+        return new(runtime.ModelOptions with { }, presets.Selected, resources,
+            BackendSnapshot(profile, runtime.ModelOptions.Model));
     }
 
     private async Task OpenProjectTranslationQueueAsync(IReadOnlyList<Guid> chapterIds)

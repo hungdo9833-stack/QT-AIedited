@@ -132,7 +132,14 @@ public sealed class OllamaBackendTests : IDisposable
         {
             Id = Guid.NewGuid(), Name = "EZYCloudX 3090 Ti", Kind = OllamaBackendKind.Remote,
             Endpoint = "https://gpu.example.com", Model = "translategemma:12b",
-            Token = "plain-api-token", RemoteDisclosureAccepted = true
+            Token = "plain-api-token", RemoteDisclosureAccepted = true,
+            Runtime = new AiRuntimeProfile
+            {
+                ModelOptions = new ModelOptions { Model = "translategemma:12b", Temperature = 0.2,
+                    ContextSize = 8192, MaximumOutputTokens = 2048, RequestTimeout = TimeSpan.FromSeconds(420) },
+                SegmentationOptions = new SegmenterOptions { MinimumHanCharacters = 350,
+                    TargetHanCharacters = 550, MaximumHanCharacters = 750, MaximumTextElements = 3000 }
+            }
         };
         var catalog = new OllamaProfileCatalog { ActiveProfileId = remote.Id, Profiles = [local, remote] };
 
@@ -141,6 +148,9 @@ public sealed class OllamaBackendTests : IDisposable
 
         Assert.Equal(remote.Id, reopened.ActiveProfileId);
         Assert.Equal("plain-api-token", reopened.Profiles.Single(profile => profile.Id == remote.Id).Token);
+        AiRuntimeProfile runtime = reopened.Profiles.Single(profile => profile.Id == remote.Id).Runtime!;
+        Assert.Equal(8192, runtime.ModelOptions.ContextSize);
+        Assert.Equal(550, runtime.SegmentationOptions.TargetHanCharacters);
         string persisted = await File.ReadAllTextAsync(path, Encoding.UTF8);
         Assert.DoesNotContain("plain-api-token", persisted, StringComparison.Ordinal);
         Assert.Contains("protected:", persisted, StringComparison.Ordinal);
@@ -176,6 +186,37 @@ public sealed class OllamaBackendTests : IDisposable
         Assert.Equal(["remote prompt"], clients[remote.Id].Prompts);
         Assert.Equal(["local prompt"], clients[local.Id].Prompts);
         Assert.Equal(local.Id, manager.ActiveProfile.Id);
+    }
+
+    [Fact]
+    public async Task Legacy_profile_without_runtime_settings_gets_safe_application_defaults()
+    {
+        Directory.CreateDirectory(_root);
+        string path = Path.Combine(_root, "legacy-profiles.json");
+        Guid localId = OllamaBackendProfile.DefaultLocalId;
+        await File.WriteAllTextAsync(path, $$"""
+        {
+          "schemaVersion": 1,
+          "activeProfileId": "{{localId}}",
+          "profiles": [
+            {
+              "id": "{{localId}}",
+              "name": "Ollama Local cũ",
+              "kind": "Local",
+              "endpoint": "http://127.0.0.1:11434/api/chat",
+              "model": "legacy-model:7b",
+              "remoteDisclosureAccepted": false
+            }
+          ]
+        }
+        """, new UTF8Encoding(false));
+
+        OllamaProfileCatalog catalog = await new OllamaProfileStore(path, new FakeProtector()).LoadAsync();
+
+        OllamaBackendProfile profile = Assert.Single(catalog.Profiles);
+        Assert.Equal("legacy-model:7b", profile.Runtime!.ModelOptions.Model);
+        Assert.Equal(4096, profile.Runtime.ModelOptions.ContextSize);
+        Assert.Equal(400, profile.Runtime.SegmentationOptions.TargetHanCharacters);
     }
 
     [Fact]

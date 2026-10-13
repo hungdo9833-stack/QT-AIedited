@@ -141,4 +141,36 @@ public sealed class WorkspaceHarnessTests
         Assert.Equal("Nháp tổng hợp.", loaded.Chapter.Segments[0].UserDraft);
         Assert.Equal(0, fixture.Client.Calls);
     });
+
+    [Fact]
+    public Task Opening_projects_and_switching_chapters_does_not_overwrite_runtime_inputs() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        fixture.Text("TemperatureInput").Text = "0.27";
+        fixture.Text("ContextInput").Text = "8192";
+        fixture.Text("OutputTokensInput").Text = "2048";
+        fixture.Text("TimeoutInput").Text = "420";
+        fixture.Text("MinimumInput").Text = "350";
+        fixture.Text("TargetInput").Text = "550";
+        fixture.Text("MaximumInput").Text = "750";
+        await fixture.CreateProjectAsync();
+
+        for (int number = 1; number <= 50; number++)
+        {
+            ChapterDocument chapter = await fixture.AddChapterAsync("Chương " + number, number);
+            chapter.DefaultModelOptions = new ModelOptions { Model = "historical-" + number,
+                ContextSize = 4096, MaximumOutputTokens = 1024 };
+            chapter.SegmentationOptions = new SegmenterOptions { MinimumHanCharacters = 10,
+                TargetHanCharacters = 20, MaximumHanCharacters = 30, MaximumTextElements = 2000 };
+            fixture.Attach(chapter);
+        }
+
+        Assert.Equal("0.27", fixture.Text("TemperatureInput").Text);
+        Assert.Equal("8192", fixture.Text("ContextInput").Text);
+        Assert.Equal("2048", fixture.Text("OutputTokensInput").Text);
+        Assert.Equal("420", fixture.Text("TimeoutInput").Text);
+        Assert.Equal("350", fixture.Text("MinimumInput").Text);
+        Assert.Equal("550", fixture.Text("TargetInput").Text);
+        Assert.Equal("750", fixture.Text("MaximumInput").Text);
+    });
 }

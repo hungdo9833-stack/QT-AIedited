@@ -123,7 +123,15 @@ public partial class MainWindow
             OllamaBackendKindInput.SelectedIndex = profile.Kind == OllamaBackendKind.Local ? 0 : 1;
             OllamaEndpointInput.Text = profile.Endpoint;
             OllamaTokenInput.Password = profile.Token ?? "";
-            ModelInput.Text = profile.Model;
+            AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
+            ModelInput.Text = runtime.ModelOptions.Model;
+            TemperatureInput.Text = runtime.ModelOptions.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            ContextInput.Text = runtime.ModelOptions.ContextSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            OutputTokensInput.Text = runtime.ModelOptions.MaximumOutputTokens.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            TimeoutInput.Text = runtime.ModelOptions.RequestTimeout.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+            MinimumInput.Text = runtime.SegmentationOptions.MinimumHanCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            TargetInput.Text = runtime.SegmentationOptions.TargetHanCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            MaximumInput.Text = runtime.SegmentationOptions.MaximumHanCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture);
             ApplyOllamaKindUi(profile.Kind);
             OllamaConnectionStatus.Text = profile.Id == _ollamaBackends.ActiveProfile.Id ? "Đang sử dụng" : "Đã lưu";
             OllamaConnectionStatus.Foreground = (Brush)FindResource("MutedBrush");
@@ -167,7 +175,12 @@ public partial class MainWindow
         profile.Endpoint = profile.Kind == OllamaBackendKind.Local
             ? OllamaClient.DefaultEndpoint.ToString() : OllamaEndpointInput.Text.Trim();
         profile.Token = profile.Kind == OllamaBackendKind.Remote ? OllamaTokenInput.Password : null;
-        profile.Model = ModelInput.Text.Trim();
+        profile.Runtime = new AiRuntimeProfile
+        {
+            ModelOptions = ReadModelOptions(),
+            SegmentationOptions = ReadSegmenterOptions()
+        };
+        profile.Model = profile.Runtime.ModelOptions.Model;
         profile.Validate();
         // Consent belongs to one concrete remote destination. Editing a saved
         // profile to point at another server must show the disclosure again.
@@ -188,6 +201,8 @@ public partial class MainWindow
             OllamaEndpointInput.Text = "https://";
             OllamaTokenInput.Password = "";
             ModelInput.Text = "translategemma:12b";
+            TemperatureInput.Text = "0.1"; ContextInput.Text = "4096"; OutputTokensInput.Text = "2048";
+            TimeoutInput.Text = "300"; MinimumInput.Text = "350"; TargetInput.Text = "550"; MaximumInput.Text = "750";
             ApplyOllamaKindUi(OllamaBackendKind.Remote);
             OllamaConnectionStatus.Text = "Profile mới chưa lưu";
         }
@@ -234,6 +249,17 @@ public partial class MainWindow
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
+    }
+
+    private async Task SaveRuntimeProfileEditorAsync()
+    {
+        if (!_ollamaProfilesReady || OllamaProfileInput.SelectedItem is not OllamaProfileItem) return;
+        OllamaBackendProfile profile = ReadOllamaProfileEditor();
+        if (profile.Kind == OllamaBackendKind.Remote && !profile.RemoteDisclosureAccepted)
+            throw new InvalidOperationException("Kết nối Remote đã thay đổi hoặc chưa được xác nhận. Hãy dùng “Lưu & sử dụng” để xem và xác nhận nơi nhận nguyên văn.");
+        bool active = _ollamaBackends.ActiveProfile.Id == profile.Id;
+        await _ollamaBackends.SaveProfileAsync(profile, activate: active);
+        RefreshOllamaProfileList(profile.Id);
     }
 
     private async void OnRefreshOllamaModels(object sender, RoutedEventArgs e) => await TestOllamaProfileAsync(refreshModels: true);
@@ -293,7 +319,9 @@ public partial class MainWindow
             return;
         }
         OllamaBackendProfile profile = _ollamaBackends.ActiveProfile;
-        string model = string.IsNullOrWhiteSpace(ModelInput?.Text) ? profile.Model : ModelInput.Text.Trim();
+        string model = string.IsNullOrWhiteSpace(ModelInput?.Text)
+            ? (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).ModelOptions.Model
+            : ModelInput.Text.Trim();
         OllamaBackendStatus.Text = $"{BackendLabel(profile)} · {model}";
         OllamaBackendStatus.Foreground = (Brush)FindResource("MutedBrush");
     }

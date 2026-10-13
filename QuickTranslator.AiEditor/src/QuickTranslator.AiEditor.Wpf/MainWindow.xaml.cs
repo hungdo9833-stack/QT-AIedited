@@ -466,14 +466,6 @@ public partial class MainWindow : Window
     {
         TitleInput.Text = chapter.Title;
         AssignOriginalText(chapter.OriginalText);
-        MinimumInput.Text = chapter.SegmentationOptions.MinimumHanCharacters.ToString(CultureInfo.InvariantCulture);
-        TargetInput.Text = chapter.SegmentationOptions.TargetHanCharacters.ToString(CultureInfo.InvariantCulture);
-        MaximumInput.Text = chapter.SegmentationOptions.MaximumHanCharacters.ToString(CultureInfo.InvariantCulture);
-        ModelInput.Text = chapter.DefaultModelOptions.Model;
-        TemperatureInput.Text = chapter.DefaultModelOptions.Temperature.ToString(CultureInfo.InvariantCulture);
-        ContextInput.Text = chapter.DefaultModelOptions.ContextSize.ToString(CultureInfo.InvariantCulture);
-        OutputTokensInput.Text = chapter.DefaultModelOptions.MaximumOutputTokens.ToString(CultureInfo.InvariantCulture);
-        TimeoutInput.Text = chapter.DefaultModelOptions.RequestTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
         if (_projectSession is null)
         {
             SetGlossaryTerms(chapter.ConfirmedTerms);

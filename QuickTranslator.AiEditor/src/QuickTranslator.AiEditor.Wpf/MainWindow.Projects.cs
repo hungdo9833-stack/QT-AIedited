@@ -220,12 +220,6 @@ public partial class MainWindow
     private void ApplyProjectDefaults(ProjectTranslationSettings settings)
     {
         SelectOllamaProfileInUi(settings.OllamaProfileId);
-        ModelInput.Text = settings.Model.Model;
-        TemperatureInput.Text = settings.Model.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        ContextInput.Text = settings.Model.ContextSize.ToString(); OutputTokensInput.Text = settings.Model.MaximumOutputTokens.ToString();
-        TimeoutInput.Text = settings.Model.RequestTimeout.TotalSeconds.ToString("0");
-        MinimumInput.Text = settings.Segmentation.MinimumHanCharacters.ToString();
-        TargetInput.Text = settings.Segmentation.TargetHanCharacters.ToString(); MaximumInput.Text = settings.Segmentation.MaximumHanCharacters.ToString();
         if (settings.SelectedPromptPresetId is Guid preset && _presetManager.Presets.Any(x => x.Id == preset))
         { _presetManager.Select(preset); RefreshPresetEditor(); }
         UpdateOllamaBackendStatus();

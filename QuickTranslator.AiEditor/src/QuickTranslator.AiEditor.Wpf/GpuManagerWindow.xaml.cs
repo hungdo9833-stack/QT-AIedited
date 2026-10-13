@@ -267,6 +267,10 @@ public partial class GpuManagerWindow : Window
             OllamaBackendProfile local = original.Clone(); local.Name = NameInput.Text; local.Model = ModelInput.Text; local.Validate(); return local;
         }
         var profile = original.Clone(); profile.Name = NameInput.Text; profile.Model = ModelInput.Text;
+        AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
+        runtime.ModelOptions = runtime.ModelOptions with { Model = ModelInput.Text.Trim() };
+        profile.Runtime = runtime;
+        profile.Model = runtime.ModelOptions.Model;
         profile.Endpoint = "http://127.0.0.1:11434"; profile.HourlyPrice = decimal.Parse(HourlyPriceInput.Text, CultureInfo.InvariantCulture);
         profile.Ssh = new()
         {

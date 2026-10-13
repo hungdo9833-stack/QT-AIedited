@@ -121,6 +121,7 @@ public partial class MainWindow
         if (!BeginUiOperation()) return;
         try
         {
+            await SaveRuntimeProfileEditorAsync();
             if (_service is null)
             {
                 await SavePresetEditorAsync(); ReadModelOptions().Validate(); ReadSegmenterOptions().Validate(); ReadTerms();
@@ -129,7 +130,7 @@ public partial class MainWindow
             else await SaveSelectedSettingsAsync();
             if (_projectSession is not null) await SaveProjectAssetsAsync();
             _settingsDirty = false;
-            SetStatus("Đã lưu preset; thiết lập/thuật ngữ/ngữ cảnh của chương được lưu nếu chương đã tạo. Cỡ đoạn dùng khi tạo chương mới.");
+            SetStatus("Đã lưu AI Runtime Profile của GPU đang chọn và tài nguyên Project. Chuyển chapter không đổi cấu hình runtime.");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
