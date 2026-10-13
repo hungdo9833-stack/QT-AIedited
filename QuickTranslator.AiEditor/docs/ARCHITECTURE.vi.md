@@ -74,7 +74,7 @@ Lần mở lại đánh dấu `Translating`/`InProgress` thành lỗi/`Interrupt
 
 ## Reader density và thao tác vùng chọn
 
-`ReaderDocumentComposer` tiếp tục là nguồn văn bản/ánh xạ segment bất biến. `ReaderDisplayLayout` chỉ tạo danh sách khoảng ký tự cần vẽ; tùy chọn thu gọn paragraph rỗng không sửa `ReaderDocument.Text` hay dữ liệu chương. `ReaderPreferencesStore` lưu density, giãn dòng, khoảng cách đoạn, lề, chiều rộng và tùy chọn hiển thị bằng ghi tệp nguyên tử riêng.
+`ChapterTranslationComposer` là quy tắc ghép segment dùng chung cho Reader và TXT Export; vì vậy hai đường luôn có cùng văn bản và offset. `ReaderDocumentComposer` bổ sung ánh xạ segment cùng trạng thái đọc trên output canonical đó. `ReaderDisplayLayout` chỉ tạo danh sách khoảng ký tự cần vẽ; tùy chọn thu gọn paragraph rỗng không sửa `ReaderDocument.Text` hay dữ liệu chương. `ReaderPreferencesStore` lưu density, giãn dòng, khoảng cách đoạn, lề, chiều rộng, trạng thái mục lục và vị trí chapter/segment/offset bằng ghi tệp nguyên tử riêng.
 
 `SourceContextActions` kiểm tra vùng chọn và tìm hồ sơ/vị trí ở Core. WPF gắn cùng context menu vào `ChapterInput` và `SourceText`, chụp/phục hồi selection khi chuột phải. Thêm nhân vật dùng `CharacterProject`/`CharacterProjectStore`; glossary dùng `ConfirmedTerms` trong chương; dịch riêng dùng `TranslationPromptBuilder` và `OllamaClient`. Không có cơ sở dữ liệu phụ hoặc đường ghi nào vào bản dịch người dùng.
 

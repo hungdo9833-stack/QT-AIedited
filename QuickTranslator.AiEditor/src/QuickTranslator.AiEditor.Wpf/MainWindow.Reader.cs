@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
+using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Reading;
 using QuickTranslator.AiEditor.Core.TextCleaning;
 
@@ -19,8 +20,9 @@ public partial class MainWindow
     private Exception? _readerLoadFailure;
     private ReaderDocument? _readerDocument;
     private readonly List<ReaderRunRange> _readerRuns = [];
-    private bool _readerReady, _applyingReaderAppearance, _restoringReaderScroll, _focusMode;
+    private bool _readerReady, _applyingReaderAppearance, _restoringReaderScroll, _focusMode, _syncingReaderCatalog;
     private Guid? _restoredReaderChapterId;
+    private Guid? _renderedReaderChapterId;
     private string _renderedReaderText = "";
     private int _readerSelectionOffset;
     private WindowStyle _savedWindowStyle;
@@ -52,6 +54,7 @@ public partial class MainWindow
         _readerReady = true;
         LoadReaderAppearanceControls();
         ApplyReaderAppearance();
+        ApplyReaderCatalogVisibility();
         RefreshReader(_service?.GetSnapshot());
     }
 
@@ -62,16 +65,19 @@ public partial class MainWindow
         if (chapter is null)
         {
             _readerDocument = null;
+            _renderedReaderChapterId = null;
             ReaderWarning.Text = "Hãy nhập và chia chương trong chế độ Biên tập để bắt đầu đọc.";
             if (_renderedReaderText.Length > 0) BuildReaderFlowDocument("");
             return;
         }
 
         var next = ReaderDocumentComposer.Compose(chapter);
-        if (!string.Equals(next.Text, _renderedReaderText, StringComparison.Ordinal))
+        if (_renderedReaderChapterId != chapter.Id ||
+            !string.Equals(next.Text, _renderedReaderText, StringComparison.Ordinal))
         {
             double offset = ReaderScroll.VerticalOffset;
             _readerDocument = next;
+            _renderedReaderChapterId = chapter.Id;
             BuildReaderFlowDocument(next.Text);
             Dispatcher.BeginInvoke(() =>
             {
@@ -137,8 +143,98 @@ public partial class MainWindow
         bool reader = ReaderModeButton.IsChecked == true;
         ReaderView.Visibility = reader ? Visibility.Visible : Visibility.Collapsed;
         EditorView.Visibility = reader ? Visibility.Collapsed : Visibility.Visible;
+        TwoPaneModeButton.Visibility = FourPaneModeButton.Visibility = reader
+            ? Visibility.Collapsed : Visibility.Visible;
+        ApplyProjectSidebarVisibility();
         ApplyReaderChrome();
-        if (reader) RefreshReader(_service?.GetSnapshot());
+        if (reader)
+        {
+            RefreshReaderCatalog();
+            RefreshReader(_service?.GetSnapshot());
+        }
+    }
+
+    private void RefreshReaderCatalog()
+    {
+        if (ReaderChapterList is null || ReaderChapterSearchInput is null) return;
+        _syncingReaderCatalog = true;
+        try
+        {
+            if (_projectSession is null)
+            {
+                ReaderChapterList.ItemsSource = null;
+                ReaderChapterCountText.Text = "0 chương";
+                return;
+            }
+            var chapters = _projectCatalog.Query(_projectSession, new(
+                Search: ReaderChapterSearchInput.Text, Sort: ProjectCatalogSort.ReadingOrder));
+            ReaderChapterItem[] items = chapters.Select(chapter => new ReaderChapterItem(chapter.ChapterId,
+                $"{chapter.Number:0000} · {chapter.VietnameseTitle}", ProjectStateLabel(chapter.TranslationState))).ToArray();
+            ReaderChapterList.ItemsSource = items;
+            ReaderChapterList.SelectedItem = items.FirstOrDefault(item =>
+                item.ChapterId == _projectSession.Manifest.CurrentChapterId);
+            ReaderChapterCountText.Text = $"{items.Length:N0} chương";
+        }
+        finally { _syncingReaderCatalog = false; }
+    }
+
+    private void OnReaderChapterSearchChanged(object sender, RoutedEventArgs e)
+    {
+        if (_initialized) RefreshReaderCatalog();
+    }
+
+    private async void OnReaderChapterSelected(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingReaderCatalog || ReaderChapterList.SelectedItem is not ReaderChapterItem item ||
+            item.ChapterId == _service?.GetSnapshot().Id) return;
+        try { await LoadProjectChapterAsync(item.ChapterId); }
+        catch (Exception ex) { ShowError(ex); }
+        finally { RefreshReaderCatalog(); }
+    }
+
+    private async void OnReaderPreviousChapter(object sender, RoutedEventArgs e)
+    {
+        try { await NavigateReaderChapterAsync(-1); } catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async void OnReaderNextChapter(object sender, RoutedEventArgs e)
+    {
+        try { await NavigateReaderChapterAsync(1); } catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async Task NavigateReaderChapterAsync(int delta)
+    {
+        if (_projectSession is null || _service is null) return;
+        CaptureReaderPosition(_service.GetSnapshot().Id);
+        ProjectCatalogChapter[] chapters = _projectCatalog.Query(_projectSession,
+            new(Sort: ProjectCatalogSort.ReadingOrder)).ToArray();
+        int current = Array.FindIndex(chapters, chapter => chapter.ChapterId == _service.GetSnapshot().Id);
+        int target = current + delta;
+        if (current < 0 || target < 0 || target >= chapters.Length)
+        {
+            SetStatus(delta < 0 ? "Đang ở chương đầu tiên." : "Đang ở chương cuối cùng.");
+            return;
+        }
+        await LoadProjectChapterAsync(chapters[target].ChapterId);
+        RefreshReaderCatalog();
+    }
+
+    private void OnToggleReaderCatalog(object sender, RoutedEventArgs e)
+    {
+        _readerPreferences.TableOfContentsVisible = !_readerPreferences.TableOfContentsVisible;
+        ApplyReaderCatalogVisibility();
+        QueueReaderPreferencesSave();
+    }
+
+    private void ApplyReaderCatalogVisibility()
+    {
+        if (ReaderCatalogPanel is null) return;
+        bool visible = _readerPreferences.TableOfContentsVisible && !_focusMode;
+        ReaderCatalogPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        ReaderCatalogSplitter.Visibility = ReaderCatalogPanel.Visibility;
+        ReaderCatalogColumn.Width = visible ? new GridLength(_compactShell ? 235 : 270) : new GridLength(0);
+        ReaderCatalogSplitterColumn.Width = visible ? new GridLength(5) : new GridLength(0);
+        ReaderCatalogToggleButton.Content = visible ? "Ẩn mục lục" : "Hiện mục lục";
     }
 
     private void OnToggleReaderAppearance(object sender, RoutedEventArgs e) => ReaderAppearancePopup.IsOpen = !ReaderAppearancePopup.IsOpen;
@@ -224,7 +320,12 @@ public partial class MainWindow
         Color foreground = (Color)ColorConverter.ConvertFromString(palette.TextForeground);
         ReaderBackground.Background = new SolidColorBrush(background);
         ReaderText.Foreground = ReaderTitle.Foreground = new SolidColorBrush(foreground);
-        try { ReaderText.FontFamily = new FontFamily(_readerPreferences.FontFamily); } catch { ReaderText.FontFamily = new FontFamily("Georgia"); }
+        try { ReaderText.FontFamily = new FontFamily(_readerPreferences.FontFamily); }
+        catch (ArgumentException ex)
+        {
+            ReaderText.FontFamily = new FontFamily("Georgia");
+            SetStatus("Không nạp được font Reader đã lưu; đang dùng Georgia: " + ex.Message);
+        }
         ReaderText.FontSize = _readerPreferences.FontSize;
         ReaderText.Document.LineHeight = _readerPreferences.FontSize * _readerPreferences.LineHeight;
         ReaderPage.MaxWidth = _readerPreferences.PageWidth switch { ReaderPageWidth.Narrow => 620, ReaderPageWidth.Wide => 980, _ => 760 };
@@ -287,6 +388,12 @@ public partial class MainWindow
         ReaderModeButton.Foreground = EditorModeButton.Foreground = foreground;
         ReaderModeButton.Background = EditorModeButton.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
         ReaderModeButton.BorderBrush = EditorModeButton.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Border));
+        ReaderCatalogPanel.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
+        ReaderCatalogPanel.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Border));
+        ReaderChapterSearchInput.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
+        ReaderChapterSearchInput.Foreground = foreground;
+        ReaderChapterList.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
+        ReaderChapterList.Foreground = foreground;
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
@@ -301,9 +408,16 @@ public partial class MainWindow
 
     private void OnReaderSelectionChanged(object sender, RoutedEventArgs e)
     {
-        if (!_readerReady) return;
+        if (!_readerReady || _restoringReaderScroll) return;
         if (FindRun(ReaderText.Selection.Start) is { } range)
+        {
             _readerSelectionOffset = Math.Clamp(range.Start + range.Run.ContentStart.GetOffsetToPosition(ReaderText.Selection.Start), range.Start, range.Start + range.Length);
+            if (_service?.GetSnapshot() is { } chapter)
+            {
+                CaptureReaderPosition(chapter.Id);
+                QueueReaderPreferencesSave();
+            }
+        }
     }
 
     private ReaderRunRange? FindRun(TextPointer pointer)
@@ -320,9 +434,13 @@ public partial class MainWindow
         Guid? id = _readerDocument?.FindSegmentAt(offset);
         if (id is null) return;
         _selectedId = id; _shownAttemptId = null;
-        EditorTabs.SelectedIndex = 1;
+        _service?.SelectSegment(id.Value);
+        ReaderModeButton.IsChecked = false;
+        EditorModeButton.IsChecked = true;
+        EditorTabs.SelectedIndex = _workspaceLayout.FourPaneMode ? 1 : 0;
         Refresh();
-        DraftText.Focus();
+        Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
+        SetStatus("Đã mở đúng đoạn đang đọc trong Editor.");
     }
 
     private void OnOpenReaderSearch(object sender, RoutedEventArgs e) { ReaderSearchPanel.Visibility = Visibility.Visible; ReaderSearchInput.Focus(); ReaderSearchInput.SelectAll(); }
@@ -369,13 +487,21 @@ public partial class MainWindow
         ReaderProgressText.Text = $"{percent:0}%";
         if (_service?.GetSnapshot() is { } chapter)
         {
-            var position = GetReaderPosition(chapter.Id);
-            position.ScrollOffset = ReaderScroll.VerticalOffset;
-            position.CharacterOffset = _readerSelectionOffset;
-            position.SegmentId = _readerDocument?.FindSegmentAt(_readerSelectionOffset);
-            position.UpdatedAt = DateTimeOffset.UtcNow;
+            CaptureReaderPosition(chapter.Id);
             QueueReaderPreferencesSave();
         }
+    }
+
+    private void CaptureReaderPosition(Guid chapterId)
+    {
+        var position = GetReaderPosition(chapterId);
+        position.ScrollOffset = ReaderScroll.VerticalOffset;
+        position.CharacterOffset = _readerSelectionOffset;
+        ReaderSegmentSpan? span = _readerDocument?.Spans.LastOrDefault(item =>
+            _readerSelectionOffset >= item.Start && _readerSelectionOffset <= item.Start + item.Length);
+        position.SegmentId = span?.SegmentId;
+        position.SegmentOffset = span is null ? null : Math.Clamp(_readerSelectionOffset - span.Start, 0, span.Length);
+        position.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     private ReaderChapterPosition GetReaderPosition(Guid chapterId)
@@ -389,8 +515,27 @@ public partial class MainWindow
     {
         if (_restoredReaderChapterId == chapterId || !_readerPreferences.ChapterPositions.TryGetValue(chapterId, out var position)) return;
         _restoredReaderChapterId = chapterId;
-        _readerSelectionOffset = Math.Min(position.CharacterOffset, _readerDocument?.Text.Length ?? 0);
-        ReaderScroll.ScrollToVerticalOffset(position.ScrollOffset);
+        _readerSelectionOffset = _readerDocument?.ResolveCharacterOffset(
+            position.SegmentId, position.SegmentOffset, position.CharacterOffset) ?? 0;
+        _restoringReaderScroll = true;
+        try
+        {
+            if (position.SegmentOffset is not null) SelectReaderCaret(_readerSelectionOffset);
+            else ReaderScroll.ScrollToVerticalOffset(position.ScrollOffset);
+        }
+        finally { _restoringReaderScroll = false; }
+    }
+
+    private void SelectReaderCaret(int offset)
+    {
+        ReaderRunRange? range = _readerRuns.LastOrDefault(item =>
+            offset >= item.Start && offset <= item.Start + item.Length);
+        if (range is null) return;
+        TextPointer? pointer = range.Run.ContentStart.GetPositionAtOffset(
+            Math.Clamp(offset - range.Start, 0, range.Length));
+        if (pointer is null) return;
+        ReaderText.Selection.Select(pointer, pointer);
+        pointer.Paragraph?.BringIntoView();
     }
 
     private void QueueReaderPreferencesSave() { _readerSaveTimer.Stop(); _readerSaveTimer.Start(); }
@@ -421,6 +566,7 @@ public partial class MainWindow
         GlobalToolbar.Visibility = GlobalStatus.Visibility = _focusMode ? Visibility.Collapsed : Visibility.Visible;
         ReaderToolbar.Visibility = _focusMode ? Visibility.Collapsed : Visibility.Visible;
         FocusModeButton.Content = _focusMode ? "Thoát tập trung" : "Tập trung";
+        ApplyReaderCatalogVisibility();
     }
 
     private void OnToggleFullScreen(object sender, RoutedEventArgs e)
@@ -458,4 +604,8 @@ public partial class MainWindow
     }
 
     private sealed record ReaderRunRange(int Start, int Length, Run Run);
+    private sealed record ReaderChapterItem(Guid ChapterId, string Title, string Status)
+    {
+        public string Label => $"{Title}\n{Status}";
+    }
 }

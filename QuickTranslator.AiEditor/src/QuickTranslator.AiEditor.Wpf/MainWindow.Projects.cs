@@ -347,7 +347,10 @@ public partial class MainWindow
         Dispatcher.BeginInvoke(() =>
         {
             if (_projectSession?.Manifest.ProjectId == change.ProjectId && !_closing)
+            {
                 RefreshProjectChapterList();
+                RefreshReaderCatalog();
+            }
         });
     }
 

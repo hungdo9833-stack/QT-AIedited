@@ -37,6 +37,7 @@ public sealed class ReaderPreferences
     public double LineHeight { get; set; } = 1.55;
     public double ParagraphSpacing { get; set; } = 6;
     public double PageMargin { get; set; } = 32;
+    public bool TableOfContentsVisible { get; set; } = true;
     public bool CollapseExtraBlankLinesForDisplay { get; set; } = true;
     public ReaderPageWidth PageWidth { get; set; } = ReaderPageWidth.Comfortable;
     public ReaderTextAlignment TextAlignment { get; set; } = ReaderTextAlignment.Left;
@@ -52,7 +53,7 @@ public sealed class ReaderPreferences
             !double.IsFinite(ParagraphSpacing) || ParagraphSpacing is < 0 or > 60 ||
             !double.IsFinite(PageMargin) || PageMargin is < 8 or > 100 ||
             !double.IsFinite(FirstLineIndent) || FirstLineIndent is < 0 or > 80 || ChapterPositions is null ||
-            ChapterPositions.Count > 1000 || ChapterPositions.Any(p => p.Key == Guid.Empty || p.Value is null))
+            ChapterPositions.Count > 20000 || ChapterPositions.Any(p => p.Key == Guid.Empty || p.Value is null))
             throw new InvalidDataException("Thiết lập Reader không hợp lệ.");
         foreach (var position in ChapterPositions.Values) position.Validate();
     }
@@ -63,12 +64,13 @@ public sealed class ReaderChapterPosition
     public double ScrollOffset { get; set; }
     public int CharacterOffset { get; set; }
     public Guid? SegmentId { get; set; }
+    public int? SegmentOffset { get; set; }
     public int? BookmarkOffset { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public void Validate()
     {
-        if (!double.IsFinite(ScrollOffset) || ScrollOffset < 0 || CharacterOffset < 0 || BookmarkOffset < 0)
+        if (!double.IsFinite(ScrollOffset) || ScrollOffset < 0 || CharacterOffset < 0 || SegmentOffset < 0 || BookmarkOffset < 0)
             throw new InvalidDataException("Vị trí đọc không hợp lệ.");
     }
 }

@@ -1,13 +1,64 @@
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Reading;
+using QuickTranslator.AiEditor.Core.Translation;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace QuickTranslator.AiEditor.Tests;
 
 public sealed class ReaderModeTests
 {
     [Fact]
-    public void Compose_JoinsSegmentsWithoutInventingWhitespace_AndMapsOffsets()
+    public void Txt_export_existing_format_is_characterized_before_reader_unification()
+    {
+        var first = new TranslationSegment { Order = 1, UserDraft = "Dòng một.\nDòng hai." };
+        var second = new TranslationSegment { Order = 2, UserDraft = "“Đoạn kế tiếp.”" };
+
+        ComposedChapter export = ChapterTranslationComposer.Compose(
+            new ChapterDocument { Segments = [first, second] });
+
+        Assert.Equal("Dòng một.\nDòng hai.\n\n“Đoạn kế tiếp.”", export.Text);
+        Assert.Equal(0, export.Spans[0].Start);
+        Assert.Equal("Dòng một.\nDòng hai.".Length + 2, export.Spans[1].Start);
+    }
+
+    [Fact]
+    public async Task Txt_export_file_keeps_the_characterized_utf8_text_after_reader_unification()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "qtaie-m6-export-" + Guid.NewGuid() + ".txt");
+        try
+        {
+            var chapter = new ChapterDocument { Segments =
+            [
+                new() { Order = 1, UserDraft = "Dòng một.\nDòng hai." },
+                new() { Order = 2, UserDraft = "“Đoạn kế tiếp.”" }
+            ] };
+
+            await ChapterTranslationComposer.ExportAsync(chapter, path);
+
+            Assert.Equal("Dòng một.\nDòng hai.\n\n“Đoạn kế tiếp.”", await File.ReadAllTextAsync(path));
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public void Reader_and_txt_export_use_the_same_canonical_text_and_segment_offsets()
+    {
+        var first = new TranslationSegment { Order = 1, UserDraft = "Nàng bước ra" };
+        var second = new TranslationSegment { Order = 2, UserDraft = "khỏi cửa.\n\n“Đi thôi.”" };
+        var chapter = new ChapterDocument { Segments = [first, second] };
+
+        ReaderDocument reader = ReaderDocumentComposer.Compose(chapter);
+        ComposedChapter export = ChapterTranslationComposer.Compose(chapter);
+
+        Assert.Equal(export.Text, reader.Text);
+        Assert.Equal(export.Spans.Select(span => (span.SegmentId, span.Order, span.Start, span.Length)),
+            reader.Spans.Select(span => (span.SegmentId, span.Order, span.Start, span.Length)));
+    }
+
+    [Fact]
+    public void Compose_UsesCanonicalParagraphSeparator_AndMapsOffsets()
     {
         var first = new TranslationSegment { Order = 1, UserDraft = "Nàng bước ra" };
         var second = new TranslationSegment { Order = 2, UserDraft = " khỏi cửa.\n\n“Đi thôi.”" };
@@ -15,10 +66,10 @@ public sealed class ReaderModeTests
 
         var reader = ReaderDocumentComposer.Compose(chapter);
 
-        Assert.Equal("Nàng bước ra khỏi cửa.\n\n“Đi thôi.”", reader.Text);
+        Assert.Equal("Nàng bước ra\n\n khỏi cửa.\n\n“Đi thôi.”", reader.Text);
         Assert.Equal(first.Id, reader.FindSegmentAt(3));
-        Assert.Equal(second.Id, reader.FindSegmentAt("Nàng bước ra".Length));
-        Assert.Equal("Nàng bước ra".Length, reader.Spans[1].Start);
+        Assert.Equal(second.Id, reader.FindSegmentAt("Nàng bước ra\n\n".Length));
+        Assert.Equal("Nàng bước ra".Length + 2, reader.Spans[1].Start);
     }
 
     [Fact]
@@ -53,10 +104,12 @@ public sealed class ReaderModeTests
                 LineHeight = 1.8,
                 ParagraphSpacing = 3,
                 PageMargin = 22,
+                TableOfContentsVisible = false,
                 CollapseExtraBlankLinesForDisplay = false,
                 PageWidth = ReaderPageWidth.Wide,
                 TextAlignment = ReaderTextAlignment.Justify,
-                ChapterPositions = { [chapterId] = new() { ScrollOffset = 321.5, CharacterOffset = 99, BookmarkOffset = 80 } }
+                ChapterPositions = { [chapterId] = new() { ScrollOffset = 321.5, CharacterOffset = 99,
+                    SegmentId = Guid.NewGuid(), SegmentOffset = 7, BookmarkOffset = 80 } }
             };
             var store = new ReaderPreferencesStore(path);
 
@@ -67,11 +120,73 @@ public sealed class ReaderModeTests
             Assert.Equal(24, actual.FontSize);
             Assert.Equal(ReaderDensity.Compact, actual.Density);
             Assert.Equal(22, actual.PageMargin);
+        Assert.False(actual.TableOfContentsVisible);
             Assert.False(actual.CollapseExtraBlankLinesForDisplay);
             Assert.Equal(321.5, actual.ChapterPositions[chapterId].ScrollOffset);
+        Assert.Equal(7, actual.ChapterPositions[chapterId].SegmentOffset);
             Assert.Equal(80, actual.ChapterPositions[chapterId].BookmarkOffset);
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public async Task Legacy_reader_preferences_without_m6_fields_remain_compatible()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "qtaie-reader-legacy-" + Guid.NewGuid());
+        string path = Path.Combine(directory, "reader.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            Guid chapterId = Guid.NewGuid();
+            var legacy = new ReaderPreferences
+            {
+                ChapterPositions = { [chapterId] = new() { CharacterOffset = 41, SegmentId = Guid.NewGuid() } }
+            };
+            JsonObject json = JsonNode.Parse(JsonSerializer.Serialize(legacy, DocumentJson.Options))!.AsObject();
+            json.Remove("tableOfContentsVisible");
+            json["chapterPositions"]![chapterId.ToString()]!.AsObject().Remove("segmentOffset");
+            await File.WriteAllTextAsync(path, json.ToJsonString(DocumentJson.Options));
+
+            ReaderPreferences loaded = await new ReaderPreferencesStore(path).LoadAsync();
+
+            Assert.True(loaded.TableOfContentsVisible);
+            Assert.Null(loaded.ChapterPositions[chapterId].SegmentOffset);
+            Assert.Equal(41, loaded.ChapterPositions[chapterId].CharacterOffset);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void Stable_segment_offset_survives_text_inserted_before_the_segment()
+    {
+        Guid firstId = Guid.NewGuid(), secondId = Guid.NewGuid();
+        var changed = ReaderDocumentComposer.Compose(new ChapterDocument { Segments =
+        [
+            new() { Id = firstId, Order = 1, UserDraft = "Đoạn đầu đã dài hơn nhiều." },
+            new() { Id = secondId, Order = 2, UserDraft = "Đoạn cần trở lại." }
+        ] });
+
+        int resolved = changed.ResolveCharacterOffset(secondId, 5, fallbackOffset: 2);
+
+        Assert.Equal(changed.Spans[1].Start + 5, resolved);
+        Assert.Equal(secondId, changed.FindSegmentAt(resolved));
+    }
+
+    [Fact]
+    public void Preferences_accept_reading_positions_for_ten_thousand_chapters()
+    {
+        var preferences = new ReaderPreferences();
+        for (int index = 0; index < 10_000; index++)
+            preferences.ChapterPositions[Guid.NewGuid()] = new ReaderChapterPosition
+            {
+                CharacterOffset = index,
+                SegmentOffset = index % 20,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+
+        preferences.Validate();
+
+        Assert.Equal(10_000, preferences.ChapterPositions.Count);
     }
 
     [Theory]

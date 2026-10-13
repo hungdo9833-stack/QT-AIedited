@@ -110,7 +110,11 @@ public partial class MainWindow
         ChapterModeHint.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         ChapterSummary.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         ProjectSidebarToggleButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
+        ReaderBookmarkButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
+        FocusModeButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
+        ReaderFullScreenButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         ApplyProjectSidebarVisibility();
+        ApplyReaderCatalogVisibility();
         SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
         RefreshShellQueueStatus();
     }
@@ -119,9 +123,12 @@ public partial class MainWindow
     {
         if (ProjectSidebar is null || ProjectSidebarToggleButton is null) return;
         bool projectOpen = _projectSession is not null;
-        bool visible = projectOpen && _workspaceLayout.ProjectSidebarVisible && !_responsiveSidebarCollapsed;
+        bool readerActive = ReaderModeButton?.IsChecked == true;
+        bool visible = projectOpen && _workspaceLayout.ProjectSidebarVisible && !_responsiveSidebarCollapsed && !readerActive;
         ProjectSidebar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         ProjectSidebarSplitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        ProjectSidebarToggleButton.Visibility = readerActive || _compactShell
+            ? Visibility.Collapsed : Visibility.Visible;
         ProjectSidebarToggleButton.Content = visible ? "Ẩn mục lục" : "Hiện mục lục";
         ProjectSidebarToggleButton.ToolTip = _responsiveSidebarCollapsed
             ? "Mục lục tự thu gọn ở cửa sổ hẹp; dùng màn Chương để quản lý đầy đủ."
@@ -225,7 +232,7 @@ public partial class MainWindow
         EditorTabs.SelectedIndex = 0;
         ReaderModeButton.IsChecked = true;
         SetTranslationInspectorVisibility(false);
-        ChapterModeHint.Text = "Reader hiện tại · M6 sẽ tinh gọn trải nghiệm đọc";
+        ChapterModeHint.Text = "Đọc bản dịch · chọn đoạn để mở đúng vị trí trong Editor";
     }
 
     private void ShowSettingsWorkspace(string? section = null)

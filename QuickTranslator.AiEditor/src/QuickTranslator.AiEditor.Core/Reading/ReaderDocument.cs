@@ -1,5 +1,5 @@
-using System.Text;
 using QuickTranslator.AiEditor.Core.Models;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Core.Reading;
 
@@ -22,6 +22,14 @@ public sealed record ReaderDocument(
         if (exact is not null) return exact.SegmentId;
         return Spans.LastOrDefault(s => s.Start <= offset)?.SegmentId ?? Spans[0].SegmentId;
     }
+
+    public int ResolveCharacterOffset(Guid? segmentId, int? segmentOffset, int fallbackOffset)
+    {
+        if (segmentId is Guid id && segmentOffset is int relative &&
+            Spans.FirstOrDefault(span => span.SegmentId == id) is { } span)
+            return span.Start + Math.Clamp(relative, 0, span.Length);
+        return Math.Clamp(fallbackOffset, 0, Text.Length);
+    }
 }
 
 public static class ReaderDocumentComposer
@@ -29,26 +37,10 @@ public static class ReaderDocumentComposer
     public static ReaderDocument Compose(ChapterDocument chapter)
     {
         ArgumentNullException.ThrowIfNull(chapter);
-        var text = new StringBuilder();
-        var spans = new List<ReaderSegmentSpan>();
-        var incomplete = new List<Guid>();
-        var errors = new List<Guid>();
-        var inspection = new List<Guid>();
-
-        foreach (var segment in chapter.Segments.OrderBy(s => s.Order))
-        {
-            string translated = segment.EditableText ?? string.Empty;
-            spans.Add(new(segment.Id, segment.Order, text.Length, translated.Length));
-            text.Append(translated); // Reader never invents whitespace at an AI segment boundary.
-
-            if (string.IsNullOrWhiteSpace(translated) || segment.RequiresRetranslation)
-                incomplete.Add(segment.Id);
-            if (segment.Status == SegmentStatus.Error)
-                errors.Add(segment.Id);
-            if (segment.Status == SegmentStatus.InspectionRequired || segment.RequiresRetranslation)
-                inspection.Add(segment.Id);
-        }
-
-        return new(text.ToString(), spans, incomplete, errors, inspection);
+        ComposedChapter composed = ChapterTranslationComposer.Compose(chapter);
+        return new(composed.Text,
+            composed.Spans.Select(span => new ReaderSegmentSpan(
+                span.SegmentId, span.Order, span.Start, span.Length)).ToArray(),
+            composed.MissingIds, composed.ErrorIds, composed.InspectionIds);
     }
 }

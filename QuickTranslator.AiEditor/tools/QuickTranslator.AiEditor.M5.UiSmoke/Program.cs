@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Reading;
 using QuickTranslator.AiEditor.Core.Translation;
 using QuickTranslator.AiEditor.Wpf;
 
@@ -42,7 +43,10 @@ internal static class Program
         PumpDispatcher(TimeSpan.FromMilliseconds(900));
         if (window is MainWindow)
         {
-            Invoke(window, "ShowTranslationWorkspace", string.Equals(mode, "four", StringComparison.OrdinalIgnoreCase));
+            if (string.Equals(mode, "reader", StringComparison.OrdinalIgnoreCase))
+                Invoke(window, "ShowReaderWorkspace");
+            else
+                Invoke(window, "ShowTranslationWorkspace", string.Equals(mode, "four", StringComparison.OrdinalIgnoreCase));
             PumpDispatcher(TimeSpan.FromMilliseconds(250));
         }
 
@@ -130,9 +134,25 @@ internal static class Program
             }
             case "four":
                 return CreateEditor(session, root, fourPane: true);
+            case "reader":
+                return CreateReader(session, root);
             default:
                 return CreateEditor(session, root, fourPane: false);
         }
+    }
+
+    private static MainWindow CreateReader(ProjectSession session, string root)
+    {
+        MainWindow window = CreateEditor(session, root, fourPane: false);
+        Set(window, "_readerPreferences", new ReaderPreferences { Theme = ReaderTheme.Dark,
+            FontFamily = "Segoe UI Variable Text", FontSize = 20, LineHeight = 1.65,
+            ParagraphSpacing = 10, PageWidth = ReaderPageWidth.Comfortable, TableOfContentsVisible = true });
+        Set(window, "_readerReady", true);
+        Invoke(window, "LoadReaderAppearanceControls");
+        Invoke(window, "ApplyReaderAppearance");
+        Invoke(window, "RefreshReaderCatalog");
+        Invoke(window, "ShowReaderWorkspace");
+        return window;
     }
 
     private static ProjectLibraryWindow CreateLibrary(ProjectSession session)
