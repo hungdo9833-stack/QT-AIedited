@@ -70,6 +70,9 @@ public sealed class ProjectTranslationItem
     public string SourceFingerprint { get; set; } = "";
     public string ProtectedFingerprint { get; set; } = "";
     public string EnqueuedDocumentFingerprint { get; set; } = "";
+    public SegmenterOptions? AppliedSegmentationOptions { get; set; }
+    public DateTimeOffset? PreflightCompletedAt { get; set; }
+    public string? PreflightWarning { get; set; }
     public Guid? ChapterQueueRunId { get; set; }
     public Guid? AssignedWorkerId { get; set; }
     public int SourceHanCharacters { get; set; }
@@ -84,9 +87,11 @@ public sealed class ProjectTranslationItem
     {
         if (ChapterId == Guid.Empty || Number <= 0 || Order <= 0 || string.IsNullOrWhiteSpace(Title) ||
             !Enum.IsDefined(Status) || SourceFingerprint.Length != 64 || ProtectedFingerprint.Length != 64 ||
-            EnqueuedDocumentFingerprint.Length != 64 || TotalSegments < 0 || CompletedSegments < 0 ||
+            EnqueuedDocumentFingerprint.Length != 64 || PreflightWarning?.Length > 4000 ||
+            TotalSegments < 0 || CompletedSegments < 0 ||
             CompletedSegments > TotalSegments || ErrorSegments < 0 || ErrorSegments > TotalSegments || SourceHanCharacters < 0)
             throw new InvalidDataException("Item trong Project translation job không hợp lệ.");
+        AppliedSegmentationOptions?.Validate();
     }
 }
 
@@ -97,6 +102,7 @@ public sealed class ProjectTranslationWorkerState
     public string Name { get; set; } = "";
     public OllamaBackendSnapshot Backend { get; set; } = OllamaBackendSnapshot.LocalDefault("translategemma:12b");
     public ModelOptions ModelOptions { get; set; } = new();
+    public SegmenterOptions SegmentationOptions { get; set; } = new();
     public string BackendIdentity { get; set; } = "";
     public ProjectTranslationWorkerStatus Status { get; set; } = ProjectTranslationWorkerStatus.Ready;
     public Guid? CurrentChapterId { get; set; }
@@ -110,13 +116,15 @@ public sealed class ProjectTranslationWorkerState
     internal void Validate()
     {
         if (WorkerId == Guid.Empty || ProfileId == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 100 ||
-            Backend is null || ModelOptions is null || BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl) ||
+            Backend is null || ModelOptions is null || SegmentationOptions is null ||
+            BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl) ||
             !Enum.IsDefined(Status) || CompletedChapters < 0 ||
             FailedChapters < 0 || CompletedHanCharacters < 0 || ActiveSeconds < 0 || double.IsNaN(ActiveSeconds) ||
             double.IsInfinity(ActiveSeconds) || HourlyPrice is < 0 or > 1_000_000)
             throw new InvalidDataException("Worker trong translation job không hợp lệ.");
         Backend.Validate();
         ModelOptions.Validate();
+        SegmentationOptions.Validate();
         if (ProfileId != Backend.ProfileId || !string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
             throw new InvalidDataException("Snapshot worker không khớp profile/model.");
     }
@@ -149,14 +157,19 @@ public sealed record ProjectTranslationProgress(ProjectTranslationJobStatus Stat
     int CurrentTotalSegments, string? Error);
 
 public sealed record ProjectTranslationWorkerDefinition(Guid WorkerId, OllamaBackendSnapshot Backend,
-    IOllamaClient Client, ModelOptions ModelOptions, decimal? HourlyPrice = null, string BackendIdentity = "")
+    IOllamaClient Client, ModelOptions ModelOptions, SegmenterOptions SegmentationOptions,
+    decimal? HourlyPrice = null, string BackendIdentity = "")
 {
+    public ProjectTranslationWorkerDefinition(Guid workerId, OllamaBackendSnapshot backend,
+        IOllamaClient client, ModelOptions modelOptions, decimal? hourlyPrice = null, string backendIdentity = "")
+        : this(workerId, backend, client, modelOptions, new SegmenterOptions(), hourlyPrice, backendIdentity) { }
+
     public void Validate()
     {
-        if (WorkerId == Guid.Empty || Backend is null || Client is null || ModelOptions is null ||
+        if (WorkerId == Guid.Empty || Backend is null || Client is null || ModelOptions is null || SegmentationOptions is null ||
             HourlyPrice is < 0 or > 1_000_000 || BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl))
             throw new InvalidDataException("Cấu hình worker translation không hợp lệ.");
-        Backend.Validate(); ModelOptions.Validate();
+        Backend.Validate(); ModelOptions.Validate(); SegmentationOptions.Validate();
         if (!string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
             throw new InvalidDataException("Model của worker không khớp backend snapshot.");
     }

@@ -5,16 +5,20 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class ProjectTranslationQueueWindow : Window
 {
-    private readonly ProjectTranslationCoordinator _coordinator;
+    private ProjectTranslationCoordinator _coordinator;
+    private readonly Func<ProjectTranslationCoordinator,
+        Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>>? _replan;
     private ProjectTranslationJob? _plan;
     private bool _commandBusy;
     private bool _closed;
 
     internal ProjectTranslationQueueWindow(string projectTitle, ProjectTranslationCoordinator coordinator,
-        ProjectTranslationJob? plan)
+        ProjectTranslationJob? plan, Func<ProjectTranslationCoordinator,
+            Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>>? replan = null)
     {
         _coordinator = coordinator;
         _plan = plan;
+        _replan = replan;
         InitializeComponent();
         ProjectText.Text = projectTitle;
         _coordinator.ProgressChanged += OnProgressChanged;
@@ -124,7 +128,17 @@ public partial class ProjectTranslationQueueWindow : Window
         RefreshView();
         try
         {
-            _plan = await _coordinator.ReplanUnfinishedAsync();
+            if (_replan is null) _plan = await _coordinator.ReplanUnfinishedAsync();
+            else
+            {
+                ProjectTranslationCoordinator previous = _coordinator;
+                (ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan) replacement =
+                    await _replan(previous);
+                previous.ProgressChanged -= OnProgressChanged;
+                _coordinator = replacement.Coordinator;
+                _coordinator.ProgressChanged += OnProgressChanged;
+                _plan = replacement.Plan;
+            }
             StatusText.Text = $"Đã tạo Queue Plan mới cho {_plan.Items.Count:N0} chapter chưa hoàn tất. Kiểm tra snapshot rồi bấm Start.";
         }
         catch (Exception ex) { ReportError(ex); }

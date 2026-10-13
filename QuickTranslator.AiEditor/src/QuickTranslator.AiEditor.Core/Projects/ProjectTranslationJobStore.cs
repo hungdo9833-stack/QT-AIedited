@@ -99,12 +99,27 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
         return read.Value;
     }
 
+    internal async Task<ProjectTranslationJob> PrepareNextAsync(ProjectTranslationJob proposed,
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ProjectTranslationJob? current = await ReadCurrentAsync(cancellationToken).ConfigureAwait(false);
+            if (current is null || current.JobId != proposed.JobId || current.Revision != proposed.Revision)
+                throw new InvalidOperationException("Translation job đã thay đổi trên đĩa; preflight phải chạy lại.");
+            ProjectTranslationJob saved = Clone(proposed);
+            saved.Revision = checked(current.Revision + 1);
+            saved.UpdatedAt = DateTimeOffset.UtcNow;
+            saved.Validate();
+            return saved;
+        }
+        finally { _gate.Release(); }
+    }
+
     private async Task<ProjectTranslationJob> WriteAsync(ProjectTranslationJob job, CancellationToken cancellationToken)
     {
-        JsonElement content = JsonSerializer.SerializeToElement(job, DocumentJson.Options);
-        var envelope = new Envelope { Content = content, Sha256 = Hash(content) };
-        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(envelope,
-            new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
+        byte[] bytes = Serialize(job);
         LastRecovery = await RecoveryFiles.WriteAsync(PathName, bytes, Decode, cancellationToken).ConfigureAwait(false);
         return Clone(job);
     }
@@ -125,6 +140,14 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
 
     private static string Hash(JsonElement value) => Convert.ToHexString(SHA256.HashData(
         Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, DocumentJson.Options))));
+    internal static byte[] Serialize(ProjectTranslationJob job)
+    {
+        job.Validate();
+        JsonElement content = JsonSerializer.SerializeToElement(job, DocumentJson.Options);
+        var envelope = new Envelope { Content = content, Sha256 = Hash(content) };
+        return JsonSerializer.SerializeToUtf8Bytes(envelope,
+            new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
+    }
     internal static ProjectTranslationJob Clone(ProjectTranslationJob job) =>
         JsonSerializer.Deserialize<ProjectTranslationJob>(JsonSerializer.Serialize(job, DocumentJson.Options), DocumentJson.Options)!;
 

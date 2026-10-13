@@ -117,6 +117,7 @@ public sealed class ProjectTranslationCoordinator
             {
                 WorkerId = worker.WorkerId, ProfileId = worker.Backend.ProfileId, Name = worker.Backend.ProfileName,
                 Backend = worker.Backend with { }, ModelOptions = worker.ModelOptions with { },
+                SegmentationOptions = worker.SegmentationOptions with { },
                 HourlyPrice = worker.HourlyPrice, BackendIdentity = worker.BackendIdentity,
                 Status = ProjectTranslationWorkerStatus.Ready
             }).ToList(),
@@ -585,6 +586,7 @@ public sealed class ProjectTranslationCoordinator
             ProjectTranslationWorkerDefinition definition = _workerDefinitions.SingleOrDefault(worker => worker.WorkerId == snapshot.WorkerId)
                 ?? throw new InvalidOperationException($"Worker “{snapshot.Name}” chưa được kết nối lại.");
             if (definition.Backend != snapshot.Backend || definition.ModelOptions != snapshot.ModelOptions ||
+                definition.SegmentationOptions != snapshot.SegmentationOptions ||
                 snapshot.BackendIdentity.Length > 0 &&
                 !string.Equals(definition.BackendIdentity, snapshot.BackendIdentity, StringComparison.Ordinal))
                 throw new InvalidOperationException($"Backend/model của worker “{snapshot.Name}” đã đổi; job không tự gửi request.");
@@ -627,6 +629,11 @@ public sealed class ProjectTranslationCoordinator
         QueueMode mode = retryFailed && item.StartedAt is not null ? QueueMode.FailedSegments : QueueMode.MissingSegments;
         bool canResumeChapter = item.ChapterQueueRunId is Guid runId && chapter.Queue.RunId == runId &&
             chapter.Queue.Status is QueueStatus.Paused or QueueStatus.Interrupted or QueueStatus.Cancelled or QueueStatus.Faulted;
+        if (workerDefinition is not null && !canResumeChapter)
+        {
+            chapter = await RunWorkerPreflightAsync(workerDefinition, chapterId, cancellationToken).ConfigureAwait(false);
+            item = CurrentJob!.Items.Single(value => value.ChapterId == chapterId);
+        }
         bool hasEligible = chapter.Segments.Any(segment => TranslationService.IsQueueEligible(segment,
             canResumeChapter ? chapter.Queue.Mode : mode));
         if (!hasEligible && !canResumeChapter)
@@ -774,6 +781,31 @@ public sealed class ProjectTranslationCoordinator
         if (item.StartedAt is null && ProjectTranslationFingerprints.Document(chapter) != item.EnqueuedDocumentFingerprint)
             return "Document revision đã đổi sau khi enqueue.";
         return null;
+    }
+
+    private async Task<ChapterDocument> RunWorkerPreflightAsync(ProjectTranslationWorkerDefinition definition,
+        Guid chapterId, CancellationToken cancellationToken)
+    {
+        await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ProjectTranslationJob expected;
+            lock (_sync)
+            {
+                expected = ProjectTranslationJobStore.Clone(_job
+                    ?? throw new InvalidOperationException("Translation job chưa được lưu."));
+            }
+            WorkerPreflightResult result = await _repository.PreflightWorkerChapterAsync(_session,
+                expected, definition.WorkerId, chapterId, definition.SegmentationOptions, cancellationToken)
+                .ConfigureAwait(false);
+            lock (_sync) _job = result.Job;
+            return result.Chapter;
+        }
+        finally
+        {
+            _persistGate.Release();
+            Notify();
+        }
     }
 
     private string? ValidateConfigurationRevision(ProjectTranslationEnvironment environment,

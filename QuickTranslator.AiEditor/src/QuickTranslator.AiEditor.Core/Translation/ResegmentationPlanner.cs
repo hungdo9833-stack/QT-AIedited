@@ -8,12 +8,13 @@ namespace QuickTranslator.AiEditor.Core.Translation;
 
 public static class ResegmentationPlanner
 {
-    public static ResegmentationPreview Preview(ChapterDocument chapter, SegmenterOptions options)
+    public static ResegmentationPreview Preview(ChapterDocument chapter, SegmenterOptions options,
+        bool allowRecoverableCheckpoint = false)
     {
         ArgumentNullException.ThrowIfNull(chapter);
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
-        EnsureQueueIdle(chapter);
+        EnsureQueueIdle(chapter, allowRecoverableCheckpoint);
         Build(chapter, options, out List<TranslationSegment> proposed, out int retained,
             out int protectedCount, out int regions, out List<string> warnings);
         bool changed = !chapter.Segments.Select(segment => segment.Id).SequenceEqual(proposed.Select(segment => segment.Id));
@@ -22,11 +23,11 @@ public static class ResegmentationPlanner
     }
 
     public static ChapterDocument Apply(ChapterDocument chapter, ResegmentationPreview preview,
-        bool confirmed, DateTimeOffset changedAt)
+        bool confirmed, DateTimeOffset changedAt, bool allowRecoverableCheckpoint = false)
     {
         ArgumentNullException.ThrowIfNull(chapter);
         ArgumentNullException.ThrowIfNull(preview);
-        EnsureQueueIdle(chapter);
+        EnsureQueueIdle(chapter, allowRecoverableCheckpoint);
         if (!string.Equals(DocumentHash(chapter), preview.ExpectedDocumentSha256, StringComparison.Ordinal))
             throw new InvalidOperationException("Chương đã thay đổi sau khi tạo preview chia lại đoạn. Hãy xem trước lại.");
         if (preview.ProtectedSegmentCount > 0 && !confirmed)
@@ -114,10 +115,10 @@ public static class ResegmentationPlanner
         segment.UserDraft is not null || segment.Approvals.Count > 0 || segment.DraftHistory.Count > 0 ||
         segment.PreservedText is not null || segment.ProtectedByPreviousEdit || segment.NormalizationHistory.Count > 0;
 
-    private static void EnsureQueueIdle(ChapterDocument chapter)
+    private static void EnsureQueueIdle(ChapterDocument chapter, bool allowRecoverableCheckpoint)
     {
-        if (chapter.Queue.Status is QueueStatus.Running or QueueStatus.PauseRequested or QueueStatus.Paused or
-            QueueStatus.Cancelling or QueueStatus.Interrupted)
+        if (chapter.Queue.IsActive || !allowRecoverableCheckpoint &&
+            chapter.Queue.Status is QueueStatus.Paused or QueueStatus.Interrupted)
             throw new InvalidOperationException("Queue của chương chưa ở trạng thái an toàn. Hãy hoàn tất hoặc hủy checkpoint trước khi chia lại đoạn.");
     }
 

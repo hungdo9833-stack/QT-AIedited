@@ -69,9 +69,8 @@ public partial class MainWindow
             EnsureOllamaBackendReady();
             await SaveCurrentAsync();
             await SaveProjectAssetsAsync();
-            ProjectTranslationCoordinator coordinator = resumable?.Workers.Count > 0 ||
-                resumable is null && _gpuPreferences.Mode == GpuTranslationMode.ParallelLocalRemote
-                ? await RebuildParallelCoordinatorAsync(resumable)
+            ProjectTranslationCoordinator coordinator = resumable?.Workers.Count > 0 || resumable is null
+                ? await RebuildParallelCoordinatorAsync(resumable, loadExisting: resumable is not null)
                 : await EnsureProjectTranslationCoordinatorAsync();
             ProjectTranslationJob? existing = coordinator.CurrentJob;
             if (coordinator.IsRunning || existing?.Status is ProjectTranslationJobStatus.Paused or
@@ -94,7 +93,7 @@ public partial class MainWindow
     private async Task ApplyTranslationModeAsync(ProjectTranslationJob? recovered)
     {
         Guid profileId;
-        if (recovered?.Workers.Count > 0)
+        if (recovered?.Workers.Count > 0 && !_gpuPreferences.ModeExplicitlySelected)
         {
             profileId = recovered.Workers.FirstOrDefault(worker => worker.Backend.Kind == OllamaBackendKind.Remote)?.ProfileId
                 ?? OllamaBackendProfile.DefaultLocalId;
@@ -104,9 +103,15 @@ public partial class MainWindow
                     ? GpuTranslationMode.RemoteOnly : GpuTranslationMode.LocalOnly;
             if (profileId != OllamaBackendProfile.DefaultLocalId) _gpuPreferences.RemoteProfileId = profileId;
         }
-        else profileId = _gpuPreferences.Mode == GpuTranslationMode.LocalOnly
+        else
+        {
+            if (recovered?.Workers.FirstOrDefault(worker => worker.Backend.Kind == OllamaBackendKind.Remote) is { } remote &&
+                _gpuPreferences.RemoteProfileId is null)
+                _gpuPreferences.RemoteProfileId = remote.ProfileId;
+            profileId = _gpuPreferences.Mode == GpuTranslationMode.LocalOnly
             ? OllamaBackendProfile.DefaultLocalId
             : _gpuPreferences.RemoteProfileId ?? _ollamaBackends.ActiveProfile.Id;
+        }
         OllamaBackendProfile profile = _ollamaBackends.GetProfile(profileId);
         if (_ollamaBackends.ActiveProfile.Id != profileId) await _ollamaBackends.ActivateAsync(profileId);
         _selectedOllamaProfileId = profileId;
@@ -114,60 +119,79 @@ public partial class MainWindow
         SelectOllamaProfileInUi(profileId);
     }
 
-    private async Task<ProjectTranslationCoordinator> RebuildParallelCoordinatorAsync(ProjectTranslationJob? recovered)
+    private async Task<ProjectTranslationCoordinator> RebuildParallelCoordinatorAsync(ProjectTranslationJob? recovered,
+        bool closeWindow = true, bool loadExisting = true)
     {
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
-        _projectTranslationWindow?.Close(); _projectTranslationWindow = null;
+        if (closeWindow) { _projectTranslationWindow?.Close(); _projectTranslationWindow = null; }
         if (_projectTranslationCoordinator is not null)
             _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
         foreach (IDisposable client in _projectTranslationOwnedClients) client.Dispose();
         _projectTranslationOwnedClients.Clear();
-        ProjectTranslationEnvironment environment = await LoadProjectTranslationEnvironmentAsync(_projectSession, CancellationToken.None);
         var definitions = new List<ProjectTranslationWorkerDefinition>();
         if (recovered?.Workers.Count > 0)
         {
             foreach (ProjectTranslationWorkerState worker in recovered.Workers)
                 definitions.Add(CreateWorkerDefinition(worker.WorkerId, worker.Backend, worker.ModelOptions,
-                    worker.HourlyPrice, worker.BackendIdentity));
+                    worker.SegmentationOptions, worker.HourlyPrice, worker.BackendIdentity));
         }
         else
         {
             OllamaBackendProfile local = _ollamaBackends.GetProfile(OllamaBackendProfile.DefaultLocalId);
-            Guid remoteId = _gpuPreferences.RemoteProfileId
-                ?? throw new InvalidOperationException("Mở GPU Manager, kết nối và chọn một profile Remote trước khi dùng Parallel.");
-            OllamaBackendProfile remote = _ollamaBackends.GetProfile(remoteId);
-            definitions.Add(CreateWorkerDefinition(StableWorkerId(local.Id), BackendSnapshot(local, local.Model),
-                environment.ModelOptions with { Model = local.Model }, local.HourlyPrice));
-            definitions.Add(CreateWorkerDefinition(StableWorkerId(remote.Id), BackendSnapshot(remote, remote.Model),
-                environment.ModelOptions with { Model = remote.Model }, remote.HourlyPrice));
+            if (_gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote)
+            {
+                AiRuntimeProfile runtime = local.Runtime ?? AiRuntimeProfile.CreateDefault(local.Model);
+                definitions.Add(CreateWorkerDefinition(StableWorkerId(local.Id),
+                    BackendSnapshot(local, runtime.ModelOptions.Model), runtime.ModelOptions,
+                    runtime.SegmentationOptions, local.HourlyPrice));
+            }
+            if (_gpuPreferences.Mode is GpuTranslationMode.RemoteOnly or GpuTranslationMode.ParallelLocalRemote)
+            {
+                Guid remoteId = _gpuPreferences.RemoteProfileId
+                    ?? throw new InvalidOperationException("Mở GPU Manager, kết nối và chọn một profile Remote trước khi dùng Remote/Parallel.");
+                OllamaBackendProfile remote = _ollamaBackends.GetProfile(remoteId);
+                AiRuntimeProfile runtime = remote.Runtime ?? AiRuntimeProfile.CreateDefault(remote.Model);
+                definitions.Add(CreateWorkerDefinition(StableWorkerId(remote.Id),
+                    BackendSnapshot(remote, runtime.ModelOptions.Model), runtime.ModelOptions,
+                    runtime.SegmentationOptions, remote.HourlyPrice));
+            }
         }
         var coordinator = new ProjectTranslationCoordinator(_projectSession, _projectRepository, definitions,
             cancellationToken => LoadProjectTranslationEnvironmentAsync(_projectSession, cancellationToken));
         coordinator.ProgressChanged += OnProjectTranslationProgressChanged;
         _projectTranslationCoordinator = coordinator;
-        _projectTranslationLoadTask = coordinator.LoadAsync();
-        await _projectTranslationLoadTask;
-        _projectTranslationLoadTask = null;
+        if (loadExisting)
+        {
+            _projectTranslationLoadTask = coordinator.LoadAsync();
+            await _projectTranslationLoadTask;
+            _projectTranslationLoadTask = null;
+        }
         return coordinator;
     }
 
     private ProjectTranslationWorkerDefinition CreateWorkerDefinition(Guid workerId, OllamaBackendSnapshot backend,
-        ModelOptions options, decimal? hourlyPrice, string? expectedIdentity = null)
+        ModelOptions options, SegmenterOptions segmentation, decimal? hourlyPrice, string? expectedIdentity = null)
     {
         if (backend.Kind == OllamaBackendKind.Local)
         {
             string identity = "local:" + backend.ProfileId.ToString("N");
             EnsureBackendIdentity(expectedIdentity, identity, backend.ProfileName);
-            IOllamaBackendClient client = OllamaClient.CreateLocal();
-            _projectTranslationOwnedClients.Add(client);
-            return new(workerId, backend, client, options with { }, hourlyPrice, identity);
+            IOllamaClient client;
+            if (_translationClient is OllamaBackendManager)
+            {
+                IOllamaBackendClient localClient = OllamaClient.CreateLocal();
+                _projectTranslationOwnedClients.Add(localClient);
+                client = localClient;
+            }
+            else client = _translationClient; // Deterministic injected provider used by integration tests.
+            return new(workerId, backend, client, options with { }, segmentation with { }, hourlyPrice, identity);
         }
         if (!_gpuConnections.TryGetConnection(backend.ProfileId, out GpuConnectionHandle? connection) ||
             connection is null || !connection.IsConnected)
             throw new InvalidOperationException($"GPU Remote “{backend.ProfileName}” chưa có SSH tunnel. Mở GPU Manager và bấm Kết nối.");
         string remoteIdentity = SshBackendIdentity(connection.Profile);
         EnsureBackendIdentity(expectedIdentity, remoteIdentity, backend.ProfileName);
-        return new(workerId, backend, connection.Client, options with { }, hourlyPrice, remoteIdentity);
+        return new(workerId, backend, connection.Client, options with { }, segmentation with { }, hourlyPrice, remoteIdentity);
     }
 
     private static void EnsureBackendIdentity(string? expected, string current, string name)
@@ -196,10 +220,22 @@ public partial class MainWindow
             _projectTranslationWindow.Activate();
             return;
         }
-        _projectTranslationWindow = new(_projectSession?.Manifest.VietnameseTitle ?? "Project", coordinator, plan);
+        _projectTranslationWindow = new(_projectSession?.Manifest.VietnameseTitle ?? "Project", coordinator, plan,
+            ReplanProjectTranslationAsync);
         if (IsVisible) _projectTranslationWindow.Owner = this;
         _projectTranslationWindow.Closed += (_, _) => _projectTranslationWindow = null;
         _projectTranslationWindow.Show();
+    }
+
+    private async Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>
+        ReplanProjectTranslationAsync(ProjectTranslationCoordinator previous)
+    {
+        ProjectTranslationJob unfinished = await previous.ReplanUnfinishedAsync();
+        Guid[] chapterIds = unfinished.Items.OrderBy(item => item.Order).Select(item => item.ChapterId).ToArray();
+        ProjectTranslationCoordinator current = await RebuildParallelCoordinatorAsync(null,
+            closeWindow: false, loadExisting: false);
+        ProjectTranslationJob plan = await current.PlanAsync(chapterIds);
+        return (current, plan);
     }
 
     private async Task PauseProjectTranslationForContextChangeAsync()

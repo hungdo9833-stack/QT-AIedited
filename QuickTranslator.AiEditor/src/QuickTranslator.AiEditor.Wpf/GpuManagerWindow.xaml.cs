@@ -20,6 +20,7 @@ public partial class GpuManagerWindow : Window
     private string? _loadedPrivateKey;
     private CancellationTokenSource? _setupCancellation;
     private bool _busy;
+    private bool _loadingMode;
 
     internal GpuManagerWindow(OllamaBackendManager backends, GpuConnectionManager connections,
         GpuTranslationPreferences? preferences = null)
@@ -27,7 +28,9 @@ public partial class GpuManagerWindow : Window
         _backends = backends; _connections = connections;
         _preferences = preferences ?? new();
         InitializeComponent();
+        _loadingMode = true;
         TranslationModeInput.SelectedIndex = (int)_preferences.Mode;
+        _loadingMode = false;
         ProfileList.ItemsSource = _profiles;
         RefreshProfiles();
     }
@@ -36,6 +39,7 @@ public partial class GpuManagerWindow : Window
     {
         if (TranslationModeText is null) return;
         _preferences.Mode = (GpuTranslationMode)Math.Max(0, TranslationModeInput.SelectedIndex);
+        if (!_loadingMode) _preferences.ModeExplicitlySelected = true;
         TranslationModeText.Text = _preferences.Mode switch
         {
             GpuTranslationMode.LocalOnly => "Queue dùng một Ollama Local.",
