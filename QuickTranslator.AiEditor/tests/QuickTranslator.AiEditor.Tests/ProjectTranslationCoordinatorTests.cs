@@ -128,6 +128,43 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task Changing_model_options_mid_run_interrupts_once_and_replans_only_unfinished_chapters()
+    {
+        await WithProjectAsync(3, async context =>
+        {
+            ModelOptions currentOptions = context.Environment.ModelOptions;
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(
+                context.Environment with { ModelOptions = currentOptions with { } });
+            var client = new ProjectQueueFakeClient { BlockFirst = true };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await client.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            currentOptions = currentOptions with { Temperature = currentOptions.Temperature + 0.1 };
+            client.ReleaseFirst.TrySetResult();
+            await run;
+
+            ProjectTranslationJob interrupted = coordinator.CurrentJob!;
+            Assert.Equal(ProjectTranslationJobStatus.Interrupted, interrupted.Status);
+            Assert.Equal(1, interrupted.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
+            Assert.Equal(2, interrupted.Items.Count(item => item.Status == ProjectTranslationItemStatus.Pending));
+            Assert.DoesNotContain(interrupted.Items, item => item.Status == ProjectTranslationItemStatus.NeedsReview);
+            Assert.Equal(1, client.Calls);
+
+            ProjectTranslationJob replacement = await coordinator.ReplanUnfinishedAsync();
+
+            Assert.Equal(ProjectTranslationJobStatus.Draft, replacement.Status);
+            Assert.Equal(2, replacement.Items.Count);
+            Assert.Equal(currentOptions, replacement.ModelOptions);
+            Assert.Null(coordinator.CurrentJob);
+
+            await coordinator.StartAsync(replacement);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(3, client.Calls);
+        });
+    }
+
+    [Fact]
     public async Task Approved_and_user_drafts_are_skipped_and_preserved()
     {
         await WithProjectAsync(3, async context =>

@@ -55,8 +55,10 @@ public partial class ProjectTranslationQueueWindow : Window
         ProjectTranslationProgress progress = planMode
             ? new(ProjectTranslationJobStatus.Draft, job.Items.Count, 0, 0, 0, job.Items.Count, null, null, 0, 0, null)
             : _coordinator.GetProgress();
+        int needsReview = job.Items.Count(item => item.Status == ProjectTranslationItemStatus.NeedsReview);
+        int skipped = job.Items.Count(item => item.Status is ProjectTranslationItemStatus.Skipped or ProjectTranslationItemStatus.Cancelled);
         SummaryText.Text = $"{StatusLabel(progress.Status)} · {progress.CompletedChapters}/{progress.TotalChapters} xong · " +
-            $"{progress.FailedChapters} lỗi · {progress.SkippedChapters} bỏ qua";
+            $"{progress.FailedChapters} lỗi · {needsReview} cần tạo lại · {skipped} bỏ qua/hủy";
         ChapterProgress.Value = progress.TotalChapters == 0 ? 0 : 100d *
             (progress.CompletedChapters + progress.FailedChapters + progress.SkippedChapters) / progress.TotalChapters;
         CurrentText.Text = progress.CurrentChapterId is null ? "Không có chapter đang gửi request."
@@ -69,15 +71,23 @@ public partial class ProjectTranslationQueueWindow : Window
             CurrentText.Text = $"Tổng {metrics.HanCharactersPerMinute:N0} chữ Hán/phút · {eta} · " +
                 $"chi phí QT Studio ước tính {metrics.EstimatedCost:N2}";
         }
+        string? recoveryHint = needsReview > 0 || progress.Status == ProjectTranslationJobStatus.Interrupted
+            ? "Bấm “Tạo lại phần chưa xong” để chốt cấu hình hiện tại; checkpoint đã hoàn tất vẫn được giữ."
+            : null;
         StatusText.Text = planMode
             ? $"Sẽ dịch {job.Items.Count:N0} chapter bằng {Math.Max(1, job.Workers.Count)} worker. Start mới tạo job bền vững và gửi request đầu tiên."
-            : progress.Error ?? "Checkpoint được lưu sau từng segment; đóng/mở lại không tự Resume.";
+            : string.Join(" ", new[]
+            {
+                progress.Error ?? "Checkpoint được lưu sau từng segment; đóng/mở lại không tự Resume.", recoveryHint
+            }.Where(value => !string.IsNullOrWhiteSpace(value)));
         StartButton.IsEnabled = !_commandBusy && planMode;
         PauseButton.IsEnabled = !_commandBusy && _coordinator.IsRunning;
         ResumeButton.IsEnabled = !_commandBusy && !_coordinator.IsRunning &&
             progress.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted;
         CancelButton.IsEnabled = !_commandBusy && _coordinator.IsRunning;
         RetryButton.IsEnabled = !_commandBusy && !_coordinator.IsRunning && progress.FailedChapters > 0;
+        ReplanButton.IsEnabled = !_commandBusy && !planMode && !_coordinator.IsRunning && job.Items.Any(item =>
+            item.Status is not (ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Skipped));
         RetryWorkerButton.IsEnabled = !_commandBusy && !_coordinator.IsRunning && job.Workers.Any(worker =>
             worker.Status is ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted);
         ReassignButton.IsEnabled = RetryWorkerButton.IsEnabled && job.Workers.Count == 2;
@@ -102,6 +112,24 @@ public partial class ProjectTranslationQueueWindow : Window
 
     private async void OnRetry(object sender, RoutedEventArgs e) =>
         await RunQueueAsync(() => _coordinator.RetryFailedAsync(), "Đã Retry các chapter lỗi.");
+
+    private async void OnReplan(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this,
+            "Tạo hàng đợi mới cho toàn bộ chapter chưa hoàn tất bằng card/model, prompt và tài nguyên hiện tại?\n\n" +
+            "Các chapter và segment đã hoàn tất vẫn được giữ nguyên.",
+            "Tạo lại phần chưa xong", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (_commandBusy) return;
+        _commandBusy = true;
+        RefreshView();
+        try
+        {
+            _plan = await _coordinator.ReplanUnfinishedAsync();
+            StatusText.Text = $"Đã tạo Queue Plan mới cho {_plan.Items.Count:N0} chapter chưa hoàn tất. Kiểm tra snapshot rồi bấm Start.";
+        }
+        catch (Exception ex) { ReportError(ex); }
+        finally { _commandBusy = false; if (!_closed) RefreshView(); }
+    }
 
     private async void OnRetryWorker(object sender, RoutedEventArgs e)
     {

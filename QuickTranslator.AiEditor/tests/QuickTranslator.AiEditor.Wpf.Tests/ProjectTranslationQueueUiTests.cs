@@ -27,6 +27,7 @@ public sealed class ProjectTranslationQueueUiTests
 
         Assert.Equal(3, window.CurrentRows.Count);
         Assert.True(((Button)window.FindName("StartButton")).IsEnabled);
+        Assert.False(((Button)window.FindName("ReplanButton")).IsEnabled);
         Assert.Equal(0, fixture.Client.Calls);
         ((Button)window.FindName("StartButton")).RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
         ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");

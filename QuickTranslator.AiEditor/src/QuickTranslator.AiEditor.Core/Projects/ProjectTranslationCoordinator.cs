@@ -164,6 +164,42 @@ public sealed class ProjectTranslationCoordinator
         await LaunchAsync(CurrentJob!, isNew: false, retryFailed: true, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<ProjectTranslationJob> ReplanUnfinishedAsync(CancellationToken cancellationToken = default)
+    {
+        if (IsRunning) throw new InvalidOperationException("Hãy Pause translation job trước khi tạo lại hàng đợi.");
+        ProjectTranslationJob current = CurrentJob ?? await LoadAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Project chưa có translation job để tạo lại.");
+        Guid[] unfinished = current.Items
+            .Where(item => item.Status is not (ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Skipped))
+            .OrderBy(item => item.Order)
+            .Select(item => item.ChapterId)
+            .ToArray();
+        if (unfinished.Length == 0)
+            throw new InvalidOperationException("Không còn chapter chưa hoàn tất để tạo lại hàng đợi.");
+
+        // Build the replacement first. If current settings or chapter files cannot be read, the old job remains intact.
+        ProjectTranslationJob replacement = await PlanAsync(unfinished, cancellationToken).ConfigureAwait(false);
+        if (current.Status is not (ProjectTranslationJobStatus.Completed or
+            ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled))
+        {
+            await PersistAsync(job =>
+            {
+                job.Status = ProjectTranslationJobStatus.Cancelled;
+                job.CurrentChapterId = null;
+                job.LastError = "Job cũ đã được đóng để tạo lại phần chưa hoàn tất bằng cấu hình hiện tại.";
+                foreach (ProjectTranslationWorkerState worker in job.Workers)
+                {
+                    worker.CurrentChapterId = null;
+                    if (worker.Status is not ProjectTranslationWorkerStatus.Completed)
+                        worker.Status = ProjectTranslationWorkerStatus.Cancelled;
+                }
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        lock (_sync) _job = null;
+        Notify();
+        return replacement;
+    }
+
     public async Task RetryWorkerAsync(Guid workerId, bool confirmUnknownRemoteResult,
         CancellationToken cancellationToken = default)
     {
@@ -368,6 +404,13 @@ public sealed class ProjectTranslationCoordinator
                     ProjectTranslationItemStatus.Pending or ProjectTranslationItemStatus.Paused or ProjectTranslationItemStatus.Interrupted);
                 if (next is null) break;
                 try { await RunChapterAsync(next.ChapterId, retryFailed, cancellationToken).ConfigureAwait(false); }
+                catch (ProjectTranslationConfigurationChangedException ex)
+                {
+                    await FinishAsync(ProjectTranslationJobStatus.Interrupted,
+                        ex.Message + " Các checkpoint đã xong được giữ nguyên; hãy tạo lại phần chưa hoàn tất.")
+                        .ConfigureAwait(false);
+                    return;
+                }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     bool staleChapter = ContainsConflict(ex) || ex is FileNotFoundException;
@@ -460,6 +503,21 @@ public sealed class ProjectTranslationCoordinator
             {
                 await RunChapterAsync(chapterId.Value, retryFailed, cancellationToken, definition).ConfigureAwait(false);
             }
+            catch (ProjectTranslationConfigurationChangedException error)
+            {
+                _interruptionRequested = true;
+                await PersistAsync(job =>
+                {
+                    ProjectTranslationItem item = job.Items.Single(value => value.ChapterId == chapterId.Value);
+                    item.Status = ProjectTranslationItemStatus.Interrupted;
+                    item.Error = error.Message;
+                    item.FinishedAt = null;
+                    ProjectTranslationWorkerState worker = job.Workers.Single(value => value.WorkerId == definition.WorkerId);
+                    worker.CurrentChapterId = null;
+                    worker.Status = ProjectTranslationWorkerStatus.Interrupted;
+                    worker.LastError = error.Message;
+                }, CancellationToken.None).ConfigureAwait(false);
+            }
             catch (Exception error) when (error is not OperationCanceledException)
             {
                 bool conflict = ContainsConflict(error) || error is FileNotFoundException;
@@ -543,7 +601,7 @@ public sealed class ProjectTranslationCoordinator
         ProjectTranslationEnvironment environment = await LoadEnvironmentAsync(cancellationToken).ConfigureAwait(false);
         ChapterDocument chapter = (await _repository.LoadChapterAsync(_session, chapterId, cancellationToken)
             .ConfigureAwait(false)).Chapter;
-        string? conflict = ValidateRevision(item, chapter, environment, workerDefinition);
+        string? conflict = ValidateChapterRevision(item, chapter);
         if (conflict is not null)
         {
             await PersistAsync(job =>
@@ -562,6 +620,9 @@ public sealed class ProjectTranslationCoordinator
             }, CancellationToken.None).ConfigureAwait(false);
             return;
         }
+        string? configurationConflict = ValidateConfigurationRevision(environment, workerDefinition);
+        if (configurationConflict is not null)
+            throw new ProjectTranslationConfigurationChangedException(configurationConflict);
 
         QueueMode mode = retryFailed && item.StartedAt is not null ? QueueMode.FailedSegments : QueueMode.MissingSegments;
         bool canResumeChapter = item.ChapterQueueRunId is Guid runId && chapter.Queue.RunId == runId &&
@@ -704,8 +765,7 @@ public sealed class ProjectTranslationCoordinator
         }
     }
 
-    private string? ValidateRevision(ProjectTranslationItem item, ChapterDocument chapter,
-        ProjectTranslationEnvironment environment, ProjectTranslationWorkerDefinition? workerDefinition = null)
+    private static string? ValidateChapterRevision(ProjectTranslationItem item, ChapterDocument chapter)
     {
         if (ProjectTranslationFingerprints.Source(chapter) != item.SourceFingerprint)
             return "Nguyên văn hoặc ranh giới segment đã đổi sau khi enqueue.";
@@ -713,13 +773,19 @@ public sealed class ProjectTranslationCoordinator
             return "UserDraft, Approval hoặc lịch sử bảo vệ đã đổi sau khi enqueue.";
         if (item.StartedAt is null && ProjectTranslationFingerprints.Document(chapter) != item.EnqueuedDocumentFingerprint)
             return "Document revision đã đổi sau khi enqueue.";
+        return null;
+    }
+
+    private string? ValidateConfigurationRevision(ProjectTranslationEnvironment environment,
+        ProjectTranslationWorkerDefinition? workerDefinition)
+    {
         ProjectTranslationJob job = CurrentJob!;
         if (environment.Resources.Revision != job.ProjectResourceRevision)
-            return "Glossary, Context hoặc Character Profiles đã đổi sau khi enqueue.";
+            return "Glossary, Context hoặc Character Profiles đã đổi khi hàng đợi đang chạy.";
         if (workerDefinition is null && environment.ModelOptions != job.ModelOptions)
-            return "Model options đã đổi sau khi enqueue.";
+            return "Model options đã đổi khi hàng đợi đang chạy.";
         if (environment.PromptPreset != job.PromptPreset)
-            return "Prompt preset đã đổi sau khi enqueue.";
+            return "Prompt preset đã đổi khi hàng đợi đang chạy.";
         string? environmentConflict = workerDefinition is null ? ValidateEnvironment(job, environment) : null;
         if (environmentConflict is not null) return environmentConflict;
         return null;
@@ -849,6 +915,8 @@ public sealed class ProjectTranslationCoordinator
     private static bool ContainsConflict(Exception exception) => exception is ProjectTranslationConflictException ||
         exception.InnerException is not null && ContainsConflict(exception.InnerException) ||
         exception is AggregateException aggregate && aggregate.InnerExceptions.Any(ContainsConflict);
+
+    private sealed class ProjectTranslationConfigurationChangedException(string message) : InvalidOperationException(message);
 
     private void Notify()
     {
