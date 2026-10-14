@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Input;
 using QuickTranslator.AiEditor.Core.Projects;
 
 namespace QuickTranslator.AiEditor.Wpf;
@@ -8,18 +9,22 @@ public partial class ProjectTranslationQueueWindow : Window
     private ProjectTranslationCoordinator _coordinator;
     private readonly Func<ProjectTranslationCoordinator,
         Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>>? _replan;
+    private readonly Func<Guid, Task>? _openChapter;
     private ProjectTranslationJob? _plan;
     private bool _commandBusy;
     private bool _closed;
 
     internal ProjectTranslationQueueWindow(string projectTitle, ProjectTranslationCoordinator coordinator,
         ProjectTranslationJob? plan, Func<ProjectTranslationCoordinator,
-            Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>>? replan = null)
+            Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>>? replan = null,
+        Func<Guid, Task>? openChapter = null)
     {
         _coordinator = coordinator;
         _plan = plan;
         _replan = replan;
+        _openChapter = openChapter;
         InitializeComponent();
+        MainWindow.ClampWindowToWorkArea(this, 1120, 760);
         ProjectText.Text = projectTitle;
         _coordinator.ProgressChanged += OnProgressChanged;
         Closed += OnClosed;
@@ -104,6 +109,29 @@ public partial class ProjectTranslationQueueWindow : Window
         RetryWorkerButton.IsEnabled = !_commandBusy && !_coordinator.IsRunning && job.Workers.Any(worker =>
             worker.Status is ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted);
         ReassignButton.IsEnabled = RetryWorkerButton.IsEnabled && job.Workers.Count == 2;
+    }
+
+    private async void OnQueueGridDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (QueueGrid.SelectedItem is not QueueRow row || _openChapter is null) return;
+        await OpenChapterRowAsync(row.ChapterId);
+    }
+
+    internal async Task OpenChapterRowAsync(Guid chapterId)
+    {
+        if (_openChapter is null) return;
+        if (_coordinator.IsChapterLockedByRunningQueue(chapterId))
+        {
+            StatusText.Text = "Chương này đang chờ hoặc đang dịch trong Queue. Hãy chọn chương đã hoàn tất/lỗi hoặc bấm Pause.";
+            return;
+        }
+        try
+        {
+            await _openChapter(chapterId);
+            Owner?.Activate();
+            StatusText.Text = "Đã mở chương trong Editor (hàng đợi nền vẫn an toàn).";
+        }
+        catch (Exception ex) { ReportError(ex); }
     }
 
     private async void OnStart(object sender, RoutedEventArgs e)
@@ -241,10 +269,10 @@ public partial class ProjectTranslationQueueWindow : Window
         _coordinator.ProgressChanged -= OnProgressChanged;
     }
 
-    internal sealed record QueueRow(int Order, int Number, string Title, string Worker, ProjectTranslationItemStatus Status,
+    internal sealed record QueueRow(Guid ChapterId, int Order, int Number, string Title, string Worker, ProjectTranslationItemStatus Status,
         string StatusLabel, int CompletedSegments, int TotalSegments, string SegmentLabel, int ErrorSegments, string Error)
     {
-        public QueueRow(ProjectTranslationItem item, string worker = "—") : this(item.Order, item.Number, item.Title, worker, item.Status,
+        public QueueRow(ProjectTranslationItem item, string worker = "—") : this(item.ChapterId, item.Order, item.Number, item.Title, worker, item.Status,
             ItemStatusLabel(item.Status), item.CompletedSegments, item.TotalSegments,
             $"{item.CompletedSegments:N0}/{item.TotalSegments:N0}", item.ErrorSegments,
             item.Error ?? item.PreflightWarning ?? "") { }

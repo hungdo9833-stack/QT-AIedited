@@ -439,7 +439,7 @@ public partial class MainWindow
         EditorModeButton.IsChecked = true;
         EditorTabs.SelectedIndex = _workspaceLayout.FourPaneMode ? 1 : 0;
         Refresh();
-        Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
+        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
         SetStatus("Đã mở đúng đoạn đang đọc trong Editor.");
     }
 
@@ -581,31 +581,268 @@ public partial class MainWindow
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F11) { OnToggleFullScreen(sender, e); e.Handled = true; return; }
-        if (e.Key == Key.Escape && _focusMode) { OnToggleFocusMode(sender, e); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.D1)
+        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.F11) { OnToggleFullScreen(sender, e); e.Handled = true; return; }
+        if (key == Key.Escape && _focusMode) { OnToggleFocusMode(sender, e); e.Handled = true; return; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.D1)
         { ShowTranslationWorkspace(false); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.D2)
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.D2)
         { ShowTranslationWorkspace(true); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.S)
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.S)
         { OnSaveProgress(sender, e); e.Handled = true; return; }
-        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.I)
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.B)
+        { OnToggleProjectSidebar(sender, e); e.Handled = true; return; }
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.I)
         { OnToggleInspector(sender, e); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.H)
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.H)
+        { OnOpenBatchReplace(sender, e); e.Handled = true; return; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.Return)
         {
-            OnOpenBatchReplace(sender, e); e.Handled = true; return;
+            OnApproveAndAdvance(sender, e);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.Up)
+        {
+            NavigateSegment(-1);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.Down)
+        {
+            NavigateSegment(1);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.PageUp)
+        {
+            OnPreviousProjectChapter(sender, e);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.PageDown)
+        {
+            OnNextProjectChapter(sender, e);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.None && key == Key.F8)
+        {
+            JumpToNextIssueSegment();
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.R)
+        {
+            OnTranslate(sender, e);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.M)
+        {
+            ToggleMaximizeActiveTraditionalPane();
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.C)
+        {
+            TriggerQuickCharacterFromKeyboard();
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.G)
+        {
+            TriggerQuickGlossaryFromKeyboard();
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.P)
+        {
+            ShowQuickPalette(commandsMode: false);
+            e.Handled = true;
+            return;
+        }
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.P)
+        {
+            ShowQuickPalette(commandsMode: true);
+            e.Handled = true;
+            return;
         }
         if (EditorTabs.SelectedIndex != 0 || ReaderModeButton.IsChecked != true) return;
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.F) { OnOpenReaderSearch(sender, e); e.Handled = true; }
-        else if (Keyboard.Modifiers == ModifierKeys.Control && (e.Key is Key.Add or Key.OemPlus)) { ReaderFontSizeInput.Value = Math.Min(30, ReaderFontSizeInput.Value + 1); e.Handled = true; }
-        else if (Keyboard.Modifiers == ModifierKeys.Control && (e.Key is Key.Subtract or Key.OemMinus)) { ReaderFontSizeInput.Value = Math.Max(14, ReaderFontSizeInput.Value - 1); e.Handled = true; }
-        else if (!ReaderSearchInput.IsKeyboardFocusWithin && e.Key is Key.PageDown or Key.Space) { ReaderScroll.PageDown(); e.Handled = true; }
-        else if (!ReaderSearchInput.IsKeyboardFocusWithin && e.Key == Key.PageUp) { ReaderScroll.PageUp(); e.Handled = true; }
+        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.F) { OnOpenReaderSearch(sender, e); e.Handled = true; }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && (key is Key.Add or Key.OemPlus)) { ReaderFontSizeInput.Value = Math.Min(30, ReaderFontSizeInput.Value + 1); e.Handled = true; }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && (key is Key.Subtract or Key.OemMinus)) { ReaderFontSizeInput.Value = Math.Max(14, ReaderFontSizeInput.Value - 1); e.Handled = true; }
+        else if (!ReaderSearchInput.IsKeyboardFocusWithin && key is Key.PageDown or Key.Space) { ReaderScroll.PageDown(); e.Handled = true; }
+        else if (!ReaderSearchInput.IsKeyboardFocusWithin && key == Key.PageUp) { ReaderScroll.PageUp(); e.Handled = true; }
+    }
+
+    private void ToggleMaximizeActiveTraditionalPane()
+    {
+        if (EditorTabs.SelectedIndex != 1) return;
+        if (_maximizedTraditionalPane is not null || _hiddenTraditionalPanes.Count == 3)
+        {
+            OnRestoreTraditionalPanes(this, new RoutedEventArgs());
+            return;
+        }
+        string tag = SourceText.IsKeyboardFocusWithin ? "Chinese" :
+            HanVietText.IsKeyboardFocusWithin ? "HanViet" :
+            VietPhraseText.IsKeyboardFocusWithin ? "VietPhrase" : "Ai";
+        OnMaximizeTraditionalPane(new FrameworkElement { Tag = tag }, new RoutedEventArgs());
+    }
+
+    private async void TriggerQuickCharacterFromKeyboard()
+    {
+        TextBox target = SourceText.SelectionLength > 0 ? SourceText : ChapterInput;
+        CaptureSourceSelection(target);
+        if (!BeginUiOperation()) return;
+        try { await AddQuickCharacterAsync(target); }
+        catch (Exception ex) { ShowError(ex); }
+        finally { EndUiOperation(); }
+    }
+
+    private async void TriggerQuickGlossaryFromKeyboard()
+    {
+        TextBox target = SourceText.SelectionLength > 0 ? SourceText : ChapterInput;
+        CaptureSourceSelection(target);
+        if (!BeginUiOperation()) return;
+        try { await AddSelectedGlossaryAsync(target); }
+        catch (Exception ex) { ShowError(ex); }
+        finally { EndUiOperation(); }
+    }
+
+    internal sealed record QuickPaletteItem(string Id, string Title, string Subtitle, Func<Task> Execute)
+    {
+        public string Label => string.IsNullOrWhiteSpace(Subtitle) ? Title : $"{Title} — {Subtitle}";
+        public override string ToString() => Label;
+    }
+
+    internal IReadOnlyList<QuickPaletteItem> GetCommandPaletteItems(bool commandsMode, string query)
+    {
+        string trimmed = (query ?? "").Trim();
+        if (!commandsMode && !trimmed.StartsWith(">", StringComparison.Ordinal))
+        {
+            if (_projectSession is null) return [];
+            return _projectCatalog.Query(_projectSession, new(Search: trimmed))
+                .Select(c => new QuickPaletteItem(
+                    c.ChapterId.ToString("N"),
+                    $"{ProjectStateDot(c.TranslationState)} Chương {c.Number:0000} · {c.VietnameseTitle}",
+                    $"{ProjectStateLabel(c.TranslationState)} · {c.CompletedSegmentCount}/{c.SegmentCount} đoạn",
+                    () => LoadProjectChapterAsync(c.ChapterId)))
+                .ToArray();
+        }
+
+        string cmdQuery = trimmed.StartsWith(">", StringComparison.Ordinal) ? trimmed[1..].Trim() : trimmed;
+        var commands = new QuickPaletteItem[]
+        {
+            new("approve-next", "Duyệt đoạn & sang đoạn kế tiếp", "Ctrl+Enter", () => ApproveSegmentCoreAsync(advanceToNext: true)),
+            new("next-issue", "Nhảy tới đoạn lỗi / cần kiểm tra kế tiếp", "F8", () => { JumpToNextIssueSegment(); return Task.CompletedTask; }),
+            new("translate-seg", "Dịch / Dịch lại đoạn đang chọn", "Ctrl+Shift+R", () => { OnTranslate(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("translate-all", "Dịch toàn bộ chương hiện tại", "Queue 1 chương", () => { OnTranslateAll(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("approve-chapter", "Duyệt toàn bộ chương hiện tại", "Duyệt tất cả đoạn đã có bản dịch", () => { OnApproveAllSegments(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("scan-chinese", "Quét chữ Hán còn sót & Tìm thay thế", "Ctrl+H", () => { OnScanChineseText(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("scan-pronouns", "Quét tên & chuẩn hóa xưng hô nhân vật", "Inspector / Nháp", () => { OnScanPronouns(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("mode-two", "Chuyển sang Chế độ Hai ô (Lưới song ngữ)", "Ctrl+1", () => { ShowTranslationWorkspace(false); return Task.CompletedTask; }),
+            new("mode-four", "Chuyển sang Chế độ Bốn ô (Biên tập Segment)", "Ctrl+2", () => { ShowTranslationWorkspace(true); return Task.CompletedTask; }),
+            new("mode-reader", "Chuyển sang Chế độ Đọc (Reader)", "Đọc thử toàn chương", () => { ActivateShellSection("reader"); return Task.CompletedTask; }),
+            new("toggle-sidebar", "Ẩn / Hiện cột Mục lục bên trái", "Ctrl+B", () => { OnToggleProjectSidebar(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("toggle-inspector", "Ẩn / Hiện bảng Inspector bên phải", "Ctrl+Shift+I", () => { OnToggleInspector(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("open-chapters", "Mở Quản lý chương (Chapter Manager)", "Chọn dải chương, đổi tên, lọc", () => { OnOpenChapterManager(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("open-import", "Nhập nhiều chương từ tệp TXT", "Bulk Import Preview", () => OpenDetectedBulkImportAsync()),
+            new("open-gpu", "Mở Quản lý GPU (Local + Remote SSH)", "Dual-GPU Runtime", () => { OnOpenGpuManager(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("open-publish", "Xuất bản toàn bộ truyện (TXT / PDF)", "Kiểm tra & ghép chương", OpenProjectPublicationAsync)
+        };
+        if (cmdQuery.Length == 0) return commands;
+        return commands.Where(c =>
+            c.Title.Contains(cmdQuery, StringComparison.CurrentCultureIgnoreCase) ||
+            c.Subtitle.Contains(cmdQuery, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+    }
+
+    internal void ShowQuickPalette(bool commandsMode)
+    {
+        var input = new TextBox
+        {
+            Text = commandsMode ? ">" : "",
+            ToolTip = "Nhập số/tên chương để nhảy nhanh, hoặc gõ > để tìm lệnh (Enter để thực thi)",
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        var list = new ListBox { Height = 320, DisplayMemberPath = nameof(QuickPaletteItem.Label) };
+        var hint = new TextBlock
+        {
+            Text = commandsMode
+                ? "Command Palette (Ctrl+Shift+P) · Gõ tên lệnh rồi bấm Enter"
+                : "Chuyển nhanh chương (Ctrl+P) · Gõ số hoặc tên chương (hoặc gõ > để tìm lệnh)",
+            Foreground = (Brush)FindResource("MutedBrush"),
+            Margin = new Thickness(2, 0, 2, 6)
+        };
+        var panel = new DockPanel { Margin = new Thickness(12) };
+        DockPanel.SetDock(hint, Dock.Top); panel.Children.Add(hint);
+        DockPanel.SetDock(input, Dock.Top); panel.Children.Add(input);
+        panel.Children.Add(list);
+        var dialog = new Window
+        {
+            Title = commandsMode ? "QT Studio · Bảng lệnh nhanh (Command Palette)" : "QT Studio · Chuyển nhanh tới chương",
+            Width = 640, Height = 440, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = (Brush)FindResource("PanelBrush"), Foreground = (Brush)FindResource("TextBrush"),
+            Content = panel
+        };
+        if (IsVisible) dialog.Owner = this;
+        ClampWindowToWorkArea(dialog, 640, 440);
+
+        void RefreshItems()
+        {
+            var items = GetCommandPaletteItems(commandsMode, input.Text);
+            list.ItemsSource = items;
+            if (items.Count > 0) list.SelectedIndex = 0;
+        }
+
+        async Task ExecuteSelectedAsync()
+        {
+            if (list.SelectedItem is not QuickPaletteItem selected) return;
+            dialog.Close();
+            try { await selected.Execute(); }
+            catch (Exception ex) { ShowError(ex); }
+        }
+
+        input.TextChanged += (_, _) => RefreshItems();
+        input.PreviewKeyDown += async (_, e) =>
+        {
+            if (e.Key == Key.Down && list.Items.Count > 0)
+            {
+                list.SelectedIndex = Math.Min(list.Items.Count - 1, list.SelectedIndex + 1);
+                list.ScrollIntoView(list.SelectedItem);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Up && list.Items.Count > 0)
+            {
+                list.SelectedIndex = Math.Max(0, list.SelectedIndex - 1);
+                list.ScrollIntoView(list.SelectedItem);
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Enter)
+            {
+                e.Handled = true;
+                await ExecuteSelectedAsync();
+            }
+            else if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                dialog.Close();
+            }
+        };
+        list.MouseDoubleClick += async (_, _) => await ExecuteSelectedAsync();
+        RefreshItems();
+        dialog.Loaded += (_, _) =>
+        {
+            input.Focus();
+            input.CaretIndex = input.Text.Length;
+        };
+        dialog.ShowDialog();
     }
 
     private sealed record ReaderRunRange(int Start, int Length, Run Run);
     private sealed record ReaderChapterItem(Guid ChapterId, string Title, string Status)
     {
         public string Label => $"{Title}\n{Status}";
+        public override string ToString() => Label;
     }
 }

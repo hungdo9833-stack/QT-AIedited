@@ -10,12 +10,24 @@ public sealed record ProjectPublicationOptions(
     bool UseUtf8Bom = false,
     bool AllowIncomplete = false);
 
+public sealed record ProjectPublicationIssueChapter(
+    Guid ChapterId,
+    int Number,
+    string Title,
+    bool IsIncomplete,
+    bool NeedsInspection)
+{
+    public string Label => $"Chương {Number:0000} · {Title} ({(IsIncomplete ? "Chưa hoàn tất" : "Cần kiểm tra")})";
+    public override string ToString() => Label;
+}
+
 public sealed record ProjectPublicationInspection(
     string ProjectTitle,
     string ProjectRevision,
     int TotalChapterCount,
     int IncompleteChapterCount,
-    int InspectionChapterCount)
+    int InspectionChapterCount,
+    IReadOnlyList<ProjectPublicationIssueChapter>? IssueChapters = null)
 {
     public bool RequiresConfirmation => IncompleteChapterCount > 0 || InspectionChapterCount > 0;
 }
@@ -58,14 +70,17 @@ public sealed class ProjectPublicationService
         ArgumentNullException.ThrowIfNull(session);
         PublicationSnapshot snapshot = Capture(session);
         int incomplete = 0, inspection = 0, completed = 0;
+        var issueChapters = new List<ProjectPublicationIssueChapter>();
         await foreach (ProjectPublicationChapter chapter in ReadSnapshotAsync(session, snapshot, progress, cancellationToken)
                            .ConfigureAwait(false))
         {
             if (!chapter.IsComplete) incomplete++;
             if (chapter.NeedsInspection) inspection++;
+            if (!chapter.IsComplete || chapter.NeedsInspection)
+                issueChapters.Add(new(chapter.ChapterId, chapter.Number, chapter.Title, !chapter.IsComplete, chapter.NeedsInspection));
             completed++;
         }
-        return new(snapshot.ProjectTitle, snapshot.Revision, completed, incomplete, inspection);
+        return new(snapshot.ProjectTitle, snapshot.Revision, completed, incomplete, inspection, issueChapters);
     }
 
     public async Task<ProjectPublicationReport> ExportTextAsync(ProjectSession session, string path,

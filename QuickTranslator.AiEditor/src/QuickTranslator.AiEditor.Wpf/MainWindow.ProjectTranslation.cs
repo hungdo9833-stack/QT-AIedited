@@ -80,11 +80,13 @@ public partial class MainWindow
                 return;
             }
             ProjectTranslationJob plan = await coordinator.PlanAsync(chapterIds);
-            // The Project queue owns chapter writes while running. Remove the editor service before showing the plan,
-            // so Start cannot race an open chapter service.
-            DetachChapter();
-            ClearChapterEditor();
-            Refresh();
+            // Only detach the open chapter if it is part of the planned queue items.
+            if (_service?.GetSnapshot().Id is Guid openId && chapterIds.Contains(openId))
+            {
+                DetachChapter();
+                ClearChapterEditor();
+                Refresh();
+            }
             ShowProjectTranslationWindow(coordinator, plan);
         }
         finally { EndUiOperation(); }
@@ -221,7 +223,7 @@ public partial class MainWindow
             return;
         }
         _projectTranslationWindow = new(_projectSession?.Manifest.VietnameseTitle ?? "Project", coordinator, plan,
-            ReplanProjectTranslationAsync);
+            ReplanProjectTranslationAsync, LoadProjectChapterAsync);
         if (IsVisible) _projectTranslationWindow.Owner = this;
         _projectTranslationWindow.Closed += (_, _) => _projectTranslationWindow = null;
         _projectTranslationWindow.Show();

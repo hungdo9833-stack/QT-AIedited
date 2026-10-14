@@ -27,6 +27,7 @@ public partial class ChapterTitleTranslationWindow : Window
         _runtimeFactory = runtimeFactory ?? throw new ArgumentNullException(nameof(runtimeFactory));
         _store = new(draftPath);
         InitializeComponent();
+        MainWindow.ClampWindowToWorkArea(this, 1120, 760);
         TitleGrid.ItemsSource = _rows;
         ScopeText.Text = $"{_sources.Length:N0} chương · chỉ cập nhật metadata tiêu đề sau khi xác nhận";
         Loaded += OnLoaded;

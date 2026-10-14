@@ -62,6 +62,19 @@ public sealed class ProjectTranslationCoordinator
     public bool IsRunning { get { lock (_sync) return _runTask is { IsCompleted: false }; } }
     public ProjectTranslationJob? CurrentJob { get { lock (_sync) return _job is null ? null : ProjectTranslationJobStore.Clone(_job); } }
 
+    public bool IsChapterLockedByRunningQueue(Guid chapterId)
+    {
+        lock (_sync)
+        {
+            if (_runTask is not { IsCompleted: false } || _job is null) return false;
+            ProjectTranslationItem? item = _job.Items.SingleOrDefault(x => x.ChapterId == chapterId);
+            return item is not null && item.Status is ProjectTranslationItemStatus.Pending
+                or ProjectTranslationItemStatus.Running
+                or ProjectTranslationItemStatus.Paused
+                or ProjectTranslationItemStatus.Interrupted;
+        }
+    }
+
     public async Task<ProjectTranslationJob?> LoadAsync(CancellationToken cancellationToken = default)
     {
         ProjectTranslationJob? loaded = await _store.LoadAsync(cancellationToken).ConfigureAwait(false);

@@ -42,6 +42,10 @@ public sealed class ProjectPublicationUiTests
             Assert.Equal(2, window.CurrentInspection?.TotalChapterCount);
             Assert.Equal(1, window.CurrentInspection?.IncompleteChapterCount);
             Assert.Equal(Visibility.Visible, ((CheckBox)window.FindName("AllowIncompleteInput")).Visibility);
+            Assert.Equal(Visibility.Visible, ((FrameworkElement)window.FindName("IssueChaptersPanel")).Visibility);
+            Assert.Single(((ListBox)window.FindName("IssueChaptersList")).Items);
+            Assert.NotNull(window.FindName("OpenExportedFileButton"));
+            Assert.NotNull(window.FindName("OpenExportFolderButton"));
             Assert.False(((Button)window.FindName("ExportButton")).IsEnabled);
         }
         finally { window.Close(); }

@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using QuickTranslator.AiEditor.Core.Models;
@@ -78,6 +80,38 @@ public partial class MainWindow
     private async void OnTranslateAll(object sender, RoutedEventArgs e) => await RunQueueUiAsync(false, QueueMode.MissingSegments);
     private async void OnRetryErrors(object sender, RoutedEventArgs e) => await RunQueueUiAsync(false, QueueMode.FailedSegments);
     private async void OnResumeQueue(object sender, RoutedEventArgs e) => await RunQueueUiAsync(true, QueueMode.MissingSegments);
+
+    private async void OnApproveAllSegments(object sender, RoutedEventArgs e)
+    {
+        if (_service is null || WorkActive || !BeginUiOperation()) return;
+        try
+        {
+            var snapshot = _service.GetSnapshot();
+            var eligible = snapshot.Segments
+                .Where(s => s.Status is SegmentStatus.AwaitingReview or SegmentStatus.InspectionRequired &&
+                            !string.IsNullOrWhiteSpace(s.EditableText))
+                .ToArray();
+            if (eligible.Length == 0)
+            {
+                SetStatus("Không có đoạn chờ duyệt nào đủ điều kiện trong chương này.");
+                return;
+            }
+            if (MessageBox.Show(this,
+                    $"Duyệt toàn bộ {eligible.Length:N0} đoạn đã có bản dịch trong chương “{snapshot.Title}”?",
+                    "Duyệt toàn chương", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            foreach (var seg in eligible)
+                await _service.ApproveAsync(seg.Id);
+            if (_projectSession is not null)
+                await _projectRepository.UpdateChapterSummaryAsync(_projectSession, _service.GetSnapshot());
+            Refresh();
+            RefreshProjectChapterList();
+            SetAutosaveStatus("✓ Đã duyệt chương", pending: false);
+            SetStatus($"Đã duyệt {eligible.Length:N0} đoạn trong chương.");
+        }
+        catch (Exception ex) { ShowError(ex); }
+        finally { EndUiOperation(); }
+    }
 
     private async Task RunQueueUiAsync(bool resume, QueueMode mode)
     {
@@ -165,16 +199,80 @@ public partial class MainWindow
             var block = _chapterBlocks.SingleOrDefault(b => b.Id == segment.Id);
             if (block is null) { block = new(segment.Id, OnChapterDraftChanged); _chapterBlocks.Insert(i, block); }
             else if (_chapterBlocks.IndexOf(block) != i) _chapterBlocks.Move(_chapterBlocks.IndexOf(block), i);
-            block.Label = $"Đoạn {segment.Order} · {StatusLabel(segment.Status)}" + (segment.RequiresRetranslation ? " · ranh giới đã đổi" : "");
-            block.Text = segment.EditableText;
+            block.UpdateFromSegment(segment, segment.Id == _selectedId);
         }
     }
+
+    // Adjustment F (BL-14): Update draft in-place without re-binding or resetting IME/Caret/Undo on the active TextBox.
     private void OnChapterDraftChanged(Guid id, string text)
     {
         if (_rendering || _closing || _service is null || !_service.GetSnapshot().Segments.Any(s => s.Id == id)) return;
-        _service.UpdateDraft(id, text); _autosave.Start();
-        SetStatus("Đã sửa khối bản dịch chương; thay đổi gắn với đúng đoạn và đang tự lưu.");
-        Dispatcher.BeginInvoke(Refresh);
+        _service.UpdateDraft(id, text);
+        _pronounReport = null;
+        _autosave.Start();
+        SetAutosaveStatus("● Chờ tự lưu…", pending: true);
+        if (!StatusText.Text.StartsWith("Lỗi:", StringComparison.Ordinal))
+            SetStatus("Đã sửa khối bản dịch chương; thay đổi gắn với đúng đoạn và đang tự lưu.");
+
+        var snapshot = _service.GetSnapshot();
+        var updatedSegment = snapshot.Segments.SingleOrDefault(s => s.Id == id);
+        var block = _chapterBlocks.SingleOrDefault(b => b.Id == id);
+        if (updatedSegment is not null && block is not null)
+        {
+            block.UpdateMetadataOnly(updatedSegment, id == _selectedId);
+        }
+        if (_selectedId == id && !DraftText.IsKeyboardFocusWithin && DraftText.Text != text)
+        {
+            _rendering = true;
+            try { DraftText.Text = text; }
+            finally { _rendering = false; }
+        }
+        ChapterSummary.Text = $"{snapshot.Segments.Count} đoạn · đã duyệt {snapshot.Segments.Count(s => s.Status == SegmentStatus.Approved)} · " +
+            $"đã chuẩn hóa {snapshot.Segments.SelectMany(s => s.NormalizationHistory).Where(r => !r.Reverted).Sum(r => r.Changes.Count)} vị trí";
+        UpdateButtons();
+    }
+
+    private void OnBilingualSourceLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox box && box.ContextMenu is null)
+            AttachSourceContextMenu(box);
+    }
+
+    private void OnBilingualSourceFocused(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (sender is TextBox { Tag: Guid id } && _service is not null && id != _selectedId)
+        {
+            _selectedId = id;
+            _shownAttemptId = null;
+            _service.SelectSegment(id);
+            foreach (var b in _chapterBlocks) b.IsSelected = b.Id == id;
+            var seg = _service.GetSnapshot().Segments.SingleOrDefault(s => s.Id == id);
+            RefreshTraditionalSegment(seg);
+            RefreshTranslationInspector(seg);
+            UpdateButtons();
+        }
+    }
+
+    private void OnBilingualSourceSelectionChanged(object sender, RoutedEventArgs e)
+    {
+        if (_rendering || sender is not TextBox box) return;
+        if (box.Tag is Guid id && id != _selectedId && _service is not null)
+        {
+            _selectedId = id;
+            _shownAttemptId = null;
+            _service.SelectSegment(id);
+            foreach (var b in _chapterBlocks) b.IsSelected = b.Id == id;
+        }
+        UpdateInspectorLiveSelection(box.SelectedText);
+    }
+
+    private async void OnApproveBlockButtonClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Guid id } || _service is null) return;
+        _selectedId = id;
+        _shownAttemptId = null;
+        _service.SelectSegment(id);
+        await ApproveSegmentCoreAsync(advanceToNext: false);
     }
 
     private async void OnExportChapter(object sender, RoutedEventArgs e)
@@ -258,6 +356,7 @@ public partial class MainWindow
         buttons.Children.Add(accept); buttons.Children.Add(cancel); content.Children.Add(buttons); DockPanel.SetDock(buttons, Dock.Bottom);
         var grid = new Grid(); grid.ColumnDefinitions.Add(new()); grid.ColumnDefinitions.Add(new()); grid.Children.Add(left); grid.Children.Add(right); Grid.SetColumn(right, 1); content.Children.Add(grid);
         var window = new Window { Owner = this, Title = "Chọn cuối câu — xem trước hai đoạn", Width = 900, Height = 600, Content = content };
+        ClampWindowToWorkArea(window, 900, 600);
         accept.Click += (_, _) => window.DialogResult = true; cancel.Click += (_, _) => window.DialogResult = false;
         return window.ShowDialog() == true && selector.SelectedItem is BoundaryChoice choice ? choice.Offset : null;
     }
@@ -290,18 +389,92 @@ public partial class MainWindow
         2 => segment.DraftHistory.Single(a => a.Id == item.Id).Text,
         3 => segment.NormalizationHistory.Single(a => a.Id == item.Id).AfterText, _ => ""
     };
-    private void ShowTextWindow(string title, string text) => new Window
+    private void ShowTextWindow(string title, string text)
     {
-        Owner = this, Title = title, Width = 900, Height = 650,
-        Content = new TextBox { Text = text, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(10) }
-    }.ShowDialog();
-    private sealed record BoundaryChoice(int Offset, string Label);
-    private sealed class ChapterBlock(Guid id, Action<Guid, string> changed) : INotifyPropertyChanged
+        var window = new Window
+        {
+            Owner = this, Title = title, Width = 900, Height = 650,
+            Content = new TextBox { Text = text, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(10) }
+        };
+        ClampWindowToWorkArea(window, 900, 650);
+        window.ShowDialog();
+    }
+    private static string SegmentStatusDot(SegmentStatus status) => status switch
+    {
+        SegmentStatus.Approved => "●",
+        SegmentStatus.AwaitingReview => "◐",
+        SegmentStatus.InspectionRequired => "▲",
+        SegmentStatus.Error => "✕",
+        SegmentStatus.Translating => "↻",
+        _ => "○"
+    };
+    private static Brush SegmentStatusBrush(SegmentStatus status)
+    {
+        string key = status switch
+        {
+            SegmentStatus.Approved => "SuccessBrush",
+            SegmentStatus.AwaitingReview => "PrimaryBrush",
+            SegmentStatus.InspectionRequired => "WarningBrush",
+            SegmentStatus.Error => "DangerBrush",
+            SegmentStatus.Translating => "PrimaryBrush",
+            _ => "MutedBrush"
+        };
+        return Application.Current?.TryFindResource(key) as Brush ?? Brushes.Gray;
+    }
+
+    private sealed record BoundaryChoice(int Offset, string Label)
+    {
+        public override string ToString() => Label;
+    }
+    internal sealed class ChapterBlock(Guid id, Action<Guid, string> changed) : INotifyPropertyChanged
     {
         public Guid Id { get; } = id;
-        private string _text = "", _label = "";
-        public string Text { get => _text; set { if (_text == value) return; _text = value; PropertyChanged?.Invoke(this, new(nameof(Text))); changed(Id, value); } }
+        private string _text = "", _label = "", _sourceText = "", _sourceHeader = "", _statusDot = "○";
+        private Brush _statusBrush = Brushes.Gray;
+        private bool _isSelected;
+        private bool _suppressNotification;
+
+        public string Text
+        {
+            get => _text;
+            set
+            {
+                if (_text == value) return;
+                _text = value;
+                PropertyChanged?.Invoke(this, new(nameof(Text)));
+                if (!_suppressNotification) changed(Id, value);
+            }
+        }
         public string Label { get => _label; set { if (_label == value) return; _label = value; PropertyChanged?.Invoke(this, new(nameof(Label))); } }
+        public string SourceText { get => _sourceText; set { if (_sourceText == value) return; _sourceText = value; PropertyChanged?.Invoke(this, new(nameof(SourceText))); } }
+        public string SourceHeader { get => _sourceHeader; set { if (_sourceHeader == value) return; _sourceHeader = value; PropertyChanged?.Invoke(this, new(nameof(SourceHeader))); } }
+        public string StatusDot { get => _statusDot; set { if (_statusDot == value) return; _statusDot = value; PropertyChanged?.Invoke(this, new(nameof(StatusDot))); } }
+        public Brush StatusBrush { get => _statusBrush; set { if (ReferenceEquals(_statusBrush, value)) return; _statusBrush = value; PropertyChanged?.Invoke(this, new(nameof(StatusBrush))); } }
+        public bool IsSelected { get => _isSelected; set { if (_isSelected == value) return; _isSelected = value; PropertyChanged?.Invoke(this, new(nameof(IsSelected))); } }
+
+        public void UpdateFromSegment(TranslationSegment segment, bool selected)
+        {
+            _suppressNotification = true;
+            try
+            {
+                Text = segment.EditableText;
+                UpdateMetadataOnly(segment, selected);
+            }
+            finally { _suppressNotification = false; }
+        }
+
+        public void UpdateMetadataOnly(TranslationSegment segment, bool selected)
+        {
+            SourceText = segment.SourceText;
+            SourceHeader = $"Đoạn {segment.Order} · {segment.HanCharacterCount} chữ Hán";
+            StatusDot = SegmentStatusDot(segment.Status);
+            StatusBrush = SegmentStatusBrush(segment.Status);
+            Label = $"{StatusDot} Đoạn {segment.Order} · {StatusLabel(segment.Status)}" +
+                    (segment.RequiresRetranslation ? " · ranh giới đã đổi" : "") +
+                    (segment.UserDraft is not null ? " · nháp bảo vệ" : "");
+            IsSelected = selected;
+        }
+
         public event PropertyChangedEventHandler? PropertyChanged;
     }
 }

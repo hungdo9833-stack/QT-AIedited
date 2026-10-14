@@ -31,6 +31,7 @@ public partial class ChapterManagerWindow : Window
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _commands = commands ?? throw new ArgumentNullException(nameof(commands));
         InitializeComponent();
+        MainWindow.ClampWindowToWorkArea(this, 1320, 820);
         ProjectTitleText.Text = session.Manifest.VietnameseTitle;
         _catalog.Changed += OnCatalogChanged;
         Closed += OnClosed;
@@ -96,6 +97,30 @@ public partial class ChapterManagerWindow : Window
 
     private void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateCommands();
     private void OnClearSelection(object sender, RoutedEventArgs e) => ChapterGrid.UnselectAll();
+
+    private void OnSelectChapterRange(object sender, RoutedEventArgs e)
+    {
+        if (!int.TryParse(RangeStartInput.Text.Trim(), out int from) ||
+            !int.TryParse(RangeEndInput.Text.Trim(), out int to))
+        {
+            StatusText.Text = "Hãy nhập số chương bắt đầu và kết thúc hợp lệ (ví dụ: Từ chương 1 đến 100).";
+            return;
+        }
+        SelectChapterRange(from, to);
+    }
+
+    internal int SelectChapterRange(int fromNumber, int toNumber)
+    {
+        int min = Math.Min(fromNumber, toNumber);
+        int max = Math.Max(fromNumber, toNumber);
+        ChapterGrid.SelectedItems.Clear();
+        foreach (ChapterManagerRow row in _rows.Where(r => r.Number >= min && r.Number <= max))
+            ChapterGrid.SelectedItems.Add(row);
+        UpdateCommands();
+        StatusText.Text = $"Đã chọn {ChapterGrid.SelectedItems.Count:N0} chương trong dải từ số {min} đến {max}.";
+        return ChapterGrid.SelectedItems.Count;
+    }
+
     private async void OnGridDoubleClick(object sender, MouseButtonEventArgs e) => await OpenSelectedAsync();
     private async void OnOpen(object sender, RoutedEventArgs e) => await OpenSelectedAsync();
 
@@ -121,6 +146,7 @@ public partial class ChapterManagerWindow : Window
         panel.Children.Add(new TextBlock { Text = "Tên tiếng Trung", Margin = new Thickness(4) }); panel.Children.Add(chinese); panel.Children.Add(buttons);
         var dialog = new Window { Owner = this, Title = "Đổi tên chương", Width = 560, SizeToContent = SizeToContent.Height,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = Background, Foreground = Foreground, Content = panel };
+        MainWindow.ClampWindowToWorkArea(dialog, 560, 320);
         save.Click += (_, _) => { if (!string.IsNullOrWhiteSpace(title.Text)) dialog.DialogResult = true; };
         if (dialog.ShowDialog() != true) return;
         await RunAsync(() => _commands.Rename(row.ChapterId, title.Text.Trim(), chinese.Text.Trim()), "Đã đổi tên và cập nhật mục lục.");

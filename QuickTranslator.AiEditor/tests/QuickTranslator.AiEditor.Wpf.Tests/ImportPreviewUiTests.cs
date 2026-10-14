@@ -104,4 +104,30 @@ public sealed class ImportPreviewUiTests
         }
         finally { window.Close(); }
     });
+
+    [Fact]
+    public Task BL18_Title_translation_fallback_keeps_confirm_enabled_and_drag_drop_loads_standalone_txt() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        string txtPath = Path.Combine(fixture.Root, "drop-chapter.txt");
+        await File.WriteAllTextAsync(txtPath, "第1章 标题一\n正文一。\n第2章 标题二\n正文二。\n");
+
+        // Standalone drag-and-drop loads .txt into ChapterInput
+        bool handled = await fixture.Window.HandleDroppedFilesAsync([txtPath]);
+        Assert.True(handled);
+        Assert.Equal("drop-chapter", ((TextBox)fixture.Window.FindName("TitleInput")).Text);
+        Assert.Contains("第1章", ((TextBox)fixture.Window.FindName("ChapterInput")).Text);
+
+        await fixture.CreateProjectAsync();
+        var window = new ImportPreviewWindow(fixture.Project);
+        try
+        {
+            await window.LoadSourceAsync(txtPath, SourceTextEncoding.Auto);
+            ((CheckBox)window.FindName("TranslateTitlesCheck")).IsChecked = true;
+            Assert.True(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            window.EnsureFallbackVietnameseTitles();
+            Assert.All(window.CurrentPlan!.ImportableChapters, c => Assert.False(string.IsNullOrWhiteSpace(c.VietnameseTitle)));
+        }
+        finally { window.Close(); }
+    });
 }

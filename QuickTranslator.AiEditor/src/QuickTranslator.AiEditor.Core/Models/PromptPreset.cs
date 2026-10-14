@@ -36,4 +36,6 @@ public sealed record PromptPreset
         if (variables.Count(v => v == "source_text") != 1 || variables.Any(v => v is not ("source_text" or "glossary" or "context")))
             throw new ArgumentException("Prompt phải có đúng một {{source_text}}; chỉ hỗ trợ thêm {{glossary}} và {{context}}.");
     }
+
+    public override string ToString() => Name;
 }

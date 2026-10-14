@@ -37,6 +37,46 @@ public partial class MainWindow
         finally { _transitioning = false; EndUiOperation(); }
     }
 
+    // Adjustment E (BL-15): Allow opening/editing completed or non-queued chapters while ProjectTranslationCoordinator runs in background,
+    // without pausing the project translation queue or mutating ProjectResources.Revision.
+    private async Task<bool> RunSafeBackgroundChapterSwitchAsync(Func<Task> commit)
+    {
+        if (!BeginUiOperation(allowDuringTranslation: true)) return false;
+        _transitioning = true;
+        _autosave.Stop();
+        try
+        {
+            if (HasPendingSourceEdit)
+            {
+                SetStatus("Nguyên văn đang sửa chưa được lưu. Hãy chọn Lưu nguyên văn hoặc Hủy sửa nguồn trước khi chuyển.");
+                return false;
+            }
+            if (_sourceEditMode) EndSourceEditMode(assignSnapshot: true);
+            if (_projectSession?.RecoveryReport.RequiresDecision == true)
+                await ReviewProjectRecoveryAsync(_projectSession);
+            var queue = _queue;
+            var request = _activeRequest;
+            var completion = _activeWorkCompletion;
+            if (queue?.IsRunning == true) await queue.PauseAsync();
+            if (request is not null)
+            {
+                try { await request; }
+                catch (OperationCanceledException) { }
+                catch (OllamaRequestException ex) { ShowError(ex); }
+            }
+            if (completion is not null) await completion;
+            if (ReferenceEquals(request, _activeRequest) && request is { IsCompleted: true })
+            {
+                _activeRequest = null;
+                _busy = false;
+            }
+            await SaveCurrentAsync();
+            await commit();
+            return true;
+        }
+        finally { _transitioning = false; EndUiOperation(); }
+    }
+
     private async Task WaitForCurrentWorkAsync()
     {
         await PauseProjectTranslationForContextChangeAsync();

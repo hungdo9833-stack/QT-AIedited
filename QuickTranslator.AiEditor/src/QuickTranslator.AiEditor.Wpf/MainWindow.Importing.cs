@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -8,7 +10,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow
 {
-    private async Task OpenDetectedBulkImportAsync()
+    private async Task OpenDetectedBulkImportAsync(string? initialTxtPath = null)
     {
         if (_projectSession is null)
         {
@@ -17,7 +19,8 @@ public partial class MainWindow
         }
 
         await EnsureOllamaBackendsLoadedAsync();
-        var preview = new ImportPreviewWindow(_projectSession, CreateChapterTitleRuntimeAsync) { Owner = this };
+        var preview = new ImportPreviewWindow(_projectSession, CreateChapterTitleRuntimeAsync, initialTxtPath) { Owner = this };
+        ClampWindowToWorkArea(preview, 1380, 860);
         if (preview.ShowDialog() != true || preview.ConfirmedPlan is not ImportPreviewPlan plan) return;
         try
         {
@@ -48,6 +51,54 @@ public partial class MainWindow
         catch (Exception ex) { ShowError(ex); }
     }
 
+    private void OnWindowPreviewDragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop) &&
+            e.Data.GetData(DataFormats.FileDrop) is string[] files &&
+            files.Any(f => f.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ||
+                           f.EndsWith(".qtproj", StringComparison.OrdinalIgnoreCase)))
+        {
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+        }
+    }
+
+    private async void OnWindowDrop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop) ||
+            e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
+        e.Handled = true;
+        await HandleDroppedFilesAsync(files);
+    }
+
+    internal async Task<bool> HandleDroppedFilesAsync(IReadOnlyList<string> files)
+    {
+        if (files.Count == 0 || WorkActive || _uiOperation) return false;
+        string? qtproj = files.FirstOrDefault(f => f.EndsWith(".qtproj", StringComparison.OrdinalIgnoreCase));
+        if (qtproj is not null)
+        {
+            await OpenProjectPathAsync(qtproj);
+            return true;
+        }
+        string? txt = files.FirstOrDefault(f => f.EndsWith(".txt", StringComparison.OrdinalIgnoreCase));
+        if (txt is null) return false;
+        if (_projectSession is not null && IsVisible)
+        {
+            await OpenDetectedBulkImportAsync(txt);
+            return true;
+        }
+        if (!BeginUiOperation()) return false;
+        try
+        {
+            AssignOriginalText(await File.ReadAllTextAsync(txt, new UTF8Encoding(false, true)));
+            TitleInput.Text = Path.GetFileNameWithoutExtension(txt);
+            SetStatus($"Đã nạp tệp kéo-thả “{Path.GetFileName(txt)}”.");
+            return true;
+        }
+        catch (Exception ex) { ShowError(ex); return false; }
+        finally { EndUiOperation(); }
+    }
+
     internal Task<BulkImportReport> ImportDetectedPlanAsync(ImportPreviewPlan plan,
         IProgress<BulkImportProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -60,6 +111,7 @@ public partial class MainWindow
     private Task<BulkImportReport> RunBulkImportProgressAsync(ImportPreviewPlan plan)
     {
         var window = new BulkImportProgressWindow { Owner = this };
+        ClampWindowToWorkArea(window, 560, 320);
         return window.RunAsync((progress, token) => ImportDetectedPlanAsync(plan, progress, token));
     }
 
@@ -90,10 +142,13 @@ public partial class MainWindow
         {
             Title = "QT Studio · Safe Bulk Import";
             Width = 560; SizeToContent = SizeToContent.Height; WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            Background = new SolidColorBrush(Color.FromRgb(7, 17, 31)); Foreground = Brushes.Gainsboro;
+            SetResourceReference(BackgroundProperty, "AppBackgroundBrush");
+            SetResourceReference(ForegroundProperty, "TextBrush");
             var panel = new StackPanel { Margin = new Thickness(18) };
             panel.Children.Add(new TextBlock { Text = "Đang nhập theo transaction chunk", FontSize = 18, FontWeight = FontWeights.SemiBold });
-            panel.Children.Add(new TextBlock { Text = "Có thể hủy. Chunk đang ghi sẽ rollback; các chunk đã commit được giữ.", Foreground = new SolidColorBrush(Color.FromRgb(145, 164, 188)), Margin = new Thickness(4, 5, 4, 0) });
+            var subtitle = new TextBlock { Text = "Có thể hủy. Chunk đang ghi sẽ rollback; các chunk đã commit được giữ.", Margin = new Thickness(4, 5, 4, 0) };
+            subtitle.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
+            panel.Children.Add(subtitle);
             panel.Children.Add(_bar); panel.Children.Add(_status); panel.Children.Add(_cancel); Content = panel;
             _cancel.Click += (_, _) => { _cancel.IsEnabled = false; _status.Text = "Đang hủy an toàn và chờ rollback chunk hiện tại…"; _cancellation.Cancel(); };
             Closing += OnClosing;

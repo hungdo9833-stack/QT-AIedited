@@ -2,8 +2,10 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using QuickTranslator.AiEditor.Core.Editing;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -16,6 +18,8 @@ public partial class MainWindow
     private bool _responsiveSidebarCollapsed;
     private bool _responsiveInspectorCollapsed;
     private bool _compactShell;
+    private bool _navRailCollapsed;
+    private string _lastLiveSelectionChinese = "";
 
     private void InitializeProductionShell()
     {
@@ -49,6 +53,7 @@ public partial class MainWindow
         TraditionalTopRow.Height = new(_workspaceLayout.FourPaneTopStar, GridUnitType.Star);
         SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
         ApplyProjectSidebarVisibility();
+        ApplyTwoPaneEditorModeLayout();
         TwoPaneModeButton.IsChecked = !_workspaceLayout.FourPaneMode;
         FourPaneModeButton.IsChecked = _workspaceLayout.FourPaneMode;
     }
@@ -63,8 +68,10 @@ public partial class MainWindow
                 ? TranslationInspector.ActualWidth : TranslationInspector.Width, 240, 600);
             _workspaceLayout.ProjectSidebarWidth = Math.Clamp(ProjectSidebar.ActualWidth > 0
                 ? ProjectSidebar.ActualWidth : ProjectSidebar.Width, 220, 520);
-            _workspaceLayout.TwoPaneSourceStar = StarValue(ChapterTwoPaneLeftColumn.Width, 1);
-            _workspaceLayout.SegmentNavigatorWidth = Math.Clamp(SegmentNavigatorColumn.ActualWidth, 180, 520);
+            if (_sourceEditMode || _service is null)
+                _workspaceLayout.TwoPaneSourceStar = StarValue(ChapterTwoPaneLeftColumn.Width, 1);
+            _workspaceLayout.SegmentNavigatorWidth = Math.Clamp(SegmentNavigatorColumn.ActualWidth > 0
+                ? SegmentNavigatorColumn.ActualWidth : _workspaceLayout.SegmentNavigatorWidth, 180, 520);
             _workspaceLayout.FourPaneLeftStar = StarValue(TraditionalLeftColumn.Width, 1);
             _workspaceLayout.FourPaneTopStar = StarValue(TraditionalTopRow.Height, 1);
             await _workspaceLayoutStore.SaveAsync(_workspaceLayout);
@@ -93,6 +100,33 @@ public partial class MainWindow
         await SaveWorkspaceLayoutAsync();
     }
 
+    private void OnToggleNavRail(object sender, RoutedEventArgs e)
+    {
+        _navRailCollapsed = !_navRailCollapsed;
+        ShellNavigation.Width = _navRailCollapsed ? 56 : (_compactShell ? 148 : 176);
+        if (FindName("NavRailToggleButton") is Button btn)
+            btn.Content = _navRailCollapsed ? "»" : "«";
+    }
+
+    private void OnSwitchLeftPanelToChapters(object sender, RoutedEventArgs e)
+    {
+        _workspaceLayout.ProjectSidebarVisible = true;
+        ApplyProjectSidebarVisibility();
+    }
+
+    private void OnSwitchLeftPanelToSegments(object sender, RoutedEventArgs e)
+    {
+        if (EditorTabs.SelectedIndex == 1)
+        {
+            _workspaceLayout.ProjectSidebarVisible = false;
+            ApplyProjectSidebarVisibility();
+        }
+        else
+        {
+            ShowTranslationWorkspace(true);
+        }
+    }
+
     private void OnShellSizeChanged(object sender, SizeChangedEventArgs e) =>
         UpdateResponsiveShell(e.NewSize.Width);
 
@@ -102,7 +136,7 @@ public partial class MainWindow
         _compactShell = width > 0 && width < 1180;
         _responsiveSidebarCollapsed = width > 0 && width < 1320;
         _responsiveInspectorCollapsed = width > 0 && width < 1100;
-        ShellNavigation.Width = _compactShell ? 148 : 176;
+        ShellNavigation.Width = _navRailCollapsed ? 56 : (_compactShell ? 148 : 176);
         BrandBlock.Width = _compactShell ? 150 : 190;
         ProjectSwitcher.Width = _compactShell ? 190 : 300;
         TitleInput.Width = _compactShell ? 250 : 360;
@@ -132,7 +166,27 @@ public partial class MainWindow
         ProjectSidebarToggleButton.Content = visible ? "Ẩn mục lục" : "Hiện mục lục";
         ProjectSidebarToggleButton.ToolTip = _responsiveSidebarCollapsed
             ? "Mục lục tự thu gọn ở cửa sổ hẹp; dùng màn Chương để quản lý đầy đủ."
-            : null;
+            : "Ẩn/Hiện mục lục chương (Ctrl+B)";
+    }
+
+    // BL-14: In Two-Pane mode, show Aligned Bilingual Segment Grid when a chapter is segmented and not in _sourceEditMode;
+    // show monolithic ChapterInput when _service is null or _sourceEditMode == true.
+    internal void ApplyTwoPaneEditorModeLayout()
+    {
+        if (ChapterTwoPaneLeftColumn is null || ChapterTwoPaneSplitter is null) return;
+        bool showRawSourceBox = _service is null || _sourceEditMode;
+        if (FindName("ChapterSourcePaneBorder") is Border sourceBorder)
+            sourceBorder.Visibility = showRawSourceBox ? Visibility.Visible : Visibility.Collapsed;
+        ChapterTwoPaneSplitter.Visibility = showRawSourceBox ? Visibility.Visible : Visibility.Collapsed;
+        ChapterTwoPaneLeftColumn.Width = showRawSourceBox
+            ? new GridLength(Math.Clamp(_workspaceLayout.TwoPaneSourceStar, 0.25, 4), GridUnitType.Star)
+            : new GridLength(0);
+        if (FindName("ChapterSplitterColumn") is ColumnDefinition splitterCol)
+            splitterCol.Width = showRawSourceBox ? new GridLength(5) : new GridLength(0);
+        if (FindName("BilingualGridHeaderText") is TextBlock headerText)
+            headerText.Text = showRawSourceBox
+                ? "VIỆT · BẢN ĐANG BIÊN TẬP"
+                : "LƯỚI SONG NGỮ ĐỒNG BỘ TỪNG ĐOẠN (TRUNG ↔ VIỆT · CUỘN ĐỒNG BỘ 100%)";
     }
 
     private void SetTranslationInspectorVisibility(bool visible)
@@ -145,7 +199,7 @@ public partial class MainWindow
             TranslationInspector.Visibility == Visibility.Visible ? "Ẩn Inspector" : "Hiện Inspector";
         InspectorToggleButton.ToolTip = _responsiveInspectorCollapsed
             ? "Inspector tự thu gọn ở mức DPI cao hoặc cửa sổ hẹp."
-            : null;
+            : "Ẩn/Hiện Inspector (Ctrl+Shift+I)";
     }
 
     private async void OnToggleShellTheme(object sender, RoutedEventArgs e)
@@ -216,7 +270,7 @@ public partial class MainWindow
         }
         SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
         Refresh();
-        Dispatcher.BeginInvoke(() => FocusSelectedEditor(fourPane));
+        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(fourPane));
         _ = SaveWorkspaceLayoutAsync();
     }
 
@@ -245,6 +299,34 @@ public partial class MainWindow
                 .FirstOrDefault(item => string.Equals(item.Tag as string, section, StringComparison.Ordinal));
     }
 
+    internal void ActivateShellSection(string section)
+    {
+        switch ((section ?? "").Trim().ToLowerInvariant())
+        {
+            case "translate":
+                ShowTranslationWorkspace(_workspaceLayout.FourPaneMode);
+                break;
+            case "reader":
+                ShowReaderWorkspace();
+                break;
+            case "character":
+            case "characters":
+                ShowSettingsWorkspace("Characters");
+                break;
+            case "dictionary":
+                ShowSettingsWorkspace("Dictionary");
+                break;
+            case "quality":
+                ShowSettingsWorkspace("Quality");
+                break;
+            case "settings":
+                ShowSettingsWorkspace();
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(section), section, "Khu vực workspace không được hỗ trợ.");
+        }
+    }
+
     private async void OnOpenQueueStatus(object sender, RoutedEventArgs e) => await OpenQueueStatusAsync();
 
     private async Task OpenQueueStatusAsync()
@@ -268,7 +350,8 @@ public partial class MainWindow
         {
             if (_service is not null) await SaveCurrentAsync();
             var service = new ProjectPublicationService(_projectRepository, _projectCatalog);
-            var window = new ProjectPublicationWindow(_projectSession, service) { Owner = this };
+            var window = new ProjectPublicationWindow(_projectSession, service, LoadProjectChapterAsync) { Owner = this };
+            ClampWindowToWorkArea(window, 760, 570);
             window.ShowDialog();
             if (window.LastExportPath is string path)
                 SetStatus("Đã xuất toàn bộ chương thành một file: " + path);
@@ -293,7 +376,11 @@ public partial class MainWindow
         _selectedId = id;
         _shownAttemptId = null;
         _service.SelectSegment(id);
-        RefreshTranslationInspector(_service.GetSnapshot().Segments.Single(segment => segment.Id == id));
+        foreach (var b in _chapterBlocks) b.IsSelected = b.Id == id;
+        var seg = _service.GetSnapshot().Segments.Single(segment => segment.Id == id);
+        RefreshTraditionalSegment(seg);
+        RefreshTranslationInspector(seg);
+        UpdateButtons();
     }
 
     private void OnChapterBlockSelectionChanged(object sender, RoutedEventArgs e)
@@ -305,6 +392,11 @@ public partial class MainWindow
     {
         ChapterDocument? chapter = _service?.GetSnapshot();
         if (chapter is null) return;
+        if (_selectedId is Guid existing && chapter.Segments.Any(s => s.Id == existing))
+        {
+            _service!.SelectSegment(existing);
+            return;
+        }
         int offset = Math.Clamp(ChapterInput.SelectionStart, 0, chapter.OriginalText.Length);
         TranslationSegment? segment = chapter.Segments.FirstOrDefault(item =>
             offset >= item.StartUtf16 && offset <= item.StartUtf16 + item.SourceText.Length);
@@ -314,7 +406,12 @@ public partial class MainWindow
 
     private void OnChapterSourceSelectionChanged(object sender, RoutedEventArgs e)
     {
-        if (_rendering || _service is null || ChapterInput.SelectionLength == 0) return;
+        if (_rendering || _service is null || ChapterInput.SelectionLength == 0)
+        {
+            if (ChapterInput.SelectionLength == 0) UpdateInspectorLiveSelection("");
+            return;
+        }
+        UpdateInspectorLiveSelection(ChapterInput.SelectedText);
         EnsureSelectedSegmentFromChapterCaret();
         ChapterDocument chapter = _service.GetSnapshot();
         TranslationSegment? segment = chapter.Segments.SingleOrDefault(item => item.Id == _selectedId);
@@ -328,11 +425,92 @@ public partial class MainWindow
         RefreshTranslationInspector(segment);
     }
 
+    // BL-13: Live Selection Lookup in TranslationInspector
+    internal void UpdateInspectorLiveSelection(string selectedText)
+    {
+        string trimmed = (selectedText ?? "").Trim();
+        _lastLiveSelectionChinese = trimmed;
+        if (FindName("InspectorLiveSelectionBorder") is not Border card ||
+            FindName("InspectorLiveSelectionText") is not TextBlock textBlock)
+            return;
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            card.Visibility = Visibility.Collapsed;
+            textBlock.Text = "Bôi đen từ/cụm từ trong Editor để tra nhanh Hán Việt & VietPhrase.";
+            return;
+        }
+        card.Visibility = Visibility.Visible;
+        string hv = SuggestTraditionalVietnamese(trimmed, titleCase: true);
+        string vp = SuggestTraditionalVietnamese(trimmed, titleCase: false);
+        var existingChar = _characterProject.Profiles.FirstOrDefault(p =>
+            string.Equals(p.ChineseName, trimmed, StringComparison.Ordinal) ||
+            p.Aliases.Any(a => string.Equals(a, trimmed, StringComparison.Ordinal)));
+        var existingTerm = _glossaryRows.FirstOrDefault(t => string.Equals(t.Chinese, trimmed, StringComparison.Ordinal));
+        var lines = new List<string> { $"Cụm chọn: 【{trimmed}】" };
+        if (!string.IsNullOrWhiteSpace(hv)) lines.Add($"Hán Việt: {hv}");
+        if (!string.IsNullOrWhiteSpace(vp) && !string.Equals(vp, hv, StringComparison.OrdinalIgnoreCase))
+            lines.Add($"VietPhrase: {vp}");
+        if (existingChar is not null)
+            lines.Add($"Nhân vật đã có: {existingChar.VietnameseName} ({existingChar.PrimaryNarrativePronoun})");
+        if (existingTerm is not null)
+            lines.Add($"Glossary đã có: {existingTerm.Vietnamese}");
+        if (lines.Count == 1)
+            lines.Add("Chưa có trong từ điển cục bộ · bấm nút bên dưới để thêm.");
+        textBlock.Text = string.Join("\n", lines);
+    }
+
+    private async void OnInspectorQuickAddCharacter(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastLiveSelectionChinese) || WorkActive || _uiOperation) return;
+        SourceText.Text = string.IsNullOrEmpty(SourceText.Text) ? _lastLiveSelectionChinese : SourceText.Text;
+        _sourceSelections[SourceText] = new TextSelectionSnapshot(0, 0, _lastLiveSelectionChinese);
+        if (!BeginUiOperation()) return;
+        try
+        {
+            string chinese = SourceContextActions.ValidateCharacterName(_lastLiveSelectionChinese);
+            var quick = ShowQuickCharacterEditor(chinese);
+            if (quick is null) return;
+            _characterProject.Profiles.Add(quick.Profile);
+            var merged = ReadTerms().Where(t => !string.Equals(t.Chinese, quick.Profile.ChineseName, StringComparison.Ordinal)).ToList();
+            merged.Add(new(quick.Profile.ChineseName, quick.Profile.VietnameseName));
+            SetGlossaryTerms(merged);
+            await SaveCharacterProjectAsync();
+            RefreshCharacterGrid();
+            UpdateInspectorLiveSelection(_lastLiveSelectionChinese);
+            SetStatus($"Đã thêm nhanh nhân vật “{quick.Profile.VietnameseName}” từ Inspector.");
+        }
+        catch (Exception ex) { _settingsDirty = true; ShowError(ex); }
+        finally { EndUiOperation(); }
+    }
+
+    private async void OnInspectorQuickAddGlossary(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastLiveSelectionChinese) || WorkActive || _uiOperation) return;
+        if (!BeginUiOperation()) return;
+        try
+        {
+            string chinese = SourceContextActions.ValidateGlossaryTerm(_lastLiveSelectionChinese);
+            var existing = _glossaryRows.FirstOrDefault(t => string.Equals(t.Chinese, chinese, StringComparison.Ordinal));
+            string suggested = existing?.Vietnamese ?? SuggestTraditionalVietnamese(chinese, titleCase: false);
+            var edited = ShowGlossaryEditor(existing is null && !string.IsNullOrWhiteSpace(suggested)
+                ? new GlossaryRow(chinese, suggested) : existing, chinese);
+            if (edited is null) return;
+            if (existing is null) _glossaryRows.Add(edited);
+            else _glossaryRows[_glossaryRows.IndexOf(existing)] = edited;
+            GlossaryChanged();
+            await PersistCurrentGlossaryAsync();
+            UpdateInspectorLiveSelection(_lastLiveSelectionChinese);
+            SetStatus($"Đã lưu thuật ngữ “{edited.Chinese} = {edited.Vietnamese}” từ Inspector.");
+        }
+        catch (Exception ex) { _settingsDirty = true; ShowError(ex); }
+        finally { EndUiOperation(); }
+    }
+
     private void FocusSelectedEditor(bool fourPane)
     {
         if (fourPane) { DraftText.Focus(); return; }
         TextBox? target = FindVisualChildren<TextBox>(ChapterBlocksItems)
-            .FirstOrDefault(input => input.Tag is Guid id && id == _selectedId);
+            .FirstOrDefault(input => !input.IsReadOnly && input.Tag is Guid id && id == _selectedId);
         target?.Focus();
     }
 
@@ -351,6 +529,8 @@ public partial class MainWindow
             InspectorDictionaryText.Text = "Chưa chọn segment.";
             InspectorGlossaryItems.ItemsSource = null;
             InspectorCharacterItems.ItemsSource = null;
+            if (FindName("InspectorConsistencyStatusText") is TextBlock statusEmpty)
+                statusEmpty.Text = "Chưa chọn segment.";
             InspectorContextText.Text = "Project chưa có ngữ cảnh cho segment đang chọn.";
             return;
         }
@@ -362,9 +542,46 @@ public partial class MainWindow
             .Select(term => $"{term.Chinese}  →  {term.Vietnamese}").ToArray();
         InspectorContextText.Text = string.IsNullOrWhiteSpace(ContextNotesInput.Text)
             ? "Chưa có ghi chú ngữ cảnh Project." : ContextNotesInput.Text;
-        InspectorCharacterItems.ItemsSource = _characterProject.Profiles.Where(profile =>
-            !string.IsNullOrWhiteSpace(profile.ChineseName) && segment.SourceText.Contains(profile.ChineseName, StringComparison.Ordinal))
-            .Select(profile => $"{profile.ChineseName}  →  {profile.VietnameseName}\n{profile.PrimaryNarrativePronoun}").ToArray();
+
+        CharacterConsistencySelection selectedRules = _service is not null
+            ? _service.PreviewCharacterConsistency(segment.Id)
+            : new CharacterConsistencyRuleSelector().Select(_characterProject, segment.SourceText);
+
+        if (FindName("InspectorConsistencyStatusText") is TextBlock consistencyStatus)
+        {
+            if (!_characterProject.ConsistencyLockEnabled)
+            {
+                consistencyStatus.Text = "Khóa nhất quán Project đang tắt. Chỉ hiển thị hồ sơ khớp tên trong đoạn.";
+            }
+            else if (string.IsNullOrWhiteSpace(selectedRules.PromptBlock))
+            {
+                consistencyStatus.Text = "Khóa nhất quán bật · Không có quy tắc khóa nào được chọn cho đoạn này.";
+            }
+            else
+            {
+                consistencyStatus.Text = $"Khóa nhất quán bật · {selectedRules.NarrativeRuleCount} đại từ khóa · {selectedRules.DialogueRuleCount} quy tắc thoại" +
+                    (selectedRules.OmittedRuleCount > 0 ? $" · {selectedRules.OmittedRuleCount} lược bỏ do giới hạn" : "");
+            }
+        }
+
+        if (_characterProject.ConsistencyLockEnabled && !string.IsNullOrWhiteSpace(selectedRules.PromptBlock))
+        {
+            string[] ruleLines = selectedRules.PromptBlock
+                .ReplaceLineEndings("\n")
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(line => line.StartsWith("- CHARACTER ", StringComparison.Ordinal) ||
+                               line.StartsWith("- DIALOGUE ", StringComparison.Ordinal))
+                .Select(line => line[2..])
+                .ToArray();
+            InspectorCharacterItems.ItemsSource = ruleLines;
+        }
+        else
+        {
+            InspectorCharacterItems.ItemsSource = _characterProject.Profiles.Where(profile =>
+                (!string.IsNullOrWhiteSpace(profile.ChineseName) && segment.SourceText.Contains(profile.ChineseName, StringComparison.Ordinal)) ||
+                profile.Aliases.Any(alias => !string.IsNullOrWhiteSpace(alias) && segment.SourceText.Contains(alias, StringComparison.Ordinal)))
+                .Select(profile => $"{profile.ChineseName}  →  {profile.VietnameseName}\n{profile.PrimaryNarrativePronoun}").ToArray();
+        }
         FourPaneSelectionText.Text = $"Đoạn {segment.Order} · {StatusLabel(segment.Status)}";
     }
 
@@ -372,6 +589,7 @@ public partial class MainWindow
     {
         ChapterDocument? chapter = _service?.GetSnapshot();
         ShellChapterText.Text = chapter is null ? "Chưa mở chương" : chapter.Title;
+        ApplyTwoPaneEditorModeLayout();
         RefreshTranslationInspector(chapter?.Segments.SingleOrDefault(segment => segment.Id == _selectedId));
         RefreshShellQueueStatus();
         ApplyProjectSidebarVisibility();

@@ -43,6 +43,7 @@ public partial class MainWindow : Window
         _ollamaBackends = ollamaBackends ?? new OllamaBackendManager();
         _translationClient = _ollamaBackends;
         InitializeComponent();
+        ClampWindowToWorkArea(this, 1600, 950);
         _projectCatalog = new(_projectRepository);
         _projectCatalog.Changed += OnProjectCatalogChanged;
         _initialized = true;
@@ -57,6 +58,33 @@ public partial class MainWindow : Window
         InitializeProductionShell();
         SavePathText.Text = "Dữ liệu riêng tư chỉ lưu tại: " + ChapterFileStore.DefaultDirectory;
         Refresh();
+    }
+
+    internal static void ClampWindowToWorkArea(Window window, double preferredWidth, double preferredHeight,
+        double? explicitWorkAreaWidth = null, double? explicitWorkAreaHeight = null)
+    {
+        void Apply(double workWidth, double workHeight)
+        {
+            if (workWidth <= 0 || workHeight <= 0) return;
+            double maxW = Math.Max(480, workWidth - 16);
+            double maxH = Math.Max(360, workHeight - 16);
+            if (window.MinWidth > maxW) window.MinWidth = maxW;
+            if (window.MinHeight > maxH) window.MinHeight = maxH;
+            if (preferredWidth > 0 && (double.IsNaN(window.Width) || window.Width > maxW || explicitWorkAreaWidth.HasValue))
+                window.Width = Math.Min(preferredWidth, maxW);
+            if (preferredHeight > 0 && window.SizeToContent == SizeToContent.Manual &&
+                (double.IsNaN(window.Height) || window.Height > maxH || explicitWorkAreaHeight.HasValue))
+                window.Height = Math.Min(preferredHeight, maxH);
+            if (window.SizeToContent != SizeToContent.Manual && window.MaxHeight > maxH)
+                window.MaxHeight = maxH;
+        }
+
+        if (explicitWorkAreaWidth.HasValue && explicitWorkAreaHeight.HasValue)
+        {
+            Apply(explicitWorkAreaWidth.Value, explicitWorkAreaHeight.Value);
+            return;
+        }
+        window.SourceInitialized += (_, _) => Apply(SystemParameters.WorkArea.Width, SystemParameters.WorkArea.Height);
     }
 
     private async void OnSplitChapter(object sender, RoutedEventArgs e)
@@ -220,18 +248,114 @@ public partial class MainWindow : Window
         finally { EndUiOperation(); }
     }
 
-    private async void OnApprove(object sender, RoutedEventArgs e)
+    private async void OnApprove(object sender, RoutedEventArgs e) => await ApproveSegmentCoreAsync(advanceToNext: false);
+
+    private async void OnApproveAndAdvance(object sender, RoutedEventArgs e) => await ApproveSegmentCoreAsync(advanceToNext: true);
+
+    internal async Task ApproveSegmentCoreAsync(bool advanceToNext)
     {
         if (_service is null || _selectedId is not Guid id) return;
         if (!BeginUiOperation(allowDuringTranslation: true)) return;
         try
         {
+            var snapshotBefore = _service.GetSnapshot();
+            var currentSegment = snapshotBefore.Segments.SingleOrDefault(s => s.Id == id);
+            if (currentSegment is null || currentSegment.Status == SegmentStatus.Translating ||
+                string.IsNullOrWhiteSpace(currentSegment.EditableText)) return;
             await _service.ApproveAsync(id);
+            if (_projectSession is not null)
+                await _projectRepository.UpdateChapterSummaryAsync(_projectSession, _service.GetSnapshot());
+            bool movedNext = false;
+            if (advanceToNext)
+            {
+                var ordered = _service.GetSnapshot().Segments.OrderBy(s => s.Order).ToList();
+                int idx = ordered.FindIndex(s => s.Id == id);
+                if (idx >= 0 && idx + 1 < ordered.Count)
+                {
+                    var next = ordered[idx + 1];
+                    _selectedId = next.Id;
+                    _shownAttemptId = null;
+                    _service.SelectSegment(next.Id);
+                    movedNext = true;
+                }
+            }
             Refresh();
-            SetStatus("Đã duyệt và lưu đoạn đang chọn. Chọn đoạn khác khi bạn muốn tiếp tục.");
+            RefreshProjectChapterList();
+            SetAutosaveStatus("✓ Đã lưu duyệt", pending: false);
+            if (advanceToNext)
+            {
+                _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
+                SetStatus(movedNext
+                    ? "Đã duyệt và chuyển sang đoạn kế tiếp."
+                    : "Đã duyệt đoạn cuối cùng của chương.");
+            }
+            else
+            {
+                SetStatus("Đã duyệt và lưu đoạn đang chọn. Chọn đoạn khác hoặc bấm Ctrl+Enter để duyệt & sang đoạn kế.");
+            }
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
+    }
+
+    internal void NavigateSegment(int delta)
+    {
+        if (_service is null) return;
+        var ordered = _service.GetSnapshot().Segments.OrderBy(s => s.Order).ToList();
+        if (ordered.Count == 0) return;
+        int currentIndex = _selectedId is Guid id ? ordered.FindIndex(s => s.Id == id) : 0;
+        int nextIndex = Math.Clamp((currentIndex < 0 ? 0 : currentIndex) + delta, 0, ordered.Count - 1);
+        var target = ordered[nextIndex];
+        FollowQueueCheck.IsChecked = false;
+        _selectedId = target.Id;
+        _shownAttemptId = null;
+        _service.SelectSegment(target.Id);
+        Refresh();
+        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
+        SetStatus($"Đang mở Đoạn {target.Order}/{ordered.Count} · {StatusLabel(target.Status)}.");
+    }
+
+    internal bool JumpToNextIssueSegment()
+    {
+        if (_service is null) return false;
+        var ordered = _service.GetSnapshot().Segments.OrderBy(s => s.Order).ToList();
+        if (ordered.Count == 0) return false;
+        int startIdx = _selectedId is Guid id ? ordered.FindIndex(s => s.Id == id) : -1;
+        TranslationSegment? found = null;
+        for (int offset = 1; offset <= ordered.Count; offset++)
+        {
+            var candidate = ordered[(startIdx + offset + ordered.Count) % ordered.Count];
+            if (candidate.Status is SegmentStatus.Error or SegmentStatus.InspectionRequired || candidate.RequiresRetranslation)
+            {
+                found = candidate;
+                break;
+            }
+        }
+        if (found is null)
+        {
+            for (int offset = 1; offset <= ordered.Count; offset++)
+            {
+                var candidate = ordered[(startIdx + offset + ordered.Count) % ordered.Count];
+                if (candidate.Status == SegmentStatus.Untranslated)
+                {
+                    found = candidate;
+                    break;
+                }
+            }
+        }
+        if (found is null)
+        {
+            SetStatus("Không còn đoạn lỗi, cần kiểm tra hoặc chưa dịch trong chương hiện tại.");
+            return false;
+        }
+        FollowQueueCheck.IsChecked = false;
+        _selectedId = found.Id;
+        _shownAttemptId = null;
+        _service.SelectSegment(found.Id);
+        Refresh();
+        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
+        SetStatus($"Đã nhảy tới Đoạn {found.Order} ({StatusLabel(found.Status)}).");
+        return true;
     }
 
     private void OnDraftChanged(object sender, TextChangedEventArgs e)
@@ -241,7 +365,9 @@ public partial class MainWindow : Window
         _pronounReport = null;
         // Keep the running interval: continuous typing must still get periodic checkpoints.
         _autosave.Start();
-        SetStatus("Có thay đổi bản nháp; đang chờ tự lưu. Sửa bản đã duyệt sẽ đưa đoạn về chờ duyệt.");
+        SetAutosaveStatus("● Chờ tự lưu…", pending: true);
+        if (!StatusText.Text.StartsWith("Lỗi:", StringComparison.Ordinal))
+            SetStatus("Có thay đổi bản nháp; đang chờ tự lưu. Sửa bản đã duyệt sẽ đưa đoạn về chờ duyệt.");
         UpdateButtons();
     }
 
@@ -260,10 +386,17 @@ public partial class MainWindow : Window
             {
                 Refresh();
                 RefreshProjectChapterList();
-                SetStatus(service.HasUnsavedChanges ? "Còn thay đổi đang chờ lưu." : "Đã tự lưu bản nháp trên máy này.");
+                SetAutosaveStatus(service.HasUnsavedChanges ? "● Chờ tự lưu…" : "✓ Đã tự lưu", service.HasUnsavedChanges);
             }
         }
         catch (Exception ex) { ShowError(ex); }
+    }
+
+    private void SetAutosaveStatus(string text, bool pending)
+    {
+        if (AutosaveStatusText is null) return;
+        AutosaveStatusText.Text = text;
+        AutosaveStatusText.Foreground = (Brush)FindResource(pending ? "WarningBrush" : "SuccessBrush");
     }
 
     private async void OnSaveProgress(object sender, RoutedEventArgs e)
@@ -276,8 +409,10 @@ public partial class MainWindow : Window
         if (!BeginUiOperation(allowDuringTranslation: true)) return;
         try
         {
-            if (!WorkActive) await SaveCharacterProjectAsync();
-            await SaveCurrentAsync(); Refresh(); SetStatus("Đã lưu tiến độ, bản nháp và hồ sơ nhân vật trên máy này.");
+            if (!WorkActive && _projectTranslationCoordinator?.IsRunning != true) await SaveCharacterProjectAsync();
+            await SaveCurrentAsync(); Refresh();
+            SetAutosaveStatus("✓ Đã lưu", pending: false);
+            SetStatus("Đã lưu tiến độ, bản nháp và hồ sơ nhân vật trên máy này.");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
@@ -294,6 +429,13 @@ public partial class MainWindow : Window
             if (session is not null) await _projectRepository.UpdateChapterSummaryAsync(session, service.GetSnapshot());
         }
     }
+
+    private void OnSegmentFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_initialized && !_rendering) Refresh();
+    }
+
+    private void OnJumpToNextIssueSegment(object sender, RoutedEventArgs e) => JumpToNextIssueSegment();
 
     private void OnSegmentSelected(object sender, SelectionChangedEventArgs e)
     {
@@ -326,12 +468,14 @@ public partial class MainWindow : Window
             $"Đầu ra: {options.MaximumOutputTokens} token; timeout: {options.RequestTimeout.TotalSeconds:0} giây\n" +
             $"Preset: {attempt.PresetSnapshot?.Name ?? "Legacy"} (v{attempt.PresetSnapshot?.Revision})\n" +
             $"Tài nguyên project: revision {attempt.ProjectResourceRevision?.ToString() ?? "legacy/standalone"}\nPrompt: {attempt.PromptVersion}\n\n{attempt.Prompt}";
-        new Window
+        var window = new Window
         {
             Owner = this, Title = "Prompt đã lưu — chỉ hiển thị trên máy này", Width = 850, Height = 600,
             Content = new TextBox { Text = details, IsReadOnly = true, TextWrapping = TextWrapping.Wrap,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(10) }
-        }.ShowDialog();
+        };
+        ClampWindowToWorkArea(window, 850, 600);
+        window.ShowDialog();
     }
 
     private void Refresh()
@@ -341,8 +485,19 @@ public partial class MainWindow : Window
         try
         {
             var chapter = _service?.GetSnapshot();
-            var items = chapter?.Segments.Select(s => new SegmentItem(s.Id,
-                $"Đoạn {s.Order} · {s.HanCharacterCount} chữ Hán\n{StatusLabel(s.Status)}\nTrung: {Preview(s.SourceText)}\nViệt: {Preview(s.EditableText)}")).ToList() ?? [];
+            string segFilter = (FindName("SegmentStateFilter") as ComboBox)?.SelectedItem is ComboBoxItem filterItem
+                ? filterItem.Tag?.ToString() ?? "All" : "All";
+            var items = chapter?.Segments
+                .Where(s => segFilter switch
+                {
+                    "Untranslated" => s.Status == SegmentStatus.Untranslated,
+                    "AwaitingReview" => s.Status == SegmentStatus.AwaitingReview,
+                    "Issues" => s.Status is SegmentStatus.Error or SegmentStatus.InspectionRequired || s.RequiresRetranslation,
+                    "Approved" => s.Status == SegmentStatus.Approved,
+                    _ => true
+                })
+                .Select(s => new SegmentItem(s.Id,
+                    $"{SegmentStatusDot(s.Status)} Đoạn {s.Order} · {s.HanCharacterCount} chữ Hán\n{StatusLabel(s.Status)}\nTrung: {Preview(s.SourceText)}\nViệt: {Preview(s.EditableText)}")).ToList() ?? [];
             SegmentList.ItemsSource = items;
             SegmentList.SelectedItem = items.SingleOrDefault(i => i.Id == _selectedId);
             var segment = chapter?.Segments.SingleOrDefault(s => s.Id == _selectedId);
@@ -378,8 +533,8 @@ public partial class MainWindow : Window
                 if (attempt.NormalizationRunId is Guid runId && segment!.NormalizationHistory.SingleOrDefault(r => r.Id == runId) is { } run)
                     info.AppendLine($"Chuẩn hóa xưng hô: {run.Changes.Count} thay đổi; bản AI gốc vẫn nằm trong lịch sử.");
             }
-            info.Append("Kiểm tra tự động chỉ gợi ý lỗi; không xác nhận bản dịch đúng. Bạn quyết định duyệt.");
-            ReviewInfo.Text = info.ToString();
+            ReviewInfo.Text = info.ToString().TrimEnd();
+            UpdateAiComparisonVisibility();
             ChapterSummary.Text = chapter is null ? "" : $"{chapter.Segments.Count} đoạn · đã duyệt {chapter.Segments.Count(s => s.Status == SegmentStatus.Approved)} · " +
                 $"đã chuẩn hóa {chapter.Segments.SelectMany(s => s.NormalizationHistory).Where(r => !r.Reverted).Sum(r => r.Changes.Count)} vị trí";
             RefreshChapterBlocks(chapter);
@@ -403,6 +558,13 @@ public partial class MainWindow : Window
         SaveButton.IsEnabled = document && available;
         SplitButton.IsEnabled = !document && !active && available && _presetsReady;
         PasteButton.IsEnabled = ImportTextButton.IsEnabled = !document && !active && available;
+        Visibility standaloneVis = document && _projectSession is not null ? Visibility.Collapsed : Visibility.Visible;
+        PasteButton.Visibility = ImportTextButton.Visibility = SplitButton.Visibility = standaloneVis;
+        if (FindName("ApproveAllChapterButton") is Button approveAllBtn) approveAllBtn.IsEnabled = document && !active && available;
+        if (FindName("QuickScanChineseToolbarButton") is Button quickChineseBtn) quickChineseBtn.IsEnabled = document && !active && available;
+        if (FindName("QuickScanPronounsToolbarButton") is Button quickPronounsBtn) quickPronounsBtn.IsEnabled = document && !active && available;
+        if (FindName("ApproveAndNextButton") is Button approveNextBtn)
+            approveNextBtn.IsEnabled = selected && _service?.GetSnapshot().Segments.SingleOrDefault(s => s.Id == _selectedId)?.Status != SegmentStatus.Translating && !string.IsNullOrWhiteSpace(DraftText.Text) && available;
         ChapterInput.IsReadOnly = document && !_sourceEditMode || !available;
         TitleInput.IsReadOnly = document || !available;
         EditSourceButton.IsEnabled = document && !active && available && !_sourceEditMode &&
@@ -437,6 +599,10 @@ public partial class MainWindow : Window
         ApplyPronounsButton.IsEnabled = document && !active && available && _pronounReport?.Safe > 0;
         UndoPronounsButton.IsEnabled = document && !active && available &&
             _service!.GetSnapshot().Segments.SelectMany(s => s.NormalizationHistory).Any(r => !r.Reverted);
+        if (FindName("InspectorScanPronounsButton") is Button inspScan) inspScan.IsEnabled = NormalizePronounsButton.IsEnabled;
+        if (FindName("InspectorApplyPronounsButton") is Button inspApply) inspApply.IsEnabled = ApplyPronounsButton.IsEnabled;
+        if (FindName("InspectorUndoPronounsButton") is Button inspUndo) inspUndo.IsEnabled = UndoPronounsButton.IsEnabled;
+        if (FindName("InspectorPreviewRulesButton") is Button inspPreview) inspPreview.IsEnabled = document && !active && available;
         ScanChineseButton.IsEnabled = document && !active && available;
         UndoBatchReplaceButton.IsEnabled = document && !active && available &&
             _service!.GetSnapshot().BatchReplacementHistory.Any(r => !r.Reverted && !r.Automatic);
@@ -503,7 +669,11 @@ public partial class MainWindow : Window
         AttemptOutcome.Interrupted => "bị gián đoạn", _ => "có lỗi"
     };
 
-    private void SetStatus(string text) { StatusText.Text = text; StatusText.Foreground = Brushes.DarkSlateGray; }
+    private void SetStatus(string text)
+    {
+        StatusText.Text = text;
+        StatusText.Foreground = (Brush)FindResource("TextBrush");
+    }
 
     private bool BeginUiOperation(bool allowDuringTranslation = false)
     {
@@ -535,7 +705,7 @@ public partial class MainWindow : Window
             (error is IOException or UnauthorizedAccessException
                 ? " Tác vụ chưa hoàn tất; hãy giữ ứng dụng mở, kiểm tra dung lượng/quyền ghi và thử lại thao tác lưu."
                 : _service?.HasUnsavedChanges == true ? " Có thay đổi chưa lưu; hãy giữ ứng dụng mở và thử Lưu tiến độ." : "");
-        StatusText.Foreground = Brushes.Firebrick;
+        StatusText.Foreground = (Brush)FindResource("DangerBrush");
     }
 
     private async void OnWindowClosing(object? sender, CancelEventArgs e)
@@ -599,12 +769,20 @@ public partial class MainWindow : Window
     {
         _progressTimer.Stop(); _readerSaveTimer.Stop();
         _chapterManagerWindow?.Close();
+        _textCleanerWindow?.Close();
+        _sourceOccurrencesWindow?.Close();
         ClearProjectTranslationCoordinator();
         _projectCatalog.Changed -= OnProjectCatalogChanged;
         _projectCatalog.Dispose();
         _gpuConnections.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _ollamaBackends.Dispose();
     }
-    private sealed record SegmentItem(Guid Id, string Label);
-    private sealed record AttemptItem(Guid Id, string Label, int Kind = 0, DateTimeOffset Date = default);
+    private sealed record SegmentItem(Guid Id, string Label)
+    {
+        public override string ToString() => Label;
+    }
+    private sealed record AttemptItem(Guid Id, string Label, int Kind = 0, DateTimeOffset Date = default)
+    {
+        public override string ToString() => Label;
+    }
 }

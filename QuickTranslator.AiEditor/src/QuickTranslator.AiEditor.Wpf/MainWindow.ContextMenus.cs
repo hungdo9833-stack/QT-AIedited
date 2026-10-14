@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -5,6 +7,7 @@ using System.Windows.Media;
 using QuickTranslator.AiEditor.Core.Editing;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
+using QuickTranslator.AiEditor.Core.Traditional;
 using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
@@ -17,13 +20,15 @@ public partial class MainWindow
     {
         AttachSourceContextMenu(ChapterInput);
         AttachSourceContextMenu(SourceText);
+        AttachSourceContextMenu(HanVietText);
+        AttachSourceContextMenu(VietPhraseText);
     }
 
     private void AttachSourceContextMenu(TextBox textBox)
     {
         var menu = new ContextMenu();
-        var addCharacter = WorkspaceMenuItem("Thêm vào hồ sơ nhân vật", () => AddQuickCharacterAsync(textBox));
-        var addGlossary = WorkspaceMenuItem("Thêm vào Glossary Trung–Việt", () => AddSelectedGlossaryAsync(textBox));
+        var addCharacter = WorkspaceMenuItem("Thêm vào hồ sơ nhân vật (Ctrl+Shift+C)", () => AddQuickCharacterAsync(textBox));
+        var addGlossary = WorkspaceMenuItem("Thêm vào Glossary Trung–Việt (Ctrl+Shift+G)", () => AddSelectedGlossaryAsync(textBox));
         var find = MenuItem("Tìm các vị trí xuất hiện trong chương", () => ShowSourceOccurrences(textBox));
         var translate = MenuItem("Dịch riêng phần đã chọn", async () => await TranslateSourceSelectionAsync(textBox));
         var copy = MenuItem("Sao chép", () => CopySourceSelection(textBox));
@@ -40,7 +45,7 @@ public partial class MainWindow
             addGlossary.IsEnabled = capabilities.AddGlossary;
             find.IsEnabled = capabilities.FindOccurrences;
             translate.IsEnabled = capabilities.TranslateSelection;
-            copy.IsEnabled = capabilities.Copy;
+            copy.IsEnabled = !string.IsNullOrEmpty(textBox.SelectedText) || capabilities.Copy;
         };
         menu.Closed += (_, _) => Dispatcher.BeginInvoke(() => RestoreSourceSelection(textBox));
         textBox.ContextMenu = menu;
@@ -80,14 +85,55 @@ public partial class MainWindow
     private string GetSourceSelection(TextBox textBox)
     {
         RestoreSourceSelection(textBox);
+        if ((ReferenceEquals(textBox, HanVietText) || ReferenceEquals(textBox, VietPhraseText)) &&
+            textBox.SelectionLength > 0 && _traditionalResult is not null &&
+            _traditionalDisplayedSegmentId == _selectedId &&
+            string.Equals(_traditionalResult.SourceText, SourceText.Text, StringComparison.Ordinal))
+        {
+            TraditionalPane origin = ReferenceEquals(textBox, HanVietText) ? TraditionalPane.HanViet : TraditionalPane.VietPhrase;
+            SelectionProjection projected = SelectionAlignment.Project(_traditionalResult, origin,
+                new(textBox.SelectionStart, textBox.SelectionLength));
+            if (projected.Chinese.Length > 0 &&
+                projected.Chinese.Start >= 0 &&
+                projected.Chinese.Start + projected.Chinese.Length <= SourceText.Text.Length)
+            {
+                return SourceText.Text.Substring(projected.Chinese.Start, projected.Chinese.Length);
+            }
+        }
         return textBox.SelectedText;
+    }
+
+    internal string SuggestTraditionalVietnamese(string chinese, bool titleCase)
+    {
+        if (string.IsNullOrWhiteSpace(chinese) || _traditionalService.CurrentSnapshot is not { } snapshot)
+            return "";
+        string trimmed = chinese.Trim();
+        string? raw = null;
+        if (snapshot.Names.TryGetValue(trimmed, out string? nameVal) && !string.IsNullOrWhiteSpace(nameVal))
+            raw = FirstTraditionalMeaning(nameVal);
+        else if (!titleCase && snapshot.CombinedOneMeaning.TryGetValue(trimmed, out string? vpVal) && !string.IsNullOrWhiteSpace(vpVal))
+            raw = FirstTraditionalMeaning(vpVal);
+        else
+        {
+            var syllables = new List<string>();
+            foreach (Rune rune in trimmed.EnumerateRunes())
+            {
+                string ch = rune.ToString();
+                if (snapshot.HanViet.TryGetValue(ch, out string? hv) && !string.IsNullOrWhiteSpace(hv))
+                    syllables.Add(FirstTraditionalMeaning(hv));
+            }
+            if (syllables.Count > 0) raw = string.Join(" ", syllables);
+        }
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        return titleCase ? CultureInfo.CurrentCulture.TextInfo.ToTitleCase(raw.ToLower(CultureInfo.CurrentCulture)) : raw;
     }
 
     private void CopySourceSelection(TextBox textBox)
     {
         try
         {
-            string text = GetSourceSelection(textBox);
+            RestoreSourceSelection(textBox);
+            string text = textBox.SelectedText.Length > 0 ? textBox.SelectedText : GetSourceSelection(textBox);
             if (text.Length > 0) Clipboard.SetText(text);
         }
         catch (Exception ex) { ShowError(ex); }
@@ -136,8 +182,6 @@ public partial class MainWindow
             if (quick.ScanExisting && _service is not null)
             {
                 ScanPronounsAndShow();
-                EditorTabs.SelectedIndex = 0;
-                EditorModeButton.IsChecked = true;
             }
         }
         catch (Exception ex)
@@ -152,27 +196,75 @@ public partial class MainWindow
 
     private QuickCharacterResult? ShowQuickCharacterEditor(string chinese)
     {
-        var vietnamese = new TextBox();
+        string suggestedVietnamese = SuggestTraditionalVietnamese(chinese, titleCase: true);
+        var vietnamese = new TextBox { Text = suggestedVietnamese };
         var genders = new[] { new GenderChoice(CharacterGender.Unknown, "Chưa xác định"), new GenderChoice(CharacterGender.Female, "Nữ"),
             new GenderChoice(CharacterGender.Male, "Nam"), new GenderChoice(CharacterGender.Other, "Khác") };
         var gender = new ComboBox { ItemsSource = genders, DisplayMemberPath = "Label", SelectedIndex = 0 };
         var primary = new ComboBox { IsEditable = true, ItemsSource = new[] { "nàng", "nàng ấy", "hắn", "hắn ta", "y", "người ấy" } };
         var secondary = new ComboBox { IsEditable = true, ItemsSource = new[] { "nàng ấy", "hắn ta", "người ấy" } };
+        var lockPronoun = new CheckBox { Content = "Khóa đại từ trần thuật chính cho nhân vật này", IsChecked = _characterProject.ConsistencyLockEnabled };
+
+        // Optional quick relationship with existing character in the project/segment (BL-06 / CC-04)
+        var listenerChoices = _characterProject.Profiles.OrderBy(p => p.VietnameseName).ToList();
+        var quickListenerCombo = new ComboBox
+        {
+            ItemsSource = listenerChoices,
+            DisplayMemberPath = nameof(CharacterProfile.VietnameseName),
+            ToolTip = "Tùy chọn: thiết lập nhanh quan hệ hội thoại với một nhân vật đã có"
+        };
+        var quickPresetCombo = new ComboBox
+        {
+            ItemsSource = CharacterRelationshipPreset.Defaults,
+            DisplayMemberPath = nameof(CharacterRelationshipPreset.Label),
+            ToolTip = "Chọn mẫu xưng hô nhanh (tự điền Tự xưng / Gọi đối phương)"
+        };
         var scan = new CheckBox { Content = "Quét lại bản dịch hiện có và chỉ xem trước đề xuất", IsChecked = true };
-        var validation = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        var validation = new TextBlock { Foreground = (Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
         var panel = new StackPanel { Margin = new Thickness(14) };
         void Add(string label, Control field) { panel.Children.Add(new TextBlock { Text = label, FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 2) }); panel.Children.Add(field); }
+        // IMPORTANT: Keep Chinese TextBox first and Vietnamese TextBox second so AsyncSafetyTests Descendants<TextBox>(dialog).Skip(1).First() always targets `vietnamese`.
         Add("Tên tiếng Trung đã chọn", new TextBox { Text = chinese, IsReadOnly = true });
-        Add("Tên Hán Việt / tiếng Việt đã xác nhận", vietnamese); Add("Giới tính", gender);
-        Add("Đại từ trần thuật chính", primary); Add("Đại từ trần thuật phụ", secondary);
+        Add("Tên Hán Việt / tiếng Việt đã xác nhận", vietnamese);
+        Add("Giới tính", gender);
+        Add("Đại từ trần thuật chính", primary);
+        Add("Đại từ trần thuật phụ", secondary);
+        panel.Children.Add(lockPronoun);
+        if (listenerChoices.Count > 0)
+        {
+            Add("Quan hệ nhanh với nhân vật đã có (tùy chọn)", quickListenerCombo);
+            Add("Mẫu xưng hô hội thoại (tùy chọn)", quickPresetCombo);
+        }
         panel.Children.Add(scan); panel.Children.Add(validation);
         var buttons = new WrapPanel(); var save = new Button { Content = "Thêm nhân vật", Style = (Style)FindResource("PrimaryButton") };
         var advanced = new Button { Content = "Hồ sơ nâng cao…" }; var cancel = new Button { Content = "Hủy" };
         buttons.Children.Add(save); buttons.Children.Add(advanced); buttons.Children.Add(cancel); panel.Children.Add(buttons);
         var window = new Window { Owner = this, Title = "Thêm nhanh nhân vật", Width = 620, SizeToContent = SizeToContent.Height, Content = panel };
+        ClampWindowToWorkArea(window, 620, 680);
         CharacterProfile? result = null;
-        CharacterProfile Build() => SourceContextActions.CreateQuickCharacter(chinese, vietnamese.Text,
-            ((GenderChoice)gender.SelectedItem).Value, primary.Text, secondary.Text);
+        CharacterProfile Build()
+        {
+            var built = SourceContextActions.CreateQuickCharacter(chinese, vietnamese.Text,
+                ((GenderChoice)gender.SelectedItem).Value, primary.Text, secondary.Text);
+            if (lockPronoun.IsChecked == true && !string.IsNullOrWhiteSpace(built.PrimaryNarrativePronoun))
+                built.NarrativePronounLocked = true;
+            if (quickListenerCombo.SelectedItem is CharacterProfile listener &&
+                quickPresetCombo.SelectedItem is CharacterRelationshipPreset preset)
+            {
+                built.Relationships.Add(new CharacterRelationship
+                {
+                    TargetCharacterId = listener.Id,
+                    SpeakerCharacterId = built.Id,
+                    ListenerCharacterId = listener.Id,
+                    Relationship = preset.Relationship,
+                    SelfReference = preset.SelfReference,
+                    AddresseeReference = preset.AddresseeReference,
+                    Enabled = true
+                });
+            }
+            built.Validate();
+            return built;
+        }
         gender.SelectionChanged += (_, _) =>
         {
             var value = ((GenderChoice)gender.SelectedItem).Value;
@@ -199,7 +291,9 @@ public partial class MainWindow
         try { chinese = SourceContextActions.ValidateGlossaryTerm(GetSourceSelection(textBox)); }
         catch (Exception ex) { ShowError(ex); return; }
         var existing = _glossaryRows.FirstOrDefault(t => string.Equals(t.Chinese, chinese, StringComparison.Ordinal));
-        var edited = ShowGlossaryEditor(existing, chinese);
+        string suggestedVn = existing?.Vietnamese ?? SuggestTraditionalVietnamese(chinese, titleCase: false);
+        var edited = ShowGlossaryEditor(existing is null && !string.IsNullOrWhiteSpace(suggestedVn)
+            ? new GlossaryRow(chinese, suggestedVn) : existing, chinese);
         if (edited is null) return;
         var character = _characterProject.Profiles.FirstOrDefault(p => string.Equals(p.ChineseName, chinese, StringComparison.Ordinal));
         if (character is not null && !string.Equals(character.VietnameseName, edited.Vietnamese, StringComparison.Ordinal))
@@ -259,11 +353,14 @@ public partial class MainWindow
         return true;
     }
 
+    private Window? _sourceOccurrencesWindow;
+
     private void ShowSourceOccurrences(TextBox textBox)
     {
         string selected;
         try { selected = SourceContextActions.ValidateGlossaryTerm(GetSourceSelection(textBox)); }
         catch (Exception ex) { ShowError(ex); return; }
+        _sourceOccurrencesWindow?.Close();
         var items = new List<SourceOccurrence>();
         if (_service?.GetSnapshot() is { } chapter)
         {
@@ -278,11 +375,12 @@ public partial class MainWindow
         var open = new Button { Content = "Mở vị trí", Style = (Style)FindResource("PrimaryButton") };
         var close = new Button { Content = "Đóng" }; var buttons = new WrapPanel(); buttons.Children.Add(open); buttons.Children.Add(close);
         var panel = new DockPanel(); DockPanel.SetDock(buttons, Dock.Bottom); panel.Children.Add(buttons); panel.Children.Add(list);
-        var window = new Window { Owner = this, Title = $"{items.Count} vị trí có “{selected}”", Width = 760, Height = 520, Content = panel };
+        var window = new Window { Title = $"{items.Count} vị trí có “{selected}”", Width = 760, Height = 520, Content = panel };
+        if (IsVisible) window.Owner = this;
+        ClampWindowToWorkArea(window, 760, 520);
         void Open()
         {
             if (list.SelectedItem is not SourceOccurrence item) return;
-            window.Close();
             if (item.SegmentId is Guid id)
             {
                 _selectedId = id; _shownAttemptId = null; EditorTabs.SelectedIndex = 1; Refresh();
@@ -291,8 +389,10 @@ public partial class MainWindow
             else { EditorTabs.SelectedIndex = 0; EditorModeButton.IsChecked = true; ChapterInput.Focus(); ChapterInput.Select(item.Start, selected.Length); }
         }
         open.Click += (_, _) => Open(); list.MouseDoubleClick += (_, _) => Open(); close.Click += (_, _) => window.Close();
+        window.Closed += (_, _) => { if (ReferenceEquals(_sourceOccurrencesWindow, window)) _sourceOccurrencesWindow = null; };
         if (items.Count > 0) list.SelectedIndex = 0;
-        window.ShowDialog();
+        _sourceOccurrencesWindow = window;
+        window.Show();
     }
 
     private async Task TranslateSourceSelectionAsync(TextBox textBox)
@@ -344,5 +444,5 @@ public partial class MainWindow
     }
 
     private sealed record QuickCharacterResult(CharacterProfile Profile, bool ScanExisting);
-    private sealed record SourceOccurrence(Guid? SegmentId, int Start, string Label);
+    private sealed record SourceOccurrence(Guid? SegmentId, int Start, string Label) { public override string ToString() => Label; }
 }

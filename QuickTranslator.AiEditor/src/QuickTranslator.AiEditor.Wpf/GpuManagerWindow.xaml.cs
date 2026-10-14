@@ -29,6 +29,7 @@ public partial class GpuManagerWindow : Window
         _backends = backends; _connections = connections;
         _preferences = preferences ?? new();
         InitializeComponent();
+        MainWindow.ClampWindowToWorkArea(this, 1180, 820);
         _loadingMode = true;
         TranslationModeInput.SelectedIndex = (int)_preferences.Mode;
         _loadingMode = false;
@@ -80,6 +81,7 @@ public partial class GpuManagerWindow : Window
         RuntimeTextElementsInput.Text = runtime.SegmentationOptions.MaximumTextElements.ToString(CultureInfo.InvariantCulture);
         bool remote = profile.Kind == OllamaBackendKind.Remote;
         AdvancedConnectionExpander.IsEnabled = remote;
+        AdvancedConnectionExpander.IsExpanded = remote;
         UseForRemoteButton.IsEnabled = remote;
         ConnectionTypeInput.SelectedIndex = profile.Ssh is null ? 1 : 0;
         EndpointInput.Text = profile.Endpoint;
@@ -184,6 +186,20 @@ public partial class GpuManagerWindow : Window
         {
             FingerprintInput.Text = error.ObservedFingerprint;
             StatusText.Text = error.Message + " Fingerprint quan sát: " + error.ObservedFingerprint;
+            if (IsVisible && MessageBox.Show(this,
+                    $"Máy chủ trả về SSH Host Key Fingerprint:\n{error.ObservedFingerprint}\n\nTin cậy fingerprint này, lưu profile và kết nối ngay?",
+                    "Xác nhận SSH Fingerprint (1 chạm)", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            {
+                OllamaBackendProfile confirmedProfile = ReadProfile();
+                confirmedProfile.RemoteDisclosureAccepted = true;
+                await _backends.SaveProfileAsync(confirmedProfile, activate: false);
+                GpuConnectionHandle handle = await _connections.ConnectAsync(confirmedProfile);
+                await _backends.AttachRuntimeClientAsync(confirmedProfile.Id, handle.Client);
+                await _backends.ActivateAsync(confirmedProfile.Id);
+                _preferences.RemoteProfileId = confirmedProfile.Id;
+                RefreshProfiles(confirmedProfile.Id);
+                StatusText.Text = "Đã xác nhận SSH Fingerprint, lưu profile và kết nối tunnel sẵn sàng.";
+            }
         }
     });
 

@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Microsoft.Win32;
 using QuickTranslator.AiEditor.Core.Projects;
 
@@ -11,6 +13,7 @@ public partial class ProjectPublicationWindow : Window
 {
     private readonly ProjectSession _session;
     private readonly ProjectPublicationService _service;
+    private readonly Func<Guid, Task>? _openChapter;
     private ProjectPublicationInspection? _inspection;
     private CancellationTokenSource? _operationCancellation;
     private bool _busy;
@@ -18,11 +21,14 @@ public partial class ProjectPublicationWindow : Window
     internal string? LastExportPath { get; private set; }
     internal ProjectPublicationInspection? CurrentInspection => _inspection;
 
-    internal ProjectPublicationWindow(ProjectSession session, ProjectPublicationService service)
+    internal ProjectPublicationWindow(ProjectSession session, ProjectPublicationService service,
+        Func<Guid, Task>? openChapter = null)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _service = service ?? throw new ArgumentNullException(nameof(service));
+        _openChapter = openChapter;
         InitializeComponent();
+        MainWindow.ClampWindowToWorkArea(this, 780, 640);
         ProjectTitleText.Text = session.Manifest.VietnameseTitle;
         UpdateFormatDescription();
     }
@@ -48,12 +54,24 @@ public partial class ProjectPublicationWindow : Window
             InspectionText.Foreground = (System.Windows.Media.Brush)FindResource(
                 _inspection.RequiresConfirmation ? "WarningBrush" : "SuccessBrush");
             AllowIncompleteInput.Visibility = _inspection.RequiresConfirmation ? Visibility.Visible : Visibility.Collapsed;
+            IReadOnlyList<ProjectPublicationIssueChapter> issues = _inspection.IssueChapters ?? [];
+            IssueChaptersList.ItemsSource = issues;
+            IssueChaptersPanel.Visibility = issues.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             ProgressText.Text = _inspection.TotalChapterCount == 0
                 ? "Project chưa có chương đang hoạt động." : "Đã kiểm tra xong. Chọn định dạng và nơi lưu.";
         }
         catch (OperationCanceledException) { ProgressText.Text = "Đã hủy kiểm tra."; }
         catch (Exception ex) { ShowError(ex); }
         finally { _operationCancellation.Dispose(); _operationCancellation = null; SetBusy(false); }
+    }
+
+    private async void OnIssueChapterDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (_busy || _openChapter is null || IssueChaptersList.SelectedItem is not ProjectPublicationIssueChapter issue)
+            return;
+        Guid chapterId = issue.ChapterId;
+        Close();
+        await _openChapter(chapterId);
     }
 
     private async void OnExport(object sender, RoutedEventArgs e)
@@ -86,6 +104,7 @@ public partial class ProjectPublicationWindow : Window
                     _operationCancellation.Token);
             LastExportPath = report.OutputPath;
             OutputPathText.Text = "Đã xuất " + report.ExportedChapterCount.ToString("N0") + " chương:\n" + report.OutputPath;
+            ExportedActionsPanel.Visibility = Visibility.Visible;
             ProgressText.Text = report.IncompleteChapterCount > 0 || report.InspectionChapterCount > 0
                 ? "Đã xuất bản nháp theo xác nhận của người dùng. Dữ liệu Project không bị thay đổi."
                 : "Xuất bản hoàn tất. Dữ liệu Project không bị thay đổi.";
@@ -93,6 +112,22 @@ public partial class ProjectPublicationWindow : Window
         catch (OperationCanceledException) { ProgressText.Text = "Đã hủy. File đích cũ được giữ nguyên."; }
         catch (Exception ex) { ShowError(ex); }
         finally { _operationCancellation.Dispose(); _operationCancellation = null; SetBusy(false); }
+    }
+
+    private void OnOpenExportedFile(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(LastExportPath) || !File.Exists(LastExportPath)) return;
+        try { Process.Start(new ProcessStartInfo(LastExportPath) { UseShellExecute = true }); }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private void OnOpenExportFolder(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(LastExportPath)) return;
+        string? dir = Path.GetDirectoryName(LastExportPath);
+        if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir)) return;
+        try { Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true }); }
+        catch (Exception ex) { ShowError(ex); }
     }
 
     private void SetBusy(bool busy, string? message = null)

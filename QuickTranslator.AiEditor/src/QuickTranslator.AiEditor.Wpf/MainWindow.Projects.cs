@@ -257,7 +257,13 @@ public partial class MainWindow
     {
         if (_projectSession is null) return;
         if (_projectTranslationCoordinator?.IsRunning == true)
-            throw new InvalidOperationException("Hãy Pause Translation Queue trước khi mở chapter trong Editor.");
+        {
+            if (_projectTranslationCoordinator.IsChapterLockedByRunningQueue(chapterId))
+                throw new InvalidOperationException("Hãy Pause Translation Queue trước khi mở chapter trong Editor.");
+            if (_service?.GetSnapshot().Id == chapterId) return;
+            await RunSafeBackgroundChapterSwitchAsync(() => LoadProjectChapterCoreAsync(chapterId));
+            return;
+        }
         if (_service?.GetSnapshot().Id == chapterId) return;
         await RunWorkspaceTransitionAsync(() => LoadProjectChapterCoreAsync(chapterId));
     }
@@ -300,12 +306,22 @@ public partial class MainWindow
             foreach (ProjectCatalogChapter entry in _projectCatalog.Query(_projectSession,
                          new(Search: query, State: state, Sort: sort)))
                 _projectChapters.Add(new(entry.ChapterId,
-                    $"{entry.Number:0000} · {entry.VietnameseTitle}\n{ProjectStateLabel(entry.TranslationState)}"));
+                    $"{ProjectStateDot(entry.TranslationState)} {entry.Number:0000} · {entry.VietnameseTitle}\n{ProjectStateLabel(entry.TranslationState)}"));
             ProjectChapterList.SelectedItem = _projectChapters.FirstOrDefault(x => x.Id == _projectSession.Manifest.CurrentChapterId);
             ProjectAutosaveStatus.Text = $"{_projectSession.Manifest.Chapters.Count(x => x.DeletedAt is null)} chương · lưu tại {Path.GetFileName(_projectSession.ManifestPath)}";
         }
         finally { _syncingProjectUi = false; }
     }
+
+    private static string ProjectStateDot(ProjectChapterState state) => state switch
+    {
+        ProjectChapterState.Approved => "●",
+        ProjectChapterState.AwaitingReview => "◐",
+        ProjectChapterState.NeedsInspection => "▲",
+        ProjectChapterState.Translating => "↻",
+        ProjectChapterState.Untranslated => "○",
+        _ => "✕"
+    };
 
     private static string ProjectStateLabel(ProjectChapterState state) => state switch
     {
@@ -426,6 +442,7 @@ public partial class MainWindow
         {
             IReadOnlyList<ProjectLibraryCard> cards = await BuildProjectLibraryCardsAsync();
             var window = new ProjectLibraryWindow(cards, _projectSession?.Manifest.ProjectId) { Owner = this };
+            ClampWindowToWorkArea(window, 1180, 760);
             if (window.ShowDialog() != true || window.RequestedAction is not ProjectLibraryAction action) return;
             ProjectLibraryCard? selected = window.RequestedProject;
             try
@@ -577,10 +594,21 @@ public partial class MainWindow
     {
         if (_projectSession is null || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
         var entry = _projectSession.Manifest.Chapters.Single(x => x.ChapterId == item.Id);
-        string? title = AskText("Đổi tên chương", "Tên tiếng Việt", entry.VietnameseTitle); if (title is null) return;
-        string? chinese = AskText("Đổi tên chương", "Tên tiếng Trung (có thể để trống)", entry.ChineseTitle); if (chinese is null) return;
+        var (title, chinese) = ShowChapterRenameDialog(entry.VietnameseTitle, entry.ChineseTitle);
+        if (title is null || chinese is null) return;
         try { await RenameProjectChapterAsync(item.Id, title, chinese); }
         catch (Exception ex) { ShowError(ex); }
+    }
+
+    internal (string? VietnameseTitle, string? ChineseTitle) ShowChapterRenameDialog(string currentVietnameseTitle, string currentChineseTitle)
+    {
+        var vietnameseInput = new TextBox { Text = currentVietnameseTitle, MinWidth = 420 };
+        var chineseInput = new TextBox { Text = currentChineseTitle, MinWidth = 420 };
+        var panel = FormPanel(
+            ("Tên tiếng Việt (bắt buộc)", vietnameseInput),
+            ("Tên tiếng Trung (có thể để trống)", chineseInput));
+        if (!ShowForm("Đổi tên chương", panel)) return (null, null);
+        return (vietnameseInput.Text.Trim(), chineseInput.Text.Trim());
     }
 
     internal async Task RenameProjectChapterAsync(Guid chapterId, string title, string chineseTitle)
@@ -663,6 +691,7 @@ public partial class MainWindow
             var valid = candidates.Where(x => x.Error is null).ToList();
             var list = new ListBox { ItemsSource = valid, SelectionMode = SelectionMode.Extended, DisplayMemberPath = "Title", Margin = new Thickness(10) };
             var window = new Window { Owner = this, Title = "Chọn chương cũ để nhập (Ctrl/Shift để chọn nhiều)", Width = 760, Height = 520 };
+            ClampWindowToWorkArea(window, 760, 520);
             var import = new Button { Content = "Sao lưu nguồn và nhập", Style = (Style)FindResource("PrimaryButton") }; var cancel = new Button { Content = "Hủy" };
             var buttons = new WrapPanel(); buttons.Children.Add(import); buttons.Children.Add(cancel); var panel = new DockPanel(); DockPanel.SetDock(buttons, Dock.Bottom); panel.Children.Add(buttons); panel.Children.Add(list); window.Content = panel;
             import.Click += (_, _) => { if (list.SelectedItems.Count > 0) window.DialogResult = true; }; cancel.Click += (_, _) => window.DialogResult = false;
@@ -707,10 +736,17 @@ public partial class MainWindow
         var save = new Button { Content = "Lưu", Style = (Style)FindResource("PrimaryButton") }; var cancel = new Button { Content = "Hủy" };
         var buttons = new WrapPanel(); buttons.Children.Add(save); buttons.Children.Add(cancel); panel.Children.Add(buttons);
         var window = new Window { Owner = this, Title = title, Width = 600, SizeToContent = SizeToContent.Height, MaxHeight = 800, Content = panel };
+        ClampWindowToWorkArea(window, 600, 800);
         save.Click += (_, _) => window.DialogResult = true; cancel.Click += (_, _) => window.DialogResult = false;
         return window.ShowDialog() == true;
     }
 
-    private sealed record ProjectChapterItem(Guid Id, string Label);
-    private sealed record ProjectSwitchItem(Guid Id, string Title, string Path, bool Missing);
+    private sealed record ProjectChapterItem(Guid Id, string Label)
+    {
+        public override string ToString() => Label;
+    }
+    private sealed record ProjectSwitchItem(Guid Id, string Title, string Path, bool Missing)
+    {
+        public override string ToString() => Title;
+    }
 }

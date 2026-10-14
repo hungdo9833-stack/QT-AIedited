@@ -15,7 +15,7 @@
       </StackPanel>
       <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right" Width="430">
         <TextBlock x:Name="SummaryText" HorizontalAlignment="Right" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-        <TextBlock Text="Tối đa hai GPU · mỗi GPU một chapter · checkpoint từng segment" Foreground="{DynamicResource MutedBrush}"/>
+        <TextBlock Text="Tối đa hai GPU · mỗi GPU một chapter · nhấp đúp dòng hoàn tất/lỗi để mở trong Editor" Foreground="{DynamicResource MutedBrush}"/>
       </StackPanel>
     </DockPanel>
     <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
@@ -52,7 +52,8 @@
               HeadersVisibility="Column" GridLinesVisibility="Horizontal" Background="{DynamicResource PanelBrush}" Foreground="{DynamicResource TextBrush}"
               BorderBrush="{DynamicResource BorderBrush}" RowBackground="{DynamicResource PanelBrush}" AlternatingRowBackground="{DynamicResource PanelAltBrush}"
               EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-              ScrollViewer.CanContentScroll="True">
+              ScrollViewer.CanContentScroll="True" MouseDoubleClick="OnQueueGridDoubleClick"
+              ToolTip="Nhấp đúp vào chương đã hoàn tất hoặc lỗi để mở ngay trong Editor">
       <DataGrid.Columns>
         <DataGridTextColumn Header="#" Binding="{Binding Order}" Width="55"/>
         <DataGridTextColumn Header="Số" Binding="{Binding Number}" Width="65"/>

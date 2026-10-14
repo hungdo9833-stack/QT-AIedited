@@ -33,6 +33,7 @@ public partial class ProjectLibraryWindow : Window
     {
         _projects = projects;
         InitializeComponent();
+        MainWindow.ClampWindowToWorkArea(this, 1180, 760);
         RefreshItems();
         ProjectList.SelectedItem = _projects.FirstOrDefault(project => project.ProjectId == activeProjectId) ?? _projects.FirstOrDefault();
         UpdateButtons();

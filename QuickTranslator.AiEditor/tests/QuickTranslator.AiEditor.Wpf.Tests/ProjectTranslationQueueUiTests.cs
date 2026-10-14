@@ -1,5 +1,8 @@
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
+using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Translation;
 using QuickTranslator.AiEditor.Tests;
@@ -111,5 +114,67 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob?.Status);
         Assert.False(coordinator.IsRunning);
         window.Close();
+    });
+
+    [Fact]
+    public Task BL15_Completed_and_non_queued_chapters_can_be_opened_and_edited_while_project_queue_runs_in_background() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        var first = await fixture.AddChapterAsync("Một", 1);
+        var second = await fixture.AddChapterAsync("Hai", 2);
+        var third = await fixture.AddChapterAsync("Ba", 3);
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecond = new TaskCompletionSource<OllamaCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Client.Respond = (call, _) =>
+        {
+            if (call == 1) return Task.FromResult(FakeClient.Completion("Chương một đã dịch xong."));
+            secondStarted.TrySetResult();
+            return releaseSecond.Task;
+        };
+
+        await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id, second.Id });
+        var window = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
+        ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
+        ProjectTranslationJob plan = await coordinator.PlanAsync(new[] { first.Id, second.Id });
+        Task run = coordinator.StartAsync(plan);
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(coordinator.IsRunning);
+        Assert.True(coordinator.IsChapterLockedByRunningQueue(second.Id));
+        Assert.False(coordinator.IsChapterLockedByRunningQueue(first.Id));
+        Assert.False(coordinator.IsChapterLockedByRunningQueue(third.Id));
+
+        // Open and approve completed chapter 1 while chapter 2 is still actively translating in background
+        await window.OpenChapterRowAsync(first.Id);
+        Assert.Equal(first.Id, fixture.Service.GetSnapshot().Id);
+        await fixture.Window.ApproveSegmentCoreAsync(advanceToNext: false);
+        Assert.Equal(SegmentStatus.Approved, fixture.Service.GetSnapshot().Segments[0].Status);
+
+        releaseSecond.TrySetResult(FakeClient.Completion("Chương hai dịch xong."));
+        await run;
+        Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob?.Status);
+        window.Close();
+    });
+
+    [Fact]
+    public Task BL16_ShowTextCleanerWindow_opens_modeless_without_locking_editor() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        ChapterDocument chapter = TranslationService.CreateChapter("Chương modeless", "老公说了一句话。");
+        chapter.Segments[0].UserDraft = "Còn sót chữ 老公 trong bản dịch.";
+        fixture.Attach(chapter);
+        fixture.Window.ShowInTaskbar = false;
+        fixture.Window.Left = -30000;
+        fixture.Window.Show();
+
+        fixture.Call("ShowTextCleanerWindow", true);
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+
+        Assert.False(fixture.Get<bool>("_uiOperation"));
+        Assert.Single(fixture.Window.OwnedWindows);
+        var cleaner = fixture.Window.OwnedWindows.Cast<Window>().Single();
+        Assert.True(cleaner.IsVisible);
+        cleaner.Close();
     });
 }

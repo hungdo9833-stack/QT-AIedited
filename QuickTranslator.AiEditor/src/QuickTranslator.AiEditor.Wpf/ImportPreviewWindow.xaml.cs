@@ -22,19 +22,45 @@ public partial class ImportPreviewWindow : Window
     private bool _loading;
     private bool _translatingTitles;
 
-    public ImportPreviewWindow(ProjectSession project) : this(project, null) { }
+    public ImportPreviewWindow(ProjectSession project) : this(project, null, null) { }
 
-    internal ImportPreviewWindow(ProjectSession project, ChapterTitleRuntimeFactory? titleRuntimeFactory)
+    internal ImportPreviewWindow(ProjectSession project, ChapterTitleRuntimeFactory? titleRuntimeFactory, string? initialPath = null)
     {
         _project = project ?? throw new ArgumentNullException(nameof(project));
         _titleRuntimeFactory = titleRuntimeFactory;
         InitializeComponent();
+        MainWindow.ClampWindowToWorkArea(this, 1380, 860);
         PreviewGrid.ItemsSource = _rows;
+        if (!string.IsNullOrWhiteSpace(initialPath))
+        {
+            Loaded += async (_, _) => await AnalyzePathAsync(initialPath);
+        }
     }
 
     public ImportPreviewPlan? ConfirmedPlan { get; private set; }
     public string? SourcePath { get; private set; }
     internal ImportPreviewPlan? CurrentPlan => _editor?.Current;
+
+    private void OnWindowPreviewDragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop) &&
+            e.Data.GetData(DataFormats.FileDrop) is string[] files &&
+            files.Any(f => f.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)))
+        {
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+        }
+    }
+
+    private async void OnWindowDrop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop) ||
+            e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
+        string? txt = files.FirstOrDefault(f => f.EndsWith(".txt", StringComparison.OrdinalIgnoreCase));
+        if (txt is null) return;
+        e.Handled = true;
+        await AnalyzePathAsync(txt);
+    }
 
     internal async Task LoadSourceAsync(string path, SourceTextEncoding encoding, CancellationToken token = default)
     {
@@ -99,7 +125,7 @@ public partial class ImportPreviewWindow : Window
             string[] problems = plan.Issues.Where(x => x.ItemIds.Contains(item.Id)).Select(x => x.Message).ToArray();
             ChapterTitleTranslationItem? translated = _titleDraft?.Items.SingleOrDefault(x => x.Id == item.Id);
             if (translated?.Status == ChapterTitleTranslationStatus.Failed && translated.Error is not null)
-                problems = [.. problems, "Dịch tiêu đề: " + translated.Error];
+                problems = [.. problems, "Dịch tiêu đề (đã dùng tên dự phòng): " + translated.Error];
             string? collision = ProjectCollision(item);
             if (collision is not null) { problems = [.. problems, collision]; projectIssues.Add(collision); }
             var row = new PreviewRow(item, problems, translated?.Status);
@@ -123,16 +149,17 @@ public partial class ImportPreviewWindow : Window
         ProblemCountText.Text = $"{problemsCount:N0} mục";
         SourceSummaryText.Text = $"{plan.Source.EncodingName} · {plan.Source.Text.Length:N0} ký tự · {plan.Source.NewLineStyle}";
         UndoButton.IsEnabled = _editor.CanUndo;
-        bool titlesReady = TranslateTitlesCheck.IsChecked != true || plan.ImportableChapters.All(item =>
-            !string.IsNullOrWhiteSpace(item.VietnameseTitle));
-        ConfirmButton.IsEnabled = !_translatingTitles && !plan.HasBlockingIssues && collisions == 0 &&
-            plan.ImportableChapters.Any() && titlesReady;
-        FooterHintText.Text = ConfirmButton.IsEnabled
-            ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương theo thứ tự số. Source hash {plan.Source.RawSha256[..12]}…"
-            : titlesReady ? "Cần xử lý lỗi màu cảnh báo hoặc collision trước khi nhập. Nguồn TXT vẫn giữ nguyên."
-                : "Còn tiêu đề chưa dịch. Hãy retry mục lỗi hoặc bỏ chọn dịch tiêu đề để chủ động nhập tên gốc.";
-        int translatedCount = plan.ImportableChapters.Count(item => !string.IsNullOrWhiteSpace(item.VietnameseTitle));
         int failedTitles = _titleDraft?.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Failed) ?? 0;
+        int untranslatedCount = plan.ImportableChapters.Count(item => string.IsNullOrWhiteSpace(item.VietnameseTitle));
+        // BL-18: Do not lock out ConfirmButton when a few titles fail or remain untranslated; automatically fallback to safe titles with warning.
+        ConfirmButton.IsEnabled = !_translatingTitles && !plan.HasBlockingIssues && collisions == 0 &&
+            plan.ImportableChapters.Any();
+        FooterHintText.Text = ConfirmButton.IsEnabled
+            ? (TranslateTitlesCheck.IsChecked == true && (failedTitles > 0 || untranslatedCount > 0)
+                ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương ({failedTitles:N0} tiêu đề lỗi / {untranslatedCount:N0} chưa dịch sẽ tự dùng tên dự phòng kèm cảnh báo)."
+                : $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương theo thứ tự số. Source hash {plan.Source.RawSha256[..12]}…")
+            : "Cần xử lý lỗi màu cảnh báo hoặc collision trước khi nhập. Nguồn TXT vẫn giữ nguyên.";
+        int translatedCount = plan.ImportableChapters.Count(item => !string.IsNullOrWhiteSpace(item.VietnameseTitle));
         TitleTranslationProgressText.Text = $"{translatedCount:N0}/{plan.ImportableChapters.Count():N0} tiêu đề · {failedTitles:N0} lỗi";
         TranslateAllTitlesButton.IsEnabled = !_translatingTitles && plan.ImportableChapters.Any();
         RetryFailedTitlesButton.IsEnabled = !_translatingTitles && failedTitles > 0;
@@ -332,11 +359,42 @@ public partial class ImportPreviewWindow : Window
     private void ApplyCompletedTitles()
     {
         if (_editor is null || _titleDraft is null) return;
-        Dictionary<Guid, string> completed = _titleDraft.Items.Where(item =>
-                item.Status is ChapterTitleTranslationStatus.Completed or ChapterTitleTranslationStatus.Protected &&
+        var titles = new Dictionary<Guid, string>();
+        foreach (ChapterTitleTranslationItem item in _titleDraft.Items)
+        {
+            if (item.Status is ChapterTitleTranslationStatus.Completed or ChapterTitleTranslationStatus.Protected &&
                 !string.IsNullOrWhiteSpace(item.VietnameseTitle))
-            .ToDictionary(item => item.Id, item => item.VietnameseTitle);
-        if (completed.Count > 0) _editor.ApplyVietnameseTitles(completed);
+            {
+                titles[item.Id] = item.VietnameseTitle;
+            }
+            else if (item.Status == ChapterTitleTranslationStatus.Failed)
+            {
+                titles[item.Id] = !string.IsNullOrWhiteSpace(item.VietnameseTitle)
+                    ? item.VietnameseTitle
+                    : FallbackVietnameseTitle(item.ChapterNumber, item.ChineseTitle);
+            }
+        }
+        if (titles.Count > 0) _editor.ApplyVietnameseTitles(titles);
+    }
+
+    internal void EnsureFallbackVietnameseTitles()
+    {
+        if (_editor is null) return;
+        var fallback = new Dictionary<Guid, string>();
+        foreach (ImportPreviewItem item in _editor.Current.ImportableChapters)
+        {
+            if (string.IsNullOrWhiteSpace(item.VietnameseTitle))
+                fallback[item.Id] = FallbackVietnameseTitle(item.Number, item.Title);
+        }
+        if (fallback.Count > 0) _editor.ApplyVietnameseTitles(fallback);
+    }
+
+    private static string FallbackVietnameseTitle(int? number, string originalTitle)
+    {
+        string trimmed = originalTitle.Trim();
+        if (number is int n && !trimmed.StartsWith("Chương ", StringComparison.OrdinalIgnoreCase))
+            return string.IsNullOrWhiteSpace(trimmed) ? $"Chương {n}" : $"Chương {n}: {trimmed}";
+        return string.IsNullOrWhiteSpace(trimmed) ? "Chương mới" : trimmed;
     }
 
     private void InvalidateTitleDraft()
@@ -389,11 +447,17 @@ public partial class ImportPreviewWindow : Window
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         buttons.Children.Add(cancel); buttons.Children.Add(ok);
         var panel = new StackPanel { Margin = new Thickness(12) };
-        panel.Children.Add(new TextBlock { Text = "Chọn dòng bắt đầu", Foreground = System.Windows.Media.Brushes.Gainsboro }); panel.Children.Add(lines);
-        panel.Children.Add(new TextBlock { Text = "Số chương", Foreground = System.Windows.Media.Brushes.Gainsboro }); panel.Children.Add(numberInput);
-        panel.Children.Add(new TextBlock { Text = "Tên chương", Foreground = System.Windows.Media.Brushes.Gainsboro }); panel.Children.Add(titleInput); panel.Children.Add(buttons);
+        var l1 = new TextBlock { Text = "Chọn dòng bắt đầu" }; l1.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+        var l2 = new TextBlock { Text = "Số chương" }; l2.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+        var l3 = new TextBlock { Text = "Tên chương" }; l3.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+        panel.Children.Add(l1); panel.Children.Add(lines);
+        panel.Children.Add(l2); panel.Children.Add(numberInput);
+        panel.Children.Add(l3); panel.Children.Add(titleInput); panel.Children.Add(buttons);
         var dialog = new Window { Owner = this, Title = title, Width = 620, SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(14, 27, 45)), Content = panel };
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = panel };
+        dialog.SetResourceReference(BackgroundProperty, "PanelBrush");
+        dialog.SetResourceReference(ForegroundProperty, "TextBrush");
+        MainWindow.ClampWindowToWorkArea(dialog, 620, 460);
         ok.Click += (_, _) => dialog.DialogResult = true;
         if (dialog.ShowDialog() != true || lines.SelectedItem is not LineChoice selected || !int.TryParse(numberInput.Text, out number) || number <= 0) return false;
         offset = selected.Offset; chapterTitle = titleInput.Text.Trim(); return true;
@@ -422,6 +486,8 @@ public partial class ImportPreviewWindow : Window
     private void OnConfirm(object sender, RoutedEventArgs e)
     {
         if (_editor is null || !ConfirmButton.IsEnabled) return;
+        if (TranslateTitlesCheck.IsChecked == true)
+            EnsureFallbackVietnameseTitles();
         ConfirmedPlan = _editor.Current;
         DialogResult = true;
     }
@@ -441,7 +507,10 @@ public partial class ImportPreviewWindow : Window
     }
     private static string Short(string value) => value.Length <= 70 ? value : value[..67] + "…";
 
-    private sealed record LineChoice(int Offset, string Label);
+    private sealed record LineChoice(int Offset, string Label)
+    {
+        public override string ToString() => Label;
+    }
     private sealed record PreviewRow(Guid Id, string IncludedLabel, string NumberLabel, string Title,
         string VietnameseTitle, string VolumeTitle, string Status, string ProblemLabel, string[] Problems)
     {

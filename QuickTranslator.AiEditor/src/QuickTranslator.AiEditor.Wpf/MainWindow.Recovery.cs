@@ -38,6 +38,7 @@ public partial class MainWindow
         var panel = new DockPanel(); DockPanel.SetDock(status, Dock.Top); DockPanel.SetDock(buttons, Dock.Bottom);
         panel.Children.Add(status); panel.Children.Add(buttons); panel.Children.Add(list);
         var window = new Window { Owner = this, Title = "Đối chiếu transaction và chương mất liên kết", Width = 980, Height = 560, Content = panel };
+        ClampWindowToWorkArea(window, 980, 560);
         bool working = false;
         void Reload()
         {
@@ -97,7 +98,10 @@ public partial class MainWindow
         if (session.RecoveryReport.RequiresDecision)
             throw new OperationCanceledException("Dự án còn transaction chưa đối chiếu; chưa thay context. Journal/orphans được giữ nguyên.");
     }
-    private sealed record RecoveryRow(string Label, ProjectTransactionPreview? Transaction);
+    private sealed record RecoveryRow(string Label, ProjectTransactionPreview? Transaction)
+    {
+        public override string ToString() => Label;
+    }
 
     private void ShowLegacyImportReport(LegacyImportReport report)
     {

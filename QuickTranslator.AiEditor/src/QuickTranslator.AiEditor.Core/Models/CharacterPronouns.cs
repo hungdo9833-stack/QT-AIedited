@@ -29,6 +29,98 @@ public sealed record CharacterRelationship
         !string.IsNullOrWhiteSpace(AddresseeReference) || SpeakerCharacterId != Guid.Empty || ListenerCharacterId != Guid.Empty;
 }
 
+public sealed record CharacterRelationshipPreset(
+    string Label,
+    string Relationship,
+    string SelfReference,
+    string AddresseeReference,
+    string ReverseRelationship,
+    string ReverseSelfReference,
+    string ReverseAddresseeReference)
+{
+    public override string ToString() => Label;
+
+    public static IReadOnlyList<CharacterRelationshipPreset> Defaults { get; } =
+    [
+        new("Chồng → Vợ (anh – em)", "Chồng - Vợ", "anh", "em", "Vợ - Chồng", "em", "anh"),
+        new("Vợ → Chồng (em – anh)", "Vợ - Chồng", "em", "anh", "Chồng - Vợ", "anh", "em"),
+        new("Huynh → Muội (huynh – muội)", "Huynh - Muội", "huynh", "muội", "Muội - Huynh", "muội", "huynh"),
+        new("Tỷ → Đệ (tỷ – đệ)", "Tỷ - Đệ", "tỷ", "đệ", "Đệ - Tỷ", "đệ", "tỷ"),
+        new("Sư phụ → Đồ đệ (vi sư – đồ nhi)", "Sư phụ - Đồ đệ", "vi sư", "đồ nhi", "Đồ đệ - Sư phụ", "đồ nhi", "sư phụ"),
+        new("Chủ thượng → Thuộc hạ (bản tọa – ngươi)", "Chủ - Thuộc hạ", "bản tọa", "ngươi", "Thuộc hạ - Chủ", "thuộc hạ", "chủ thượng"),
+        new("Ngang hàng cổ trang (ta – ngươi)", "Ngang hàng", "ta", "ngươi", "Ngang hàng", "ta", "ngươi"),
+        new("Ngang hàng hiện đại (tôi – cậu)", "Bạn bè", "tôi", "cậu", "Bạn bè", "tôi", "cậu")
+    ];
+}
+
+public static class CharacterRelationshipSync
+{
+    /// <summary>
+    /// Creates or updates an explicitly confirmed reverse relationship (B -> A) on the target listener profile.
+    /// Never infers unconfirmed fields and NEVER overwrites a Locked relationship rule on the target profile (Adjustment A).
+    /// </summary>
+    public static bool TryApplyConfirmedReverseRule(
+        CharacterProject project,
+        Guid speakerCharacterId,
+        Guid listenerCharacterId,
+        string reverseRelationship,
+        string reverseSelfReference,
+        string reverseAddresseeReference,
+        bool enabled,
+        bool locked,
+        string addressingNotes,
+        out string? warning)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        warning = null;
+        if (speakerCharacterId == Guid.Empty || listenerCharacterId == Guid.Empty || speakerCharacterId == listenerCharacterId)
+        {
+            warning = "Nhân vật nói và nhân vật nghe của quy tắc ngược không hợp lệ.";
+            return false;
+        }
+        CharacterProfile? speaker = project.Profiles.SingleOrDefault(p => p.Id == speakerCharacterId);
+        CharacterProfile? listener = project.Profiles.SingleOrDefault(p => p.Id == listenerCharacterId);
+        if (speaker is null || listener is null)
+        {
+            warning = "Không tìm thấy hồ sơ nhân vật đích trong dự án.";
+            return false;
+        }
+        string selfRef = (reverseSelfReference ?? "").Trim();
+        string addrRef = (reverseAddresseeReference ?? "").Trim();
+        string relName = (reverseRelationship ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(selfRef) || string.IsNullOrWhiteSpace(addrRef))
+        {
+            warning = $"Quy tắc chiều ngược ({listener.VietnameseName} → {speaker.VietnameseName}) cần đủ Tự xưng và Gọi đối phương.";
+            return false;
+        }
+
+        int existingIndex = listener.Relationships.FindIndex(r => r.EffectiveListenerCharacterId == speaker.Id);
+        if (existingIndex >= 0 && listener.Relationships[existingIndex].Locked)
+        {
+            warning = $"Quy tắc {listener.VietnameseName} → {speaker.VietnameseName} đang Khóa (Locked); giữ nguyên không ghi đè.";
+            return false;
+        }
+
+        var reverseRule = new CharacterRelationship
+        {
+            TargetCharacterId = speaker.Id,
+            SpeakerCharacterId = listener.Id,
+            ListenerCharacterId = speaker.Id,
+            Relationship = string.IsNullOrWhiteSpace(relName) ? "đã xác nhận" : relName,
+            SelfReference = selfRef,
+            AddresseeReference = addrRef,
+            Enabled = enabled,
+            Locked = locked,
+            AddressingNotes = (addressingNotes ?? "").Trim()
+        };
+
+        if (existingIndex >= 0) listener.Relationships[existingIndex] = reverseRule;
+        else listener.Relationships.Add(reverseRule);
+        listener.Validate();
+        return true;
+    }
+}
+
 public sealed class CharacterProfile
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -48,6 +140,24 @@ public sealed class CharacterProfile
     {
         CharacterGender.Male => "Nam", CharacterGender.Female => "Nữ", CharacterGender.Other => "Khác", _ => "Chưa xác định"
     };
+
+    [JsonIgnore]
+    public string RelationshipSummary
+    {
+        get
+        {
+            if (Relationships is null || Relationships.Count == 0)
+                return string.IsNullOrWhiteSpace(AddressingNotes) ? "Chưa có" : AddressingNotes;
+            int active = Relationships.Count(r => r.Enabled);
+            int locked = Relationships.Count(r => r.Locked);
+            var parts = Relationships.Take(3).Select(r =>
+                !string.IsNullOrWhiteSpace(r.SelfReference) && !string.IsNullOrWhiteSpace(r.AddresseeReference)
+                    ? $"{(string.IsNullOrWhiteSpace(r.Relationship) ? "Đàm thoại" : r.Relationship)} ({r.SelfReference}→{r.AddresseeReference}{(r.Locked ? " 🔒" : "")})"
+                    : r.Relationship);
+            string head = $"{Relationships.Count} quan hệ ({active} bật, {locked} khóa): ";
+            return head + string.Join(", ", parts) + (Relationships.Count > 3 ? "…" : "");
+        }
+    }
 
     public void ApplyGenderDefaults()
     {

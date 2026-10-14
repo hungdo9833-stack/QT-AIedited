@@ -24,6 +24,7 @@ public partial class MainWindow
     private string? _traditionalRequestKey;
     private bool _syncingTraditionalSelection;
     private bool _loadingTraditionalPreferences;
+    private bool _showAiComparison;
     private TextBoxRangeHighlightAdorner? _chineseHighlight;
     private TextBoxRangeHighlightAdorner? _hanVietHighlight;
     private TextBoxRangeHighlightAdorner? _vietPhraseHighlight;
@@ -39,6 +40,23 @@ public partial class MainWindow
         };
         ApplyTraditionalPaneLayout();
         AlignmentDiagnosticsPathText.Text = "Log: " + AlignmentDiagnosticsLogger.DefaultPath;
+    }
+
+    private void OnToggleAiComparison(object sender, RoutedEventArgs e)
+    {
+        _showAiComparison = !_showAiComparison;
+        UpdateAiComparisonVisibility();
+    }
+
+    private void UpdateAiComparisonVisibility()
+    {
+        if (AiText is null) return;
+        bool hasDiff = !string.IsNullOrWhiteSpace(AiText.Text) &&
+                       !string.Equals(AiText.Text.Trim(), DraftText.Text.Trim(), StringComparison.Ordinal);
+        bool visible = _showAiComparison || hasDiff;
+        AiText.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (FindName("ToggleAiCompareButton") is Button toggleBtn)
+            toggleBtn.Content = visible ? "Ẩn bản AI" : "So sánh AI gốc";
     }
 
     private async void OnTraditionalEditorLoaded(object sender, RoutedEventArgs e)
@@ -230,10 +248,13 @@ public partial class MainWindow
         if (input.SelectionLength <= 0)
         {
             ClearTraditionalHighlights();
+            UpdateInspectorLiveSelection("");
             return;
         }
         TraditionalPane origin = ReferenceEquals(input, SourceText) ? TraditionalPane.Chinese :
             ReferenceEquals(input, HanVietText) ? TraditionalPane.HanViet : TraditionalPane.VietPhrase;
+        if (origin == TraditionalPane.Chinese)
+            UpdateInspectorLiveSelection(input.SelectedText);
         if (_traditionalResult is null || _traditionalDisplayedSegmentId != _selectedId ||
             !string.Equals(_traditionalResult.SourceText, SourceText.Text, StringComparison.Ordinal))
         {
@@ -248,6 +269,12 @@ public partial class MainWindow
             ClearTraditionalHighlights();
             WriteAlignmentDiagnostic(origin, new(input.SelectionStart, input.SelectionLength), projected, "no-source-mapping");
             return;
+        }
+        if (origin != TraditionalPane.Chinese &&
+            projected.Chinese.Start >= 0 &&
+            projected.Chinese.Start + projected.Chinese.Length <= SourceText.Text.Length)
+        {
+            UpdateInspectorLiveSelection(SourceText.Text.Substring(projected.Chinese.Start, projected.Chinese.Length));
         }
         ShowTraditionalHighlights(origin, projected);
         ScrollMappedTargetsIntoView(origin, projected);
@@ -311,7 +338,7 @@ public partial class MainWindow
 
     private void OnHideTraditionalPane(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse(tag, out TraditionalPane pane)) return;
+        if (sender is not FrameworkElement { Tag: string tag }) return;
         var visible = Enum.GetValues<TraditionalPane>().Where(item => !_hiddenTraditionalPanes.Contains(item)).ToList();
         int visibleCount = visible.Count + (AiPane.Visibility == Visibility.Visible && _maximizedTraditionalPane is null ? 1 : 0);
         if (tag == "Ai")
@@ -319,11 +346,12 @@ public partial class MainWindow
             if (visibleCount <= 1) { SetStatus("Phải giữ lại ít nhất một ô."); return; }
             AiPane.Visibility = Visibility.Collapsed;
         }
-        else
+        else if (Enum.TryParse(tag, out TraditionalPane pane))
         {
             if (visibleCount <= 1) { SetStatus("Phải giữ lại ít nhất một ô."); return; }
             _hiddenTraditionalPanes.Add(pane);
         }
+        else return;
         _maximizedTraditionalPane = null;
         ApplyTraditionalPaneLayout();
     }
@@ -358,18 +386,43 @@ public partial class MainWindow
     private void ApplyTraditionalPaneLayout()
     {
         if (ChinesePane is null) return;
-        ChinesePane.Visibility = _hiddenTraditionalPanes.Contains(TraditionalPane.Chinese) ? Visibility.Collapsed : Visibility.Visible;
-        HanVietPane.Visibility = _hiddenTraditionalPanes.Contains(TraditionalPane.HanViet) ? Visibility.Collapsed : Visibility.Visible;
-        VietPhrasePane.Visibility = _hiddenTraditionalPanes.Contains(TraditionalPane.VietPhrase) ? Visibility.Collapsed : Visibility.Visible;
-        bool left = ChinesePane.Visibility == Visibility.Visible || VietPhrasePane.Visibility == Visibility.Visible;
-        bool right = HanVietPane.Visibility == Visibility.Visible || AiPane.Visibility == Visibility.Visible;
-        bool top = ChinesePane.Visibility == Visibility.Visible || HanVietPane.Visibility == Visibility.Visible;
-        bool bottom = VietPhrasePane.Visibility == Visibility.Visible || AiPane.Visibility == Visibility.Visible;
+        bool zhVisible = !_hiddenTraditionalPanes.Contains(TraditionalPane.Chinese);
+        bool hvVisible = !_hiddenTraditionalPanes.Contains(TraditionalPane.HanViet);
+        bool vpVisible = !_hiddenTraditionalPanes.Contains(TraditionalPane.VietPhrase);
+        bool aiVisible = AiPane.Visibility == Visibility.Visible;
+
+        ChinesePane.Visibility = zhVisible ? Visibility.Visible : Visibility.Collapsed;
+        HanVietPane.Visibility = hvVisible ? Visibility.Visible : Visibility.Collapsed;
+        VietPhrasePane.Visibility = vpVisible ? Visibility.Visible : Visibility.Collapsed;
+
+        bool left = zhVisible || vpVisible;
+        bool right = hvVisible || aiVisible;
+        bool top = zhVisible || hvVisible;
+        bool bottom = vpVisible || aiVisible;
+
+        // BL-09: Dynamic Column / ColumnSpan & Row / RowSpan expansion when 1 pane in a row/column is hidden.
+        Grid.SetColumn(ChinesePane, 0);
+        Grid.SetColumnSpan(ChinesePane, zhVisible && !hvVisible && right ? 3 : 1);
+        Grid.SetRow(ChinesePane, 0);
+        Grid.SetRowSpan(ChinesePane, zhVisible && !vpVisible && bottom && (!hvVisible || aiVisible) ? 1 : 1);
+
+        Grid.SetColumn(HanVietPane, hvVisible && !zhVisible && left ? 0 : 2);
+        Grid.SetColumnSpan(HanVietPane, hvVisible && !zhVisible && left ? 3 : 1);
+        Grid.SetRow(HanVietPane, 0);
+
+        Grid.SetColumn(VietPhrasePane, 0);
+        Grid.SetColumnSpan(VietPhrasePane, vpVisible && !aiVisible && right ? 3 : 1);
+        Grid.SetRow(VietPhrasePane, 2);
+
+        Grid.SetColumn(AiPane, aiVisible && !vpVisible && left ? 0 : 2);
+        Grid.SetColumnSpan(AiPane, aiVisible && !vpVisible && left ? 3 : 1);
+        Grid.SetRow(AiPane, 2);
+
         TraditionalLeftColumn.Width = left ? new(_workspaceLayout.FourPaneLeftStar, GridUnitType.Star) : new(0);
         TraditionalRightColumn.Width = right ? new(1, GridUnitType.Star) : new(0);
-        TraditionalVerticalSplitterColumn.Width = left && right ? new(6) : new(0);
+        TraditionalVerticalSplitterColumn.Width = left && right && ((zhVisible && hvVisible) || (vpVisible && aiVisible)) ? new(6) : new(0);
         TraditionalTopRow.Height = top ? new(_workspaceLayout.FourPaneTopStar, GridUnitType.Star) : new(0);
-        TraditionalBottomRow.Height = bottom ? new(1.2, GridUnitType.Star) : new(0);
+        TraditionalBottomRow.Height = bottom ? new(1.35, GridUnitType.Star) : new(0);
         TraditionalHorizontalSplitterRow.Height = top && bottom ? new(6) : new(0);
         _chineseHighlight?.InvalidateVisual();
         _hanVietHighlight?.InvalidateVisual();

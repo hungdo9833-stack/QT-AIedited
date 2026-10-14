@@ -99,6 +99,31 @@ public sealed class ChapterManagerUiTests
         Assert.Single(fixture.Get<ProjectCatalog>("_projectCatalog").Query(fixture.Project, new()));
     });
 
+    [Fact]
+    public Task BL17_BL20_Chapter_range_selection_and_command_palette_filter_chapters_and_commands() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        AddManifestEntries(fixture.Project, 50);
+        await fixture.Repository.SaveManifestAsync(fixture.Project);
+        var window = new ChapterManagerWindow(fixture.Project, fixture.Get<ProjectCatalog>("_projectCatalog"), NoOpCommands());
+        try
+        {
+            int count = window.SelectChapterRange(10, 25);
+            Assert.Equal(16, count);
+            Assert.Contains("Đã chọn 16", ((TextBlock)window.FindName("SelectionText")).Text);
+
+            var chapterPalette = fixture.Window.GetCommandPaletteItems(commandsMode: false, "Chương 25");
+            Assert.Single(chapterPalette);
+            Assert.Contains("0025", chapterPalette[0].Title);
+
+            var commandPalette = fixture.Window.GetCommandPaletteItems(commandsMode: true, "Ctrl+Enter");
+            Assert.Single(commandPalette);
+            Assert.Equal("approve-next", commandPalette[0].Id);
+        }
+        finally { window.Close(); }
+    });
+
     private static ChapterManagerCommands NoOpCommands() => new(
         _ => Task.CompletedTask,
         (_, _, _) => Task.CompletedTask,

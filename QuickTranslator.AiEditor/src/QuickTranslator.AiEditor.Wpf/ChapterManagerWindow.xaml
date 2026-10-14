@@ -47,6 +47,12 @@
         <Button x:Name="QueueButton" Content="Đưa vào hàng đợi dịch" Click="OnQueue" ToolTip="Xem Queue Plan trước khi bắt đầu dịch tuần tự."/>
         <Button x:Name="TranslateSelectedTitlesButton" Content="Dịch tiêu đề đã chọn" Click="OnTranslateSelectedTitles"/>
         <Button x:Name="TranslateAllTitlesButton" Content="Dịch tất cả tiêu đề" Click="OnTranslateAllTitles"/>
+        <Separator Width="1" Height="22" Margin="6,2" Background="{DynamicResource BorderBrush}"/>
+        <TextBlock Text="Từ chương:" VerticalAlignment="Center" Margin="4,0,2,0" Foreground="{DynamicResource MutedBrush}"/>
+        <TextBox x:Name="RangeStartInput" Width="62" ToolTip="Số chương bắt đầu"/>
+        <TextBlock Text="đến:" VerticalAlignment="Center" Margin="4,0,2,0" Foreground="{DynamicResource MutedBrush}"/>
+        <TextBox x:Name="RangeEndInput" Width="62" ToolTip="Số chương kết thúc"/>
+        <Button x:Name="SelectRangeButton" Content="Chọn dải" Click="OnSelectChapterRange" ToolTip="Chọn nhanh toàn bộ chương nằm trong dải từ X đến Y"/>
         <Button x:Name="ClearSelectionButton" Content="Bỏ chọn" Click="OnClearSelection"/>
       </WrapPanel>
       <TextBlock x:Name="SelectionText" DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>

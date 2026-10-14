@@ -156,7 +156,7 @@ public partial class MainWindow
     {
         var chinese = new TextBox { Text = source?.Chinese ?? chineseSeed ?? "" };
         var vietnamese = new TextBox { Text = source?.Vietnamese ?? "" };
-        var validation = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap };
+        var validation = new TextBlock { Foreground = (Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap };
         var panel = new StackPanel { Margin = new Thickness(14) };
         panel.Children.Add(new TextBlock { Text = "Tiếng Trung", FontWeight = FontWeights.SemiBold }); panel.Children.Add(chinese);
         panel.Children.Add(new TextBlock { Text = "Tiếng Việt đã xác nhận", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0) }); panel.Children.Add(vietnamese);
@@ -164,6 +164,7 @@ public partial class MainWindow
         var buttons = new WrapPanel(); var save = new Button { Content = "Lưu", Style = (Style)FindResource("PrimaryButton") }; var cancel = new Button { Content = "Hủy" };
         buttons.Children.Add(save); buttons.Children.Add(cancel); panel.Children.Add(buttons);
         var window = new Window { Owner = this, Title = source is null ? "Thêm thuật ngữ" : "Sửa thuật ngữ", Width = 540, SizeToContent = SizeToContent.Height, Content = panel };
+        ClampWindowToWorkArea(window, 540, 420);
         GlossaryRow? result = null;
         save.Click += (_, _) =>
         {
@@ -198,7 +199,7 @@ public partial class MainWindow
             var description = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 64 };
             var template = new TextBox { AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
-            var validation = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+            var validation = new TextBlock { Foreground = (Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
             bool dirty = false, loading = false;
 
             void RefreshList(Guid? select = null)
@@ -247,6 +248,7 @@ public partial class MainWindow
             var grid = new Grid { Margin = new Thickness(12) }; grid.ColumnDefinitions.Add(new() { Width = new GridLength(270) }); grid.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             var left = new DockPanel(); DockPanel.SetDock(leftButtons, Dock.Bottom); left.Children.Add(leftButtons); left.Children.Add(list); grid.Children.Add(left); Grid.SetColumn(editor, 1); grid.Children.Add(editor);
             var window = new Window { Owner = this, Title = "Quản lý Prompt Preset", Width = 1050, Height = 720, MinWidth = 800, MinHeight = 520, Content = grid };
+            ClampWindowToWorkArea(window, 1050, 720);
             save.Click += (_, _) => SaveEditor();
             restore.Click += (_, _) => { template.Text = PromptPreset.DefaultTemplate; dirty = true; validation.Text = "Đã nạp nội dung mặc định; bấm Lưu thay đổi để xác nhận."; };
             close.Click += (_, _) => { if (dirty && MessageBox.Show(window, "Bỏ thay đổi chưa lưu trong cửa sổ preset?", "Đóng", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return; window.DialogResult = true; };

@@ -42,6 +42,7 @@ public partial class MainWindow
             await EnsureOllamaBackendsLoadedAsync();
             if (_gpuManagerWindow is { IsLoaded: true }) { _gpuManagerWindow.Activate(); return; }
             _gpuManagerWindow = new GpuManagerWindow(_ollamaBackends, _gpuConnections, _gpuPreferences) { Owner = this };
+            ClampWindowToWorkArea(_gpuManagerWindow, 1180, 820);
             _gpuManagerWindow.Closed += (_, _) => _gpuManagerWindow = null;
             _gpuManagerWindow.Show();
         }
@@ -182,8 +183,6 @@ public partial class MainWindow
         };
         profile.Model = profile.Runtime.ModelOptions.Model;
         profile.Validate();
-        // Consent belongs to one concrete remote destination. Editing a saved
-        // profile to point at another server must show the disclosure again.
         if (profile.Kind == OllamaBackendKind.Remote && (original?.Kind != OllamaBackendKind.Remote ||
             !string.Equals(original.Endpoint, profile.Endpoint, StringComparison.OrdinalIgnoreCase)))
             profile.RemoteDisclosureAccepted = false;
@@ -329,5 +328,8 @@ public partial class MainWindow
     private static string BackendLabel(OllamaBackendProfile profile) =>
         $"{(profile.Kind == OllamaBackendKind.Local ? "Local" : "Remote")} · {profile.Name}";
 
-    private sealed record OllamaProfileItem(Guid Id, string Label);
+    private sealed record OllamaProfileItem(Guid Id, string Label)
+    {
+        public override string ToString() => Label;
+    }
 }

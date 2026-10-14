@@ -18,6 +18,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow
 {
+    private Window? _textCleanerWindow;
     private readonly ChineseTextScanner _chineseTextScanner = new();
     private readonly BatchReplacementEngine _batchReplacementEngine = new();
 
@@ -72,8 +73,7 @@ public partial class MainWindow
             return;
         }
         if (_uiOperation) return;
-        _uiOperation = true;
-        UpdateButtons();
+        _textCleanerWindow?.Close();
 
         var find = new TextBox { MinWidth = 170, ToolTip = "Văn bản cần tìm" };
         var replace = new TextBox { MinWidth = 170, ToolTip = "Văn bản thay thế; có thể để trống để xóa" };
@@ -103,7 +103,7 @@ public partial class MainWindow
         var classification = new ComboBox { Width = 175 };
         classification.ItemsSource = new[] { "Tất cả trạng thái", "Đã xác nhận", "Chưa biết", "Xung đột", "Giữ nguyên", "Được bảo vệ" };
         classification.SelectedIndex = 0;
-        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DarkSlateGray, Margin = new Thickness(6) };
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = (Brush)FindResource("TextBrush"), Margin = new Thickness(6) };
         var progress = new ProgressBar { Height = 5, IsIndeterminate = true, Visibility = Visibility.Collapsed };
         var previewRows = new ObservableCollection<BatchPreviewRow>();
         var chineseRows = new ObservableCollection<ChineseOccurrenceRow>();
@@ -154,12 +154,13 @@ public partial class MainWindow
         DockPanel.SetDock(bottom, Dock.Bottom); root.Children.Add(bottom); root.Children.Add(tabs);
         var window = new Window
         {
-            Owner = this, Title = "Tìm & thay thế hàng loạt · Quét chữ Hán còn sót",
+            Title = "Tìm & thay thế hàng loạt · Quét chữ Hán còn sót",
             Width = 1180, Height = 760, MinWidth = 850, MinHeight = 560, Content = root
         };
+        if (IsVisible) window.Owner = this;
+        ClampWindowToWorkArea(window, 1180, 760);
 
         IReadOnlyList<ChapterDocument> loadedChapters = [_service.GetSnapshot()];
-        NavigationRequest? navigation = null;
         CancellationTokenSource? retranslationCancellation = null;
         bool working = false;
 
@@ -258,7 +259,7 @@ public partial class MainWindow
                     (allowProtected.IsChecked == true ? ", bao gồm nội dung được bảo vệ." : " và không được bảo vệ.");
                 tabs.SelectedIndex = 0; ApplyFilter();
             }
-            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = Brushes.Firebrick; }
+            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = (Brush)FindResource("DangerBrush"); }
             finally { SetWorking(false); }
         }
 
@@ -275,12 +276,12 @@ public partial class MainWindow
                 chineseRows.Clear();
                 foreach (var item in report.Occurrences)
                     chineseRows.Add(new(item, counts[item.Text]));
-                status.Foreground = Brushes.DarkSlateGray;
+                status.Foreground = (Brush)FindResource("TextBrush");
                 status.Text = $"Có {report.TotalOccurrences} vị trí · chưa biết {report.UnknownOccurrences} · xung đột {report.ConflictOccurrences}. " +
                     "Nhấp đúp để mở đúng segment; ứng dụng không suy đoán tên chưa xác nhận.";
                 tabs.SelectedIndex = 1; ApplyFilter();
             }
-            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = Brushes.Firebrick; }
+            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = (Brush)FindResource("DangerBrush"); }
             finally { SetWorking(false); }
         }
 
@@ -342,7 +343,7 @@ public partial class MainWindow
             bool allowProtectedChanges = allowProtected.IsChecked == true;
             if (protectedText && !allowProtectedChanges)
             {
-                status.Foreground = Brushes.DarkOrange;
+                status.Foreground = (Brush)FindResource("WarningBrush");
                 status.Text = "Có nội dung đã sửa/duyệt được bảo vệ. Hãy bật “Cho phép thay nội dung đã sửa/duyệt” rồi chọn lại các dòng cần thay.";
                 return;
             }
@@ -382,7 +383,7 @@ public partial class MainWindow
                 SetWorking(false);
                 await ScanAsync();
             }
-            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = Brushes.Firebrick; }
+            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = (Brush)FindResource("DangerBrush"); }
             finally { SetWorking(false); }
         }
 
@@ -448,19 +449,19 @@ public partial class MainWindow
                     throw new InvalidOperationException("Không tạo được preview nào. " + failures[0]);
                 previewGrid.SelectedItem = previewRows.FirstOrDefault();
                 tabs.SelectedIndex = 0;
-                status.Foreground = failures.Count == 0 ? Brushes.DarkSlateGray : Brushes.DarkOrange;
+                status.Foreground = failures.Count == 0 ? (Brush)FindResource("TextBrush") : (Brush)FindResource("WarningBrush");
                 status.Text = $"Đã tạo {previewRows.Count:N0} preview; lỗi/bỏ qua {failures.Count:N0}. " +
                     "Kiểm tra câu trước/sau rồi chọn các dòng cần áp dụng; chưa có dữ liệu nào được ghi." +
                     (failures.Count == 0 ? "" : "\n" + string.Join("\n", failures.Take(3)));
             }
             catch (OperationCanceledException)
             {
-                status.Foreground = Brushes.DarkSlateGray;
+                status.Foreground = (Brush)FindResource("TextBrush");
                 status.Text = $"Đã hủy dịch lại sau {previewRows.Count:N0} preview; nội dung chapter chưa thay đổi.";
             }
             catch (Exception ex)
             {
-                status.Foreground = Brushes.Firebrick;
+                status.Foreground = (Brush)FindResource("DangerBrush");
                 status.Text = $"Lỗi dịch lại sau {previewRows.Count:N0} preview: {ex.Message} Nội dung chapter chưa thay đổi.";
             }
             finally
@@ -476,14 +477,14 @@ public partial class MainWindow
         {
             foreach (BatchPreviewRow row in previewRows.Where(row => row.Item.Protected))
                 row.IsSelected = row.Item.RuleConfirmed && !row.Item.Conflict;
-            status.Foreground = Brushes.DarkOrange;
+            status.Foreground = (Brush)FindResource("WarningBrush");
             status.Text = $"Đã bật thay nội dung được bảo vệ và chọn {previewRows.Count(row => row.Item.Protected && row.IsSelected):N0} vị trí. " +
                           "Khi áp dụng vẫn phải xác nhận lần cuối; Approval và lịch sử cũ được giữ.";
         };
         allowProtected.Unchecked += (_, _) =>
         {
             foreach (BatchPreviewRow row in previewRows.Where(row => row.Item.Protected)) row.IsSelected = false;
-            status.Foreground = Brushes.DarkSlateGray;
+            status.Foreground = (Brush)FindResource("TextBrush");
             status.Text = "Đã bật lại cơ chế bảo vệ; các vị trí đã sửa/duyệt được bỏ chọn.";
         };
         selectEligible.Click += (_, _) =>
@@ -514,7 +515,7 @@ public partial class MainWindow
             {
                 status.Text = "Chưa hoàn tất: " + ex.Message +
                     " Thay đổi trong bộ nhớ được giữ; kiểm tra quyền ghi/dung lượng rồi bấm lại thao tác để thử lưu.";
-                status.Foreground = Brushes.Firebrick;
+                status.Foreground = (Brush)FindResource("DangerBrush");
                 ShowError(ex);
                 return false;
             }
@@ -576,21 +577,19 @@ public partial class MainWindow
         {
             if (working) return;
             if (previewGrid.SelectedItem is BatchPreviewRow row)
-            { navigation = new(row.Item.ChapterId, row.Item.SegmentId, row.Item.StartUtf16, row.Item.LengthUtf16); window.Close(); }
+                _ = OpenTextLocationAsync(new(row.Item.ChapterId, row.Item.SegmentId, row.Item.StartUtf16, row.Item.LengthUtf16));
         };
         chineseGrid.MouseDoubleClick += (_, _) =>
         {
             if (working) return;
             if (chineseGrid.SelectedItem is ChineseOccurrenceRow row)
-            { navigation = new(row.Item.ChapterId, row.Item.SegmentId, row.Item.StartUtf16, row.Item.LengthUtf16); window.Close(); }
+                _ = OpenTextLocationAsync(new(row.Item.ChapterId, row.Item.SegmentId, row.Item.StartUtf16, row.Item.LengthUtf16));
         };
         window.Loaded += async (_, _) => { if (scanFirst) await ScanAsync(); };
         window.Closing += (_, args) => { if (working) { args.Cancel = true; status.Text = "Đang ghi/đọc dữ liệu; hãy chờ thao tác hoàn tất trước khi đóng."; } };
-        try { window.ShowDialog(); }
-        finally { _uiOperation = false; UpdateButtons(); }
-        // Navigation owns a new operation lock only after the dialog's lock has been released.
-        // OpenTextLocationAsync handles and reports its own errors.
-        if (navigation is not null) _ = OpenTextLocationAsync(navigation);
+        window.Closed += (_, _) => { if (ReferenceEquals(_textCleanerWindow, window)) _textCleanerWindow = null; };
+        _textCleanerWindow = window;
+        window.Show();
     }
 
     private async Task ReloadCurrentChapterAfterProjectBatchAsync(Guid chapterId)
@@ -694,7 +693,7 @@ public partial class MainWindow
                 ? "Đoạn này có bản sửa hoặc Approval. Preview vẫn được tạo; khi áp dụng QT Studio sẽ yêu cầu xác nhận và giữ lịch sử cũ."
                 : "Toàn bộ dự án sẽ bỏ qua các cụm đã đánh dấu Giữ nguyên. Kết quả chỉ được đưa vào preview; dữ liệu chưa đổi cho tới khi xác nhận áp dụng.",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 14, 0, 14),
-            Foreground = selectedRows.Any(row => row.Item.Protected) ? Brushes.DarkOrange : Brushes.DarkSlateGray
+            Foreground = selectedRows.Any(row => row.Item.Protected) ? (Brush)owner.FindResource("WarningBrush") : (Brush)owner.FindResource("TextBrush")
         });
         panel.Children.Add(actions);
         var dialog = new Window
@@ -834,12 +833,12 @@ public partial class MainWindow
         return (separator < 0 ? value : value[..separator]).Trim();
     }
 
-    private sealed record ScopeOption(BatchReplacementScope Scope, string Label);
+    private sealed record ScopeOption(BatchReplacementScope Scope, string Label) { public override string ToString() => Label; }
     private sealed record NavigationRequest(Guid ChapterId, Guid SegmentId, int StartUtf16, int LengthUtf16);
     private enum ChineseRetranslationChapterScope { SelectedOccurrences, EntireProject }
-    private sealed record RetranslationChapterScopeOption(ChineseRetranslationChapterScope Scope, string Label);
-    private sealed record RetranslationModeOption(ChineseRetranslationMode Mode, string Label);
-    private sealed record RetranslationMethodOption(ChineseRetranslationMethod Method, string Label);
+    private sealed record RetranslationChapterScopeOption(ChineseRetranslationChapterScope Scope, string Label) { public override string ToString() => Label; }
+    private sealed record RetranslationModeOption(ChineseRetranslationMode Mode, string Label) { public override string ToString() => Label; }
+    private sealed record RetranslationMethodOption(ChineseRetranslationMethod Method, string Label) { public override string ToString() => Label; }
     private sealed record ChineseRetranslationChoice(ChineseRetranslationChapterScope ChapterScope,
         ChineseRetranslationMode Mode, ChineseRetranslationMethod Method);
 
