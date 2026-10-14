@@ -139,8 +139,12 @@ public partial class GpuManagerWindow : Window
             MessageBox.Show(this, "Remote GPU sẽ nhận prompt và nguyên văn segment. Xác nhận lưu profile Remote?",
                 "Quyền gửi dữ liệu", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         profile.RemoteDisclosureAccepted = profile.Kind == OllamaBackendKind.Remote;
-        await _backends.SaveProfileAsync(profile, activate: false);
-        RefreshProfiles(profile.Id); StatusText.Text = "Đã lưu profile. Credential được bảo vệ bằng Windows DPAPI.";
+        bool isActive = _backends.ActiveProfile.Id == profile.Id;
+        await _backends.SaveProfileAsync(profile, activate: isActive);
+        RefreshProfiles(profile.Id);
+        StatusText.Text = isActive
+            ? "Đã lưu và áp dụng profile đang dùng. Request mới sẽ dùng model này."
+            : "Đã lưu profile. Credential được bảo vệ bằng Windows DPAPI.";
     });
 
     private async void OnDeleteProfile(object sender, RoutedEventArgs e) => await RunAsync(async () =>

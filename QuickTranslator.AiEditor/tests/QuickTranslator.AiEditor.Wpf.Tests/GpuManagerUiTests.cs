@@ -9,6 +9,29 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 public sealed class GpuManagerUiTests
 {
     [Fact]
+    public Task Saving_the_active_gpu_profile_reloads_runtime_model_for_new_requests() => StaHost.Run(async () =>
+    {
+        string root = CreateTestRoot();
+        using var backends = CreateBackendManager(root);
+        await using var connections = new GpuConnectionManager(new NoConnectionService(), (_, _) => new StubClient());
+        var window = new GpuManagerWindow(backends, connections);
+        try
+        {
+            int activeProfileChanges = 0;
+            backends.ActiveProfileChanged += (_, _) => activeProfileChanges++;
+            ((TextBox)window.FindName("ModelInput")).Text = "huihui_ai/hy-mt1.5-abliterated:7b";
+
+            ((Button)window.FindName("SaveProfileButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await WaitUntilAsync(() => ((TextBlock)window.FindName("StatusText")).Text.Contains("Đã lưu", StringComparison.Ordinal));
+
+            Assert.Equal(1, activeProfileChanges);
+            Assert.Equal("huihui_ai/hy-mt1.5-abliterated:7b",
+                backends.ActiveProfile.Runtime!.ModelOptions.Model);
+        }
+        finally { window.Close(); Directory.Delete(root, true); }
+    });
+
+    [Fact]
     public Task Gpu_manager_exposes_profiles_credentials_host_key_and_controlled_setup_actions() => StaHost.Run(async () =>
     {
         string root = CreateTestRoot();
@@ -81,6 +104,16 @@ public sealed class GpuManagerUiTests
         string root = Path.Combine(Path.GetTempPath(), "qtaie-gpu-ui-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         return root;
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(3);
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline) throw new TimeoutException("GPU Manager did not finish saving the profile.");
+            await Task.Delay(10);
+        }
     }
 
     private static OllamaBackendManager CreateBackendManager(string root) => new(
