@@ -16,8 +16,9 @@ AI Editor lưu một bộ truyện trong một thư mục riêng có manifest `*
 4. **Dự án → Sao lưu ZIP** tạo tệp mới, đọc kiểm chứng toàn bộ ZIP và không đưa `Cache` hay các backup cũ vào. **Khôi phục bản sao** luôn dùng một thư mục mới; không ghi đè thư mục có dữ liệu.
 5. **Tệp → Nhập tiến độ cũ** quét thư mục Chapters cũ, cho chọn chương, tạo ZIP nguồn trước khi nhập và xác minh nguyên văn/lịch sử ở đích. Nguồn cũ không bị sửa hoặc xóa.
 6. **Bỏ khỏi danh sách** trong Thư viện chỉ xóa lối tắt recent. Lệnh xóa dự án riêng chuyển toàn bộ thư mục vào Thùng rác Windows sau khi người dùng xác nhận; không áp dụng cho dự án đang mở.
+7. Chọn **Workspace → Xuất bản** để ghép toàn bộ chương đang hoạt động theo thứ tự mục lục thành một file TXT UTF-8 hoặc PDF A4. Chương đã xóa mềm không được xuất; chương chưa hoàn tất/cần kiểm tra chỉ được đưa vào file sau khi người dùng xác nhận xuất bản nháp.
 
-Có thể mở dự án bằng `QuickTranslator.AiEditor.exe "D:\Truyen\TenTruyen.qtproj"`. Ứng dụng không ghi Windows Registry. Book Builder chưa tồn tại trong mã hiện tại; `ProjectRepository` đã cung cấp danh sách chương có thứ tự và API đọc chương thống nhất để module đó dùng sau này, không tạo thêm kho dữ liệu song song.
+Có thể mở dự án bằng `QuickTranslator.AiEditor.exe "D:\Truyen\TenTruyen.qtproj"`. Ứng dụng không ghi Windows Registry. Trình **Xuất bản** hiện chỉ ghép toàn bộ chương vào một file; chưa có dàn trang bìa, mục lục PDF hay xuất nhiều tập.
 
 ## 1. Chuẩn bị trên Windows
 

@@ -193,6 +193,7 @@ public partial class MainWindow
             case "Import": OnAddChapterFromText(sender, e); break;
             case "Queue": await OpenQueueStatusAsync(); break;
             case "Library": ShowProjectLibraryWindow(); break;
+            case "Publish": await OpenProjectPublicationAsync(); break;
             case "Reader": ShowReaderWorkspace(); break;
             case "Settings": ShowSettingsWorkspace(); break;
         }
@@ -257,6 +258,23 @@ public partial class MainWindow
             return;
         }
         ShowProjectTranslationWindow(coordinator, null);
+    }
+
+    private async Task OpenProjectPublicationAsync()
+    {
+        if (_projectSession is null) { SetStatus("Hãy mở Project trước khi xuất bản."); return; }
+        if (!BeginUiOperation(allowDuringTranslation: true)) return;
+        try
+        {
+            if (_service is not null) await SaveCurrentAsync();
+            var service = new ProjectPublicationService(_projectRepository, _projectCatalog);
+            var window = new ProjectPublicationWindow(_projectSession, service) { Owner = this };
+            window.ShowDialog();
+            if (window.LastExportPath is string path)
+                SetStatus("Đã xuất toàn bộ chương thành một file: " + path);
+        }
+        catch (Exception ex) { ShowError(ex); }
+        finally { EndUiOperation(); }
     }
 
     private void OnOpenInspectorSettings(object sender, RoutedEventArgs e)

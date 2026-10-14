@@ -9,5 +9,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../QuickTranslator.AiEditor.Core/QuickTranslator.AiEditor.Core.csproj" />
+    <PackageReference Include="PDFsharp-MigraDoc-WPF" Version="6.2.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
