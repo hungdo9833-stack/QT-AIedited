@@ -54,6 +54,38 @@ public sealed class ImportPreviewUiTests
     });
 
     [Fact]
+    public Task History_replacement_does_not_unlock_an_active_number_collision() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        const string source = "第1章 第一章\n原文一。\n";
+        ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source, "same-source.txt")).Current;
+        ImportPreviewItem item = Assert.Single(plan.ImportableChapters);
+        var old = TranslationService.CreateChapter(item.Title, plan.Slice(item.ContentSpan));
+        old.Id = item.ChapterId;
+        old.Segments = new TextSegmenter().Segment(old.OriginalText, old.Id, new()).ToList();
+        old.SelectedSegmentId = old.Segments[0].Id;
+        await fixture.Repository.AddChapterAsync(fixture.Project, old, 1);
+        await fixture.Repository.SoftDeleteChapterAsync(fixture.Project, old.Id);
+        await fixture.AddChapterAsync("Chương active khác", 1);
+        string path = Path.Combine(fixture.Root, "same-source.txt");
+        await File.WriteAllTextAsync(path, source);
+
+        var window = new ImportPreviewWindow(fixture.Project);
+        try
+        {
+            await window.LoadSourceAsync(path, SourceTextEncoding.Auto);
+            ((CheckBox)window.FindName("ReplaceHistoryCheck")).IsChecked = true;
+
+            Assert.False(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.Contains("Số 1", ((TextBlock)window.FindName("FooterHintText")).Text +
+                string.Join(" ", ((ListBox)window.FindName("IssuesList")).Items.Cast<object>()),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
     public Task Dark_preview_loads_detector_output_and_blocks_project_number_collisions() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();

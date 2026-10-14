@@ -491,9 +491,11 @@ public partial class ImportPreviewWindow : Window
         if (!item.Included || item.Number is not int number) return null;
         ProjectChapterEntry? id = _project.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == item.ChapterId);
         if (id is not null)
-            return id.DeletedAt is null || ReplaceHistoryCheck.IsChecked == true
-                ? null
-                : "ChapterId nằm trong History/xóa mềm. Bật “Ghi đè History” để thay thế bản cũ.";
+        {
+            if (id.DeletedAt is null) return null;
+            if (ReplaceHistoryCheck.IsChecked != true)
+                return "ChapterId nằm trong History/xóa mềm. Bật “Ghi đè History” để thay thế bản cũ.";
+        }
         ProjectChapterEntry? used = _project.Manifest.Chapters.SingleOrDefault(x => x.DeletedAt is null && x.Number == number);
         return used is null ? null : $"Số {number} đã thuộc “{used.VietnameseTitle}”.";
     }
