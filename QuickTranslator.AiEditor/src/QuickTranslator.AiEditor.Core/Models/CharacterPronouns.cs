@@ -10,6 +10,23 @@ public sealed record CharacterRelationship
     public Guid TargetCharacterId { get; init; }
     public string Relationship { get; init; } = "";
     public string AddressingNotes { get; init; } = "";
+    // Optional V1 directional fields. TargetCharacterId/Relationship remain for old project files.
+    public Guid SpeakerCharacterId { get; init; }
+    public Guid ListenerCharacterId { get; init; }
+    public string SelfReference { get; init; } = "";
+    public string AddresseeReference { get; init; } = "";
+    public bool Enabled { get; init; }
+    public bool Locked { get; init; }
+
+    [JsonIgnore]
+    public Guid EffectiveListenerCharacterId => ListenerCharacterId == Guid.Empty ? TargetCharacterId : ListenerCharacterId;
+
+    public Guid EffectiveSpeakerCharacterId(Guid ownerCharacterId) =>
+        SpeakerCharacterId == Guid.Empty ? ownerCharacterId : SpeakerCharacterId;
+
+    [JsonIgnore]
+    public bool HasDirectionalAddressing => !string.IsNullOrWhiteSpace(SelfReference) ||
+        !string.IsNullOrWhiteSpace(AddresseeReference) || SpeakerCharacterId != Guid.Empty || ListenerCharacterId != Guid.Empty;
 }
 
 public sealed class CharacterProfile
@@ -25,6 +42,7 @@ public sealed class CharacterProfile
     public List<string> DisallowedNarrativePronouns { get; set; } = [];
     public string AddressingNotes { get; set; } = "";
     public bool NormalizationEnabled { get; set; } = true;
+    public bool NarrativePronounLocked { get; set; }
     [JsonIgnore]
     public string GenderLabel => Gender switch
     {
@@ -62,8 +80,16 @@ public sealed class CharacterProfile
         if (Aliases.Any(string.IsNullOrWhiteSpace) || DisallowedNarrativePronouns.Any(string.IsNullOrWhiteSpace) ||
             Aliases.Distinct(StringComparer.OrdinalIgnoreCase).Count() != Aliases.Count ||
             DisallowedNarrativePronouns.Distinct(StringComparer.OrdinalIgnoreCase).Count() != DisallowedNarrativePronouns.Count ||
-            Relationships.Any(r => r is null || r.TargetCharacterId == Guid.Empty || string.IsNullOrWhiteSpace(r.Relationship)))
+            Relationships.Any(r => r is null || r.EffectiveListenerCharacterId == Guid.Empty ||
+                (string.IsNullOrWhiteSpace(r.Relationship) && !r.HasDirectionalAddressing) ||
+                r.SelfReference is null || r.AddresseeReference is null || r.Relationship is null || r.AddressingNotes is null ||
+                r.SelfReference.Length > 80 || r.AddresseeReference.Length > 80 || r.Relationship.Length > 200 ||
+                r.AddressingNotes.Length > 2000 ||
+                ((r.HasDirectionalAddressing || r.Enabled || r.Locked) &&
+                 (string.IsNullOrWhiteSpace(r.SelfReference) || string.IsNullOrWhiteSpace(r.AddresseeReference)))))
             throw new ArgumentException($"Bí danh, đại từ hoặc quan hệ của {VietnameseName} không hợp lệ.");
+        if (NarrativePronounLocked && string.IsNullOrWhiteSpace(PrimaryNarrativePronoun))
+            throw new ArgumentException($"Nhân vật {VietnameseName} cần đại từ trần thuật chính trước khi khóa.");
     }
 }
 
@@ -74,6 +100,7 @@ public sealed class CharacterProject
     public string Name { get; set; } = "Bộ truyện mới";
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public bool NormalizeAfterTranslation { get; set; } = true;
+    public bool ConsistencyLockEnabled { get; set; }
     public List<CharacterProfile> Profiles { get; set; } = [];
 
     public void Validate()
@@ -86,8 +113,11 @@ public sealed class CharacterProject
             Profiles.Select(p => p.VietnameseName.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Profiles.Count)
             throw new ArgumentException("ID hoặc tên nhân vật bị trùng trong cùng dự án.");
         var ids = Profiles.Select(p => p.Id).ToHashSet();
-        if (Profiles.SelectMany(p => p.Relationships).Any(r => !ids.Contains(r.TargetCharacterId)))
+        if (Profiles.SelectMany(p => p.Relationships).Any(r => !ids.Contains(r.EffectiveListenerCharacterId)))
             throw new ArgumentException("Quan hệ đang tham chiếu nhân vật không thuộc dự án.");
+        if (Profiles.Any(owner => owner.Relationships.Any(r =>
+                r.SpeakerCharacterId != Guid.Empty && r.SpeakerCharacterId != owner.Id)))
+            throw new ArgumentException("Quan hệ hai chiều có người nói không khớp hồ sơ sở hữu.");
     }
 }
 

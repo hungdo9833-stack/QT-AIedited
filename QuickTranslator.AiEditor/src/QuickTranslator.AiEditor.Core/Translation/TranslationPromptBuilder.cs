@@ -28,12 +28,16 @@ public sealed class EmptyContextMemory : IContextMemory
 
 public sealed class TranslationPromptBuilder
 {
-    public const string Version = "translategemma-zh-vi-v1";
+    public const string Version = "translategemma-zh-vi-v2-character-consistency";
 
     public string Build(string sourceText, IReadOnlyList<GlossaryEntry> glossary, string contextNotes)
         => Build(sourceText, glossary, contextNotes, PromptPreset.Default);
 
     public string Build(string sourceText, IReadOnlyList<GlossaryEntry> glossary, string contextNotes, PromptPreset preset)
+        => Build(sourceText, glossary, contextNotes, preset, "");
+
+    public string Build(string sourceText, IReadOnlyList<GlossaryEntry> glossary, string contextNotes,
+        PromptPreset preset, string characterConsistency)
     {
         preset.Validate();
         var prompt = new StringBuilder();
@@ -46,10 +50,13 @@ public sealed class TranslationPromptBuilder
         string context = string.IsNullOrWhiteSpace(contextNotes) ? "" :
             "Context notes (reference only, do not translate these notes):\n" + contextNotes;
         // One regex pass: placeholder-like text in source/glossary is never interpreted as template code.
-        return System.Text.RegularExpressions.Regex.Replace(preset.Template.ReplaceLineEndings(Environment.NewLine), @"\{\{(source_text|glossary|context)\}\}",
+        string rendered = System.Text.RegularExpressions.Regex.Replace(preset.Template.ReplaceLineEndings(Environment.NewLine), @"\{\{(source_text|glossary|context)\}\}",
             match => match.Groups[1].Value switch
             {
                 "source_text" => sourceText, "glossary" => prompt.ToString(), _ => context
             });
+        return string.IsNullOrWhiteSpace(characterConsistency)
+            ? rendered
+            : characterConsistency.TrimEnd() + Environment.NewLine + Environment.NewLine + rendered;
     }
 }

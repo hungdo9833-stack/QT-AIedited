@@ -255,6 +255,86 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task Character_rules_are_used_by_queue_without_extra_requests()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            ProjectTranslationEnvironment current = context.Environment with
+            {
+                Resources = context.Environment.Resources.Clone()
+            };
+            current.Resources.Characters.ConsistencyLockEnabled = true;
+            current.Resources.Characters.Profiles.Add(new CharacterProfile
+            {
+                ChineseName = "天地", VietnameseName = "Thiên Địa", PrimaryNarrativePronoun = "hắn",
+                SecondaryNarrativePronoun = "hắn ta", NarrativePronounLocked = true,
+                DisallowedNarrativePronouns = ["anh ấy"]
+            });
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(current);
+            var client = new ProjectQueueFakeClient();
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            Assert.Equal(1, client.Calls);
+            Assert.Single(client.Prompts);
+            Assert.Contains("CHARACTER CONSISTENCY", client.Prompts[0]);
+            Assert.Contains("天地 = Thiên Địa", client.Prompts[0]);
+        });
+    }
+
+    [Fact]
+    public async Task Changed_character_resource_revision_blocks_old_plan_before_request()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            ProjectTranslationEnvironment current = context.Environment;
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(current);
+            var client = new ProjectQueueFakeClient();
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load);
+            ProjectTranslationJob plan = await coordinator.PlanAsync(context.ChapterIds);
+            ProjectResources changed = current.Resources.Clone();
+            changed.Revision++;
+            changed.Characters.ConsistencyLockEnabled = true;
+            current = current with { Resources = changed };
+
+            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.StartAsync(plan));
+
+            Assert.Contains("Character Profiles", error.Message, StringComparison.Ordinal);
+            Assert.Equal(0, client.Calls);
+        });
+    }
+
+    [Fact]
+    public async Task Resume_does_not_silently_use_changed_character_rules()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            ProjectTranslationEnvironment current = context.Environment;
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(current);
+            var store = new ProjectTranslationJobStore(context.Session);
+            var planner = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                new ProjectQueueFakeClient(), Load, store);
+            ProjectTranslationJob saved = await store.SaveNewAsync(await planner.PlanAsync(context.ChapterIds));
+            saved.Status = ProjectTranslationJobStatus.Interrupted;
+            await store.SaveAsync(saved);
+            ProjectResources changed = current.Resources.Clone();
+            changed.Revision++;
+            changed.Characters.ConsistencyLockEnabled = true;
+            current = current with { Resources = changed };
+            var client = new ProjectQueueFakeClient();
+            var reopened = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load,
+                new ProjectTranslationJobStore(context.Session));
+            await reopened.LoadAsync();
+
+            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => reopened.ResumeAsync());
+
+            Assert.Contains("Queue Plan mới", error.Message, StringComparison.Ordinal);
+            Assert.Equal(0, client.Calls);
+        });
+    }
+
+    [Fact]
     public async Task Backend_snapshot_blocks_start_or_resume_after_profile_changes()
     {
         await WithProjectAsync(1, async context =>
@@ -593,6 +673,7 @@ public sealed class ProjectTranslationCoordinatorTests
         public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
         public bool BlockFirst { get; init; }
         public HashSet<int> FailCalls { get; } = [];
+        public List<string> Prompts { get; } = [];
         public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseFirst { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -600,6 +681,7 @@ public sealed class ProjectTranslationCoordinatorTests
             CancellationToken cancellationToken = default)
         {
             int call = Interlocked.Increment(ref _calls);
+            lock (Prompts) Prompts.Add(prompt);
             int active = Interlocked.Increment(ref _concurrency);
             int observed;
             do { observed = _maximumConcurrency; }

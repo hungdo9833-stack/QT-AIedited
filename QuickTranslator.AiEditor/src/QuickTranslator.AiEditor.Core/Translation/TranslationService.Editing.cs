@@ -52,9 +52,18 @@ public sealed partial class TranslationService
         return BuildPrompt(chapter, segment, [], "", preset);
     }
 
+    public CharacterConsistencySelection PreviewCharacterConsistency(Guid segmentId)
+    {
+        var chapter = GetOperationSnapshot();
+        var segment = chapter.Segments.Single(s => s.Id == segmentId);
+        return _characterConsistency.Select(chapter.CharacterProject, segment.SourceText);
+    }
+
     private string BuildPrompt(ChapterDocument chapter, TranslationSegment segment, IReadOnlyList<GlossaryEntry> external, string memory, PromptPreset preset)
     {
-        var confirmed = chapter.ConfirmedTerms.Where(t => segment.SourceText.Contains(t.Chinese, StringComparison.Ordinal))
+        CharacterConsistencySelection consistency = _characterConsistency.Select(chapter.CharacterProject, segment.SourceText);
+        var confirmed = chapter.ConfirmedTerms.Where(t => segment.SourceText.Contains(t.Chinese, StringComparison.Ordinal) &&
+                !consistency.CoveredChineseTerms.Contains(t.Chinese))
             .Select(t => new GlossaryEntry(t.Chinese, t.Vietnamese)).ToArray();
         // Explicitly confirmed spellings override optional provider entries. References stay short.
         var glossary = confirmed.Concat(external).DistinctBy(t => t.Chinese).Take(Math.Max(64, confirmed.Length)).ToArray();
@@ -68,7 +77,7 @@ public sealed partial class TranslationService
             notes += "\nPrevious human-approved excerpt (reference only): " + approved;
         }
         if (!string.IsNullOrWhiteSpace(memory)) notes += "\n" + memory;
-        return _prompts.Build(segment.SourceText, glossary, notes, preset);
+        return _prompts.Build(segment.SourceText, glossary, notes, preset, consistency.PromptBlock);
     }
 
     public async Task RestoreDraftAsync(Guid segmentId, Guid versionId, bool approval,

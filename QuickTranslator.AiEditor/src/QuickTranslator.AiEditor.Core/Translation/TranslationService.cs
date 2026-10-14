@@ -16,6 +16,7 @@ public sealed partial class TranslationService
     private readonly IContextMemory _memory;
     private readonly TimeProvider _clock;
     private readonly TranslationPromptBuilder _prompts = new();
+    private readonly CharacterConsistencyRuleSelector _characterConsistency = new();
     private readonly TranslationQualityChecker _quality = new();
     private long _revision;
     private long _savedRevision = -1;

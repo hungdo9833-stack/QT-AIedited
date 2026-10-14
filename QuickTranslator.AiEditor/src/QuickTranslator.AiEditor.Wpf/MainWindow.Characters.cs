@@ -5,6 +5,7 @@ using System.Windows.Data;
 using Microsoft.Win32;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -19,6 +20,7 @@ public partial class MainWindow
         _characterProject = CharacterProjectStore.Clone(project);
         CharacterProjectNameInput.Text = _characterProject.Name;
         NormalizeAfterTranslationCheck.IsChecked = _characterProject.NormalizeAfterTranslation;
+        ConsistencyLockCheck.IsChecked = _characterProject.ConsistencyLockEnabled;
         RefreshCharacterGrid();
         ClearPronounReport();
     }
@@ -41,8 +43,11 @@ public partial class MainWindow
 
     private void UpdateCharacterProjectFromInputs()
     {
+        CharactersGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+        CharactersGrid.CommitEdit(DataGridEditingUnit.Row, true);
         _characterProject.Name = CharacterProjectNameInput.Text.Trim();
         _characterProject.NormalizeAfterTranslation = NormalizeAfterTranslationCheck.IsChecked == true;
+        _characterProject.ConsistencyLockEnabled = ConsistencyLockCheck.IsChecked == true;
         _characterProject.UpdatedAt = DateTimeOffset.UtcNow;
         _characterProject.Validate();
     }
@@ -121,7 +126,7 @@ public partial class MainWindow
         if (MessageBox.Show(this, $"Xóa hồ sơ {selected.VietnameseName}? Lịch sử chuẩn hóa cũ trong chương vẫn được giữ.",
                 "Xóa nhân vật", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _characterProject.Profiles.RemoveAll(p => p.Id == selected.Id);
-        foreach (var profile in _characterProject.Profiles) profile.Relationships.RemoveAll(r => r.TargetCharacterId == selected.Id);
+        foreach (var profile in _characterProject.Profiles) profile.Relationships.RemoveAll(r => r.EffectiveListenerCharacterId == selected.Id);
         RefreshCharacterGrid(); ClearPronounReport();
     }
 
@@ -144,6 +149,7 @@ public partial class MainWindow
             if (_characterProject.Profiles.Count > 0 && imported.Id != _characterProject.Id && MessageBox.Show(this,
                     $"Thay dự án “{_characterProject.Name}” bằng “{imported.Name}” cho chương hiện tại?",
                     "Nhập hồ sơ", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            CharacterConsistencyProtection.PreserveLockedRules(_characterProject, imported);
             if (_projectSession is not null)
             {
                 imported.Id = _projectSession.Manifest.ProjectId;
@@ -182,7 +188,19 @@ public partial class MainWindow
     {
         if (_service is null) { ShowError(new InvalidOperationException("Hãy chia hoặc mở một chương trước khi xem trước.")); return; }
         if (!BeginUiOperation()) return;
-        try { await SaveCharacterProjectAsync(); ScanPronounsAndShow(); EditorTabs.SelectedIndex = 0; }
+        try
+        {
+            await SaveCharacterProjectAsync();
+            Guid segmentId = _selectedId ?? _service.GetSnapshot().Segments.First().Id;
+            CharacterConsistencySelection preview = _service.PreviewCharacterConsistency(segmentId);
+            var text = new TextBox { Text = string.IsNullOrWhiteSpace(preview.PromptBlock)
+                    ? "Không có quy tắc khóa phù hợp với nhân vật xuất hiện trong đoạn đang chọn."
+                    : preview.PromptBlock,
+                IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(12) };
+            _ = new Window { Owner = this, Title = "Xem trước Character Consistency", Width = 760, Height = 520,
+                Content = text }.ShowDialog();
+        }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
     }
@@ -281,23 +299,34 @@ public partial class MainWindow
         panel.Children.Add(gender);
         var primary = PronounField("Đại từ trần thuật chính — chọn hoặc nhập thủ công", profile.PrimaryNarrativePronoun);
         var secondary = PronounField("Đại từ trần thuật phụ — chọn hoặc nhập thủ công", profile.SecondaryNarrativePronoun);
+        var narrativeLocked = new CheckBox { Content = "Khóa đại từ trần thuật chính cho nhân vật này",
+            IsChecked = profile.NarrativePronounLocked, Margin = new Thickness(4, 8, 4, 4) };
+        panel.Children.Add(narrativeLocked);
+        panel.Children.Add(new TextBlock { Text = "Khi khóa nhất quán của Project bật, đại từ phụ không thay thế đại từ chính trong prompt hoặc chuẩn hóa.",
+            TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.DimGray, Margin = new Thickness(4) });
         var disallowed = Field("Cách gọi cần tránh trong lời kể — mỗi dòng một cách gọi", string.Join(Environment.NewLine, profile.DisallowedNarrativePronouns), 85);
         panel.Children.Add(new TextBlock { Text = "Quan hệ với nhân vật khác", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 10, 4, 2) });
-        panel.Children.Add(new TextBlock { Text = "Chọn nhân vật đích rồi nhập quan hệ và ghi chú xưng hô. Dữ liệu sai được giữ trong cửa sổ để sửa.",
+        panel.Children.Add(new TextBlock { Text = $"Người nói: {profile.VietnameseName}. Chọn người nghe; hai chiều là hai quy tắc độc lập và không tự suy ra.",
             TextWrapping = TextWrapping.Wrap, Foreground = System.Windows.Media.Brushes.DimGray, Margin = new Thickness(4) });
         var relationshipRows = profile.Relationships.Select(r => new RelationshipEditorRow
         {
-            TargetCharacterId = r.TargetCharacterId, Relationship = r.Relationship, AddressingNotes = r.AddressingNotes
+            TargetCharacterId = r.EffectiveListenerCharacterId, Relationship = r.Relationship,
+            AddressingNotes = r.AddressingNotes, SelfReference = r.SelfReference,
+            AddresseeReference = r.AddresseeReference, Enabled = r.Enabled, Locked = r.Locked
         }).ToList();
         var relationshipGrid = new DataGrid { ItemsSource = relationshipRows, AutoGenerateColumns = false, CanUserAddRows = false,
             MinHeight = 130, MaxHeight = 230, SelectionMode = DataGridSelectionMode.Single };
         relationshipGrid.Columns.Add(new DataGridComboBoxColumn
         {
-            Header = "Nhân vật", ItemsSource = _characterProject.Profiles.Where(p => p.Id != profile.Id).OrderBy(p => p.VietnameseName).ToList(),
+            Header = "Người nghe", ItemsSource = _characterProject.Profiles.Where(p => p.Id != profile.Id).OrderBy(p => p.VietnameseName).ToList(),
             DisplayMemberPath = "VietnameseName", SelectedValuePath = "Id", SelectedValueBinding = new Binding(nameof(RelationshipEditorRow.TargetCharacterId)), Width = new DataGridLength(1.3, DataGridLengthUnitType.Star)
         });
         relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Quan hệ", Binding = new Binding(nameof(RelationshipEditorRow.Relationship)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
-        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Ghi chú xưng hô", Binding = new Binding(nameof(RelationshipEditorRow.AddressingNotes)), Width = new DataGridLength(1.7, DataGridLengthUnitType.Star) });
+        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Tự xưng", Binding = new Binding(nameof(RelationshipEditorRow.SelfReference)), Width = new DataGridLength(0.8, DataGridLengthUnitType.Star) });
+        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Gọi đối phương", Binding = new Binding(nameof(RelationshipEditorRow.AddresseeReference)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+        relationshipGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Bật", Binding = new Binding(nameof(RelationshipEditorRow.Enabled)), Width = 55 });
+        relationshipGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Khóa", Binding = new Binding(nameof(RelationshipEditorRow.Locked)), Width = 55 });
+        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Ghi chú", Binding = new Binding(nameof(RelationshipEditorRow.AddressingNotes)), Width = new DataGridLength(1.2, DataGridLengthUnitType.Star) });
         panel.Children.Add(relationshipGrid);
         var relationButtons = new WrapPanel();
         var addRelation = new Button { Content = "Thêm quan hệ" }; var removeRelation = new Button { Content = "Xóa quan hệ đã chọn" };
@@ -321,6 +350,7 @@ public partial class MainWindow
                 profile.VietnameseName = vietnamese.Text.Trim(); profile.ChineseName = chinese.Text.Trim();
                 profile.Aliases = Lines(aliases.Text); profile.Gender = ((GenderChoice)gender.SelectedItem).Value;
                 profile.PrimaryNarrativePronoun = primary.Text.Trim(); profile.SecondaryNarrativePronoun = secondary.Text.Trim();
+                profile.NarrativePronounLocked = narrativeLocked.IsChecked == true;
                 profile.DisallowedNarrativePronouns = Lines(disallowed.Text); profile.AddressingNotes = notes.Text.Trim();
                 profile.NormalizationEnabled = enabled.IsChecked == true;
                 profile.ApplyGenderDefaults();
@@ -328,9 +358,20 @@ public partial class MainWindow
                 {
                     if (row.TargetCharacterId == Guid.Empty || !_characterProject.Profiles.Any(p => p.Id == row.TargetCharacterId))
                         throw new ArgumentException("Mỗi quan hệ phải chọn một nhân vật đang có trong dự án.");
-                    if (string.IsNullOrWhiteSpace(row.Relationship)) throw new ArgumentException("Quan hệ không được để trống.");
+                    if (string.IsNullOrWhiteSpace(row.Relationship) &&
+                        (string.IsNullOrWhiteSpace(row.SelfReference) || string.IsNullOrWhiteSpace(row.AddresseeReference)))
+                        throw new ArgumentException("Quan hệ cần tên quan hệ hoặc đủ cách tự xưng và gọi đối phương.");
+                    bool directional = !string.IsNullOrWhiteSpace(row.SelfReference) ||
+                        !string.IsNullOrWhiteSpace(row.AddresseeReference) || row.Enabled || row.Locked;
+                    if (directional && (string.IsNullOrWhiteSpace(row.SelfReference) ||
+                                        string.IsNullOrWhiteSpace(row.AddresseeReference)))
+                        throw new ArgumentException("Quy tắc hai chiều cần đủ cách tự xưng và gọi đối phương.");
                     return new CharacterRelationship { TargetCharacterId = row.TargetCharacterId,
-                        Relationship = row.Relationship.Trim(), AddressingNotes = row.AddressingNotes.Trim() };
+                        SpeakerCharacterId = directional ? profile.Id : Guid.Empty,
+                        ListenerCharacterId = directional ? row.TargetCharacterId : Guid.Empty,
+                        Relationship = row.Relationship.Trim(), AddressingNotes = row.AddressingNotes.Trim(),
+                        SelfReference = row.SelfReference.Trim(), AddresseeReference = row.AddresseeReference.Trim(),
+                        Enabled = row.Enabled, Locked = row.Locked };
                 }).ToList();
                 profile.Validate();
                 validation.Text = "";
@@ -365,7 +406,8 @@ public partial class MainWindow
         Aliases = [.. source.Aliases], Gender = source.Gender, Relationships = [.. source.Relationships],
         PrimaryNarrativePronoun = source.PrimaryNarrativePronoun, SecondaryNarrativePronoun = source.SecondaryNarrativePronoun,
         DisallowedNarrativePronouns = [.. source.DisallowedNarrativePronouns], AddressingNotes = source.AddressingNotes,
-        NormalizationEnabled = source.NormalizationEnabled
+        NormalizationEnabled = source.NormalizationEnabled,
+        NarrativePronounLocked = source.NarrativePronounLocked
     };
 
     private static string SafeFileName(string name) => string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
@@ -381,5 +423,9 @@ public partial class MainWindow
         public Guid TargetCharacterId { get; set; }
         public string Relationship { get; set; } = "";
         public string AddressingNotes { get; set; } = "";
+        public string SelfReference { get; set; } = "";
+        public string AddresseeReference { get; set; } = "";
+        public bool Enabled { get; set; }
+        public bool Locked { get; set; }
     }
 }

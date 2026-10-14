@@ -1,0 +1,20 @@
+[
+  {
+    "source": "林风推门而入。他看见苏婉站在窗边。",
+    "referenceTranslation": "Lâm Phong đẩy cửa bước vào. Hắn nhìn thấy Tô Uyển đứng bên cửa sổ.",
+    "expectedPromptTerms": [ "林风 = Lâm Phong", "苏婉 = Tô Uyển", "narrative pronoun = hắn", "narrative pronoun = nàng" ],
+    "absentPromptTerms": []
+  },
+  {
+    "source": "路人推门而入，屋里空无一人。",
+    "referenceTranslation": "Người qua đường đẩy cửa bước vào, trong phòng không một bóng người.",
+    "expectedPromptTerms": [],
+    "absentPromptTerms": [ "CHARACTER CONSISTENCY", "Lâm Phong", "Tô Uyển" ]
+  },
+  {
+    "source": "林风问苏婉：“你愿意跟我走吗？”",
+    "referenceTranslation": "Lâm Phong hỏi Tô Uyển: “Muội có bằng lòng đi cùng huynh không?”",
+    "expectedPromptTerms": [ "Lâm Phong -> Tô Uyển: self = huynh; address = muội" ],
+    "absentPromptTerms": [ "Tô Uyển -> Lâm Phong: self = muội; address = huynh" ]
+  }
+]

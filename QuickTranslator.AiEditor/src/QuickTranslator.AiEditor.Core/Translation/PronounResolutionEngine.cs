@@ -17,7 +17,8 @@ public sealed class PronounResolutionEngine
     {
         project.Validate();
         if (string.IsNullOrEmpty(translatedText)) return [];
-        var profiles = project.Profiles.Where(p => p.NormalizationEnabled).ToArray();
+        var profiles = project.Profiles.Where(p => p.NormalizationEnabled &&
+            (!project.ConsistencyLockEnabled || p.NarrativePronounLocked)).ToArray();
         if (profiles.Length == 0) return [];
         var sentenceSpans = SentenceSpans(translatedText);
         var dialogueSpans = DialogueSpans(translatedText);
@@ -26,7 +27,8 @@ public sealed class PronounResolutionEngine
                     .Concat(string.IsNullOrWhiteSpace(profile.PrimaryNarrativePronoun) ? [] :
                         [new PronounTerm(profile.PrimaryNarrativePronoun, profile, true)])
                     .Concat(string.IsNullOrWhiteSpace(profile.SecondaryNarrativePronoun) ? [] :
-                        [new PronounTerm(profile.SecondaryNarrativePronoun, profile, true)]))
+                        [new PronounTerm(profile.SecondaryNarrativePronoun, profile,
+                            !project.ConsistencyLockEnabled || !profile.NarrativePronounLocked)]))
             .Where(t => !string.IsNullOrWhiteSpace(t.Text))
             .OrderByDescending(t => t.Text.Length).ToArray();
         var occupied = new bool[translatedText.Length];
@@ -87,13 +89,16 @@ public sealed class PronounResolutionEngine
             }
 
             bool alreadyAllowed = string.Equals(occurrence.Text, resolved.PrimaryNarrativePronoun, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(occurrence.Text, resolved.SecondaryNarrativePronoun, StringComparison.OrdinalIgnoreCase);
+                (!project.ConsistencyLockEnabled &&
+                 string.Equals(occurrence.Text, resolved.SecondaryNarrativePronoun, StringComparison.OrdinalIgnoreCase));
             if (alreadyAllowed)
             {
                 suggestions.Add(Item(PronounSuggestionKind.Valid, resolved, $"Đại từ đã phù hợp hồ sơ {resolved.VietnameseName}."));
                 continue;
             }
-            if (!resolved.DisallowedNarrativePronouns.Contains(occurrence.Text, StringComparer.OrdinalIgnoreCase)) continue;
+            bool lockedSecondary = project.ConsistencyLockEnabled && resolved.NarrativePronounLocked &&
+                string.Equals(occurrence.Text, resolved.SecondaryNarrativePronoun, StringComparison.OrdinalIgnoreCase);
+            if (!lockedSecondary && !resolved.DisallowedNarrativePronouns.Contains(occurrence.Text, StringComparer.OrdinalIgnoreCase)) continue;
             string replacement = MatchCapitalization(occurrence.Text, resolved.PrimaryNarrativePronoun);
             suggestions.Add(Item(protectedByUser ? PronounSuggestionKind.Protected : PronounSuggestionKind.SafeReplacement,
                 resolved, protectedByUser
