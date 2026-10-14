@@ -29,7 +29,7 @@ public partial class MainWindow
                 BulkImportReport report;
                 while (true)
                 {
-                    report = await RunBulkImportProgressAsync(plan);
+                    report = await RunBulkImportProgressAsync(plan, preview.ReplaceSoftDeletedHistory);
                     RefreshProjectChapterList();
                     if (_projectSession is { RecoveryReport.RequiresDecision: false } &&
                         _projectSession.Manifest.CurrentChapterId is Guid current)
@@ -101,18 +101,24 @@ public partial class MainWindow
 
     internal Task<BulkImportReport> ImportDetectedPlanAsync(ImportPreviewPlan plan,
         IProgress<BulkImportProgress>? progress = null, CancellationToken cancellationToken = default)
+        => ImportDetectedPlanWithOptionsAsync(plan, false, progress, cancellationToken);
+
+    private Task<BulkImportReport> ImportDetectedPlanWithOptionsAsync(ImportPreviewPlan plan,
+        bool replaceSoftDeletedHistory, IProgress<BulkImportProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         if (_projectSession is null) throw new InvalidOperationException("Chưa mở Project.");
         var defaults = new BulkImportChapterDefaults(ReadSegmenterOptions(), ReadModelOptions(), _presetManager.Selected);
         return new SafeBulkImportService(_projectRepository).ImportAsync(_projectSession, plan, defaults,
-            new BulkImportOptions(), progress, cancellationToken);
+            new BulkImportOptions(ReplaceSoftDeletedHistory: replaceSoftDeletedHistory), progress, cancellationToken);
     }
 
-    private Task<BulkImportReport> RunBulkImportProgressAsync(ImportPreviewPlan plan)
+    private Task<BulkImportReport> RunBulkImportProgressAsync(ImportPreviewPlan plan, bool replaceSoftDeletedHistory)
     {
         var window = new BulkImportProgressWindow { Owner = this };
         ClampWindowToWorkArea(window, 560, 320);
-        return window.RunAsync((progress, token) => ImportDetectedPlanAsync(plan, progress, token));
+        return window.RunAsync((progress, token) =>
+            ImportDetectedPlanWithOptionsAsync(plan, replaceSoftDeletedHistory, progress, token));
     }
 
     private void ShowBulkImportReport(BulkImportReport report)

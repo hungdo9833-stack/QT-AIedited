@@ -38,6 +38,7 @@ public partial class ImportPreviewWindow : Window
     }
 
     public ImportPreviewPlan? ConfirmedPlan { get; private set; }
+    public bool ReplaceSoftDeletedHistory { get; private set; }
     public string? SourcePath { get; private set; }
     internal ImportPreviewPlan? CurrentPlan => _editor?.Current;
 
@@ -69,6 +70,9 @@ public partial class ImportPreviewWindow : Window
         PreviewStatusText.Text = "Đang đọc và nhận diện…";
         ConfirmButton.IsEnabled = false;
         ConfirmedPlan = null;
+        ReplaceSoftDeletedHistory = false;
+        ReplaceHistoryCheck.IsChecked = false;
+        ReplaceHistoryCheck.Visibility = Visibility.Collapsed;
         _editor = null;
         _rows.Clear();
         try
@@ -113,6 +117,10 @@ public partial class ImportPreviewWindow : Window
     {
         if (_editor is null) return;
         ImportPreviewPlan plan = _editor.Current;
+        int historyCollisions = plan.ImportableChapters.Count(IsSoftDeletedCollision);
+        bool replaceHistory = historyCollisions > 0 && ReplaceHistoryCheck.IsChecked == true;
+        ReplaceHistoryCheck.Visibility = historyCollisions > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ReplaceHistoryCheck.IsEnabled = !_translatingTitles && historyCollisions > 0;
         Guid? selectedId = select ?? (PreviewGrid.SelectedItem as PreviewRow)?.Id;
         string query = SearchInput.Text.Trim();
         string filter = (FilterInput.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "All";
@@ -128,6 +136,8 @@ public partial class ImportPreviewWindow : Window
                 problems = [.. problems, "Dịch tiêu đề (đã dùng tên dự phòng): " + translated.Error];
             string? collision = ProjectCollision(item);
             if (collision is not null) { problems = [.. problems, collision]; projectIssues.Add(collision); }
+            else if (replaceHistory && IsSoftDeletedCollision(item))
+                problems = [.. problems, "Sẽ xóa vĩnh viễn bản History cũ và nhập lại ChapterId này."];
             var row = new PreviewRow(item, problems, translated?.Status);
             bool matchesQuery = query.Length == 0 || row.NumberLabel.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 row.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) || row.VolumeTitle.Contains(query, StringComparison.CurrentCultureIgnoreCase);
@@ -155,7 +165,9 @@ public partial class ImportPreviewWindow : Window
         ConfirmButton.IsEnabled = !_translatingTitles && !plan.HasBlockingIssues && collisions == 0 &&
             plan.ImportableChapters.Any();
         FooterHintText.Text = ConfirmButton.IsEnabled
-            ? (TranslateTitlesCheck.IsChecked == true && (failedTitles > 0 || untranslatedCount > 0)
+            ? (replaceHistory
+                ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương; sẽ xóa vĩnh viễn {historyCollisions:N0} bản chương trong History khi transaction commit."
+                : TranslateTitlesCheck.IsChecked == true && (failedTitles > 0 || untranslatedCount > 0)
                 ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương ({failedTitles:N0} tiêu đề lỗi / {untranslatedCount:N0} chưa dịch sẽ tự dùng tên dự phòng kèm cảnh báo)."
                 : $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương theo thứ tự số. Source hash {plan.Source.RawSha256[..12]}…")
             : "Cần xử lý lỗi màu cảnh báo hoặc collision trước khi nhập. Nguồn TXT vẫn giữ nguyên.";
@@ -478,16 +490,37 @@ public partial class ImportPreviewWindow : Window
     {
         if (!item.Included || item.Number is not int number) return null;
         ProjectChapterEntry? id = _project.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == item.ChapterId);
-        if (id is not null) return id.DeletedAt is null ? null : "ChapterId nằm trong History/xóa mềm.";
+        if (id is not null)
+            return id.DeletedAt is null || ReplaceHistoryCheck.IsChecked == true
+                ? null
+                : "ChapterId nằm trong History/xóa mềm. Bật “Ghi đè History” để thay thế bản cũ.";
         ProjectChapterEntry? used = _project.Manifest.Chapters.SingleOrDefault(x => x.DeletedAt is null && x.Number == number);
         return used is null ? null : $"Số {number} đã thuộc “{used.VietnameseTitle}”.";
+    }
+
+    private bool IsSoftDeletedCollision(ImportPreviewItem item) => item.Included &&
+        _project.Manifest.Chapters.Any(x => x.ChapterId == item.ChapterId && x.DeletedAt is not null);
+
+    private void OnReplaceHistoryChanged(object sender, RoutedEventArgs e)
+    {
+        if (_editor is not null) RefreshRows();
     }
 
     private void OnConfirm(object sender, RoutedEventArgs e)
     {
         if (_editor is null || !ConfirmButton.IsEnabled) return;
+        int historyCollisions = _editor.Current.ImportableChapters.Count(IsSoftDeletedCollision);
+        bool replaceHistory = historyCollisions > 0 && ReplaceHistoryCheck.IsChecked == true;
+        if (replaceHistory && MessageBox.Show(this,
+                $"Xóa vĩnh viễn {historyCollisions:N0} chương đang nằm trong History và nhập lại từ TXT?\n\n" +
+                "Bản dịch, bản nháp, duyệt và lịch sử của các bản cũ sẽ bị xóa khi transaction commit. " +
+                "Nếu import thất bại, transaction sẽ phục hồi chúng.",
+                "Xác nhận ghi đè History", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
         if (TranslateTitlesCheck.IsChecked == true)
             EnsureFallbackVietnameseTitles();
+        ReplaceSoftDeletedHistory = replaceHistory;
         ConfirmedPlan = _editor.Current;
         DialogResult = true;
     }

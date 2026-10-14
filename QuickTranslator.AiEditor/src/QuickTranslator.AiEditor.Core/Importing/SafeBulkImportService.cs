@@ -19,7 +19,8 @@ public sealed record BulkImportChapterDefaults(
 
 public sealed record BulkImportOptions(
     int MaxChaptersPerChunk = 50,
-    long MaxUtf8BytesPerChunk = 16 * 1024 * 1024)
+    long MaxUtf8BytesPerChunk = 16 * 1024 * 1024,
+    bool ReplaceSoftDeletedHistory = false)
 {
     public void Validate()
     {
@@ -108,7 +109,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             throw new InvalidDataException("Tài nguyên canonical không thuộc Project đang import.");
 
         var outcomes = selected.Select(item => new MutableOutcome(item)).ToArray();
-        IReadOnlyList<string> collisions = await PreflightAsync(session, plan, outcomes, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<string> collisions = await PreflightAsync(session, plan, outcomes, options, cancellationToken).ConfigureAwait(false);
         if (collisions.Count > 0)
             throw new BulkImportValidationException("Bulk import có collision; chưa ghi source rescue hoặc Project.", collisions);
 
@@ -146,7 +147,8 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             try
             {
                 await repository.ImportDetectedChapterChunkAsync(session, documents, archivePath,
-                    $"DetectedBulkImport:{importId:N}:{chunkIndex + 1}/{chunks.Count}", id => published.Add(id), cancellationToken)
+                    $"DetectedBulkImport:{importId:N}:{chunkIndex + 1}/{chunks.Count}", id => published.Add(id),
+                    options.ReplaceSoftDeletedHistory, cancellationToken)
                     .ConfigureAwait(false);
                 foreach (MutableOutcome item in chunk) item.State = BulkImportChapterState.Imported;
                 completedChunks++;
@@ -180,7 +182,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
     }
 
     private async Task<IReadOnlyList<string>> PreflightAsync(ProjectSession session, ImportPreviewPlan plan,
-        IReadOnlyList<MutableOutcome> outcomes, CancellationToken token)
+        IReadOnlyList<MutableOutcome> outcomes, BulkImportOptions options, CancellationToken token)
     {
         var issues = new List<string>();
         Dictionary<Guid, ProjectChapterEntry> byId = session.Manifest.Chapters.ToDictionary(x => x.ChapterId);
@@ -197,18 +199,43 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             {
                 if (sameId.DeletedAt is not null)
                 {
-                    issues.Add($"ChapterId {item.ChapterId:D} đã tồn tại trong History/xóa mềm; không tự phục hồi hoặc ghi đè.");
-                    continue;
+                    if (!options.ReplaceSoftDeletedHistory)
+                    {
+                        issues.Add($"ChapterId {item.ChapterId:D} đã tồn tại trong History/xóa mềm; chỉ ghi đè khi người dùng bật tùy chọn xóa History cũ.");
+                        continue;
+                    }
+                    try
+                    {
+                        ChapterDocument deleted = await ChapterFileStore.ReadVerifiedFileAsync(
+                            session.Resolve(sameId.RelativePath), token).ConfigureAwait(false);
+                        if (deleted.Id != sameId.ChapterId || deleted.ProjectId != session.Manifest.ProjectId)
+                            throw new InvalidDataException("File History không thuộc ChapterId/Project cần thay thế.");
+                        string backupPath = session.Resolve(sameId.RelativePath) + ".bak";
+                        if (File.Exists(backupPath))
+                        {
+                            ChapterDocument backup = await ChapterFileStore.ReadVerifiedFileAsync(backupPath, token).ConfigureAwait(false);
+                            if (backup.Id != sameId.ChapterId || backup.ProjectId != session.Manifest.ProjectId)
+                                throw new InvalidDataException("Backup History không thuộc ChapterId/Project cần thay thế.");
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+                    {
+                        issues.Add($"Không thể xác minh bản History của ChapterId {item.ChapterId:D}; chưa xóa hoặc ghi đè. {ex.Message}");
+                        continue;
+                    }
                 }
-                ChapterDocument existing = (await repository.LoadChapterAsync(session, item.ChapterId, token).ConfigureAwait(false)).Chapter;
-                if (sameId.Number == number && existing.ChapterNumber == number && existing.ProjectId == session.Manifest.ProjectId &&
-                    existing.Title == expectedTitle && existing.ChineseTitle == ChineseTitle(item) && existing.OriginalText == expectedText)
+                else
                 {
-                    outcome.State = BulkImportChapterState.AlreadyImported;
+                    ChapterDocument existing = (await repository.LoadChapterAsync(session, item.ChapterId, token).ConfigureAwait(false)).Chapter;
+                    if (sameId.Number == number && existing.ChapterNumber == number && existing.ProjectId == session.Manifest.ProjectId &&
+                        existing.Title == expectedTitle && existing.ChineseTitle == ChineseTitle(item) && existing.OriginalText == expectedText)
+                    {
+                        outcome.State = BulkImportChapterState.AlreadyImported;
+                        continue;
+                    }
+                    issues.Add($"ChapterId {item.ChapterId:D} đã tồn tại nhưng nội dung/metadata khác preview; giữ nguyên chapter hiện có.");
                     continue;
                 }
-                issues.Add($"ChapterId {item.ChapterId:D} đã tồn tại nhưng nội dung/metadata khác preview; giữ nguyên chapter hiện có.");
-                continue;
             }
             if (activeByNumber.TryGetValue(number, out ProjectChapterEntry? collision))
                 issues.Add($"Số chương {number} đã thuộc chapter “{collision.VietnameseTitle}”; không ghi đè.");

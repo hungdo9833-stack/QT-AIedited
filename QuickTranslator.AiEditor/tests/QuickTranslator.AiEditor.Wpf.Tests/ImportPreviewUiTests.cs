@@ -2,12 +2,57 @@ using System.IO;
 using System.Windows.Controls;
 using QuickTranslator.AiEditor.Core.Importing;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Segmentation;
+using QuickTranslator.AiEditor.Core.Translation;
 using Xunit;
 
 namespace QuickTranslator.AiEditor.Wpf.Tests;
 
 public sealed class ImportPreviewUiTests
 {
+    [Fact]
+    public Task Reimport_after_soft_delete_requires_explicit_history_replacement() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        const string source = "第1章 第一章\n原文一。\n第2章 第二章\n原文二。\n";
+        ImportPreviewPlan originalPlan = ImportPreviewEditor.Create(
+            new ChapterDetector().Detect(source, "same-source.txt")).Current;
+        foreach (ImportPreviewItem item in originalPlan.ImportableChapters)
+        {
+            var chapter = TranslationService.CreateChapter(item.Title, originalPlan.Slice(item.ContentSpan));
+            chapter.Id = item.ChapterId;
+            chapter.Segments = new TextSegmenter().Segment(chapter.OriginalText, chapter.Id, new()).ToList();
+            chapter.SelectedSegmentId = chapter.Segments[0].Id;
+            await fixture.Repository.AddChapterAsync(fixture.Project, chapter, item.Number!.Value);
+            await fixture.Repository.SoftDeleteChapterAsync(fixture.Project, chapter.Id);
+        }
+        Guid[] deletedIds = fixture.Project.Manifest.Chapters.Select(item => item.ChapterId).ToArray();
+        string path = Path.Combine(fixture.Root, "same-source.txt");
+        await File.WriteAllTextAsync(path, source);
+
+        var window = new ImportPreviewWindow(fixture.Project);
+        try
+        {
+            await window.LoadSourceAsync(path, SourceTextEncoding.Auto);
+
+            var replace = Assert.IsType<CheckBox>(window.FindName("ReplaceHistoryCheck"));
+            Assert.True(replace.IsEnabled);
+            Assert.False(((Button)window.FindName("ConfirmButton")).IsEnabled);
+
+            replace.IsChecked = true;
+
+            Assert.True(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.Equal(deletedIds.Order(), window.CurrentPlan!.ImportableChapters
+                .Select(item => item.ChapterId).Order());
+            Assert.Equal(2, fixture.Project.Manifest.DeletedChapterCount);
+            Assert.Contains("xóa vĩnh viễn", ((TextBlock)window.FindName("FooterHintText")).Text,
+                StringComparison.CurrentCultureIgnoreCase);
+            Assert.Equal(source, window.CurrentPlan.ReconstructSource());
+        }
+        finally { window.Close(); }
+    });
+
     [Fact]
     public Task Dark_preview_loads_detector_output_and_blocks_project_number_collisions() => StaHost.Run(async () =>
     {

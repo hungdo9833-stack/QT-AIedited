@@ -3,6 +3,7 @@ using QuickTranslator.AiEditor.Core.Importing;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Segmentation;
 using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
@@ -225,6 +226,86 @@ public sealed class SafeBulkImportTests : IDisposable
         Assert.Contains("正文二前。", loaded.OriginalText, StringComparison.Ordinal);
         Assert.DoesNotContain("正文二后。", loaded.OriginalText, StringComparison.Ordinal);
         Assert.Equal(source, plan.ReconstructSource());
+    }
+
+    [Fact]
+    public async Task Explicit_history_replacement_deletes_soft_deleted_copy_and_imports_same_id()
+    {
+        var repository = new ProjectRepository();
+        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "replace-history"), "Synthetic replace history");
+        ImportPreviewPlan plan = Plan(2);
+        var oldPaths = new List<string>();
+        foreach (ImportPreviewItem item in plan.ImportableChapters)
+        {
+            ChapterDocument old = ChapterWithId(item.ChapterId, "Bản cũ", "旧内容。", session.Manifest.ProjectId);
+            await repository.AddChapterAsync(session, old, item.Number!.Value);
+            await repository.SoftDeleteChapterAsync(session, old.Id);
+            oldPaths.Add(session.Manifest.Chapters.Single(x => x.ChapterId == old.Id).RelativePath);
+        }
+
+        await Assert.ThrowsAsync<BulkImportValidationException>(() =>
+            new SafeBulkImportService(repository).ImportAsync(session, plan, Defaults()));
+        Assert.Equal(2, session.Manifest.DeletedChapterCount);
+        Assert.All(oldPaths, relative => Assert.True(File.Exists(session.Resolve(relative))));
+
+        BulkImportReport report = await new SafeBulkImportService(repository).ImportAsync(session, plan, Defaults(),
+            new BulkImportOptions(ReplaceSoftDeletedHistory: true));
+
+        Assert.True(report.Completed);
+        Assert.Equal(2, report.ImportedCount);
+        Assert.Equal(2, session.Manifest.ChapterCount);
+        Assert.Equal(0, session.Manifest.DeletedChapterCount);
+        Assert.Equal(plan.ImportableChapters.Select(x => x.ChapterId).Order(),
+            session.Manifest.Chapters.Select(x => x.ChapterId).Order());
+        Assert.All(oldPaths, relative => Assert.False(File.Exists(session.Resolve(relative))));
+        foreach (ImportPreviewItem item in plan.ImportableChapters)
+        {
+            ChapterDocument imported = (await repository.LoadChapterAsync(session, item.ChapterId)).Chapter;
+            Assert.Equal(plan.Slice(item.ContentSpan), imported.OriginalText);
+        }
+        ProjectSession reopened = (await new ProjectRepository().OpenAsync(session.ManifestPath)).Session;
+        Assert.False(reopened.RecoveryReport.RequiresDecision);
+        Assert.Empty(reopened.RecoveryReport.Orphans);
+    }
+
+    [Fact]
+    public async Task History_replacement_failure_rolls_back_deleted_copy_and_new_chapter()
+    {
+        var repository = new ProjectRepository();
+        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "replace-history-rollback"), "Synthetic rollback");
+        ImportPreviewPlan plan = Plan(1);
+        ImportPreviewItem item = Assert.Single(plan.ImportableChapters);
+        ChapterDocument old = ChapterWithId(item.ChapterId, "Bản cũ", "旧内容。", session.Manifest.ProjectId);
+        await repository.AddChapterAsync(session, old, item.Number!.Value);
+        await repository.SoftDeleteChapterAsync(session, old.Id);
+        ProjectChapterEntry deleted = Assert.Single(session.Manifest.Chapters);
+        string historyPath = session.Resolve(deleted.RelativePath);
+        byte[] historyBefore = await File.ReadAllBytesAsync(historyPath);
+        repository.FaultPoint = point => { if (point == "AfterFile:1") throw new IOException("Injected disk failure."); };
+
+        BulkImportReport report = await new SafeBulkImportService(repository).ImportAsync(session, plan, Defaults(),
+            new BulkImportOptions(ReplaceSoftDeletedHistory: true));
+
+        Assert.False(report.Completed);
+        Assert.Equal(0, report.ImportedCount);
+        ProjectChapterEntry restored = Assert.Single(session.Manifest.Chapters);
+        Assert.NotNull(restored.DeletedAt);
+        Assert.Equal(deleted.RelativePath, restored.RelativePath);
+        Assert.Equal(historyBefore, await File.ReadAllBytesAsync(historyPath));
+        Assert.False(File.Exists(session.ChapterStore.GetPath(item.ChapterId)));
+        ProjectSession reopened = (await new ProjectRepository().OpenAsync(session.ManifestPath)).Session;
+        Assert.False(reopened.RecoveryReport.RequiresDecision);
+        Assert.Empty(reopened.RecoveryReport.Orphans);
+    }
+
+    private static ChapterDocument ChapterWithId(Guid id, string title, string source, Guid projectId)
+    {
+        ChapterDocument chapter = TranslationService.CreateChapter(title, source);
+        chapter.Id = id;
+        chapter.ProjectId = projectId;
+        chapter.Segments = new TextSegmenter().Segment(chapter.OriginalText, chapter.Id, new()).ToList();
+        chapter.SelectedSegmentId = chapter.Segments[0].Id;
+        return chapter;
     }
 
     private static ImportPreviewPlan Plan(int count, int firstNumber = 1)

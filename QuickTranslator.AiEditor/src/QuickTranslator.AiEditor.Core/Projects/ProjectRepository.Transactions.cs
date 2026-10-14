@@ -202,7 +202,7 @@ public sealed partial class ProjectRepository
 
     internal async Task<Guid> ImportDetectedChapterChunkAsync(ProjectSession session,
         IReadOnlyList<(ChapterDocument Source, int Number)> chapters, string sourceArchive, string operation,
-        Action<Guid> published, CancellationToken token)
+        Action<Guid> published, bool replaceSoftDeletedHistory, CancellationToken token)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(operation);
         await session.OperationGate.WaitAsync(token).ConfigureAwait(false);
@@ -213,8 +213,27 @@ public sealed partial class ProjectRepository
             var files = new List<PlannedProjectFile>();
             foreach (var (source, number) in chapters)
             {
-                if (after.Chapters.Any(x => x.ChapterId == source.Id || x.DeletedAt is null && x.Number == number))
-                    throw new InvalidOperationException("ID/số chương nhập đã có trong Project (kể cả ID xóa mềm).");
+                ProjectChapterEntry? replaced = after.Chapters.SingleOrDefault(x => x.ChapterId == source.Id);
+                if (replaced is not null)
+                {
+                    if (!replaceSoftDeletedHistory || replaced.DeletedAt is null)
+                        throw new InvalidOperationException("ID chương nhập đã có trong Project; bản active không được ghi đè.");
+                    string deletedPath = session.Resolve(replaced.RelativePath);
+                    ChapterDocument deleted = await ChapterFileStore.ReadVerifiedFileAsync(deletedPath, token).ConfigureAwait(false);
+                    if (deleted.Id != replaced.ChapterId || deleted.ProjectId != session.Manifest.ProjectId)
+                        throw new InvalidDataException("File History không thuộc ChapterId/Project cần thay thế.");
+                    files.Add(new(replaced.RelativePath, null));
+                    if (File.Exists(deletedPath + ".bak"))
+                    {
+                        ChapterDocument backup = await ChapterFileStore.ReadVerifiedFileAsync(deletedPath + ".bak", token).ConfigureAwait(false);
+                        if (backup.Id != replaced.ChapterId || backup.ProjectId != session.Manifest.ProjectId)
+                            throw new InvalidDataException("Backup History không thuộc ChapterId/Project cần thay thế.");
+                        files.Add(new(replaced.RelativePath + ".bak", null));
+                    }
+                    after.Chapters.Remove(replaced);
+                }
+                if (after.Chapters.Any(x => x.DeletedAt is null && x.Number == number))
+                    throw new InvalidOperationException("Số chương nhập đã thuộc một chapter active khác.");
                 string relative = $"Chapters/{source.Id:D}.qtaie.json";
                 await EnsureDestinationEmptyAsync(session.Resolve(relative), token).ConfigureAwait(false);
                 ChapterDocument saved = PrepareRegisteredChapter(session, source, number, source.ChineseTitle);
