@@ -57,6 +57,7 @@ public sealed class GpuManagerUiTests
             Assert.NotNull(window.FindName("RuntimeMinimumInput"));
             Assert.NotNull(window.FindName("RuntimeTargetInput"));
             Assert.NotNull(window.FindName("RuntimeMaximumInput"));
+            Assert.False(((Expander)window.FindName("AdvancedRuntimeExpander")).IsExpanded);
             Assert.NotNull(window.FindName("AdvancedConnectionExpander"));
             Assert.NotNull(window.FindName("ConnectionTypeInput"));
             Assert.NotNull(window.FindName("EndpointInput"));
@@ -70,7 +71,7 @@ public sealed class GpuManagerUiTests
     });
 
     [Fact]
-    public Task BL19_Selecting_remote_profile_auto_expands_advanced_connection_expander() => StaHost.Run(async () =>
+    public Task Selecting_remote_profile_keeps_advanced_sections_collapsed_until_requested() => StaHost.Run(async () =>
     {
         string root = CreateTestRoot();
         using var backends = CreateBackendManager(root);
@@ -94,7 +95,10 @@ public sealed class GpuManagerUiTests
             window.GetType().GetMethod("OnProfileSelected", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
                 .Invoke(window, [list, null!]);
             if (list.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote })
-                Assert.True(expander.IsExpanded);
+            {
+                Assert.False(expander.IsExpanded);
+                Assert.False(((Expander)window.FindName("AdvancedRuntimeExpander")).IsExpanded);
+            }
         }
         finally { window.Close(); Directory.Delete(root, true); }
     });

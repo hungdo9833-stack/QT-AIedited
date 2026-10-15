@@ -65,7 +65,7 @@ public partial class ChapterManagerWindow : Window
             CatalogCountText.Text = $"{snapshot.ActiveCount:N0} hoạt động · {snapshot.DeletedCount:N0} trong History";
             StatusText.Text = _rows.Count == 0
                 ? "Không có chương phù hợp bộ lọc."
-                : $"Đang hiển thị {_rows.Count:N0} chương · revision {snapshot.Revision[..12]}…";
+                : $"Đang hiển thị {_rows.Count:N0} chương.";
             UpdateCommands();
         }
         finally { _refreshing = false; }
@@ -175,7 +175,7 @@ public partial class ChapterManagerWindow : Window
         ChapterManagerRow[] rows = SelectedRows().Where(row => !row.IsDeleted).OrderBy(row => row.DisplayOrder).ToArray();
         if (rows.Length == 0) return;
         await RunAsync(() => _commands.Queue(rows.Select(row => row.ChapterId).ToArray()),
-            "Đã mở Queue Plan. Hàng đợi chỉ chạy sau khi bạn xác nhận Start.");
+            $"Đã bắt đầu dịch {rows.Length:N0} chương. Theo dõi tiến độ trong cửa sổ Hàng đợi.");
     }
 
     private async void OnResegment(object sender, RoutedEventArgs e)

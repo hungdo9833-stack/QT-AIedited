@@ -44,21 +44,25 @@
       <StackPanel Margin="0,0,8,0"><TextBlock Text="Tên hiển thị" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NameInput"/></StackPanel>
       <StackPanel Grid.Column="1"><TextBlock Text="Model Ollama" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ModelInput" Text="translategemma:12b"/></StackPanel>
      </Grid>
-     <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-      <StackPanel Margin="0,0,7,0"><TextBlock Text="Temperature" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTemperatureInput" Text="0.1"/></StackPanel>
-      <StackPanel Grid.Column="1" Margin="0,0,7,0"><TextBlock Text="Context" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeContextInput" Text="4096"/></StackPanel>
-      <StackPanel Grid.Column="2" Margin="0,0,7,0"><TextBlock Text="Output tokens" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeOutputInput" Text="2048"/></StackPanel>
-      <StackPanel Grid.Column="3"><TextBlock Text="Timeout (giây)" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTimeoutInput" Text="300"/></StackPanel>
-     </Grid>
-     <TextBlock Text="Chia đoạn theo GPU · người dùng quyết định, QT Studio không auto-tune" Style="{StaticResource FieldLabel}"/>
-     <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-      <StackPanel Margin="0,0,7,0"><TextBlock Text="Minimum Han" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeMinimumInput" Text="300"/></StackPanel>
-      <StackPanel Grid.Column="1" Margin="0,0,7,0"><TextBlock Text="Target Han" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTargetInput" Text="400"/></StackPanel>
-      <StackPanel Grid.Column="2" Margin="0,0,7,0"><TextBlock Text="Maximum Han" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeMaximumInput" Text="500"/></StackPanel>
-      <StackPanel Grid.Column="3"><TextBlock Text="Max text elements" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTextElementsInput" Text="2000"/></StackPanel>
-     </Grid>
+      <Expander x:Name="AdvancedRuntimeExpander" Header="Thiết lập nâng cao · context, đầu ra và cỡ đoạn" IsExpanded="False" Margin="0,8,0,0">
+       <StackPanel>
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+         <StackPanel Margin="0,0,7,0"><TextBlock Text="Temperature" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTemperatureInput" Text="0.1"/></StackPanel>
+         <StackPanel Grid.Column="1" Margin="0,0,7,0"><TextBlock Text="Context" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeContextInput" Text="4096"/></StackPanel>
+         <StackPanel Grid.Column="2" Margin="0,0,7,0"><TextBlock Text="Độ dài đầu ra" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeOutputInput" Text="2048"/></StackPanel>
+         <StackPanel Grid.Column="3"><TextBlock Text="Thời gian chờ (giây)" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTimeoutInput" Text="300"/></StackPanel>
+        </Grid>
+        <TextBlock Text="Độ dài đoạn tiếng Trung cho GPU này" Style="{StaticResource FieldLabel}"/>
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+         <StackPanel Margin="0,0,7,0"><TextBlock Text="Tối thiểu" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeMinimumInput" Text="300"/></StackPanel>
+         <StackPanel Grid.Column="1" Margin="0,0,7,0"><TextBlock Text="Mục tiêu" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTargetInput" Text="400"/></StackPanel>
+         <StackPanel Grid.Column="2" Margin="0,0,7,0"><TextBlock Text="Tối đa" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeMaximumInput" Text="500"/></StackPanel>
+         <StackPanel Grid.Column="3"><TextBlock Text="Ký tự tối đa" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTextElementsInput" Text="2000"/></StackPanel>
+        </Grid>
+       </StackPanel>
+      </Expander>
     </StackPanel></Border>
-    <Expander x:Name="AdvancedConnectionExpander" Header="Advanced Connection · SSH / HTTPS / token" IsExpanded="False" Margin="3,7">
+     <Expander x:Name="AdvancedConnectionExpander" Header="Thiết lập kết nối nâng cao · SSH / HTTPS / token" IsExpanded="False" Margin="3,7">
      <Border Style="{StaticResource Card}" Margin="0,5,0,0"><StackPanel>
       <TextBlock Text="Loại kết nối Remote" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="ConnectionTypeInput" SelectionChanged="OnConnectionTypeChanged"><ComboBoxItem Content="SSH tunnel (khuyên dùng)"/><ComboBoxItem Content="HTTPS / private network trực tiếp"/></ComboBox>
       <StackPanel x:Name="DirectConnectionPanel" Visibility="Collapsed">

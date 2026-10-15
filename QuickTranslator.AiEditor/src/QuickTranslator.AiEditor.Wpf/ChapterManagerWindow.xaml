@@ -15,7 +15,7 @@
       </StackPanel>
       <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
         <TextBlock x:Name="CatalogCountText" HorizontalAlignment="Right" FontWeight="SemiBold"/>
-        <TextBlock Text="Catalog đọc metadata từ manifest; không nạp nội dung chương." Foreground="{DynamicResource MutedBrush}"/>
+        <TextBlock Text="Tìm, lọc và chọn nhiều chương mà không tải toàn bộ nội dung." Foreground="{DynamicResource MutedBrush}"/>
       </StackPanel>
     </DockPanel>
     <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="8">
@@ -44,7 +44,7 @@
         <Button x:Name="DeleteButton" Content="Chuyển vào History" Click="OnDelete"/>
         <Button x:Name="RestoreButton" Content="Phục hồi" Click="OnRestore"/>
         <Button x:Name="ResegmentButton" Content="Chia lại đoạn" Click="OnResegment" ToolTip="Xem trước ranh giới mới; giữ nguyên các segment đã có dữ liệu dịch/duyệt."/>
-        <Button x:Name="QueueButton" Content="Đưa vào hàng đợi dịch" Click="OnQueue" ToolTip="Xem Queue Plan trước khi bắt đầu dịch tuần tự."/>
+        <Button x:Name="QueueButton" Content="Dịch các chương đã chọn" Style="{StaticResource PrimaryButton}" Click="OnQueue" ToolTip="Tạo hàng đợi an toàn và bắt đầu dịch ngay"/>
         <Button x:Name="TranslateSelectedTitlesButton" Content="Dịch tiêu đề đã chọn" Click="OnTranslateSelectedTitles"/>
         <Button x:Name="TranslateAllTitlesButton" Content="Dịch tất cả tiêu đề" Click="OnTranslateAllTitles"/>
         <Separator Width="1" Height="22" Margin="6,2" Background="{DynamicResource BorderBrush}"/>

@@ -21,7 +21,14 @@ public partial class MainWindow
             cancellationToken => LoadProjectTranslationEnvironmentAsync(session, cancellationToken));
         coordinator.ProgressChanged += OnProjectTranslationProgressChanged;
         _projectTranslationCoordinator = coordinator;
-        _projectTranslationLoadTask = coordinator.LoadAsync();
+        _projectTranslationLoadTask = LoadProjectTranslationStateAsync(coordinator);
+    }
+
+    private async Task<ProjectTranslationJob?> LoadProjectTranslationStateAsync(ProjectTranslationCoordinator coordinator)
+    {
+        ProjectTranslationJob? job = await coordinator.LoadAsync();
+        if (!_closing) await Dispatcher.InvokeAsync(RefreshShellQueueStatus);
+        return job;
     }
 
     private async Task<ProjectTranslationCoordinator> EnsureProjectTranslationCoordinatorAsync()

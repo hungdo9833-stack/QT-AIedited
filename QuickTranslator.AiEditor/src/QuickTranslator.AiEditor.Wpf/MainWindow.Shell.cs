@@ -342,6 +342,24 @@ public partial class MainWindow
         ShowProjectTranslationWindow(coordinator, null);
     }
 
+    private async void OnResumeProjectTranslationFromShell(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ProjectTranslationCoordinator coordinator = await EnsureProjectTranslationCoordinatorAsync();
+            ProjectTranslationProgress progress = coordinator.GetProgress();
+            if (progress.Status is not (ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted))
+            {
+                RefreshShellQueueStatus();
+                return;
+            }
+            ShowProjectTranslationWindow(coordinator, null);
+            if (_projectTranslationWindow is not null)
+                await _projectTranslationWindow.ResumeNowAsync();
+        }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
     private async Task OpenProjectPublicationAsync()
     {
         if (_projectSession is null) { SetStatus("Hãy mở Project trước khi xuất bản."); return; }
@@ -599,13 +617,21 @@ public partial class MainWindow
     {
         ProjectTranslationProgress? progress = _projectTranslationCoordinator?.CurrentJob is null
             ? null : _projectTranslationCoordinator.GetProgress();
+        bool resumable = progress?.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted;
+        if (QueueResumeBanner is not null)
+        {
+            QueueResumeBanner.Visibility = resumable ? Visibility.Visible : Visibility.Collapsed;
+            if (resumable && progress is not null)
+                QueueResumeSummaryText.Text = $"Đã dịch {progress.CompletedChapters:N0}/{progress.TotalChapters:N0} chương. " +
+                    $"Còn {Math.Max(0, progress.TotalChapters - progress.CompletedChapters - progress.SkippedChapters):N0} chương.";
+        }
         if (_compactShell)
         {
-            ShellQueueButton.Content = progress is null ? "Queue" :
+            ShellQueueButton.Content = progress is null ? "Queue" : resumable ? "Tiếp tục dịch" :
                 $"Queue {progress.CompletedChapters}/{progress.TotalChapters}";
             return;
         }
-        ShellQueueButton.Content = progress is null ? "Hàng đợi · chưa chạy" :
+        ShellQueueButton.Content = progress is null ? "Hàng đợi · chưa chạy" : resumable ? "Hàng đợi · có thể tiếp tục" :
             $"Hàng đợi · {progress.CompletedChapters}/{progress.TotalChapters}" +
             (progress.FailedChapters > 0 ? $" · {progress.FailedChapters} lỗi" : "");
     }

@@ -81,7 +81,8 @@ public partial class GpuManagerWindow : Window
         RuntimeTextElementsInput.Text = runtime.SegmentationOptions.MaximumTextElements.ToString(CultureInfo.InvariantCulture);
         bool remote = profile.Kind == OllamaBackendKind.Remote;
         AdvancedConnectionExpander.IsEnabled = remote;
-        AdvancedConnectionExpander.IsExpanded = remote;
+        AdvancedConnectionExpander.IsExpanded = false;
+        AdvancedRuntimeExpander.IsExpanded = false;
         UseForRemoteButton.IsEnabled = remote;
         ConnectionTypeInput.SelectedIndex = profile.Ssh is null ? 1 : 0;
         EndpointInput.Text = profile.Endpoint;

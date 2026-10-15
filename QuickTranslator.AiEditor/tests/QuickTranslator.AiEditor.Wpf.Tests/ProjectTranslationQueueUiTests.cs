@@ -13,8 +13,44 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 
 public sealed class ProjectTranslationQueueUiTests
 {
+    [Theory]
+    [InlineData(300)]
+    [InlineData(1000)]
+    [InlineData(5000)]
+    public Task Queue_refresh_reuses_rows_and_preserves_selection_for_large_projects(int chapterCount) => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        await fixture.TaskCall("EnsureProjectTranslationCoordinatorAsync");
+        ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
+        ProjectTranslationJob plan = SyntheticPlan(fixture.Project.Manifest.ProjectId, chapterCount);
+        var window = new ProjectTranslationQueueWindow("Benchmark tổng hợp", coordinator, plan);
+        try
+        {
+            var grid = (DataGrid)window.FindName("QueueGrid");
+            object source = grid.ItemsSource;
+            int selectedIndex = chapterCount / 2;
+            grid.SelectedIndex = selectedIndex;
+            object selected = grid.SelectedItem;
+            ProjectTranslationQueueWindow.QueueRow selectedRow = window.CurrentRows[selectedIndex];
+
+            _ = window.MeasureRefresh(); // warm up templates, formatters and JIT
+            ProjectTranslationQueueWindow.QueueRefreshMeasurement measurement = window.MeasureRefresh();
+
+            Assert.Same(source, grid.ItemsSource);
+            Assert.Same(selected, grid.SelectedItem);
+            Assert.Same(selectedRow, window.CurrentRows[selectedIndex]);
+            Assert.Equal(chapterCount, window.RowObjectCreationCount);
+            Assert.True(measurement.Elapsed < TimeSpan.FromMilliseconds(750),
+                $"Refresh {chapterCount:N0} rows took {measurement.Elapsed.TotalMilliseconds:N1} ms.");
+            Assert.True(measurement.AllocatedBytes < 8_000_000,
+                $"Refresh {chapterCount:N0} rows allocated {measurement.AllocatedBytes:N0} bytes.");
+        }
+        finally { window.Close(); }
+    });
+
     [Fact]
-    public Task Chapter_manager_selection_opens_plan_without_sending_request_then_start_completes() => StaHost.Run(async () =>
+    public Task Chapter_manager_selection_starts_saved_queue_without_second_start_click() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
         await fixture.CreateProjectAsync();
@@ -29,19 +65,19 @@ public sealed class ProjectTranslationQueueUiTests
         var window = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
 
         Assert.Equal(3, window.CurrentRows.Count);
-        Assert.True(((Button)window.FindName("StartButton")).IsEnabled);
-        Assert.False(((Button)window.FindName("ReplanButton")).IsEnabled);
-        Assert.Equal(0, fixture.Client.Calls);
-        ((Button)window.FindName("StartButton")).RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
         ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
         for (int count = 0; count < 100 && (coordinator.CurrentJob is null || coordinator.IsRunning); count++)
         {
             await Task.Delay(20);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
         }
+        await Task.Delay(150);
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
 
         Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob?.Status);
         Assert.Equal(3, fixture.Client.Calls);
+        Assert.NotEqual(Guid.Empty, coordinator.CurrentJob!.JobId);
+        Assert.False(((Button)window.FindName("StartButton")).IsEnabled);
         Assert.Contains("3/3", ((TextBlock)window.FindName("SummaryText")).Text);
         window.Close();
     });
@@ -61,16 +97,13 @@ public sealed class ProjectTranslationQueueUiTests
             return Task.FromResult(FakeClient.Completion("Bản dịch tiếp theo."));
         };
         await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id, second.Id });
-        ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
-        ProjectTranslationJob plan = await coordinator.PlanAsync(new[] { first.Id, second.Id });
-        Task run = coordinator.StartAsync(plan);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.TaskCall("LoadProjectChapterAsync", second.Id));
         Task pauseForSwitch = fixture.TaskCall("WaitForCurrentWorkAsync");
         release.TrySetResult(FakeClient.Completion("Checkpoint trước khi chuyển."));
         await pauseForSwitch;
-        await run;
 
         Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob?.Status);
         Assert.False(coordinator.IsRunning);
@@ -95,8 +128,8 @@ public sealed class ProjectTranslationQueueUiTests
 
         await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id, second.Id });
         var window = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
-        ((Button)window.FindName("StartButton")).RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(150);
         await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
 
         Assert.True(((Button)window.FindName("PauseButton")).IsEnabled);
@@ -113,6 +146,10 @@ public sealed class ProjectTranslationQueueUiTests
 
         Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob?.Status);
         Assert.False(coordinator.IsRunning);
+        fixture.Call("RefreshShellQueueStatus");
+        Assert.Equal(Visibility.Visible, ((Border)fixture.Window.FindName("QueueResumeBanner")).Visibility);
+        Assert.Contains("Còn", ((TextBlock)fixture.Window.FindName("QueueResumeSummaryText")).Text);
+        Assert.Equal("Hàng đợi · có thể tiếp tục", ((Button)fixture.Window.FindName("ShellQueueButton")).Content);
         window.Close();
     });
 
@@ -136,8 +173,6 @@ public sealed class ProjectTranslationQueueUiTests
         await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id, second.Id });
         var window = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
         ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
-        ProjectTranslationJob plan = await coordinator.PlanAsync(new[] { first.Id, second.Id });
-        Task run = coordinator.StartAsync(plan);
         await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.True(coordinator.IsRunning);
@@ -152,7 +187,11 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.Equal(SegmentStatus.Approved, fixture.Service.GetSnapshot().Segments[0].Status);
 
         releaseSecond.TrySetResult(FakeClient.Completion("Chương hai dịch xong."));
-        await run;
+        for (int count = 0; count < 100 && coordinator.IsRunning; count++)
+        {
+            await Task.Delay(20);
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+        }
         Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob?.Status);
         window.Close();
     });
@@ -177,4 +216,29 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.True(cleaner.IsVisible);
         cleaner.Close();
     });
+
+    private static ProjectTranslationJob SyntheticPlan(Guid projectId, int chapterCount)
+    {
+        const string fingerprint = "0000000000000000000000000000000000000000000000000000000000000000";
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        return new ProjectTranslationJob
+        {
+            ProjectId = projectId,
+            Status = ProjectTranslationJobStatus.Draft,
+            CreatedAt = now,
+            UpdatedAt = now,
+            Items = Enumerable.Range(1, chapterCount).Select(number => new ProjectTranslationItem
+            {
+                ChapterId = Guid.NewGuid(),
+                Number = number,
+                Order = number,
+                Title = "Chương tổng hợp " + number,
+                SourceFingerprint = fingerprint,
+                ProtectedFingerprint = fingerprint,
+                EnqueuedDocumentFingerprint = fingerprint,
+                TotalSegments = 12,
+                CompletedSegments = number % 12
+            }).ToList()
+        };
+    }
 }
