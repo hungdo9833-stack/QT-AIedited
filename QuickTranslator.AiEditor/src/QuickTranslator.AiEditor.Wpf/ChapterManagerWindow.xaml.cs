@@ -235,7 +235,7 @@ public partial class ChapterManagerWindow : Window
         TranslateSelectedTitlesButton.IsEnabled = !_working && active > 0 && deleted == 0;
         TranslateAllTitlesButton.IsEnabled = !_working && _session.Manifest.Chapters.Any(entry => entry.DeletedAt is null);
         ClearSelectionButton.IsEnabled = !_working && selected.Length > 0;
-        SelectionText.Text = $"Đã chọn {selected.Length:N0} · {active:N0} hoạt động · {deleted:N0} History";
+        SelectionText.Text = $"Đã chọn {selected.Length:N0}";
     }
 
     private static T Parse<T>(ComboBox combo, T fallback) where T : struct, Enum =>

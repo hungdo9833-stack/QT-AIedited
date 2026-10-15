@@ -74,10 +74,12 @@ public sealed class RecoveryUiTests
         var dialog = fixture.Window.OwnedWindows.Cast<Window>().Single(); dialog.Left = -30000;
         try
         {
-            await UntilAsync(() => Descendants<Button>(dialog).Any(x => Equals(x.Content, "Rollback transaction đã chọn")));
-            Descendants<Button>(dialog).Single(x => Equals(x.Content, "Rollback transaction đã chọn")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await UntilAsync(() => Descendants<Button>(dialog).Any(x => Equals(x.Content, "Phục hồi bản trước")));
+            Assert.Contains("cần kiểm tra", dialog.Title, StringComparison.CurrentCultureIgnoreCase);
+            Assert.Contains(Descendants<Expander>(dialog), item => Equals(item.Header, "Chi tiết kỹ thuật") && !item.IsExpanded);
+            Descendants<Button>(dialog).Single(x => Equals(x.Content, "Phục hồi bản trước")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await UntilAsync(() => !fixture.Project.RecoveryReport.RequiresDecision && Descendants<Button>(dialog).All(x => x.IsEnabled));
-            Descendants<Button>(dialog).Single(x => Equals(x.Content, "Tiếp tục / Đóng")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Descendants<Button>(dialog).Single(x => Equals(x.Content, "Đóng")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await launch; await review!;
             Assert.Null(fixture.Project.Manifest.Chapters.Single().DeletedAt);
             Assert.True(File.Exists(fixture.Project.ChapterStore.GetPath(chapter.Id)));

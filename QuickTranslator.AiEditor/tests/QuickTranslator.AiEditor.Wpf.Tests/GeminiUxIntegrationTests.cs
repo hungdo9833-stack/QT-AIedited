@@ -13,6 +13,34 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 public sealed class GeminiUxIntegrationTests
 {
     [Fact]
+    public void Editor_split_uses_the_caret_at_a_sentence_boundary_or_suggests_the_nearest_one()
+    {
+        const string source = "第一句。第二句。第三句。";
+        int firstBoundary = TextSegmenter.GetSentenceBoundaries(source)[0];
+
+        MainWindow.SplitBoundaryDecision exact = MainWindow.ResolveSplitBoundary(source, firstBoundary);
+        Assert.Equal(firstBoundary, exact.Boundary);
+        Assert.False(exact.RequiresConfirmation);
+
+        MainWindow.SplitBoundaryDecision suggested = MainWindow.ResolveSplitBoundary(source, firstBoundary - 2);
+        Assert.Equal(firstBoundary, suggested.Boundary);
+        Assert.True(suggested.RequiresConfirmation);
+        Assert.DoesNotContain("UTF-16", suggested.Preview, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Source_edit_only_requires_a_blocking_confirmation_when_translation_data_is_at_risk()
+    {
+        SourceEditPreview safe = Preview(protectedSegments: 0, replacesMost: false);
+        SourceEditPreview protectedEdit = Preview(protectedSegments: 2, replacesMost: false);
+        SourceEditPreview replacement = Preview(protectedSegments: 0, replacesMost: true);
+
+        Assert.False(MainWindow.RequiresSourceEditConfirmation(safe));
+        Assert.True(MainWindow.RequiresSourceEditConfirmation(protectedEdit));
+        Assert.True(MainWindow.RequiresSourceEditConfirmation(replacement));
+    }
+
+    [Fact]
     public Task Responsive_shell_and_section_navigation_use_the_real_workspace_controls() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
@@ -143,4 +171,8 @@ public sealed class GeminiUxIntegrationTests
             ((FrameworkElement)fixture.Window.FindName("InspectorLiveSelectionBorder")).Visibility);
         Assert.Contains("【苏雨】", ((TextBlock)fixture.Window.FindName("InspectorLiveSelectionText")).Text);
     });
+
+    private static SourceEditPreview Preview(int protectedSegments, bool replacesMost) => new(
+        1, new string('0', 64), new string('1', 64), "新正文。", new SegmenterOptions(),
+        new SourceTextChange(0, 1, 0, 1, "旧", "新"), 1, 1, 0, 1, protectedSegments, replacesMost);
 }

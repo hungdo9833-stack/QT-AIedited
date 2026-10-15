@@ -34,10 +34,19 @@ internal static class Program
 
         var application = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.InitializeComponent();
+        if (string.Equals(mode, "queue-benchmark", StringComparison.OrdinalIgnoreCase))
+        {
+            int count = (int)(NumberAfter(args, "--count") ?? 1000);
+            RunQueueBenchmark(root, count);
+            application.Shutdown();
+            return;
+        }
         ProjectSession session = CreateSyntheticProjectAsync(root).GetAwaiter().GetResult();
         Window window = CreateWindow(mode, session, root);
         if (requestedWidth is > 0) window.Width = requestedWidth.Value;
         if (requestedHeight is > 0) window.Height = requestedHeight.Value;
+        if (window is MainWindow && requestedWidth is > 0)
+            Invoke(window, "UpdateResponsiveShell", requestedWidth.Value);
         application.MainWindow = window;
         window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
         if (window is MainWindow)
@@ -62,6 +71,55 @@ internal static class Program
         PumpDispatcher(TimeSpan.FromMilliseconds(900));
         window.Closed += (_, _) => application.Shutdown();
         application.Run();
+    }
+
+    private static void RunQueueBenchmark(string root, int count)
+    {
+        ProjectSession session = new ProjectRepository().CreateAsync(Path.Combine(root, "QueueBenchmark"),
+            "Queue Benchmark").GetAwaiter().GetResult();
+        var client = new SyntheticClient();
+        var resources = new ProjectResources { ProjectId = session.Manifest.ProjectId };
+        var coordinator = new ProjectTranslationCoordinator(session, new ProjectRepository(), client,
+            _ => Task.FromResult(new ProjectTranslationEnvironment(new ModelOptions(), PromptPreset.Default, resources)));
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        const string hash = "0000000000000000000000000000000000000000000000000000000000000000";
+        var plan = new ProjectTranslationJob
+        {
+            ProjectId = session.Manifest.ProjectId,
+            Status = ProjectTranslationJobStatus.Draft,
+            CreatedAt = now,
+            UpdatedAt = now,
+            Items = Enumerable.Range(1, count).Select(number => new ProjectTranslationItem
+            {
+                ChapterId = Guid.NewGuid(), Number = number, Order = number, Title = "Chương " + number,
+                SourceFingerprint = hash, ProtectedFingerprint = hash, EnqueuedDocumentFingerprint = hash,
+                TotalSegments = 12, CompletedSegments = number % 12
+            }).ToList()
+        };
+        var window = new ProjectTranslationQueueWindow("Benchmark", coordinator, plan);
+        try
+        {
+            _ = window.MeasureRefresh();
+            int repetitions = count >= 5000 ? 50 : 200;
+            TimeSpan cpuBefore = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
+            var wall = System.Diagnostics.Stopwatch.StartNew();
+            double refreshMilliseconds = 0;
+            long allocatedBytes = 0;
+            ProjectTranslationQueueWindow.QueueRefreshMeasurement measured = default!;
+            for (int index = 0; index < repetitions; index++)
+            {
+                measured = window.MeasureRefresh();
+                refreshMilliseconds += measured.Elapsed.TotalMilliseconds;
+                allocatedBytes += measured.AllocatedBytes;
+            }
+            wall.Stop();
+            double cpuMilliseconds = (System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime - cpuBefore).TotalMilliseconds;
+            Console.WriteLine($"QUEUE_UI count={count} repetitions={repetitions} " +
+                $"avg_refresh_ms={refreshMilliseconds / repetitions:F3} avg_allocated_bytes={allocatedBytes / repetitions} " +
+                $"cpu_ms={cpuMilliseconds:F3} wall_ms={wall.Elapsed.TotalMilliseconds:F3} " +
+                $"row_objects={measured.RowObjectCreations}");
+        }
+        finally { window.Close(); }
     }
 
     private static async Task<ProjectSession> CreateSyntheticProjectAsync(string root)
@@ -338,6 +396,11 @@ internal static class Program
         {
             chapterGrid.Columns[2].Width = 210;
             chapterGrid.Columns[3].Width = 180;
+        }
+        if (window.FindName("QueueGrid") is DataGrid queueGrid && queueGrid.Columns.Count == 7)
+        {
+            queueGrid.Columns[2].Width = 280;
+            queueGrid.Columns[6].Width = 320;
         }
     }
 

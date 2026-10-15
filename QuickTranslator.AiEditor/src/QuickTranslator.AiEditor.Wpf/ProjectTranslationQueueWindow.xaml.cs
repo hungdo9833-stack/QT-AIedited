@@ -97,7 +97,7 @@ public partial class ProjectTranslationQueueWindow : Window
             return;
         }
         bool planMode = _plan?.Status == ProjectTranslationJobStatus.Draft && _coordinator.CurrentJob is null;
-        HeadingText.Text = planMode ? "Queue Plan · kiểm tra trước khi chạy" : "Translation Queue · tiến độ thật";
+        HeadingText.Text = planMode ? "Chuẩn bị dịch" : "Tiến độ dịch";
         BackendText.Text = job.Workers.Count > 0 ? string.Join(" + ", job.Workers.Select(worker => worker.Name)) :
             job.Backend is null ? "Local · legacy job" : $"{job.Backend.Kind} · {job.Backend.ProfileName}";
         ModelText.Text = job.Workers.Count > 0 ? string.Join(" / ", job.Workers.Select(worker => worker.ModelOptions.Model).Distinct()) : job.ModelOptions.Model;
@@ -289,7 +289,7 @@ public partial class ProjectTranslationQueueWindow : Window
                 _coordinator.ProgressChanged += OnProgressChanged;
                 _plan = replacement.Plan;
             }
-            StatusText.Text = $"Đã tạo Queue Plan mới cho {_plan.Items.Count:N0} chapter chưa hoàn tất. Kiểm tra snapshot rồi bấm Start.";
+            StatusText.Text = $"Đã chuẩn bị lại {_plan.Items.Count:N0} chương chưa hoàn tất. Bấm Dịch để bắt đầu.";
         }
         catch (Exception ex) { ReportError(ex); }
         finally { _commandBusy = false; if (!_closed) RefreshView(); }

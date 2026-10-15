@@ -301,8 +301,45 @@ public partial class MainWindow
     {
         if (_service is null || _selectedId is not Guid id) return;
         string text = _service.GetSnapshot().Segments.Single(s => s.Id == id).SourceText;
-        int? boundary = PickBoundary(text, text.Length / 2);
+        int? caret = FocusedSourceCaret(id, text);
+        int? boundary;
+        if (caret is int preferred)
+        {
+            SplitBoundaryDecision decision = ResolveSplitBoundary(text, preferred);
+            if (decision.Boundary is null)
+            {
+                ShowError(new InvalidOperationException("Không tìm thấy cuối câu phù hợp để tách an toàn."));
+                return;
+            }
+            boundary = decision.Boundary;
+            if (decision.RequiresConfirmation && MessageBox.Show(this,
+                $"Con trỏ chưa nằm ở cuối câu. Tách tại điểm gần nhất?\n\n{decision.Preview}",
+                "Gợi ý điểm tách", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                MessageBoxResult.Yes) != MessageBoxResult.Yes)
+                boundary = PickBoundary(text, preferred);
+        }
+        else boundary = PickBoundary(text, text.Length / 2);
         if (boundary is int cut) await ChangeStructureUiAsync(confirmed => _service.SplitSegmentAsync(id, cut, confirmed));
+    }
+
+    private int? FocusedSourceCaret(Guid segmentId, string text)
+    {
+        if (Keyboard.FocusedElement is TextBox focused && focused.IsReadOnly &&
+            focused.Tag is Guid id && id == segmentId && string.Equals(focused.Text, text, StringComparison.Ordinal))
+            return focused.CaretIndex;
+        if (SourceText.IsKeyboardFocusWithin && string.Equals(SourceText.Text, text, StringComparison.Ordinal))
+            return SourceText.CaretIndex;
+        return null;
+    }
+
+    internal static SplitBoundaryDecision ResolveSplitBoundary(string text, int caret)
+    {
+        int[] boundaries = TextSegmenter.GetSentenceBoundaries(text).ToArray();
+        if (boundaries.Length == 0) return new(null, false, "");
+        int preferred = Math.Clamp(caret, 1, Math.Max(1, text.Length - 1));
+        int boundary = boundaries.MinBy(offset => Math.Abs(offset - preferred));
+        string preview = Preview(text[Math.Max(0, boundary - 30)..Math.Min(text.Length, boundary + 30)]);
+        return new(boundary, boundary != caret, preview);
     }
     private async void OnMergeSegments(object sender, RoutedEventArgs e)
     {
@@ -343,7 +380,7 @@ public partial class MainWindow
     private int? PickBoundary(string text, int preferred)
     {
         var boundaries = TextSegmenter.GetSentenceBoundaries(text).Select(offset => new BoundaryChoice(offset,
-            $"Vị trí {offset} · {Preview(text[Math.Max(0, offset - 18)..Math.Min(text.Length, offset + 18)])}")).ToArray();
+            $"Cuối câu · {Preview(text[Math.Max(0, offset - 18)..Math.Min(text.Length, offset + 18)])}")).ToArray();
         if (boundaries.Length == 0) { ShowError(new InvalidOperationException("Không có cuối câu/lời thoại hoàn chỉnh để tách an toàn. Không sửa nguyên văn tự động.")); return null; }
         var selector = new ComboBox { ItemsSource = boundaries, DisplayMemberPath = "Label", Margin = new Thickness(8) };
         selector.SelectedItem = boundaries.MinBy(b => Math.Abs(b.Offset - preferred));
@@ -372,6 +409,7 @@ public partial class MainWindow
     }
 
     private static string Preview(string text) => text.Replace('\r', ' ').Replace('\n', ' ') is var normalized && normalized.Length > 60 ? normalized[..60] + "…" : normalized;
+    internal sealed record SplitBoundaryDecision(int? Boundary, bool RequiresConfirmation, string Preview);
     private static List<AttemptItem> HistoryItems(TranslationSegment? segment)
     {
         if (segment is null) return [];

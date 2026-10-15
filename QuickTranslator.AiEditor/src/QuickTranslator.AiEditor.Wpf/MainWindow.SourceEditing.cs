@@ -30,23 +30,15 @@ public partial class MainWindow
         try
         {
             SourceEditPreview preview = _service.PreviewSourceEdit(ChapterInput.Text, ReadSegmenterOptions());
-            if (!ShowSourceEditPreview(preview)) return;
-            bool protectedConfirmation = false;
-            if (preview.ProtectedAffectedSegmentCount > 0 || preview.ReplacesMostOfSource)
-            {
-                string warning = preview.ProtectedAffectedSegmentCount > 0
-                    ? $"Thay đổi chạm {preview.ProtectedAffectedSegmentCount:N0} segment có bản dịch, nháp, duyệt hoặc lịch sử. Dữ liệu cũ sẽ được lưu nguyên trong Source Edit History; segment mới cần kiểm tra."
-                    : "Thay đổi thay thế phần lớn nguyên văn. Bản nguồn và toàn bộ cấu trúc cũ sẽ được lưu trong Source Edit History.";
-                protectedConfirmation = MessageBox.Show(this, warning + "\n\nTiếp tục lưu nguyên văn?",
-                    "Xác nhận riêng dữ liệu được bảo vệ", MessageBoxButton.YesNo, MessageBoxImage.Warning,
-                    MessageBoxResult.No) == MessageBoxResult.Yes;
-                if (!protectedConfirmation) return;
-            }
+            bool protectedConfirmation = RequiresSourceEditConfirmation(preview);
+            if (protectedConfirmation && !ShowSourceEditPreview(preview)) return;
             await _service.ApplySourceEditAsync(preview, protectedConfirmation);
             EndSourceEditMode(assignSnapshot: true);
             RefreshProjectChapterList();
             Refresh();
-            SetStatus("Đã lưu nguyên văn bằng transaction an toàn. Segment không ánh xạ chắc chắn được đánh dấu cần kiểm tra.");
+            SetStatus(preview.AffectedSegmentCount == 0
+                ? "Đã lưu nguyên văn."
+                : "Đã lưu nguyên văn; các đoạn bị ảnh hưởng đã được đánh dấu để kiểm tra.");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
@@ -71,18 +63,18 @@ public partial class MainWindow
     private bool ShowSourceEditPreview(SourceEditPreview preview)
     {
         string details = new StringBuilder()
-            .AppendLine($"Segment: {preview.OldSegmentCount:N0} → {preview.NewSegmentCount:N0}")
-            .AppendLine($"Giữ nguyên/ánh xạ được: {preview.RetainedSegmentCount:N0}")
-            .AppendLine($"Bị ảnh hưởng: {preview.AffectedSegmentCount:N0}")
-            .AppendLine($"Có dữ liệu dịch/duyệt: {preview.ProtectedAffectedSegmentCount:N0}")
-            .AppendLine().AppendLine("Vùng bị bỏ:").AppendLine(PreviewChange(preview.Change.RemovedText))
-            .AppendLine().AppendLine("Vùng thêm vào:").AppendLine(PreviewChange(preview.Change.AddedText))
-            .AppendLine().Append("Nguồn mới sẽ được tái tạo đúng từng ký tự trước khi commit.").ToString();
-        return MessageBox.Show(this, details, "Preview sửa nguyên văn", MessageBoxButton.OKCancel,
-            preview.ProtectedAffectedSegmentCount > 0 || preview.ReplacesMostOfSource
-                ? MessageBoxImage.Warning : MessageBoxImage.Information,
-            MessageBoxResult.Cancel) == MessageBoxResult.OK;
+            .AppendLine($"Thay đổi này ảnh hưởng {preview.AffectedSegmentCount:N0} đoạn; " +
+                $"{preview.ProtectedAffectedSegmentCount:N0} đoạn đã có bản dịch, bản nháp hoặc phê duyệt.")
+            .AppendLine("Bản cũ vẫn được giữ trong lịch sử và các đoạn liên quan sẽ cần kiểm tra lại.")
+            .AppendLine().AppendLine("Nội dung bỏ đi:").AppendLine(PreviewChange(preview.Change.RemovedText))
+            .AppendLine().AppendLine("Nội dung thêm vào:").AppendLine(PreviewChange(preview.Change.AddedText))
+            .AppendLine().Append("Bạn có muốn lưu thay đổi này?").ToString();
+        return MessageBox.Show(this, details, "Sửa nguyên văn ảnh hưởng bản dịch", MessageBoxButton.YesNo,
+            MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
     }
+
+    internal static bool RequiresSourceEditConfirmation(SourceEditPreview preview) =>
+        preview.ProtectedAffectedSegmentCount > 0 || preview.ReplacesMostOfSource;
 
     private static string PreviewChange(string value)
     {

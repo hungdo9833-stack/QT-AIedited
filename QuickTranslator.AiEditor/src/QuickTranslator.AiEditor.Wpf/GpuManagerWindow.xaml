@@ -11,16 +11,14 @@
      <Button Content="Xóa profile" Click="OnDeleteProfile" Style="{StaticResource DangerButton}"/>
     </StackPanel>
     <StackPanel DockPanel.Dock="Top">
-     <TextBlock Text="GPU PROFILES" FontWeight="SemiBold" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+     <TextBlock Text="DANH SÁCH GPU" FontWeight="SemiBold" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
      <TextBlock Text="AI &amp; hiệu năng" FontSize="22" FontWeight="SemiBold" Margin="0,4,0,4"/>
-     <TextBlock Text="Mỗi card lưu model và cấu hình chia đoạn riêng." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+     <TextBlock Text="Chọn GPU để xem model và trạng thái kết nối." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
     </StackPanel>
     <ListBox x:Name="ProfileList" SelectionChanged="OnProfileSelected" BorderThickness="0" Background="Transparent">
      <ListBox.ItemTemplate><DataTemplate><Border Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9" Margin="1,3"><StackPanel>
       <DockPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock DockPanel.Dock="Right" Text="{Binding Kind}" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"/></DockPanel>
       <TextBlock Text="{Binding Runtime.ModelOptions.Model}" Foreground="{DynamicResource PrimaryBrush}" TextTrimming="CharacterEllipsis"/>
-      <TextBlock Foreground="{DynamicResource MutedBrush}" FontSize="11"><Run Text="Context "/><Run Text="{Binding Runtime.ModelOptions.ContextSize}"/><Run Text=" · Output "/><Run Text="{Binding Runtime.ModelOptions.MaximumOutputTokens}"/></TextBlock>
-      <TextBlock Foreground="{DynamicResource MutedBrush}" FontSize="11"><Run Text="Segment "/><Run Text="{Binding Runtime.SegmentationOptions.MinimumHanCharacters}"/><Run Text=" / "/><Run Text="{Binding Runtime.SegmentationOptions.TargetHanCharacters}"/><Run Text=" / "/><Run Text="{Binding Runtime.SegmentationOptions.MaximumHanCharacters}"/></TextBlock>
      </StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
     </ListBox>
    </DockPanel>
@@ -36,7 +34,7 @@
     </DockPanel>
     <Border Style="{StaticResource Card}"><DockPanel>
      <Button x:Name="UseForRemoteButton" DockPanel.Dock="Right" Content="Dùng card này cho Remote" Click="OnUseForRemote"/>
-     <StackPanel><TextBlock Text="CHẾ ĐỘ DỊCH" FontWeight="SemiBold"/><ComboBox x:Name="TranslationModeInput" Width="310" HorizontalAlignment="Left" SelectionChanged="OnTranslationModeChanged"><ComboBoxItem Content="Local Only"/><ComboBoxItem Content="Remote Only"/><ComboBoxItem Content="Parallel · Local + Remote"/></ComboBox><TextBlock x:Name="TranslationModeText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/></StackPanel>
+     <StackPanel><TextBlock Text="CHẾ ĐỘ DỊCH" FontWeight="SemiBold"/><ComboBox x:Name="TranslationModeInput" Width="310" HorizontalAlignment="Left" SelectionChanged="OnTranslationModeChanged"><ComboBoxItem Content="Chỉ GPU máy này"/><ComboBoxItem Content="Chỉ GPU từ xa"/><ComboBoxItem Content="Song song · Máy này + Từ xa"/></ComboBox><TextBlock x:Name="TranslationModeText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/></StackPanel>
     </DockPanel></Border>
     <Border Style="{StaticResource Card}"><StackPanel>
      <TextBlock Text="CẤU HÌNH GPU ĐANG CHỌN" FontWeight="SemiBold"/>
@@ -44,7 +42,7 @@
       <StackPanel Margin="0,0,8,0"><TextBlock Text="Tên hiển thị" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NameInput"/></StackPanel>
       <StackPanel Grid.Column="1"><TextBlock Text="Model Ollama" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ModelInput" Text="translategemma:12b"/></StackPanel>
      </Grid>
-      <Expander x:Name="AdvancedRuntimeExpander" Header="Thiết lập nâng cao · context, đầu ra và cỡ đoạn" IsExpanded="False" Margin="0,8,0,0">
+      <Expander x:Name="AdvancedRuntimeExpander" Header="Thiết lập nâng cao · context, đầu ra và cỡ đoạn" IsExpanded="False" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}">
        <StackPanel>
         <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
          <StackPanel Margin="0,0,7,0"><TextBlock Text="Temperature" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RuntimeTemperatureInput" Text="0.1"/></StackPanel>
@@ -62,7 +60,7 @@
        </StackPanel>
       </Expander>
     </StackPanel></Border>
-     <Expander x:Name="AdvancedConnectionExpander" Header="Thiết lập kết nối nâng cao · SSH / HTTPS / token" IsExpanded="False" Margin="3,7">
+     <Expander x:Name="AdvancedConnectionExpander" Header="Thiết lập kết nối nâng cao · SSH / HTTPS / token" IsExpanded="False" Margin="3,7" Foreground="{DynamicResource MutedBrush}">
      <Border Style="{StaticResource Card}" Margin="0,5,0,0"><StackPanel>
       <TextBlock Text="Loại kết nối Remote" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="ConnectionTypeInput" SelectionChanged="OnConnectionTypeChanged"><ComboBoxItem Content="SSH tunnel (khuyên dùng)"/><ComboBoxItem Content="HTTPS / private network trực tiếp"/></ComboBox>
       <StackPanel x:Name="DirectConnectionPanel" Visibility="Collapsed">

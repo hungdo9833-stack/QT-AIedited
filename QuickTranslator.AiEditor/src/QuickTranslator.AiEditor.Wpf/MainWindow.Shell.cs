@@ -335,7 +335,7 @@ public partial class MainWindow
         ProjectTranslationCoordinator coordinator = await EnsureProjectTranslationCoordinatorAsync();
         if (coordinator.CurrentJob is null)
         {
-            SetStatus("Project chưa có queue. Chọn nhiều chương trong Chapter Manager để tạo Queue Plan.");
+            SetStatus("Chưa có hàng đợi. Hãy chọn các chương cần dịch trong Quản lý chương.");
             OnOpenChapterManager(this, new RoutedEventArgs());
             return;
         }

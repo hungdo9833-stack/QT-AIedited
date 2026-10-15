@@ -228,15 +228,6 @@ public partial class MainWindow
                 if (confirmed != MessageBoxResult.Yes) return;
                 profile.RemoteDisclosureAccepted = true;
             }
-            ProjectTranslationJob? job = _projectTranslationCoordinator?.CurrentJob;
-            OllamaBackendSnapshot proposed = BackendSnapshot(profile, profile.Model);
-            if (job is not null && job.Status is not (ProjectTranslationJobStatus.Completed or
-                ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled) &&
-                job.Backend is not null && !SameBackend(job.Backend, proposed) &&
-                MessageBox.Show(this,
-                    "Queue hiện tại đã chốt backend/model khác. Sau khi đổi, job đó sẽ không Resume cho tới khi bạn tạo Queue Plan mới. Đổi backend?",
-                    "Queue cần lập lại kế hoạch", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-                return;
             await _ollamaBackends.SaveProfileAsync(profile, activate: true);
             _selectedOllamaProfileId = profile.Id;
             _projectOllamaProfileMissing = false;
@@ -244,7 +235,7 @@ public partial class MainWindow
             if (_projectSession is not null) await SaveProjectAssetsAsync();
             _settingsDirty = false;
             UpdateOllamaBackendStatus();
-            SetStatus($"Đã lưu và chuyển sang {BackendLabel(profile)}. Request mới sẽ dùng backend này.");
+            SetStatus($"Đã chuyển sang {BackendLabel(profile)}. Lần dịch mới hoặc Tiếp tục dịch sẽ dùng cấu hình này.");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }

@@ -184,7 +184,14 @@ public sealed class ProductionShellUiTests
         try
         {
             Assert.Equal(3, queueWindow.CurrentRows.Count);
-            Assert.Equal(0, fixture.Client.Calls);
+            ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
+            for (int count = 0; count < 100 && (coordinator.CurrentJob is null || coordinator.IsRunning); count++)
+            {
+                await Task.Delay(20);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            }
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob?.Status);
+            Assert.Equal(3, fixture.Client.Calls);
             await fixture.TaskCall("LoadProjectChapterAsync", snapshot.Chapters[0].ChapterId);
             fixture.Call("ShowTranslationWorkspace", false);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
