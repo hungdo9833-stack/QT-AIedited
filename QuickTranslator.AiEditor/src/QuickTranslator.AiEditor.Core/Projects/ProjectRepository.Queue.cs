@@ -21,7 +21,8 @@ public sealed partial class ProjectRepository
     }
 
     public async Task<string> UpdateChapterIfStorageRevisionAsync(ProjectSession session, ChapterDocument chapter,
-        string expectedStorageRevision, CancellationToken cancellationToken = default)
+        string expectedStorageRevision, CancellationToken cancellationToken = default,
+        bool deferManifestCheckpoint = false)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(chapter);
@@ -32,7 +33,7 @@ public sealed partial class ProjectRepository
             try
             {
                 return await WriteFastChapterCheckpointAsync(session, chapter, expectedStorageRevision,
-                    "ProjectTranslationCheckpoint", cancellationToken).ConfigureAwait(false);
+                    "ProjectTranslationCheckpoint", cancellationToken, deferManifestCheckpoint).ConfigureAwait(false);
             }
             catch (StorageRevisionMismatchException error)
             {
@@ -84,6 +85,6 @@ internal sealed class RevisionGuardedChapterStore : IChapterStore
     {
         if (chapter.Id != _chapterId) throw new InvalidOperationException("Store checkpoint không thuộc chapter này.");
         _storageRevision = await _repository.UpdateChapterIfStorageRevisionAsync(
-            _session, chapter, _storageRevision, cancellationToken).ConfigureAwait(false);
+            _session, chapter, _storageRevision, cancellationToken, deferManifestCheckpoint: true).ConfigureAwait(false);
     }
 }

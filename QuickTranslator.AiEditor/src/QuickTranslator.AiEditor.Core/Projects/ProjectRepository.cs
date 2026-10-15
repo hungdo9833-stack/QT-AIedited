@@ -167,7 +167,8 @@ public sealed partial class ProjectRepository
     }
 
     private async Task<string> WriteFastChapterCheckpointAsync(ProjectSession session, ChapterDocument chapter,
-        string? expectedStorageRevision, string operation, CancellationToken cancellationToken)
+        string? expectedStorageRevision, string operation, CancellationToken cancellationToken,
+        bool deferManifestCheckpoint = false)
     {
         if (session.RecoveryReport.RequiresDecision)
             throw new InvalidOperationException("Còn transaction cần phục hồi; không ghi checkpoint chương.");
@@ -179,20 +180,40 @@ public sealed partial class ProjectRepository
         chapter.ChapterNumber = entry.Number;
         chapter.CharacterProject.Id = session.Manifest.ProjectId;
         byte[] chapterBytes = ChapterFileStore.SerializeDocument(chapter);
-        ProjectManifest after = Clone(session.Manifest);
-        CopySummary(after.Chapters.Single(x => x.ChapterId == chapter.Id), chapter);
-        after.CurrentChapterId = chapter.Id;
-        NormalizeManifest(after);
-
         FaultPoint?.Invoke("BeforeFastChapterWrite");
         string revision = await session.ChapterStore.SaveSerializedAsync(chapter.Id, chapterBytes,
             expectedStorageRevision, cancellationToken).ConfigureAwait(false);
         FaultPoint?.Invoke("AfterFastChapterWrite");
+        if (deferManifestCheckpoint)
+        {
+            CopySummary(entry, chapter);
+            session.Manifest.CurrentChapterId = chapter.Id;
+            return revision;
+        }
+        ProjectManifest after = Clone(session.Manifest);
+        CopySummary(after.Chapters.Single(x => x.ChapterId == chapter.Id), chapter);
+        after.CurrentChapterId = chapter.Id;
+        NormalizeManifest(after);
         await WriteFastManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
         FaultPoint?.Invoke("AfterFastManifestWrite");
         session.Manifest = after;
         PublishManifestCommitted(session, operation);
         return revision;
+    }
+
+    internal async Task FlushDeferredManifestAsync(ProjectSession session, string operation,
+        CancellationToken cancellationToken = default)
+    {
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ProjectManifest after = Clone(session.Manifest);
+            NormalizeManifest(after);
+            await WriteFastManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
+            session.Manifest = after;
+            PublishManifestCommitted(session, operation);
+        }
+        finally { session.OperationGate.Release(); }
     }
 
     private static async Task ReconcileFastCheckpointSummariesAsync(ProjectSession session,

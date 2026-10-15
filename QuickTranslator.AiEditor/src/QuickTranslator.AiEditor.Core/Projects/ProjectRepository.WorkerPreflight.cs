@@ -58,26 +58,31 @@ public sealed partial class ProjectRepository
             item.ChapterQueueRunId = null;
             item.PreflightWarning = preview.Warnings.Count == 0 ? null : string.Join(" ", preview.Warnings);
 
-            var jobStore = new ProjectTranslationJobStore(session);
-            ProjectTranslationJob savedJob = await jobStore.PrepareNextAsync(proposed, cancellationToken).ConfigureAwait(false);
             string chapterRelative = entry.RelativePath;
-            string jobRelative = Path.GetRelativePath(session.RootDirectory, jobStore.PathName).Replace('\\', '/');
             byte[] previousChapter = await File.ReadAllBytesAsync(session.Resolve(chapterRelative), cancellationToken)
                 .ConfigureAwait(false);
-            byte[] previousJob = await File.ReadAllBytesAsync(jobStore.PathName, cancellationToken).ConfigureAwait(false);
             CopySummary(entry, candidate);
+            if (!preview.BoundariesChanged)
+            {
+                await session.ChapterStore.SaveSerializedAsync(candidate.Id,
+                    ChapterFileStore.SerializeDocument(candidate), Hash(previousChapter), cancellationToken)
+                    .ConfigureAwait(false);
+                session.Manifest = after;
+                return new(candidate, proposed, preview);
+            }
             NormalizeManifest(after);
             var changes = new PlannedProjectFile[]
             {
                 new(chapterRelative + ".bak", previousChapter),
-                new(chapterRelative, ChapterFileStore.SerializeDocument(candidate)),
-                new(jobRelative + ".bak", previousJob),
-                new(jobRelative, ProjectTranslationJobStore.Serialize(savedJob))
+                new(chapterRelative, ChapterFileStore.SerializeDocument(candidate))
             };
             await Transactions.ExecuteAsync(session, "WorkerSegmentationPreflight", after, changes,
                 cancellationToken).ConfigureAwait(false);
             PublishManifestCommitted(session, "WorkerSegmentationPreflight");
-            return new(candidate, savedJob, preview);
+            // The chapter and manifest are the structural transaction. Queue metadata is a derived
+            // progress index and is checkpointed adaptively by the coordinator; after a crash the
+            // worker preflight can be repeated safely from the committed chapter.
+            return new(candidate, proposed, preview);
         }
         finally { session.OperationGate.Release(); }
     }

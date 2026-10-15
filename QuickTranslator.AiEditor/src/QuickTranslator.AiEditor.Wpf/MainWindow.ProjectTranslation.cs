@@ -122,7 +122,7 @@ public partial class MainWindow
     }
 
     private async Task<ProjectTranslationCoordinator> RebuildParallelCoordinatorAsync(ProjectTranslationJob? recovered,
-        bool closeWindow = true, bool loadExisting = true)
+        bool closeWindow = true, bool loadExisting = true, bool useCurrentWorkers = false)
     {
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
         if (closeWindow) { _projectTranslationWindow?.Close(); _projectTranslationWindow = null; }
@@ -131,7 +131,7 @@ public partial class MainWindow
         foreach (IDisposable client in _projectTranslationOwnedClients) client.Dispose();
         _projectTranslationOwnedClients.Clear();
         var definitions = new List<ProjectTranslationWorkerDefinition>();
-        if (recovered?.Workers.Count > 0)
+        if (recovered?.Workers.Count > 0 && !useCurrentWorkers)
         {
             foreach (ProjectTranslationWorkerState worker in recovered.Workers)
                 definitions.Add(CreateWorkerDefinition(worker.WorkerId, worker.Backend, worker.ModelOptions,
@@ -223,7 +223,7 @@ public partial class MainWindow
             return;
         }
         _projectTranslationWindow = new(_projectSession?.Manifest.VietnameseTitle ?? "Project", coordinator, plan,
-            ReplanProjectTranslationAsync, LoadProjectChapterAsync);
+            ReplanProjectTranslationAsync, LoadProjectChapterAsync, RefreshProjectTranslationCoordinatorAsync);
         if (IsVisible) _projectTranslationWindow.Owner = this;
         _projectTranslationWindow.Closed += (_, _) => _projectTranslationWindow = null;
         _projectTranslationWindow.Show();
@@ -238,6 +238,15 @@ public partial class MainWindow
             closeWindow: false, loadExisting: false);
         ProjectTranslationJob plan = await current.PlanAsync(chapterIds);
         return (current, plan);
+    }
+
+    private async Task<ProjectTranslationCoordinator> RefreshProjectTranslationCoordinatorAsync(
+        ProjectTranslationCoordinator previous)
+    {
+        ProjectTranslationJob? recovered = previous.CurrentJob;
+        if (recovered?.Workers.Count is not > 0) return previous;
+        return await RebuildParallelCoordinatorAsync(recovered, closeWindow: false, loadExisting: true,
+            useCurrentWorkers: true);
     }
 
     private async Task PauseProjectTranslationForContextChangeAsync()

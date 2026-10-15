@@ -41,9 +41,9 @@
         <Button x:Name="StartButton" Content="Start" Style="{StaticResource PrimaryButton}" Click="OnStart"/>
         <Button x:Name="PauseButton" Content="Pause" Click="OnPause"/>
         <Button x:Name="ResumeButton" Content="Resume" Style="{StaticResource PrimaryButton}" Click="OnResume"/>
-        <Button x:Name="CancelButton" Content="Hủy phần đang chờ" Click="OnCancel"/>
+        <Button x:Name="CancelButton" Content="Dừng nhanh" Click="OnCancel"/>
         <Button x:Name="RetryButton" Content="Retry chapter lỗi" Click="OnRetry"/>
-        <Button x:Name="ReplanButton" Content="Tạo lại phần chưa xong" Style="{StaticResource PrimaryButton}" Click="OnReplan"/>
+        <Button x:Name="ReplanButton" Content="Xử lý chương xung đột" Style="{StaticResource PrimaryButton}" Click="OnReplan"/>
         <Button x:Name="RetryWorkerButton" Content="Retry GPU offline" Click="OnRetryWorker"/>
         <Button x:Name="ReassignButton" Content="Chuyển Pending" Click="OnReassignPending"/>
       </WrapPanel>

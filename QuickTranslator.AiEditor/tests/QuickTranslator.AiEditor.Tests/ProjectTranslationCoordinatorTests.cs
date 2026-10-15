@@ -25,6 +25,8 @@ public sealed class ProjectTranslationCoordinatorTests
             Assert.Equal(count, progress.CompletedChapters);
             Assert.Equal(count, client.Calls);
             Assert.Equal(1, client.MaximumConcurrency);
+            if (count >= 100)
+                Assert.InRange(coordinator.CurrentJob!.Revision, 1, 30);
             var reopened = new ProjectTranslationCoordinator(context.Session, context.Repository, client, context.LoadEnvironment);
             ProjectTranslationJob saved = Assert.IsType<ProjectTranslationJob>(await reopened.LoadAsync());
             Assert.Equal(ProjectTranslationJobStatus.Completed, saved.Status);
@@ -107,6 +109,41 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task Crash_resume_reconciles_deferred_manifest_and_does_not_translate_completed_segment_again()
+    {
+        await WithProjectAsync(3, async context =>
+        {
+            var store = new ProjectTranslationJobStore(context.Session);
+            var planner = context.Coordinator(new ProjectQueueFakeClient());
+            ProjectTranslationJob savedJob = await store.SaveNewAsync(await planner.PlanAsync(context.ChapterIds));
+            savedJob.Status = ProjectTranslationJobStatus.Interrupted;
+            await store.SaveAsync(savedJob);
+            ChapterDocument first = (await context.Repository.LoadChapterAsync(context.Session,
+                context.ChapterIds[0])).Chapter;
+            var firstClient = new ProjectQueueFakeClient();
+            RevisionGuardedChapterStore guarded = await RevisionGuardedChapterStore.CreateAsync(
+                context.Session, context.Repository, first.Id);
+            var service = new TranslationService(first, firstClient, guarded);
+            await service.TranslateAsync(first.Segments[0].Id);
+            Assert.Equal(1, firstClient.Calls);
+
+            var reopenedRepository = new ProjectRepository();
+            ProjectSession reopenedSession = (await reopenedRepository.OpenAsync(context.Session.ManifestPath)).Session;
+            var resumeClient = new ProjectQueueFakeClient();
+            var resumed = new ProjectTranslationCoordinator(reopenedSession, reopenedRepository, resumeClient,
+                context.LoadEnvironment, new ProjectTranslationJobStore(reopenedSession));
+            await resumed.LoadAsync();
+
+            await resumed.ResumeAsync();
+
+            Assert.Equal(2, resumeClient.Calls);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, resumed.CurrentJob!.Status);
+            Assert.Equal(3, resumed.CurrentJob.Items.Count(item =>
+                item.Status == ProjectTranslationItemStatus.Completed));
+        });
+    }
+
+    [Fact]
     public async Task Retry_failed_chapter_uses_existing_chapter_checkpoint()
     {
         await WithProjectAsync(3, async context =>
@@ -128,7 +165,7 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
-    public async Task Changing_model_options_mid_run_interrupts_once_and_replans_only_unfinished_chapters()
+    public async Task Changing_model_options_mid_run_refreshes_next_chapter_without_manual_replan()
     {
         await WithProjectAsync(3, async context =>
         {
@@ -144,22 +181,65 @@ public sealed class ProjectTranslationCoordinatorTests
             client.ReleaseFirst.TrySetResult();
             await run;
 
-            ProjectTranslationJob interrupted = coordinator.CurrentJob!;
-            Assert.Equal(ProjectTranslationJobStatus.Interrupted, interrupted.Status);
-            Assert.Equal(1, interrupted.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
-            Assert.Equal(2, interrupted.Items.Count(item => item.Status == ProjectTranslationItemStatus.Pending));
-            Assert.DoesNotContain(interrupted.Items, item => item.Status == ProjectTranslationItemStatus.NeedsReview);
-            Assert.Equal(1, client.Calls);
-
-            ProjectTranslationJob replacement = await coordinator.ReplanUnfinishedAsync();
-
-            Assert.Equal(ProjectTranslationJobStatus.Draft, replacement.Status);
-            Assert.Equal(2, replacement.Items.Count);
-            Assert.Equal(currentOptions, replacement.ModelOptions);
-            Assert.Null(coordinator.CurrentJob);
-
-            await coordinator.StartAsync(replacement);
             Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(3, client.Calls);
+            Assert.Equal(currentOptions, coordinator.CurrentJob.ModelOptions);
+            Assert.All(coordinator.CurrentJob.Items,
+                item => Assert.Equal(ProjectTranslationItemStatus.Completed, item.Status));
+        });
+    }
+
+    [Fact]
+    public async Task Changing_glossary_after_three_chapters_applies_to_remaining_twenty_chapter_queue()
+    {
+        await WithProjectAsync(20, async context =>
+        {
+            ProjectTranslationEnvironment current = context.Environment;
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(current with
+                { Resources = current.Resources.Clone() });
+            var client = new ProjectQueueFakeClient();
+            client.AfterCompletion = call =>
+            {
+                if (call != 3) return;
+                ProjectResources changed = current.Resources.Clone();
+                changed.Revision++;
+                changed.Terms.Add(new("天地", "Thiên Địa mới"));
+                current = current with { Resources = changed };
+            };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(20, client.Calls);
+            Assert.All(client.Prompts.Take(3), prompt => Assert.DoesNotContain("Thiên Địa mới", prompt));
+            Assert.All(client.Prompts.Skip(3), prompt => Assert.Contains("Thiên Địa mới", prompt));
+            Assert.Equal(current.Resources.Revision, coordinator.CurrentJob.ProjectResourceRevision);
+        });
+    }
+
+    [Fact]
+    public async Task Resume_after_pause_adopts_current_model_options_without_replan()
+    {
+        await WithProjectAsync(3, async context =>
+        {
+            ModelOptions currentOptions = context.Environment.ModelOptions;
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(
+                context.Environment with { ModelOptions = currentOptions with { } });
+            var client = new ProjectQueueFakeClient { BlockFirst = true };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await client.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task pause = coordinator.PauseAsync();
+            client.ReleaseFirst.TrySetResult();
+            await pause;
+            await run;
+            currentOptions = currentOptions with { Temperature = 0.37 };
+
+            await coordinator.ResumeAsync();
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(currentOptions, coordinator.CurrentJob.ModelOptions);
             Assert.Equal(3, client.Calls);
         });
     }
@@ -192,7 +272,7 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
-    public async Task Edit_after_enqueue_marks_needs_review_without_sending_AI_request()
+    public async Task Edit_after_enqueue_preserves_user_draft_and_continues_without_needs_review()
     {
         await WithProjectAsync(1, async context =>
         {
@@ -204,8 +284,41 @@ public sealed class ProjectTranslationCoordinatorTests
             await coordinator.StartAsync(plan);
 
             Assert.Equal(0, client.Calls);
-            Assert.Equal(ProjectTranslationItemStatus.NeedsReview, coordinator.CurrentJob!.Items[0].Status);
-            Assert.Contains("sau khi enqueue", coordinator.CurrentJob.Items[0].Error);
+            Assert.Equal(ProjectTranslationItemStatus.Skipped, coordinator.CurrentJob!.Items[0].Status);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob.Status);
+            ChapterDocument saved = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[0])).Chapter;
+            Assert.Equal("Sửa sau enqueue.", saved.Segments[0].UserDraft);
+        });
+    }
+
+    [Fact]
+    public async Task Drafted_segment_after_enqueue_is_skipped_while_other_segments_continue()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            var segmentation = new SegmenterOptions
+            {
+                MinimumHanCharacters = 1, TargetHanCharacters = 5, MaximumHanCharacters = 8
+            };
+            ProjectResegmentationPreview preview = await context.Repository.PreviewResegmentationAsync(
+                context.Session, [context.ChapterIds[0]], segmentation);
+            await context.Repository.ResegmentChaptersAsync(context.Session, preview, confirmed: true);
+            var client = new ProjectQueueFakeClient();
+            var coordinator = context.Coordinator(client);
+            ProjectTranslationJob plan = await coordinator.PlanAsync(context.ChapterIds);
+            ChapterDocument before = (await context.Repository.LoadChapterAsync(context.Session,
+                context.ChapterIds[0])).Chapter;
+            Assert.True(before.Segments.Count > 1);
+            await EditAsync(context, 0, service =>
+                service.UpdateDraft(service.GetSnapshot().Segments[0].Id, "Đoạn người dùng sửa."));
+
+            await coordinator.StartAsync(plan);
+
+            ChapterDocument saved = (await context.Repository.LoadChapterAsync(context.Session,
+                context.ChapterIds[0])).Chapter;
+            Assert.Equal("Đoạn người dùng sửa.", saved.Segments[0].UserDraft);
+            Assert.Equal(before.Segments.Count - 1, client.Calls);
+            Assert.Equal(ProjectTranslationItemStatus.Completed, coordinator.CurrentJob!.Items[0].Status);
         });
     }
 
@@ -284,7 +397,7 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
-    public async Task Changed_character_resource_revision_blocks_old_plan_before_request()
+    public async Task Changed_character_resource_revision_is_applied_without_replanning()
     {
         await WithProjectAsync(1, async context =>
         {
@@ -298,15 +411,16 @@ public sealed class ProjectTranslationCoordinatorTests
             changed.Characters.ConsistencyLockEnabled = true;
             current = current with { Resources = changed };
 
-            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.StartAsync(plan));
+            await coordinator.StartAsync(plan);
 
-            Assert.Contains("Character Profiles", error.Message, StringComparison.Ordinal);
-            Assert.Equal(0, client.Calls);
+            Assert.Equal(1, client.Calls);
+            Assert.Equal(changed.Revision, coordinator.CurrentJob!.ProjectResourceRevision);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob.Status);
         });
     }
 
     [Fact]
-    public async Task Resume_does_not_silently_use_changed_character_rules()
+    public async Task Resume_refreshes_changed_character_rules_without_manual_replan()
     {
         await WithProjectAsync(1, async context =>
         {
@@ -327,15 +441,63 @@ public sealed class ProjectTranslationCoordinatorTests
                 new ProjectTranslationJobStore(context.Session));
             await reopened.LoadAsync();
 
-            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => reopened.ResumeAsync());
+            await reopened.ResumeAsync();
 
-            Assert.Contains("Queue Plan mới", error.Message, StringComparison.Ordinal);
-            Assert.Equal(0, client.Calls);
+            Assert.Equal(1, client.Calls);
+            Assert.Equal(changed.Revision, reopened.CurrentJob!.ProjectResourceRevision);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, reopened.CurrentJob.Status);
         });
     }
 
     [Fact]
-    public async Task Backend_snapshot_blocks_start_or_resume_after_profile_changes()
+    public async Task Source_change_after_enqueue_still_requires_review_and_sends_no_request()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            var client = new ProjectQueueFakeClient();
+            var coordinator = context.Coordinator(client);
+            ProjectTranslationJob plan = await coordinator.PlanAsync(context.ChapterIds);
+            ChapterDocument changed = (await context.Repository.LoadChapterAsync(context.Session,
+                context.ChapterIds[0])).Chapter;
+            var editor = new TranslationService(changed, new ProjectQueueFakeClient(),
+                new RegisteredChapterStore(context.Session, context.Repository));
+            SourceEditPreview preview = editor.PreviewSourceEdit(changed.OriginalText + "新增原文。");
+            await editor.ApplySourceEditAsync(preview, confirmed: true);
+
+            await coordinator.StartAsync(plan);
+
+            Assert.Equal(0, client.Calls);
+            Assert.Equal(ProjectTranslationItemStatus.NeedsReview, coordinator.CurrentJob!.Items[0].Status);
+            Assert.Contains("Nguyên văn", coordinator.CurrentJob.Items[0].Error);
+        });
+    }
+
+    [Fact]
+    public async Task Stop_cancels_hanging_request_quickly_and_keeps_job_resumable()
+    {
+        await WithProjectAsync(3, async context =>
+        {
+            var client = new ProjectQueueFakeClient { BlockFirst = true };
+            var coordinator = context.Coordinator(client);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await client.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            await coordinator.StopAsync().WaitAsync(TimeSpan.FromSeconds(2));
+            await run;
+            watch.Stop();
+
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2));
+            Assert.Equal(ProjectTranslationJobStatus.Interrupted, coordinator.CurrentJob!.Status);
+            Assert.DoesNotContain(coordinator.CurrentJob.Items,
+                item => item.Status == ProjectTranslationItemStatus.Cancelled);
+            Assert.Equal(0, coordinator.CurrentJob.Items.Count(item =>
+                item.Status == ProjectTranslationItemStatus.Completed));
+        });
+    }
+
+    [Fact]
+    public async Task Draft_plan_adopts_current_confirmed_backend_before_first_request()
     {
         await WithProjectAsync(1, async context =>
         {
@@ -350,11 +512,11 @@ public sealed class ProjectTranslationCoordinatorTests
 
             current = new(Guid.NewGuid(), OllamaBackendKind.Remote, "GPU thuê", "https://gpu.example.com/api/chat",
                 context.Environment.ModelOptions.Model);
-            InvalidOperationException startError = await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.StartAsync(plan));
+            await coordinator.StartAsync(plan);
 
-            Assert.Contains("backend", startError.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(0, client.Calls);
-            Assert.Null(coordinator.CurrentJob);
+            Assert.Equal(1, client.Calls);
+            Assert.Equal(current, coordinator.CurrentJob!.Backend);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob.Status);
         });
     }
 
@@ -456,6 +618,42 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task Parallel_workers_finish_current_snapshots_then_use_new_glossary_without_double_claim()
+    {
+        await WithProjectAsync(8, async context =>
+        {
+            ProjectTranslationEnvironment current = context.Environment;
+            Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(current with
+                { Resources = current.Resources.Clone() });
+            var concurrency = new ParallelConcurrency();
+            var local = new ParallelFakeClient("local", concurrency, 0) { BlockFirst = true };
+            var remote = new ParallelFakeClient("remote", concurrency, 0) { BlockFirst = true };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                Workers(context, local, remote), Load);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await Task.WhenAll(local.FirstStarted.Task, remote.FirstStarted.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            ProjectResources changed = current.Resources.Clone();
+            changed.Revision++;
+            changed.Terms.Add(new("天地", "Thiên Địa song song"));
+            current = current with { Resources = changed };
+
+            local.Release.TrySetResult();
+            remote.Release.TrySetResult();
+            await run;
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(8, local.Calls + remote.Calls);
+            Assert.Equal(8, coordinator.CurrentJob.Items.Select(item => item.ChapterId).Distinct().Count());
+            Assert.Equal(8, coordinator.CurrentJob.Items.Count(item =>
+                item.Status == ProjectTranslationItemStatus.Completed));
+            Assert.DoesNotContain(local.Prompts.Take(1).Concat(remote.Prompts.Take(1)),
+                prompt => prompt.Contains("Thiên Địa song song", StringComparison.Ordinal));
+            Assert.Contains(local.Prompts.Skip(1).Concat(remote.Prompts.Skip(1)),
+                prompt => prompt.Contains("Thiên Địa song song", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
     public async Task Parallel_pause_waits_for_both_workers_and_resume_keeps_committed_checkpoints()
     {
         await WithProjectAsync(6, async context =>
@@ -480,6 +678,48 @@ public sealed class ProjectTranslationCoordinatorTests
             Assert.Equal(6, coordinator.CurrentJob.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
             Assert.InRange(committedAtPause, 0, 2);
             Assert.Equal(6, local.Calls + remote.Calls);
+        });
+    }
+
+    [Fact]
+    public async Task Paused_parallel_job_switches_to_one_confirmed_worker_without_creating_new_job()
+    {
+        await WithProjectAsync(4, async context =>
+        {
+            var originalLocal = new ParallelFakeClient("old-local", new(), 0);
+            var originalRemote = new ParallelFakeClient("old-remote", new(), 0);
+            ProjectTranslationWorkerDefinition[] original = Workers(context, originalLocal, originalRemote);
+            var store = new ProjectTranslationJobStore(context.Session);
+            var planner = new ProjectTranslationCoordinator(context.Session, context.Repository, original,
+                context.LoadEnvironment, store);
+            ProjectTranslationJob saved = await store.SaveNewAsync(await planner.PlanAsync(context.ChapterIds));
+            Guid originalJobId = saved.JobId;
+            saved.Status = ProjectTranslationJobStatus.Paused;
+            saved.Workers[0].CompletedHanCharacters = 123;
+            saved.Workers[1].CompletedHanCharacters = 456;
+            await store.SaveAsync(saved);
+
+            var currentClient = new ParallelFakeClient("new-local", new(), 0);
+            ModelOptions changedOptions = context.Environment.ModelOptions with { Temperature = 0.42 };
+            ProjectTranslationWorkerDefinition current = original[0] with
+            {
+                Client = currentClient,
+                ModelOptions = changedOptions,
+                Backend = original[0].Backend with { Model = changedOptions.Model }
+            };
+            var resumed = new ProjectTranslationCoordinator(context.Session, context.Repository, [current],
+                context.LoadEnvironment, new ProjectTranslationJobStore(context.Session));
+            await resumed.LoadAsync();
+
+            await resumed.ResumeWithCurrentConfigurationAsync();
+
+            Assert.Equal(originalJobId, resumed.CurrentJob!.JobId);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, resumed.CurrentJob.Status);
+            Assert.Single(resumed.CurrentJob.Workers);
+            Assert.Equal(changedOptions, resumed.CurrentJob.Workers[0].ModelOptions);
+            Assert.True(resumed.CurrentJob.Workers[0].CompletedHanCharacters >= 579);
+            Assert.Equal(4, currentClient.Calls);
+            Assert.Equal(4, resumed.CurrentJob.Items.Select(item => item.ChapterId).Distinct().Count());
         });
     }
 
@@ -674,6 +914,7 @@ public sealed class ProjectTranslationCoordinatorTests
         public bool BlockFirst { get; init; }
         public HashSet<int> FailCalls { get; } = [];
         public List<string> Prompts { get; } = [];
+        public Action<int>? AfterCompletion { get; set; }
         public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseFirst { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -694,7 +935,9 @@ public sealed class ProjectTranslationCoordinatorTests
                     if (BlockFirst) await ReleaseFirst.Task.WaitAsync(cancellationToken);
                 }
                 if (FailCalls.Contains(call)) throw new OllamaRequestException(OllamaErrorKind.Http, "Synthetic Ollama failure.");
-                return FakeClient.Completion($"Bản dịch tuần tự {call}.");
+                OllamaCompletion completion = FakeClient.Completion($"Bản dịch tuần tự {call}.");
+                AfterCompletion?.Invoke(call);
+                return completion;
             }
             finally { Interlocked.Decrement(ref _concurrency); }
         }
@@ -721,6 +964,7 @@ public sealed class ProjectTranslationCoordinatorTests
         public int Calls => Volatile.Read(ref _calls);
         public bool BlockFirst { get; init; }
         public bool FailWithConnection { get; init; }
+        public List<string> Prompts { get; } = [];
         public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -728,6 +972,7 @@ public sealed class ProjectTranslationCoordinatorTests
             CancellationToken cancellationToken = default)
         {
             int call = Interlocked.Increment(ref _calls);
+            lock (Prompts) Prompts.Add(prompt);
             concurrency.Enter();
             try
             {

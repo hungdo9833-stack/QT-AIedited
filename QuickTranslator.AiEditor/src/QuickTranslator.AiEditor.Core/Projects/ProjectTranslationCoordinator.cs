@@ -27,7 +27,9 @@ public sealed class ProjectTranslationCoordinator
     private Task? _runTask;
     private bool _pauseRequested;
     private bool _cancelRequested;
+    private bool _stopRequested;
     private bool _interruptionRequested;
+    private int _progressChangesSinceSave;
 
     public ProjectTranslationCoordinator(ProjectSession session, ProjectRepository repository, IOllamaClient client,
         Func<CancellationToken, Task<ProjectTranslationEnvironment>> environmentLoader,
@@ -149,12 +151,20 @@ public sealed class ProjectTranslationCoordinator
     }
 
     public async Task ResumeAsync(CancellationToken cancellationToken = default)
+        => await ResumeCoreAsync(false, cancellationToken).ConfigureAwait(false);
+
+    public async Task ResumeWithCurrentConfigurationAsync(CancellationToken cancellationToken = default)
+        => await ResumeCoreAsync(true, cancellationToken).ConfigureAwait(false);
+
+    private async Task ResumeCoreAsync(bool acceptChangedBackendOrWorkers,
+        CancellationToken cancellationToken)
     {
         ProjectTranslationJob job = CurrentJob ?? await LoadAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException("Project chưa có translation job để tiếp tục.");
         if (job.Status is not (ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted))
             throw new InvalidOperationException("Translation job chưa ở trạng thái có thể Resume.");
-        await LaunchAsync(job, isNew: false, retryFailed: false, cancellationToken).ConfigureAwait(false);
+        await LaunchAsync(job, isNew: false, retryFailed: false, cancellationToken,
+            acceptChangedBackendOrWorkers).ConfigureAwait(false);
     }
 
     public async Task RetryFailedAsync(CancellationToken cancellationToken = default)
@@ -300,6 +310,27 @@ public sealed class ProjectTranslationCoordinator
         await running.ConfigureAwait(false);
     }
 
+    public async Task StopAsync()
+    {
+        Task? running;
+        TranslationQueue[] chapterQueues;
+        lock (_sync)
+        {
+            running = _runTask;
+            if (running is null || running.IsCompleted) return;
+            _stopRequested = true;
+            chapterQueues = _workerQueues.Count > 0 ? _workerQueues.Values.ToArray() :
+                _chapterQueue is null ? [] : [_chapterQueue];
+        }
+        await PersistAsync(job =>
+        {
+            job.Status = ProjectTranslationJobStatus.Cancelling;
+            job.LastError = "Đang dừng request hiện tại; các checkpoint đã hoàn tất được giữ nguyên.";
+        }, CancellationToken.None).ConfigureAwait(false);
+        await Task.WhenAll(chapterQueues.Select(queue => queue.CancelAsync())).ConfigureAwait(false);
+        await running.ConfigureAwait(false);
+    }
+
     public ProjectTranslationProgress GetProgress()
     {
         ProjectTranslationJob? job = CurrentJob;
@@ -350,7 +381,8 @@ public sealed class ProjectTranslationCoordinator
         return new(rate, eta, workers.Sum(worker => worker.EstimatedCost));
     }
 
-    private Task LaunchAsync(ProjectTranslationJob job, bool isNew, bool retryFailed, CancellationToken cancellationToken)
+    private Task LaunchAsync(ProjectTranslationJob job, bool isNew, bool retryFailed, CancellationToken cancellationToken,
+        bool acceptChangedBackendOrWorkers = false)
     {
         lock (_sync)
         {
@@ -358,32 +390,36 @@ public sealed class ProjectTranslationCoordinator
             cancellationToken.ThrowIfCancellationRequested();
             _pauseRequested = false;
             _cancelRequested = false;
+            _stopRequested = false;
             _interruptionRequested = false;
-            _runTask = RunAsync(job, isNew, retryFailed, cancellationToken);
+            _progressChangesSinceSave = 0;
+            _runTask = RunAsync(job, isNew, retryFailed, cancellationToken, acceptChangedBackendOrWorkers);
             return _runTask;
         }
     }
 
     private async Task RunAsync(ProjectTranslationJob requested, bool isNew, bool retryFailed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool acceptChangedBackendOrWorkers)
     {
         ProjectTranslationEnvironment launchEnvironment = await LoadEnvironmentAsync(cancellationToken).ConfigureAwait(false);
-        string? launchConflict = requested.Workers.Count > 0
-            ? ValidateParallelLaunch(requested, launchEnvironment)
-            : ValidatePlannedConfiguration(requested, launchEnvironment);
-        if (launchConflict is not null) throw new InvalidOperationException(launchConflict);
+        ProjectTranslationJob launchJob = ProjectTranslationJobStore.Clone(requested);
+        bool configurationChanged = SynchronizeLaunchConfiguration(launchJob, launchEnvironment,
+            isNew || acceptChangedBackendOrWorkers);
         if (!ActiveProjects.TryAdd(_session.Manifest.ProjectId, _coordinatorId))
             throw new InvalidOperationException("Project đã có coordinator khác đang ghi translation queue.");
         try
         {
             if (isNew)
             {
-                ProjectTranslationJob saved = await _store.SaveNewAsync(requested, cancellationToken).ConfigureAwait(false);
+                ProjectTranslationJob saved = await _store.SaveNewAsync(launchJob, cancellationToken).ConfigureAwait(false);
                 lock (_sync) _job = saved;
             }
             else
             {
-                lock (_sync) _job = ProjectTranslationJobStore.Clone(requested);
+                ProjectTranslationJob saved = configurationChanged
+                    ? await _store.SaveAsync(launchJob, cancellationToken).ConfigureAwait(false)
+                    : launchJob;
+                lock (_sync) _job = saved;
             }
             await PersistAsync(job =>
             {
@@ -411,6 +447,12 @@ public sealed class ProjectTranslationCoordinator
                 if (_cancelRequested)
                 {
                     await FinishAsync(ProjectTranslationJobStatus.Cancelled, null).ConfigureAwait(false);
+                    return;
+                }
+                if (_stopRequested)
+                {
+                    await FinishAsync(ProjectTranslationJobStatus.Interrupted,
+                        "Đã dừng nhanh. Bấm Tiếp tục dịch để xử lý phần còn lại.").ConfigureAwait(false);
                     return;
                 }
                 if (_pauseRequested)
@@ -496,6 +538,12 @@ public sealed class ProjectTranslationCoordinator
             await FinishAsync(ProjectTranslationJobStatus.Cancelled, null).ConfigureAwait(false);
             return;
         }
+        if (_stopRequested)
+        {
+            await FinishAsync(ProjectTranslationJobStatus.Interrupted,
+                "Đã dừng nhanh. Các chapter chưa hoàn tất vẫn có thể tiếp tục.").ConfigureAwait(false);
+            return;
+        }
         if (_pauseRequested)
         {
             await FinishAsync(ProjectTranslationJobStatus.Paused, null).ConfigureAwait(false);
@@ -511,7 +559,7 @@ public sealed class ProjectTranslationCoordinator
     private async Task WorkerLoopAsync(ProjectTranslationWorkerDefinition definition, bool retryFailed,
         CancellationToken cancellationToken)
     {
-        while (!_pauseRequested && !_cancelRequested && !_interruptionRequested)
+        while (!_pauseRequested && !_cancelRequested && !_stopRequested && !_interruptionRequested)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Guid? chapterId = await ClaimNextAsync(definition.WorkerId, cancellationToken).ConfigureAwait(false);
@@ -565,6 +613,7 @@ public sealed class ProjectTranslationCoordinator
             ProjectTranslationWorkerState worker = job.Workers.Single(value => value.WorkerId == definition.WorkerId);
             worker.CurrentChapterId = null;
             if (_cancelRequested) worker.Status = ProjectTranslationWorkerStatus.Cancelled;
+            else if (_stopRequested) worker.Status = ProjectTranslationWorkerStatus.Interrupted;
             else if (_pauseRequested) worker.Status = ProjectTranslationWorkerStatus.Paused;
             else if (worker.Status is not (ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted))
                 worker.Status = ProjectTranslationWorkerStatus.Completed;
@@ -574,7 +623,7 @@ public sealed class ProjectTranslationCoordinator
     private async Task<Guid?> ClaimNextAsync(Guid workerId, CancellationToken cancellationToken)
     {
         Guid? claimed = null;
-        await PersistAsync(job =>
+        await MutateInMemoryAsync(job =>
         {
             ProjectTranslationItem? item = job.Items.OrderBy(value => value.Order).FirstOrDefault(value =>
                 (value.Status is ProjectTranslationItemStatus.Pending or ProjectTranslationItemStatus.Paused or
@@ -617,10 +666,11 @@ public sealed class ProjectTranslationCoordinator
     {
         DateTimeOffset workerStarted = DateTimeOffset.UtcNow;
         ProjectTranslationItem item = CurrentJob!.Items.Single(value => value.ChapterId == chapterId);
+        int completedSegmentsAtPlanCheckpoint = item.CompletedSegments;
         ProjectTranslationEnvironment environment = await LoadEnvironmentAsync(cancellationToken).ConfigureAwait(false);
         ChapterDocument chapter = (await _repository.LoadChapterAsync(_session, chapterId, cancellationToken)
             .ConfigureAwait(false)).Chapter;
-        string? conflict = ValidateChapterRevision(item, chapter);
+        string? conflict = await RefreshChapterRevisionAsync(item, chapter, cancellationToken).ConfigureAwait(false);
         if (conflict is not null)
         {
             await PersistAsync(job =>
@@ -639,9 +689,8 @@ public sealed class ProjectTranslationCoordinator
             }, CancellationToken.None).ConfigureAwait(false);
             return;
         }
-        string? configurationConflict = ValidateConfigurationRevision(environment, workerDefinition);
-        if (configurationConflict is not null)
-            throw new ProjectTranslationConfigurationChangedException(configurationConflict);
+        await RefreshBoundaryConfigurationAsync(environment, workerDefinition, cancellationToken).ConfigureAwait(false);
+        item = CurrentJob!.Items.Single(value => value.ChapterId == chapterId);
 
         QueueMode mode = retryFailed && item.StartedAt is not null ? QueueMode.FailedSegments : QueueMode.MissingSegments;
         bool canResumeChapter = item.ChapterQueueRunId is Guid runId && chapter.Queue.RunId == runId &&
@@ -657,11 +706,13 @@ public sealed class ProjectTranslationCoordinator
         {
             bool completedByThisJob = item.ChapterQueueRunId is Guid completedRun && chapter.Queue.RunId == completedRun &&
                 chapter.Queue.Status is QueueStatus.Completed or QueueStatus.CompletedWithWarnings;
-            await PersistAsync(job =>
+            bool progressedSinceSavedJob = CompletedSegments(chapter) > completedSegmentsAtPlanCheckpoint;
+            await PersistProgressAsync(job =>
             {
                 ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
-                target.Status = completedByThisJob ? ProjectTranslationItemStatus.Completed : ProjectTranslationItemStatus.Skipped;
-                target.Error = completedByThisJob ? null : "Không có segment đủ điều kiện; UserDraft và Approval được giữ nguyên.";
+                bool completed = completedByThisJob || progressedSinceSavedJob;
+                target.Status = completed ? ProjectTranslationItemStatus.Completed : ProjectTranslationItemStatus.Skipped;
+                target.Error = completed ? null : "Không có segment đủ điều kiện; UserDraft và Approval được giữ nguyên.";
                 target.CompletedSegments = CompletedSegments(chapter);
                 target.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
                 target.FinishedAt = DateTimeOffset.UtcNow;
@@ -680,7 +731,7 @@ public sealed class ProjectTranslationCoordinator
             if (workerDefinition is null) _chapterQueue = queue;
             else _workerQueues[workerDefinition.WorkerId] = queue;
         }
-        await PersistAsync(job =>
+        await MutateInMemoryAsync(job =>
         {
             ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
             target.Status = ProjectTranslationItemStatus.Running;
@@ -693,11 +744,12 @@ public sealed class ProjectTranslationCoordinator
         try
         {
             Task run = canResumeChapter
-                ? queue.ResumeAsync(cancellationToken)
+                ? queue.ResumeAsync(workerDefinition?.ModelOptions ?? CurrentJob!.ModelOptions,
+                    CurrentJob!.PromptPreset, cancellationToken)
                 : queue.StartAsync(mode, workerDefinition?.ModelOptions ?? CurrentJob!.ModelOptions,
                     CurrentJob!.PromptPreset, cancellationToken);
             Guid chapterRunId = service.GetSnapshot().Queue.RunId;
-            await PersistAsync(job => job.Items.Single(value => value.ChapterId == chapterId).ChapterQueueRunId = chapterRunId,
+            await MutateInMemoryAsync(job => job.Items.Single(value => value.ChapterId == chapterId).ChapterQueueRunId = chapterRunId,
                 CancellationToken.None).ConfigureAwait(false);
             await run.ConfigureAwait(false);
             ChapterDocument after = service.GetSnapshot();
@@ -721,11 +773,14 @@ public sealed class ProjectTranslationCoordinator
             {
                 await PersistAsync(job =>
                 {
-                    UpdateItem(job, chapterId, after,
-                        chapterCompleted ? ProjectTranslationItemStatus.Completed : ProjectTranslationItemStatus.Cancelled,
-                        chapterCompleted ? null : "Đã hủy; các segment đã checkpoint vẫn được giữ.");
+                    bool stopped = _stopRequested;
+                    UpdateItem(job, chapterId, after, chapterCompleted ? ProjectTranslationItemStatus.Completed :
+                        stopped ? ProjectTranslationItemStatus.Interrupted : ProjectTranslationItemStatus.Cancelled,
+                        chapterCompleted ? null : stopped
+                            ? "Request đang chạy đã dừng; checkpoint trước đó được giữ."
+                            : "Đã hủy; các segment đã checkpoint vẫn được giữ.");
                     ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
-                    job.Status = ProjectTranslationJobStatus.Cancelled;
+                    job.Status = stopped ? ProjectTranslationJobStatus.Interrupted : ProjectTranslationJobStatus.Cancelled;
                     ClearCurrent(job, workerDefinition);
                     UpdateWorkerCompletion(job, workerDefinition, target, after, workerStarted);
                 }, CancellationToken.None).ConfigureAwait(false);
@@ -733,7 +788,7 @@ public sealed class ProjectTranslationCoordinator
             }
             bool failed = status is QueueStatus.CompletedWithErrors or QueueStatus.Faulted;
             bool uncertainRemote = failed && workerDefinition?.Backend.Kind == OllamaBackendKind.Remote;
-            await PersistAsync(job =>
+            await PersistProgressAsync(job =>
             {
                 UpdateItem(job, chapterId, after, uncertainRemote ? ProjectTranslationItemStatus.NeedsReview :
                     failed ? ProjectTranslationItemStatus.Failed : ProjectTranslationItemStatus.Completed,
@@ -789,14 +844,27 @@ public sealed class ProjectTranslationCoordinator
         }
     }
 
-    private static string? ValidateChapterRevision(ProjectTranslationItem item, ChapterDocument chapter)
+    private async Task<string?> RefreshChapterRevisionAsync(ProjectTranslationItem item, ChapterDocument chapter,
+        CancellationToken cancellationToken)
     {
         if (ProjectTranslationFingerprints.Source(chapter) != item.SourceFingerprint)
             return "Nguyên văn hoặc ranh giới segment đã đổi sau khi enqueue.";
-        if (ProjectTranslationFingerprints.Protected(chapter) != item.ProtectedFingerprint)
-            return "UserDraft, Approval hoặc lịch sử bảo vệ đã đổi sau khi enqueue.";
-        if (item.StartedAt is null && ProjectTranslationFingerprints.Document(chapter) != item.EnqueuedDocumentFingerprint)
-            return "Document revision đã đổi sau khi enqueue.";
+        string protectedFingerprint = ProjectTranslationFingerprints.Protected(chapter);
+        string documentFingerprint = ProjectTranslationFingerprints.Document(chapter);
+        if (protectedFingerprint != item.ProtectedFingerprint ||
+            documentFingerprint != item.EnqueuedDocumentFingerprint)
+        {
+            await PersistAsync(job =>
+            {
+                ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapter.Id);
+                target.ProtectedFingerprint = protectedFingerprint;
+                target.EnqueuedDocumentFingerprint = documentFingerprint;
+                target.TotalSegments = chapter.Segments.Count;
+                target.CompletedSegments = CompletedSegments(chapter);
+                target.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
+                target.Error = null;
+            }, cancellationToken).ConfigureAwait(false);
+        }
         return null;
     }
 
@@ -825,19 +893,155 @@ public sealed class ProjectTranslationCoordinator
         }
     }
 
-    private string? ValidateConfigurationRevision(ProjectTranslationEnvironment environment,
-        ProjectTranslationWorkerDefinition? workerDefinition)
+    private async Task RefreshBoundaryConfigurationAsync(ProjectTranslationEnvironment environment,
+        ProjectTranslationWorkerDefinition? workerDefinition, CancellationToken cancellationToken)
     {
         ProjectTranslationJob job = CurrentJob!;
-        if (environment.Resources.Revision != job.ProjectResourceRevision)
-            return "Glossary, Context hoặc Character Profiles đã đổi khi hàng đợi đang chạy.";
-        if (workerDefinition is null && environment.ModelOptions != job.ModelOptions)
-            return "Model options đã đổi khi hàng đợi đang chạy.";
-        if (environment.PromptPreset != job.PromptPreset)
-            return "Prompt preset đã đổi khi hàng đợi đang chạy.";
-        string? environmentConflict = workerDefinition is null ? ValidateEnvironment(job, environment) : null;
-        if (environmentConflict is not null) return environmentConflict;
-        return null;
+        if (workerDefinition is null && ValidateEnvironment(job, environment) is string backendConflict)
+            throw new ProjectTranslationConfigurationChangedException(backendConflict +
+                " Hãy Pause rồi bấm Tiếp tục dịch sau khi backend mới đã kết nối.");
+        bool changed = environment.Resources.Revision != job.ProjectResourceRevision ||
+            environment.PromptPreset != job.PromptPreset ||
+            workerDefinition is null && environment.ModelOptions != job.ModelOptions;
+        if (!changed) return;
+        await PersistAsync(value =>
+        {
+            value.ProjectResourceRevision = environment.Resources.Revision;
+            value.PromptPreset = environment.PromptPreset with { };
+            if (workerDefinition is null) value.ModelOptions = environment.ModelOptions with { };
+            value.LastError = "Cấu hình mới sẽ được áp dụng từ chương tiếp theo.";
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private bool SynchronizeLaunchConfiguration(ProjectTranslationJob job,
+        ProjectTranslationEnvironment environment, bool acceptChangedBackendOrWorkers)
+    {
+        bool changed = false;
+        if (job.ProjectResourceRevision != environment.Resources.Revision)
+        {
+            job.ProjectResourceRevision = environment.Resources.Revision;
+            changed = true;
+        }
+        if (job.PromptPreset != environment.PromptPreset)
+        {
+            job.PromptPreset = environment.PromptPreset with { };
+            changed = true;
+        }
+        if (job.Workers.Count == 0)
+        {
+            OllamaBackendSnapshot current = environment.Backend ??
+                OllamaBackendSnapshot.LocalDefault(environment.ModelOptions.Model);
+            string? backendConflict = ValidateEnvironment(job, environment);
+            if (backendConflict is not null && !acceptChangedBackendOrWorkers)
+                throw new InvalidOperationException(backendConflict);
+            if (job.ModelOptions != environment.ModelOptions)
+            {
+                job.ModelOptions = environment.ModelOptions with { };
+                changed = true;
+            }
+            if (job.Backend != current)
+            {
+                job.Backend = current with { };
+                changed = true;
+            }
+            return changed;
+        }
+
+        if (!acceptChangedBackendOrWorkers)
+        {
+            _ = ResolveWorkerDefinitions(job);
+            return changed;
+        }
+        return SynchronizeWorkerSnapshots(job) || changed;
+    }
+
+    private bool SynchronizeWorkerSnapshots(ProjectTranslationJob job)
+    {
+        if (_workerDefinitions.Count == 0)
+            throw new InvalidOperationException("Hãy kết nối ít nhất một GPU hợp lệ trước khi tiếp tục dịch.");
+        foreach (ProjectTranslationWorkerDefinition definition in _workerDefinitions) definition.Validate();
+        bool exact = job.Workers.Count == _workerDefinitions.Count && job.Workers.All(snapshot =>
+            _workerDefinitions.Any(definition => definition.WorkerId == snapshot.WorkerId &&
+                definition.Backend == snapshot.Backend && definition.ModelOptions == snapshot.ModelOptions &&
+                definition.SegmentationOptions == snapshot.SegmentationOptions &&
+                string.Equals(definition.BackendIdentity, snapshot.BackendIdentity, StringComparison.Ordinal)));
+        if (exact) return false;
+
+        var unused = job.Workers.ToList();
+        var remap = new Dictionary<Guid, Guid>();
+        var refreshed = new List<ProjectTranslationWorkerState>(_workerDefinitions.Count);
+        foreach (ProjectTranslationWorkerDefinition definition in _workerDefinitions)
+        {
+            ProjectTranslationWorkerState? previous = unused.FirstOrDefault(value => value.WorkerId == definition.WorkerId)
+                ?? unused.FirstOrDefault(value => value.ProfileId == definition.Backend.ProfileId)
+                ?? unused.FirstOrDefault(value => value.Backend.Kind == definition.Backend.Kind);
+            if (previous is not null)
+            {
+                if (previous.ProfileId == definition.Backend.ProfileId && previous.BackendIdentity.Length > 0 &&
+                    !string.Equals(previous.BackendIdentity, definition.BackendIdentity, StringComparison.Ordinal))
+                    throw new InvalidOperationException($"Danh tính kết nối của “{previous.Name}” đã đổi; hãy xác nhận HostKey trước khi gửi nguyên văn.");
+                unused.Remove(previous);
+                remap[previous.WorkerId] = definition.WorkerId;
+            }
+            refreshed.Add(CreateWorkerState(definition, previous));
+        }
+        if (unused.Count > 0)
+        {
+            ProjectTranslationWorkerState destination = refreshed[0];
+            foreach (ProjectTranslationWorkerState historical in unused) AddHistoricalMetrics(destination, historical);
+        }
+        foreach (ProjectTranslationItem item in job.Items)
+        {
+            if (item.AssignedWorkerId is not Guid previousId) continue;
+            item.AssignedWorkerId = remap.TryGetValue(previousId, out Guid currentId) ? currentId : null;
+        }
+        job.Workers = refreshed;
+        ProjectTranslationWorkerDefinition primary = _workerDefinitions[0];
+        job.ModelOptions = primary.ModelOptions with { };
+        job.Backend = primary.Backend with { };
+        job.CurrentChapterId = null;
+        return true;
+    }
+
+    private static ProjectTranslationWorkerState CreateWorkerState(ProjectTranslationWorkerDefinition definition,
+        ProjectTranslationWorkerState? previous) => new()
+    {
+        WorkerId = definition.WorkerId,
+        ProfileId = definition.Backend.ProfileId,
+        Name = definition.Backend.ProfileName,
+        Backend = definition.Backend with { },
+        ModelOptions = definition.ModelOptions with { },
+        SegmentationOptions = definition.SegmentationOptions with { },
+        HourlyPrice = definition.HourlyPrice,
+        BackendIdentity = definition.BackendIdentity,
+        Status = ProjectTranslationWorkerStatus.Ready,
+        CompletedChapters = previous?.CompletedChapters ?? 0,
+        FailedChapters = previous?.FailedChapters ?? 0,
+        CompletedHanCharacters = previous?.CompletedHanCharacters ?? 0,
+        ActiveSeconds = previous?.ActiveSeconds ?? 0,
+        InputTokens = previous?.InputTokens ?? 0,
+        OutputTokens = previous?.OutputTokens ?? 0,
+        EvaluationSeconds = previous?.EvaluationSeconds ?? 0,
+        ErrorSegments = previous?.ErrorSegments ?? 0,
+        TruncatedOutputCount = previous?.TruncatedOutputCount ?? 0,
+        PossibleMissingContentCount = previous?.PossibleMissingContentCount ?? 0,
+        TimeoutCount = previous?.TimeoutCount ?? 0
+    };
+
+    private static void AddHistoricalMetrics(ProjectTranslationWorkerState destination,
+        ProjectTranslationWorkerState historical)
+    {
+        destination.CompletedChapters += historical.CompletedChapters;
+        destination.FailedChapters += historical.FailedChapters;
+        destination.CompletedHanCharacters += historical.CompletedHanCharacters;
+        destination.ActiveSeconds += historical.ActiveSeconds;
+        destination.InputTokens += historical.InputTokens;
+        destination.OutputTokens += historical.OutputTokens;
+        destination.EvaluationSeconds += historical.EvaluationSeconds;
+        destination.ErrorSegments += historical.ErrorSegments;
+        destination.TruncatedOutputCount += historical.TruncatedOutputCount;
+        destination.PossibleMissingContentCount += historical.PossibleMissingContentCount;
+        destination.TimeoutCount += historical.TimeoutCount;
     }
 
     private static string? ValidateEnvironment(ProjectTranslationJob job, ProjectTranslationEnvironment environment)
@@ -848,28 +1052,6 @@ public sealed class ProjectTranslationCoordinator
             !string.Equals(planned.Endpoint, current.Endpoint, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(planned.Model, current.Model, StringComparison.Ordinal))
             return "Backend/model Ollama đã đổi sau khi tạo Queue Plan. Hãy xác nhận server mới và tạo lại Queue Plan; job cũ không tự gửi request.";
-        return null;
-    }
-
-    private static string? ValidatePlannedConfiguration(ProjectTranslationJob job,
-        ProjectTranslationEnvironment environment)
-    {
-        if (environment.Resources.Revision != job.ProjectResourceRevision)
-            return "Glossary, Context hoặc Character Profiles đã đổi sau khi tạo Queue Plan. Hãy tạo Queue Plan mới.";
-        if (environment.ModelOptions != job.ModelOptions)
-            return "Model options đã đổi sau khi tạo Queue Plan. Hãy tạo Queue Plan mới.";
-        if (environment.PromptPreset != job.PromptPreset)
-            return "Prompt preset đã đổi sau khi tạo Queue Plan. Hãy tạo Queue Plan mới.";
-        return ValidateEnvironment(job, environment);
-    }
-
-    private string? ValidateParallelLaunch(ProjectTranslationJob job, ProjectTranslationEnvironment environment)
-    {
-        if (environment.Resources.Revision != job.ProjectResourceRevision)
-            return "Glossary, Context hoặc Character Profiles đã đổi sau khi tạo Queue Plan.";
-        if (environment.PromptPreset != job.PromptPreset)
-            return "Prompt preset đã đổi sau khi tạo Queue Plan.";
-        _ = ResolveWorkerDefinitions(job);
         return null;
     }
 
@@ -912,18 +1094,86 @@ public sealed class ProjectTranslationCoordinator
             }
             update(proposed);
             ProjectTranslationJob saved = await _store.SaveAsync(proposed, cancellationToken).ConfigureAwait(false);
-            lock (_sync) _job = saved;
+            lock (_sync)
+            {
+                _job = saved;
+                _progressChangesSinceSave = 0;
+            }
         }
         finally { _persistGate.Release(); }
         Notify();
     }
 
-    private Task FinishAsync(ProjectTranslationJobStatus status, string? error) => PersistAsync(job =>
+    private async Task MutateInMemoryAsync(Action<ProjectTranslationJob> update,
+        CancellationToken cancellationToken)
     {
-        job.Status = status;
-        job.LastError = error;
-        job.CurrentChapterId = null;
-    }, CancellationToken.None);
+        await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ProjectTranslationJob proposed;
+            lock (_sync)
+            {
+                proposed = ProjectTranslationJobStore.Clone(_job
+                    ?? throw new InvalidOperationException("Translation job chưa được lưu."));
+            }
+            update(proposed);
+            proposed.Validate();
+            lock (_sync) _job = proposed;
+        }
+        finally { _persistGate.Release(); }
+        Notify();
+    }
+
+    private async Task PersistProgressAsync(Action<ProjectTranslationJob> update,
+        CancellationToken cancellationToken)
+    {
+        await _persistGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ProjectTranslationJob proposed;
+            int checkpointInterval;
+            lock (_sync)
+            {
+                proposed = ProjectTranslationJobStore.Clone(_job
+                    ?? throw new InvalidOperationException("Translation job chưa được lưu."));
+                checkpointInterval = Math.Max(1, (proposed.Items.Count + 19) / 20);
+            }
+            update(proposed);
+            proposed.Validate();
+            bool save;
+            lock (_sync)
+            {
+                _progressChangesSinceSave++;
+                save = _progressChangesSinceSave >= checkpointInterval;
+            }
+            if (save)
+            {
+                ProjectTranslationJob saved = await _store.SaveAsync(proposed, cancellationToken).ConfigureAwait(false);
+                lock (_sync)
+                {
+                    _job = saved;
+                    _progressChangesSinceSave = 0;
+                }
+                await _repository.FlushDeferredManifestAsync(_session, "ProjectTranslationProgress",
+                    cancellationToken).ConfigureAwait(false);
+            }
+            else lock (_sync) _job = proposed;
+        }
+        finally { _persistGate.Release(); }
+        Notify();
+    }
+
+    private async Task FinishAsync(ProjectTranslationJobStatus status, string? error)
+    {
+        await _repository.FlushDeferredManifestAsync(_session, "ProjectTranslationCheckpoint",
+            CancellationToken.None).ConfigureAwait(false);
+        await PersistAsync(job =>
+        {
+            job.Status = status;
+            job.LastError = error;
+            job.CurrentChapterId = null;
+        }, CancellationToken.None).ConfigureAwait(false);
+    }
 
     private static void UpdateItem(ProjectTranslationJob job, Guid chapterId, ChapterDocument chapter,
         ProjectTranslationItemStatus status, string? error)
@@ -933,6 +1183,9 @@ public sealed class ProjectTranslationCoordinator
         item.TotalSegments = chapter.Segments.Count;
         item.CompletedSegments = CompletedSegments(chapter);
         item.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
+        item.SourceFingerprint = ProjectTranslationFingerprints.Source(chapter);
+        item.ProtectedFingerprint = ProjectTranslationFingerprints.Protected(chapter);
+        item.EnqueuedDocumentFingerprint = ProjectTranslationFingerprints.Document(chapter);
         item.Error = error;
         if (status is not (ProjectTranslationItemStatus.Paused or ProjectTranslationItemStatus.Interrupted))
             item.FinishedAt = DateTimeOffset.UtcNow;

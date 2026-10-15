@@ -19,11 +19,16 @@ public sealed class TranslationQueue(TranslationService service)
         Launch(mode, options ?? service.GetSnapshot().DefaultModelOptions, preset ?? service.GetSnapshot().SelectedPreset, false, cancellationToken);
 
     public Task ResumeAsync(CancellationToken cancellationToken = default)
+        => ResumeAsync(null, null, cancellationToken);
+
+    public Task ResumeAsync(ModelOptions? options, PromptPreset? preset,
+        CancellationToken cancellationToken = default)
     {
         var checkpoint = service.GetSnapshot().Queue;
         if (checkpoint.Status is not (QueueStatus.Paused or QueueStatus.Cancelled or QueueStatus.Interrupted or QueueStatus.Faulted))
             throw new InvalidOperationException("Hàng đợi chưa ở trạng thái có thể tiếp tục.");
-        return Launch(checkpoint.Mode, checkpoint.ModelOptions, checkpoint.Preset, true, cancellationToken);
+        return Launch(checkpoint.Mode, options ?? checkpoint.ModelOptions, preset ?? checkpoint.Preset, true,
+            cancellationToken);
     }
 
     private Task Launch(QueueMode mode, ModelOptions options, PromptPreset preset, bool resume, CancellationToken cancellationToken)

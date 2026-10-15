@@ -729,7 +729,11 @@ public partial class MainWindow : Window
         UpdateButtons();
         try
         {
-            await PauseProjectTranslationForContextChangeAsync();
+            if (_projectTranslationCoordinator?.IsRunning == true)
+            {
+                SetStatus("Đang dừng request AI và lưu trạng thái tối thiểu trước khi đóng…");
+                await _projectTranslationCoordinator.StopAsync();
+            }
             if (_activeRequest is not null)
             {
                 if (_queue?.IsRunning == true) await _queue.CancelAsync();

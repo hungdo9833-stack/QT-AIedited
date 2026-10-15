@@ -10,6 +10,7 @@ public partial class ProjectTranslationQueueWindow : Window
     private readonly Func<ProjectTranslationCoordinator,
         Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>>? _replan;
     private readonly Func<Guid, Task>? _openChapter;
+    private readonly Func<ProjectTranslationCoordinator, Task<ProjectTranslationCoordinator>>? _refreshCoordinator;
     private ProjectTranslationJob? _plan;
     private bool _commandBusy;
     private bool _closed;
@@ -17,12 +18,14 @@ public partial class ProjectTranslationQueueWindow : Window
     internal ProjectTranslationQueueWindow(string projectTitle, ProjectTranslationCoordinator coordinator,
         ProjectTranslationJob? plan, Func<ProjectTranslationCoordinator,
             Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>>? replan = null,
-        Func<Guid, Task>? openChapter = null)
+        Func<Guid, Task>? openChapter = null,
+        Func<ProjectTranslationCoordinator, Task<ProjectTranslationCoordinator>>? refreshCoordinator = null)
     {
         _coordinator = coordinator;
         _plan = plan;
         _replan = replan;
         _openChapter = openChapter;
+        _refreshCoordinator = refreshCoordinator;
         InitializeComponent();
         MainWindow.ClampWindowToWorkArea(this, 1120, 760);
         ProjectText.Text = projectTitle;
@@ -76,7 +79,7 @@ public partial class ProjectTranslationQueueWindow : Window
         int needsReview = job.Items.Count(item => item.Status == ProjectTranslationItemStatus.NeedsReview);
         int skipped = job.Items.Count(item => item.Status is ProjectTranslationItemStatus.Skipped or ProjectTranslationItemStatus.Cancelled);
         SummaryText.Text = $"{StatusLabel(progress.Status)} · {progress.CompletedChapters}/{progress.TotalChapters} xong · " +
-            $"{progress.FailedChapters} lỗi · {needsReview} cần tạo lại · {skipped} bỏ qua/hủy";
+            $"{progress.FailedChapters} lỗi · {needsReview} cần kiểm tra nguồn · {skipped} bỏ qua/hủy";
         ChapterProgress.Value = progress.TotalChapters == 0 ? 0 : 100d *
             (progress.CompletedChapters + progress.FailedChapters + progress.SkippedChapters) / progress.TotalChapters;
         CurrentText.Text = progress.CurrentChapterId is null ? "Không có chapter đang gửi request."
@@ -90,7 +93,9 @@ public partial class ProjectTranslationQueueWindow : Window
                 $"chi phí QT Studio ước tính {metrics.EstimatedCost:N2}";
         }
         string? recoveryHint = needsReview > 0 || progress.Status == ProjectTranslationJobStatus.Interrupted
-            ? "Bấm “Tạo lại phần chưa xong” để chốt cấu hình hiện tại; checkpoint đã hoàn tất vẫn được giữ."
+            ? needsReview > 0
+                ? "Một số chương đã đổi nguyên văn hoặc ranh giới. Hãy kiểm tra trước khi xử lý lại."
+                : "Bấm “Tiếp tục dịch”; cấu hình hợp lệ hiện tại sẽ được áp dụng tự động."
             : null;
         StatusText.Text = planMode
             ? $"Sẽ dịch {job.Items.Count:N0} chapter bằng {Math.Max(1, job.Workers.Count)} worker. Start mới tạo job bền vững và gửi request đầu tiên."
@@ -105,7 +110,7 @@ public partial class ProjectTranslationQueueWindow : Window
         CancelButton.IsEnabled = !_commandBusy && _coordinator.IsRunning;
         RetryButton.IsEnabled = !_commandBusy && !_coordinator.IsRunning && progress.FailedChapters > 0;
         ReplanButton.IsEnabled = !_commandBusy && !planMode && !_coordinator.IsRunning && job.Items.Any(item =>
-            item.Status is not (ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Skipped));
+            item.Status == ProjectTranslationItemStatus.NeedsReview);
         RetryWorkerButton.IsEnabled = !_commandBusy && !_coordinator.IsRunning && job.Workers.Any(worker =>
             worker.Status is ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted);
         ReassignButton.IsEnabled = RetryWorkerButton.IsEnabled && job.Workers.Count == 2;
@@ -142,14 +147,35 @@ public partial class ProjectTranslationQueueWindow : Window
         await RunQueueAsync(() => _coordinator.StartAsync(plan), "Hàng đợi đã kết thúc.", plan);
     }
 
-    private async void OnPause(object sender, RoutedEventArgs e) =>
-        await RunControlAsync(_coordinator.PauseAsync, "Đã Pause sau khi lưu checkpoint request hiện tại.");
+    private async void OnPause(object sender, RoutedEventArgs e)
+    {
+        StatusText.Text = "Đang chờ request hiện tại hoàn tất và lưu checkpoint…";
+        await RunControlAsync(_coordinator.PauseAsync, "Đã Pause an toàn sau checkpoint hiện tại.");
+    }
 
-    private async void OnResume(object sender, RoutedEventArgs e) =>
-        await RunQueueAsync(() => _coordinator.ResumeAsync(), "Hàng đợi Resume đã kết thúc.");
+    private async void OnResume(object sender, RoutedEventArgs e)
+        => await RunQueueAsync(ResumeWithCurrentConfigurationAsync,
+            "Hàng đợi đã xử lý xong phần còn lại.");
+
+    private async Task ResumeWithCurrentConfigurationAsync()
+    {
+        if (_refreshCoordinator is not null)
+        {
+            ProjectTranslationCoordinator previous = _coordinator;
+            ProjectTranslationCoordinator refreshed = await _refreshCoordinator(previous);
+            if (!ReferenceEquals(previous, refreshed))
+            {
+                previous.ProgressChanged -= OnProgressChanged;
+                _coordinator = refreshed;
+                _coordinator.ProgressChanged += OnProgressChanged;
+            }
+        }
+        await _coordinator.ResumeWithCurrentConfigurationAsync();
+    }
 
     private async void OnCancel(object sender, RoutedEventArgs e) =>
-        await RunControlAsync(_coordinator.CancelPendingAsync, "Đã hủy phần đang chờ; checkpoint đã commit vẫn được giữ.");
+        await RunControlAsync(_coordinator.StopAsync,
+            "Đã dừng nhanh; checkpoint đã commit được giữ và có thể tiếp tục sau.");
 
     private async void OnRetry(object sender, RoutedEventArgs e) =>
         await RunQueueAsync(() => _coordinator.RetryFailedAsync(), "Đã Retry các chapter lỗi.");

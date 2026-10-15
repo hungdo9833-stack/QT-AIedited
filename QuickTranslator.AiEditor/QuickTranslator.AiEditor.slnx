@@ -8,4 +8,5 @@
   <Project Path="tools/QuickTranslator.AiEditor.CharacterConsistency.Benchmark/QuickTranslator.AiEditor.CharacterConsistency.Benchmark.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.M5.UiSmoke/QuickTranslator.AiEditor.M5.UiSmoke.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.Storage.Benchmark/QuickTranslator.AiEditor.Storage.Benchmark.csproj" />
+  <Project Path="tools/QuickTranslator.AiEditor.QueueWorkflow.Benchmark/QuickTranslator.AiEditor.QueueWorkflow.Benchmark.csproj" />
 </Solution>
