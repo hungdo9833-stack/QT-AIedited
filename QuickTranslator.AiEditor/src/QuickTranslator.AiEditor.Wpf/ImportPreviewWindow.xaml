@@ -11,23 +11,26 @@
  <Grid Margin="14">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Border Style="{StaticResource Card}" Padding="14,10">
-   <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="170"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
     <TextBox x:Name="SourcePathInput" IsReadOnly="True" ToolTip="Tệp nguồn không bị sửa hoặc di chuyển (hỗ trợ kéo-thả tệp .txt vào cửa sổ)"/>
-    <ComboBox x:Name="EncodingInput" Grid.Column="1" SelectedIndex="0"><ComboBoxItem Tag="Auto">Tự động · UTF-8 nghiêm ngặt</ComboBoxItem><ComboBoxItem Tag="Utf8">UTF-8</ComboBoxItem><ComboBoxItem Tag="Gbk">GBK · CP936</ComboBoxItem><ComboBoxItem Tag="Gb18030">GB18030</ComboBoxItem></ComboBox>
+    <Expander Grid.Column="1" Header="Bảng mã" ToolTip="QT Studio tự nhận diện UTF-8, GBK và GB18030. Chỉ mở khi bản xem trước có ký tự bất thường." Margin="6,0">
+     <ComboBox x:Name="EncodingInput" Width="190" SelectedIndex="0"><ComboBoxItem Tag="Auto">Tự động (khuyên dùng)</ComboBoxItem><ComboBoxItem Tag="Utf8">UTF-8</ComboBoxItem><ComboBoxItem Tag="Gbk">GBK · CP936</ComboBoxItem><ComboBoxItem Tag="Gb18030">GB18030</ComboBoxItem></ComboBox>
+    </Expander>
     <Button Grid.Column="2" Content="Chọn TXT…" Click="OnBrowse"/>
     <Button Grid.Column="3" Content="Phân tích" Style="{StaticResource Primary}" Click="OnAnalyze"/>
    </Grid>
   </Border>
   <Grid Grid.Row="1" Margin="0,10"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-   <Border Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="SẼ NHẬP" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="ImportCountText" Text="0 chương" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="CẦN KIỂM TRA" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="ProblemCountText" Text="0 mục" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
-   <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="NGUYÊN VĂN" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="SourceSummaryText" Text="Chưa chọn tệp" FontSize="14" TextWrapping="Wrap"/></StackPanel></Border>
-   <Border Grid.Column="3" Style="{StaticResource Card}"><StackPanel><TextBlock Text="TRẠNG THÁI" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="PreviewStatusText" Text="Chọn hoặc kéo-thả TXT để bắt đầu" FontSize="14" TextWrapping="Wrap"/></StackPanel></Border>
+   <Border Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="CHƯƠNG MỚI" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="NewCountText" Text="0 chương" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+   <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="ĐÃ CÓ" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="ExistingCountText" Text="0 chương" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+   <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="CẦN KIỂM TRA" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="ProblemCountText" Text="0 mục" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+   <Border Grid.Column="3" Style="{StaticResource Card}"><StackPanel><TextBlock Text="CÓ THỂ NHẬP" Foreground="{DynamicResource MutedBrush}" FontSize="11"/><TextBlock x:Name="ImportCountText" Text="0 chương" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="SourceSummaryText" Text="Chưa chọn tệp" Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap"/></StackPanel></Border>
   </Grid>
   <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,10" Padding="10"><DockPanel>
-   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="TranslateAllTitlesButton" Content="Dịch tất cả" Style="{StaticResource Primary}" Click="OnTranslateAllTitles"/><Button x:Name="RetryFailedTitlesButton" Content="Dịch lại mục lỗi" Click="OnRetryFailedTitles"/><Button x:Name="RetrySelectedTitlesButton" Content="Dịch lại mục đã chọn" Click="OnRetrySelectedTitles"/><Button x:Name="CancelTitleTranslationButton" Content="Hủy" Click="OnCancelTitleTranslation" IsEnabled="False"/></StackPanel>
+   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SkipExistingButton" Content="Bỏ qua chương đã có" Click="OnSkipExisting" ToolTip="Chỉ giữ các chương mới; không ghi đè chương trong Project"/><Button x:Name="TranslateAllTitlesButton" Content="Dịch tất cả" Style="{StaticResource Primary}" Click="OnTranslateAllTitles"/><Button x:Name="RetryFailedTitlesButton" Content="Dịch lại mục lỗi" Click="OnRetryFailedTitles"/><Button x:Name="RetrySelectedTitlesButton" Content="Dịch lại mục đã chọn" Click="OnRetrySelectedTitles"/><Button x:Name="CancelTitleTranslationButton" Content="Hủy" Click="OnCancelTitleTranslation" IsEnabled="False"/></StackPanel>
    <StackPanel>
     <StackPanel Orientation="Horizontal"><CheckBox x:Name="TranslateTitlesCheck" Content="Dịch tiêu đề sang tiếng Việt" VerticalAlignment="Center" Margin="4" Checked="OnTitleTranslationOptionChanged" Unchecked="OnTitleTranslationOptionChanged"/><ComboBox x:Name="TitleMethodInput" Width="210" SelectedIndex="0" Margin="6,2"><ComboBoxItem Tag="Ollama">AI Ollama đang chọn</ComboBoxItem><ComboBoxItem Tag="HanViet">Hán Việt</ComboBoxItem><ComboBoxItem Tag="VietPhrase">VietPhrase</ComboBoxItem><ComboBoxItem Tag="KeepChinese">Giữ nguyên tiếng Trung</ComboBoxItem></ComboBox><TextBlock x:Name="TitleTranslationProgressText" Text="Chưa dịch tiêu đề" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="8,0"/></StackPanel>
+    <TextBlock x:Name="PreviewStatusText" Text="Chọn hoặc kéo-thả TXT để bắt đầu" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="4,3,4,0"/>
     <CheckBox x:Name="ReplaceHistoryCheck" Content="Ghi đè các chương trùng trong History (xóa vĩnh viễn bản cũ)"
               Visibility="Collapsed" Margin="4,5,4,0" Foreground="{DynamicResource WarningBrush}"
               ToolTip="Chỉ thay thế chương đã xóa mềm có cùng ChapterId. Chương đang hoạt động vẫn được bảo vệ."
@@ -55,7 +58,7 @@
   </Grid>
   <Border Grid.Row="4" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="0,10,0,0"><DockPanel>
    <TextBlock x:Name="FooterHintText" Text="Nguồn chỉ được đọc; mọi sửa trong preview không đổi file TXT." Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Hủy" Click="OnCancel"/><Button x:Name="ConfirmButton" Content="Nhập các chương đã chọn" Style="{StaticResource Primary}" Click="OnConfirm" IsEnabled="False"/></StackPanel>
+   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Hủy" Click="OnCancel"/><Button x:Name="ConfirmButton" Content="Nhập" Click="OnConfirm" IsEnabled="False"/><Button x:Name="ImportAndTranslateButton" Content="Nhập &amp; Dịch" Style="{StaticResource Primary}" Click="OnConfirmAndTranslate" IsEnabled="False" ToolTip="Nhập các chương mới và bắt đầu dịch ngay"/></StackPanel>
   </DockPanel></Border>
  </Grid>
 </Window>

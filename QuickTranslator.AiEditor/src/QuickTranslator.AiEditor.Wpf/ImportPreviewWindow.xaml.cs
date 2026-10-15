@@ -39,6 +39,7 @@ public partial class ImportPreviewWindow : Window
 
     public ImportPreviewPlan? ConfirmedPlan { get; private set; }
     public bool ReplaceSoftDeletedHistory { get; private set; }
+    public bool ImportAndTranslate { get; private set; }
     public string? SourcePath { get; private set; }
     internal ImportPreviewPlan? CurrentPlan => _editor?.Current;
 
@@ -69,7 +70,9 @@ public partial class ImportPreviewWindow : Window
         _loading = true;
         PreviewStatusText.Text = "Đang đọc và nhận diện…";
         ConfirmButton.IsEnabled = false;
+        ImportAndTranslateButton.IsEnabled = false;
         ConfirmedPlan = null;
+        ImportAndTranslate = false;
         ReplaceSoftDeletedHistory = false;
         ReplaceHistoryCheck.IsChecked = false;
         ReplaceHistoryCheck.Visibility = Visibility.Collapsed;
@@ -84,6 +87,8 @@ public partial class ImportPreviewWindow : Window
             SourcePathInput.Text = SourcePath;
             await RestoreTitleDraftAsync(token);
             RefreshRows();
+            if (source.EncodingDetectionUncertain)
+                PreviewStatusText.Text = $"Đã tự nhận diện {source.EncodingName}, nhưng nội dung có dấu hiệu bất thường. Hãy xem trước hoặc chọn bảng mã khác trong mục Bảng mã.";
             PreviewStatusText.Text = PreviewStatus(_editor.Current);
         }
         finally { _loading = false; }
@@ -154,23 +159,33 @@ public partial class ImportPreviewWindow : Window
         IssuesList.ItemsSource = plan.Issues.Select(x => SeverityLabel(x.Severity) + " " + x.Message)
             .Concat(projectIssues.Distinct().Select(x => "● " + x)).ToArray();
         int collisions = plan.ImportableChapters.Count(x => ProjectCollision(x) is not null);
-        int problemsCount = plan.Issues.Count(x => x.Severity != DetectionIssueSeverity.Information) + collisions;
-        ImportCountText.Text = $"{plan.ImportableChapters.Count():N0} chương";
+        int exactExisting = plan.Chapters.Count(IsActiveExistingChapter);
+        int numberConflicts = plan.Chapters.Count(IsActiveNumberConflict);
+        int newChapters = plan.Chapters.Count(item => item.Included && !IsActiveExistingChapter(item) &&
+            !IsActiveNumberConflict(item));
+        int problemsCount = plan.Issues.Count(x => x.Severity != DetectionIssueSeverity.Information) + collisions +
+            (plan.Source.EncodingDetectionUncertain ? 1 : 0);
+        NewCountText.Text = $"{newChapters:N0} chương";
+        ExistingCountText.Text = $"{exactExisting + numberConflicts:N0} chương";
+        ImportCountText.Text = $"{newChapters:N0} chương";
         ProblemCountText.Text = $"{problemsCount:N0} mục";
-        SourceSummaryText.Text = $"{plan.Source.EncodingName} · {plan.Source.Text.Length:N0} ký tự · {plan.Source.NewLineStyle}";
+        SourceSummaryText.Text = $"{plan.Source.EncodingName} · {plan.Source.Text.Length:N0} ký tự";
         UndoButton.IsEnabled = _editor.CanUndo;
         int failedTitles = _titleDraft?.Items.Count(item => item.Status == ChapterTitleTranslationStatus.Failed) ?? 0;
         int untranslatedCount = plan.ImportableChapters.Count(item => string.IsNullOrWhiteSpace(item.VietnameseTitle));
         // BL-18: Do not lock out ConfirmButton when a few titles fail or remain untranslated; automatically fallback to safe titles with warning.
-        ConfirmButton.IsEnabled = !_translatingTitles && !plan.HasBlockingIssues && collisions == 0 &&
+        bool canImport = !_translatingTitles && !plan.HasBlockingIssues && collisions == 0 &&
             plan.ImportableChapters.Any();
+        ConfirmButton.IsEnabled = canImport;
+        ImportAndTranslateButton.IsEnabled = canImport && newChapters > 0;
+        SkipExistingButton.IsEnabled = !_translatingTitles && exactExisting + numberConflicts > 0;
         FooterHintText.Text = ConfirmButton.IsEnabled
             ? (replaceHistory
-                ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương; sẽ xóa vĩnh viễn {historyCollisions:N0} bản chương trong History khi transaction commit."
+                ? $"Sẵn sàng nhập {newChapters:N0} chương mới; sẽ xóa vĩnh viễn {historyCollisions:N0} bản trong History sau khi bạn xác nhận."
                 : TranslateTitlesCheck.IsChecked == true && (failedTitles > 0 || untranslatedCount > 0)
-                ? $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương ({failedTitles:N0} tiêu đề lỗi / {untranslatedCount:N0} chưa dịch sẽ tự dùng tên dự phòng kèm cảnh báo)."
-                : $"Sẵn sàng nhập {plan.ImportableChapters.Count():N0} chương theo thứ tự số. Source hash {plan.Source.RawSha256[..12]}…")
-            : "Cần xử lý lỗi màu cảnh báo hoặc collision trước khi nhập. Nguồn TXT vẫn giữ nguyên.";
+                ? $"Sẵn sàng nhập {newChapters:N0} chương mới. {failedTitles:N0} tiêu đề lỗi và {untranslatedCount:N0} tiêu đề chưa dịch sẽ dùng tên dự phòng."
+                : $"Sẵn sàng nhập {newChapters:N0} chương mới theo thứ tự đọc.")
+            : "Cần xử lý các mục cảnh báo hoặc bỏ qua chương đã có trước khi nhập. File TXT không bị thay đổi.";
         int translatedCount = plan.ImportableChapters.Count(item => !string.IsNullOrWhiteSpace(item.VietnameseTitle));
         TitleTranslationProgressText.Text = $"{translatedCount:N0}/{plan.ImportableChapters.Count():N0} tiêu đề · {failedTitles:N0} lỗi";
         TranslateAllTitlesButton.IsEnabled = !_translatingTitles && plan.ImportableChapters.Any();
@@ -197,9 +212,9 @@ public partial class ImportPreviewWindow : Window
         IncludeButton.Content = item.Included ? "Loại khỏi import" : "Đưa vào import";
         StartContextText.Text = Context(item.Span.StartUtf16, "⟦ BẮT ĐẦU ⟧");
         EndContextText.Text = Context(item.Span.EndUtf16, "⟦ KẾT THÚC ⟧");
-        SelectedDetailText.Text = $"{row.Status} · span {item.Span.StartUtf16:N0}–{item.Span.EndUtf16:N0} · " +
-            (item.Kind == PlannedRegionKind.Unclassified ? "Vùng này chỉ nằm trong source rescue." :
-                $"confidence decision: {item.Decision}") + (row.Problems.Length == 0 ? "" : "\n" + string.Join("\n", row.Problems));
+        SelectedDetailText.Text = item.Kind == PlannedRegionKind.Unclassified
+            ? "Vùng này được giữ trong bản nguồn nhưng không nhập thành chương."
+            : row.Problems.Length == 0 ? "Ranh giới chương đã sẵn sàng." : string.Join("\n", row.Problems);
     }
 
     private string Context(int boundary, string marker)
@@ -503,12 +518,35 @@ public partial class ImportPreviewWindow : Window
     private bool IsSoftDeletedCollision(ImportPreviewItem item) => item.Included &&
         _project.Manifest.Chapters.Any(x => x.ChapterId == item.ChapterId && x.DeletedAt is not null);
 
+    private bool IsActiveExistingChapter(ImportPreviewItem item) => item.IsChapter &&
+        _project.Manifest.Chapters.Any(entry => entry.DeletedAt is null && entry.ChapterId == item.ChapterId);
+
+    private bool IsActiveNumberConflict(ImportPreviewItem item) => item.IsChapter && item.Number is int number &&
+        _project.Manifest.Chapters.Any(entry => entry.DeletedAt is null && entry.Number == number &&
+            entry.ChapterId != item.ChapterId);
+
+    private void OnSkipExisting(object sender, RoutedEventArgs e)
+    {
+        if (_editor is null) return;
+        Guid[] existing = _editor.Current.Chapters
+            .Where(item => item.Included && (IsActiveExistingChapter(item) || IsActiveNumberConflict(item)))
+            .Select(item => item.Id).ToArray();
+        foreach (Guid id in existing) _editor.SetIncluded(id, false);
+        RefreshRows();
+        PreviewStatusText.Text = existing.Length == 0
+            ? "Không có chương đã tồn tại cần bỏ qua."
+            : $"Đã bỏ qua {existing.Length:N0} chương đã có; chỉ các chương mới sẽ được nhập.";
+    }
+
     private void OnReplaceHistoryChanged(object sender, RoutedEventArgs e)
     {
         if (_editor is not null) RefreshRows();
     }
 
-    private void OnConfirm(object sender, RoutedEventArgs e)
+    private void OnConfirm(object sender, RoutedEventArgs e) => Confirm(importAndTranslate: false);
+    private void OnConfirmAndTranslate(object sender, RoutedEventArgs e) => Confirm(importAndTranslate: true);
+
+    private void Confirm(bool importAndTranslate)
     {
         if (_editor is null || !ConfirmButton.IsEnabled) return;
         int historyCollisions = _editor.Current.ImportableChapters.Count(IsSoftDeletedCollision);
@@ -523,6 +561,7 @@ public partial class ImportPreviewWindow : Window
         if (TranslateTitlesCheck.IsChecked == true)
             EnsureFallbackVietnameseTitles();
         ReplaceSoftDeletedHistory = replaceHistory;
+        ImportAndTranslate = importAndTranslate;
         ConfirmedPlan = _editor.Current;
         DialogResult = true;
     }

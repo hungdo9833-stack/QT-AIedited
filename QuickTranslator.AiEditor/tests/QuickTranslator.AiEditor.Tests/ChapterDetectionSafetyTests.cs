@@ -82,11 +82,16 @@ public sealed class ChapterDetectionSafetyTests
     }
 
     [Fact]
-    public void Auto_rejects_non_utf8_and_requires_explicit_legacy_encoding()
+    public void Auto_detects_legacy_chinese_without_replacement_and_keeps_raw_bytes()
     {
         byte[] gbk = [0xd6, 0xd0, 0xce, 0xc4];
-        SourceDecodingException error = Assert.Throws<SourceDecodingException>(() => RawSourceReader.Decode(gbk));
-        Assert.Contains("GBK", error.Message, StringComparison.OrdinalIgnoreCase);
+        RawSourceSnapshot automatic = RawSourceReader.Decode(gbk);
+        Assert.Equal("中文", automatic.Text);
+        Assert.True(automatic.EncodingWasAutoDetected);
+        Assert.Contains("GB", automatic.EncodingName, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain('\uFFFD', automatic.Text);
+        Assert.Equal(gbk, automatic.OriginalBytes);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(gbk)), automatic.RawSha256);
         Assert.Equal("中文", RawSourceReader.Decode(gbk, SourceTextEncoding.Gbk).Text);
         Assert.Equal("中文", RawSourceReader.Decode(gbk, SourceTextEncoding.Gb18030).Text);
     }

@@ -27,13 +27,14 @@ public static class RawSourceReader
     {
         byte[] original = bytes.ToArray();
         bool hasUtf8Bom = original.Length >= 3 && original[0] == 0xef && original[1] == 0xbb && original[2] == 0xbf;
+        if (encoding == SourceTextEncoding.Auto)
+            return DecodeAutomatically(original, sourceName, hasUtf8Bom);
         Encoding decoder;
         int preambleLength = 0;
         string encodingName;
 
         switch (encoding)
         {
-            case SourceTextEncoding.Auto:
             case SourceTextEncoding.Utf8:
                 decoder = StrictUtf8;
                 if (hasUtf8Bom) { preambleLength = 3; encodingName = "UTF-8 BOM"; }
@@ -56,14 +57,80 @@ public static class RawSourceReader
             string text = decoder.GetString(original, preambleLength, original.Length - preambleLength);
             return Create(sourceName, text, original, encodingName);
         }
-        catch (DecoderFallbackException ex) when (encoding == SourceTextEncoding.Auto)
-        {
-            throw new SourceDecodingException("Tệp không phải UTF-8 hợp lệ. Hãy chọn rõ GBK hoặc GB18030; QT Studio không tự đoán bảng mã để tránh đổi nội dung.", ex);
-        }
         catch (DecoderFallbackException ex)
         {
             throw new SourceDecodingException($"Dữ liệu không hợp lệ theo bảng mã {encodingName}; không có ký tự thay thế nào được chèn.", ex);
         }
+    }
+
+    private static RawSourceSnapshot DecodeAutomatically(byte[] original, string sourceName, bool hasUtf8Bom)
+    {
+        try
+        {
+            int preamble = hasUtf8Bom ? 3 : 0;
+            string utf8 = StrictUtf8.GetString(original, preamble, original.Length - preamble);
+            return Create(sourceName, utf8, original, hasUtf8Bom ? "UTF-8 BOM" : "UTF-8",
+                autoDetected: true, uncertain: LooksSuspicious(utf8), alternatives: ["UTF-8", "GB18030"]);
+        }
+        catch (DecoderFallbackException)
+        {
+            // Continue with strict Chinese code pages. GB18030 is a superset of GBK,
+            // but both are evaluated so the preview can disclose ambiguity instead of
+            // silently inserting replacement characters.
+        }
+
+        var candidates = new List<(string Name, string Text, double Score)>();
+        TryDecodeCandidate(original, 54936, "GB18030", candidates);
+        TryDecodeCandidate(original, 936, "GBK (CP936)", candidates);
+        if (candidates.Count == 0)
+            throw new SourceDecodingException("Không thể giải mã tệp bằng UTF-8, GBK hoặc GB18030 mà không làm mất ký tự. Hãy kiểm tra lại tệp nguồn.");
+
+        (string Name, string Text, double Score) best = candidates
+            .OrderByDescending(candidate => candidate.Score)
+            .ThenBy(candidate => candidate.Name, StringComparer.Ordinal)
+            .First();
+        string[] distinctAlternatives = candidates.Select(candidate => candidate.Name).Distinct(StringComparer.Ordinal).ToArray();
+        bool sameText = candidates.All(candidate => string.Equals(candidate.Text, best.Text, StringComparison.Ordinal));
+        double secondScore = candidates.Where(candidate => !string.Equals(candidate.Name, best.Name, StringComparison.Ordinal))
+            .Select(candidate => candidate.Score).DefaultIfEmpty(double.NegativeInfinity).Max();
+        bool uncertain = LooksSuspicious(best.Text) || (!sameText && best.Score - secondScore < 8d);
+        string displayName = sameText && distinctAlternatives.Length > 1
+            ? "GB18030 / GBK (tự nhận diện)"
+            : best.Name + " (tự nhận diện)";
+        return Create(sourceName, best.Text, original, displayName, autoDetected: true, uncertain,
+            distinctAlternatives.ToImmutableArray());
+    }
+
+    private static void TryDecodeCandidate(byte[] bytes, int codePage, string name,
+        ICollection<(string Name, string Text, double Score)> candidates)
+    {
+        try
+        {
+            string text = StrictCodePage(codePage).GetString(bytes);
+            candidates.Add((name, text, PlausibilityScore(text)));
+        }
+        catch (DecoderFallbackException) { }
+    }
+
+    private static double PlausibilityScore(string text)
+    {
+        if (text.Length == 0) return 0;
+        int cjk = 0, printable = 0, controls = 0, suspicious = 0;
+        foreach (Rune rune in text.EnumerateRunes())
+        {
+            int value = rune.Value;
+            if (value is >= 0x3400 and <= 0x9fff or >= 0x20000 and <= 0x2fa1f) cjk++;
+            if (value is '\r' or '\n' or '\t' || !Rune.IsControl(rune)) printable++; else controls++;
+            if (value is 0xfffd or 0x0000) suspicious++;
+        }
+        return cjk * 4d + printable - controls * 20d - suspicious * 100d;
+    }
+
+    private static bool LooksSuspicious(string text)
+    {
+        if (text.IndexOf('\uFFFD') >= 0 || text.IndexOf('\0') >= 0) return true;
+        int badControls = text.Count(character => char.IsControl(character) && character is not '\r' and not '\n' and not '\t');
+        return badControls > Math.Max(2, text.Length / 500);
     }
 
     public static async Task<RawSourceSnapshot> ReadFileAsync(string path, SourceTextEncoding encoding = SourceTextEncoding.Auto,
@@ -84,7 +151,8 @@ public static class RawSourceReader
         }
     }
 
-    private static RawSourceSnapshot Create(string sourceName, string text, byte[] originalBytes, string encodingName)
+    private static RawSourceSnapshot Create(string sourceName, string text, byte[] originalBytes, string encodingName,
+        bool autoDetected = false, bool uncertain = false, ImmutableArray<string> alternatives = default)
     {
         string name = string.IsNullOrWhiteSpace(sourceName) ? "source.txt" : sourceName;
         byte[] textBytes;
@@ -95,7 +163,8 @@ public static class RawSourceReader
         }
         return new(name, text, originalBytes.ToImmutableArray(), encodingName,
             Convert.ToHexString(SHA256.HashData(originalBytes)), Convert.ToHexString(SHA256.HashData(textBytes)),
-            DetectNewLines(text));
+            DetectNewLines(text), autoDetected, uncertain,
+            alternatives.IsDefault ? ImmutableArray<string>.Empty : alternatives);
     }
 
     private static SourceNewLineStyle DetectNewLines(string text)

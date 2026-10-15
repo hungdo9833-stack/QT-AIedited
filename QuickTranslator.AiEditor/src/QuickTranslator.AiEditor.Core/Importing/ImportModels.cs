@@ -31,7 +31,10 @@ public sealed record RawSourceSnapshot(
     string EncodingName,
     string RawSha256,
     string TextSha256,
-    SourceNewLineStyle NewLineStyle);
+    SourceNewLineStyle NewLineStyle,
+    bool EncodingWasAutoDetected = false,
+    bool EncodingDetectionUncertain = false,
+    ImmutableArray<string> EncodingAlternatives = default);
 
 public sealed record SourceLine(
     int Number,

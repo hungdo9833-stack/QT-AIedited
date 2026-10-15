@@ -22,6 +22,7 @@ public partial class MainWindow
         var preview = new ImportPreviewWindow(_projectSession, CreateChapterTitleRuntimeAsync, initialTxtPath) { Owner = this };
         ClampWindowToWorkArea(preview, 1380, 860);
         if (preview.ShowDialog() != true || preview.ConfirmedPlan is not ImportPreviewPlan plan) return;
+        Guid[] importedChapterIds = [];
         try
         {
             await RunWorkspaceTransitionAsync(async () =>
@@ -30,6 +31,9 @@ public partial class MainWindow
                 while (true)
                 {
                     report = await RunBulkImportProgressAsync(plan, preview.ReplaceSoftDeletedHistory);
+                    importedChapterIds = report.Chapters.Where(chapter =>
+                            chapter.State == BulkImportChapterState.Imported)
+                        .OrderBy(chapter => chapter.Number).Select(chapter => chapter.ChapterId).ToArray();
                     RefreshProjectChapterList();
                     if (_projectSession is { RecoveryReport.RequiresDecision: false } &&
                         _projectSession.Manifest.CurrentChapterId is Guid current)
@@ -43,6 +47,8 @@ public partial class MainWindow
                 if (!report.Completed && !report.CanResume && _projectSession?.RecoveryReport.RequiresDecision == true)
                     await ReviewProjectRecoveryAsync(_projectSession);
             });
+            if (preview.ImportAndTranslate && importedChapterIds.Length > 0)
+                await OpenProjectTranslationQueueAsync(importedChapterIds);
         }
         catch (BulkImportValidationException ex)
         {
@@ -123,17 +129,17 @@ public partial class MainWindow
 
     private void ShowBulkImportReport(BulkImportReport report)
     {
-        string message = $"Đã nhập mới: {report.ImportedCount:N0}\n" +
-            $"Đã có từ lần trước: {report.AlreadyImportedCount:N0}\n" +
-            $"Chưa xử lý: {report.Chapters.Count(x => x.State == BulkImportChapterState.NotStarted):N0}\n" +
-            $"Rollback: {report.Chapters.Count(x => x.State == BulkImportChapterState.RolledBack):N0}\n" +
-            $"Cần recovery: {report.Chapters.Count(x => x.State == BulkImportChapterState.NeedsRecovery):N0}\n\n" +
-            $"Source rescue: {report.SourceArchivePath}" + (report.Error is null ? "" : "\n\n" + report.Error);
-        MessageBox.Show(this, message, report.Completed ? "Bulk import hoàn tất" : "Bulk import chưa hoàn tất",
-            MessageBoxButton.OK, report.Completed ? MessageBoxImage.Information : MessageBoxImage.Warning);
-        SetStatus(report.Completed
-            ? $"Đã nhập {report.ImportedCount + report.AlreadyImportedCount:N0} chương; có thể đóng/mở lại Project để kiểm tra."
-            : report.Error ?? "Bulk import chưa hoàn tất.");
+        if (report.Completed)
+        {
+            SetStatus(report.ImportedCount > 0
+                ? $"Đã nhập {report.ImportedCount:N0} chương mới" +
+                  (report.AlreadyImportedCount > 0 ? $"; bỏ qua {report.AlreadyImportedCount:N0} chương đã có." : ".")
+                : $"Không có chương mới; {report.AlreadyImportedCount:N0} chương đã tồn tại.");
+            return;
+        }
+        string message = report.Error ?? "Một số chương chưa được nhập. Bạn có thể thử tiếp tục mà không tạo bản trùng.";
+        MessageBox.Show(this, message, "Nhập truyện chưa hoàn tất", MessageBoxButton.OK, MessageBoxImage.Warning);
+        SetStatus(message);
     }
 
     private sealed class BulkImportProgressWindow : Window
@@ -151,8 +157,8 @@ public partial class MainWindow
             SetResourceReference(BackgroundProperty, "AppBackgroundBrush");
             SetResourceReference(ForegroundProperty, "TextBrush");
             var panel = new StackPanel { Margin = new Thickness(18) };
-            panel.Children.Add(new TextBlock { Text = "Đang nhập theo transaction chunk", FontSize = 18, FontWeight = FontWeights.SemiBold });
-            var subtitle = new TextBlock { Text = "Có thể hủy. Chunk đang ghi sẽ rollback; các chunk đã commit được giữ.", Margin = new Thickness(4, 5, 4, 0) };
+            panel.Children.Add(new TextBlock { Text = "Đang nhập truyện", FontSize = 18, FontWeight = FontWeights.SemiBold });
+            var subtitle = new TextBlock { Text = "Có thể hủy an toàn. Những chương đã nhập xong vẫn được giữ.", Margin = new Thickness(4, 5, 4, 0) };
             subtitle.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
             panel.Children.Add(subtitle);
             panel.Children.Add(_bar); panel.Children.Add(_status); panel.Children.Add(_cancel); Content = panel;
@@ -187,7 +193,7 @@ public partial class MainWindow
             if (_completed) return;
             e.Cancel = true;
             _cancel.IsEnabled = false;
-            _status.Text = "Đang hủy an toàn và chờ transaction kết thúc…";
+            _status.Text = "Đang hoàn tất phần đang ghi để dừng an toàn…";
             _cancellation.Cancel();
         }
     }

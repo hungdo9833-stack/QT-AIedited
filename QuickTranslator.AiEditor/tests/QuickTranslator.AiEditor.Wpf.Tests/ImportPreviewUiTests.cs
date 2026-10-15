@@ -134,7 +134,49 @@ public sealed class ImportPreviewUiTests
     });
 
     [Fact]
-    public Task Preview_requires_explicit_legacy_encoding_without_replacement_characters() => StaHost.Run(async () =>
+    public Task Existing_one_to_one_hundred_can_be_skipped_before_importing_one_hundred_and_one_to_three_hundred() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        for (int number = 1; number <= 100; number++)
+            await fixture.AddChapterAsync($"Chương cũ {number}", number);
+
+        string source = string.Concat(Enumerable.Range(1, 300)
+            .Select(number => $"第{number}章 标题{number}\n新原文{number}。\n"));
+        string path = Path.Combine(fixture.Root, "one-to-three-hundred.txt");
+        await File.WriteAllTextAsync(path, source);
+        var window = new ImportPreviewWindow(fixture.Project);
+        try
+        {
+            await window.LoadSourceAsync(path, SourceTextEncoding.Auto);
+            Assert.False(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.Contains("100", ((TextBlock)window.FindName("ExistingCountText")).Text);
+
+            ((Button)window.FindName("SkipExistingButton")).RaiseEvent(
+                new System.Windows.RoutedEventArgs(Button.ClickEvent));
+
+            Assert.True(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.Equal(Enumerable.Range(101, 200).Select(number => (int?)number),
+                window.CurrentPlan!.ImportableChapters.Select(chapter => chapter.Number));
+
+            BulkImportReport report = await (Task<BulkImportReport>)fixture.Call(
+                "ImportDetectedPlanAsync", window.CurrentPlan, null, CancellationToken.None)!;
+            Assert.True(report.Completed);
+            Assert.Equal(200, report.ImportedCount);
+
+            ProjectSession reopened = (await new ProjectRepository().OpenAsync(fixture.Project.ManifestPath)).Session;
+            Assert.Equal(300, reopened.Manifest.ChapterCount);
+            Assert.Equal("Chương cũ 1", (await fixture.Repository.LoadChapterAsync(reopened,
+                reopened.Manifest.Chapters.Single(chapter => chapter.Number == 1 && chapter.DeletedAt is null).ChapterId)).Chapter.Title);
+            Assert.Empty(reopened.RecoveryReport.Orphans);
+            Assert.False(reopened.RecoveryReport.RequiresDecision);
+            Assert.Equal(source, window.CurrentPlan.ReconstructSource());
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
+    public Task Preview_auto_detects_legacy_encoding_without_replacement_characters() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
         await fixture.CreateProjectAsync();
@@ -143,10 +185,12 @@ public sealed class ImportPreviewUiTests
         var window = new ImportPreviewWindow(fixture.Project);
         try
         {
-            await Assert.ThrowsAsync<SourceDecodingException>(() => window.LoadSourceAsync(path, SourceTextEncoding.Auto));
-            await window.LoadSourceAsync(path, SourceTextEncoding.Gbk);
+            await window.LoadSourceAsync(path, SourceTextEncoding.Auto);
             Assert.DoesNotContain('\uFFFD', window.CurrentPlan!.Source.Text);
-            Assert.Equal("GBK (CP936)", window.CurrentPlan.Source.EncodingName);
+            Assert.True(window.CurrentPlan.Source.EncodingWasAutoDetected);
+            Assert.Contains("GB", window.CurrentPlan.Source.EncodingName, StringComparison.OrdinalIgnoreCase);
+            await window.LoadSourceAsync(path, SourceTextEncoding.Gbk);
+            Assert.Equal("GBK (CP936)", window.CurrentPlan!.Source.EncodingName);
         }
         finally { window.Close(); }
     });
