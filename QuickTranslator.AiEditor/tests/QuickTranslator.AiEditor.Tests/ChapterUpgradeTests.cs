@@ -111,7 +111,7 @@ public sealed class ChapterUpgradeTests : IDisposable
         await reachedSecond.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var loaded = await store.LoadAsync(store.GetPath(chapter.Id));
         Assert.Equal(1, loaded.Chapter.Queue.NextIndex);
-        Assert.Equal(chapter.Segments[1].Id, loaded.Chapter.Queue.CurrentSegmentId);
+        Assert.Null(loaded.Chapter.Queue.CurrentSegmentId); // In-flight request is intentionally not checkpointed.
         var newClient = new FakeClient();
         var reopened = new TranslationService(loaded.Chapter, newClient, new MemoryStore());
         await new TranslationQueue(reopened).ResumeAsync();

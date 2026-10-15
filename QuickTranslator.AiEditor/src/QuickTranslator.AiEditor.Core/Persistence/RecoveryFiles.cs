@@ -48,9 +48,17 @@ public static class RecoveryFiles
 
     public static async Task<RecoveryInfo> WriteAsync<T>(string path, byte[] bytes, Func<byte[], T> decode,
         CancellationToken cancellationToken = default)
+        => await WriteCheckedAsync(path, bytes, decode, null, cancellationToken).ConfigureAwait(false);
+
+    internal static async Task<RecoveryInfo> WriteCheckedAsync<T>(string path, byte[] bytes, Func<byte[], T> decode,
+        string? expectedPrimarySha256, CancellationToken cancellationToken = default)
     {
         _ = decode(bytes); // Proposed schema/identity/content must be valid before any write.
         var current = await ReadAsync(path, decode, () => default!, cancellationToken).ConfigureAwait(false);
+        if (expectedPrimarySha256 is not null &&
+            (current.Info.Source != RecoverySource.Primary ||
+             !string.Equals(current.Info.PrimarySha256, expectedPrimarySha256, StringComparison.Ordinal)))
+            throw new StorageRevisionMismatchException("File đã thay đổi sau khi worker nạp; không ghi đè checkpoint mới hơn.");
         string? rescue = null;
         bool recovered = current.Info.Source == RecoverySource.Backup;
         bool damagedBackup = false;
@@ -78,6 +86,35 @@ public static class RecoveryFiles
         FaultPoint.Value?.Invoke("BeforeReplacement");
         await AtomicLocalFile.WriteAsync(path, bytes, cancellationToken, preserveExistingBackup: recovered).ConfigureAwait(false);
         return current.Info with { RescuePath = rescue };
+    }
+
+    internal static async Task<RecoveryInfo> WriteFastCheckedAsync<T>(string path, byte[] bytes, Func<byte[], T> decode,
+        string? expectedPrimarySha256, CancellationToken cancellationToken = default)
+    {
+        _ = decode(bytes);
+        path = Path.GetFullPath(path);
+        byte[]? primary = await ReadOptionalAsync(path, cancellationToken).ConfigureAwait(false);
+        if (primary is not null)
+        {
+            try
+            {
+                _ = decode(primary);
+                string primarySha = Hash(primary)!;
+                if (expectedPrimarySha256 is not null &&
+                    !string.Equals(primarySha, expectedPrimarySha256, StringComparison.Ordinal))
+                    throw new StorageRevisionMismatchException(
+                        "File đã thay đổi sau khi worker nạp; không ghi đè checkpoint mới hơn.");
+                await AtomicLocalFile.WriteAsync(path, bytes, cancellationToken).ConfigureAwait(false);
+                return new(path, path, RecoverySource.Primary, RecoveryFileCondition.Valid,
+                    RecoveryFileCondition.NotChecked, null, primarySha, null);
+            }
+            catch (Exception error) when (IsInvalidContent(error))
+            {
+                // Fall through to the full recovery path only when the primary cannot be verified.
+            }
+        }
+        return await WriteCheckedAsync(path, bytes, decode, expectedPrimarySha256, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public static async Task<RecoveryInfo> RestoreBackupAsync<T>(RecoveryInfo preview, Func<byte[], T> decode,
@@ -140,11 +177,21 @@ public static class RecoveryFiles
 
     internal static async Task<byte[]?> ReadOptionalAsync(string path, CancellationToken token)
     {
-        try { return await File.ReadAllBytesAsync(path, token).ConfigureAwait(false); }
+        try
+        {
+            byte[] bytes = await File.ReadAllBytesAsync(path, token).ConfigureAwait(false);
+            StorageIoMetricsCapture.Read(bytes.Length);
+            return bytes;
+        }
         catch (FileNotFoundException) { return null; }
         catch (DirectoryNotFoundException) { return null; }
     }
-    internal static string? Hash(byte[]? bytes) => bytes is null ? null : Convert.ToHexString(SHA256.HashData(bytes));
+    internal static string? Hash(byte[]? bytes)
+    {
+        if (bytes is null) return null;
+        StorageIoMetricsCapture.Hash();
+        return Convert.ToHexString(SHA256.HashData(bytes));
+    }
     private static bool IsInvalidContent(Exception ex) => ex is JsonException or InvalidDataException or ArgumentException;
 
     internal static T DecodeJson<T>(byte[] bytes, Action<T> validate, params string[] required) where T : class
@@ -158,3 +205,5 @@ public static class RecoveryFiles
         validate(value); return value;
     }
 }
+
+internal sealed class StorageRevisionMismatchException(string message) : IOException(message);

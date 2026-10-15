@@ -96,11 +96,11 @@ public sealed class TranslationQueue(TranslationService service)
                     catch (OllamaRequestException) { /* Segment error is already checkpointed. Continue the chapter without an automatic retry. */ }
                     // Disk errors and unexpected exceptions stop the entire queue; continuing could lose results.
                 }
-                cancellation.Token.ThrowIfCancellationRequested();
                 service.AdvanceQueue();
                 service.CheckpointElapsed(CurrentElapsed());
                 await service.SaveAsync(CancellationToken.None).ConfigureAwait(false);
                 Notify();
+                cancellation.Token.ThrowIfCancellationRequested();
             }
             var progress = GetProgress();
             var status = progress.Errors > 0 || progress.Translated < progress.Total ? QueueStatus.CompletedWithErrors :

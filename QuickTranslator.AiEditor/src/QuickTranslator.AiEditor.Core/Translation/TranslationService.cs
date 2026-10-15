@@ -231,8 +231,7 @@ public sealed partial class TranslationService
                 _chapter.DefaultModelOptions = options with { };
                 Touch();
             }
-            // Checkpoint before contacting Ollama: a crash can be distinguished from an approved translation.
-            await SaveAsync(cancellationToken).ConfigureAwait(false);
+            // An in-flight request may be lost on process termination. Persist only completed outcomes.
             var result = await _client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
             Guid postProcessBatchId = Guid.NewGuid();
             var chineseAnalysis = AnalyseAutomaticChinese(context, selected, result.Text, postProcessBatchId);
@@ -269,8 +268,8 @@ public sealed partial class TranslationService
                 Touch();
                 responseRecorded = true;
             }
-            // A cancel click must not discard a response already received, or its checkpoint.
-            await SaveAsync(CancellationToken.None).ConfigureAwait(false);
+            // Queue combines this result with its cursor advance into one checkpoint.
+            if (runId is null) await SaveAsync(CancellationToken.None).ConfigureAwait(false);
             return GetSnapshot().Segments.Single(s => s.Id == segmentId).Attempts.Single(a => a.Id == attempt.Id);
         }
         catch (QueueSegmentSkippedException) { throw; }
@@ -292,7 +291,7 @@ public sealed partial class TranslationService
                     Touch();
                 }
                 // Do not silently retry a failed disk operation. The UI offers an explicit save/recovery path.
-                if (ex is not IOException and not UnauthorizedAccessException)
+                if (runId is null && ex is not IOException and not UnauthorizedAccessException)
                 {
                     try { await SaveAsync(CancellationToken.None).ConfigureAwait(false); }
                     catch (Exception saveError)

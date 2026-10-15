@@ -64,9 +64,8 @@ public sealed class ProjectTransactionCleanupTests : IDisposable
         {
             if (point == "AfterJournal") throw new ProjectOperationInterruptedException(point);
         };
-        chapter = (await repository.LoadChapterAsync(session, chapter.Id)).Chapter;
-        chapter.ConfirmedContextNotes = "pending";
-        await Assert.ThrowsAsync<ProjectOperationInterruptedException>(() => repository.UpdateChapterAsync(session, chapter));
+        ChapterDocument pendingChapter = TranslationService.CreateChapter("Chương pending", "天地玄黄。");
+        await Assert.ThrowsAsync<ProjectOperationInterruptedException>(() => repository.AddChapterAsync(session, pendingChapter, 2));
         repository.FaultPoint = null;
 
         string pending = Directory.EnumerateDirectories(session.Resolve("History/Transactions"))
@@ -182,9 +181,7 @@ public sealed class ProjectTransactionCleanupTests : IDisposable
                 FileMode.Open, FileAccess.Read, FileShare.Read);
             throw new IOException("synthetic rollback");
         };
-        ChapterDocument chapter = (await repository.LoadChapterAsync(session, chapterId)).Chapter;
-        chapter.ConfirmedContextNotes = "rollback";
-        await Assert.ThrowsAsync<IOException>(() => repository.UpdateChapterAsync(session, chapter));
+        await Assert.ThrowsAsync<IOException>(() => repository.SoftDeleteChapterAsync(session, chapterId));
         locked!.Dispose();
         repository.FaultPoint = null;
         return Directory.EnumerateDirectories(session.Resolve("History/Transactions"))

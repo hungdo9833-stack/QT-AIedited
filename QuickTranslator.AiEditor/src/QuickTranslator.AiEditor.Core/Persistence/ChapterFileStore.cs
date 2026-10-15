@@ -2,13 +2,15 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using System.Collections.Concurrent;
 using QuickTranslator.AiEditor.Core.Models;
 
 namespace QuickTranslator.AiEditor.Core.Persistence;
 
 public sealed class ChapterFileStore : IChapterStore
 {
-    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> WriteGates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _writeGate;
     private readonly string _directory;
     private static readonly JsonSerializerOptions EnvelopeOptions = new(DocumentJson.Options) { WriteIndented = true };
     private static readonly JsonSerializerOptions LegacyOptions = CreateLegacyOptions();
@@ -17,6 +19,7 @@ public sealed class ChapterFileStore : IChapterStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _directory = Path.GetFullPath(directory);
+        _writeGate = WriteGates.GetOrAdd(_directory, _ => new(1, 1));
     }
 
     public static string DefaultDirectory => Path.Combine(
@@ -33,6 +36,7 @@ public sealed class ChapterFileStore : IChapterStore
 
     internal static byte[] SerializeDocument(ChapterDocument chapter)
     {
+        StorageIoMetricsCapture.Serialization();
         var snapshot = DocumentJson.Clone(chapter);
         DocumentJson.Migrate(snapshot); DocumentJson.Validate(snapshot);
         var content = JsonSerializer.SerializeToElement(snapshot, DocumentJson.Options);
@@ -93,7 +97,25 @@ public sealed class ChapterFileStore : IChapterStore
     {
         byte[] bytes = SerializeDocument(chapter);
         await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { LastRecovery = await RecoveryFiles.WriteAsync(GetPath(chapter.Id), bytes, DeserializeDocument, cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            LastRecovery = await RecoveryFiles.WriteAsync(GetPath(chapter.Id), bytes, DeserializeDocument,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally { _writeGate.Release(); }
+    }
+
+    internal async Task<string> SaveSerializedAsync(Guid chapterId, byte[] bytes, string? expectedPrimarySha256,
+        CancellationToken cancellationToken = default)
+    {
+        _ = DeserializeDocument(bytes);
+        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            LastRecovery = await RecoveryFiles.WriteFastCheckedAsync(GetPath(chapterId), bytes, DeserializeDocument,
+                expectedPrimarySha256, cancellationToken).ConfigureAwait(false);
+            return Convert.ToHexString(SHA256.HashData(bytes));
+        }
         finally { _writeGate.Release(); }
     }
     public async Task<ChapterLoadResult> LoadAsync(string path, CancellationToken cancellationToken = default)
@@ -137,8 +159,12 @@ public sealed class ChapterFileStore : IChapterStore
 
     private static bool IsRecoverableReadError(Exception ex) => ex is IOException or InvalidDataException or JsonException or ArgumentException;
 
-    private static string Hash(JsonElement chapter) => Convert.ToHexString(
-        SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(chapter, DocumentJson.Options))));
+    private static string Hash(JsonElement chapter)
+    {
+        StorageIoMetricsCapture.Hash();
+        return Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(chapter, DocumentJson.Options))));
+    }
 
     private static JsonSerializerOptions CreateLegacyOptions()
     {

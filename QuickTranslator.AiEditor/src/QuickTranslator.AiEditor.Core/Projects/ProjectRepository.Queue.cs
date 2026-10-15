@@ -29,30 +29,16 @@ public sealed partial class ProjectRepository
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (session.RecoveryReport.RequiresDecision)
-                throw new InvalidOperationException("Còn transaction cần phục hồi; không ghi checkpoint hàng đợi.");
-            var entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapter.Id && x.DeletedAt is null)
-                ?? throw new InvalidOperationException("Chương không còn active trong Project.");
-            if (chapter.ProjectId != session.Manifest.ProjectId)
-                throw new InvalidOperationException("Checkpoint không thuộc Project đang chạy.");
-            string relative = entry.RelativePath;
-            byte[] before = await File.ReadAllBytesAsync(session.Resolve(relative), cancellationToken).ConfigureAwait(false);
-            if (!string.Equals(Hash(before), expectedStorageRevision, StringComparison.Ordinal))
+            try
+            {
+                return await WriteFastChapterCheckpointAsync(session, chapter, expectedStorageRevision,
+                    "ProjectTranslationCheckpoint", cancellationToken).ConfigureAwait(false);
+            }
+            catch (StorageRevisionMismatchException error)
+            {
                 throw new ProjectTranslationConflictException(chapter.Id,
-                    "Chapter đã thay đổi trên đĩa sau khi coordinator nạp; kết quả AI không được ghi đè.");
-
-            chapter.ProjectId = session.Manifest.ProjectId;
-            chapter.ChapterNumber = entry.Number;
-            chapter.CharacterProject.Id = session.Manifest.ProjectId;
-            byte[] afterBytes = ChapterFileStore.SerializeDocument(chapter);
-            var after = Clone(session.Manifest);
-            CopySummary(after.Chapters.Single(x => x.ChapterId == chapter.Id), chapter);
-            after.CurrentChapterId = chapter.Id;
-            NormalizeManifest(after);
-            await Transactions.ExecuteAsync(session, "ProjectTranslationCheckpoint", after,
-                [new(relative + ".bak", before), new(relative, afterBytes)], cancellationToken).ConfigureAwait(false);
-            PublishManifestCommitted(session, "ProjectTranslationCheckpoint");
-            return Hash(afterBytes);
+                    "Chapter đã thay đổi trên đĩa sau khi coordinator nạp; kết quả AI không được ghi đè.", error);
+            }
         }
         finally { session.OperationGate.Release(); }
     }
@@ -63,6 +49,9 @@ public sealed partial class ProjectRepository
 public sealed class ProjectTranslationConflictException(Guid chapterId, string message) : IOException(message)
 {
     public Guid ChapterId { get; } = chapterId;
+
+    internal ProjectTranslationConflictException(Guid chapterId, string message, Exception inner)
+        : this(chapterId, message) => Data["StorageConflict"] = inner.Message;
 }
 
 internal sealed class RevisionGuardedChapterStore : IChapterStore

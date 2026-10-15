@@ -28,6 +28,7 @@ public sealed class TranslationServiceTests
         Assert.Equal(TranslationPromptBuilder.Version, attempt.PromptVersion);
         Assert.Equal(new ModelOptions(), attempt.ModelOptions);
         Assert.Equal(attempt.Prompt, store.LastSaved!.Segments[1].Attempts[0].Prompt);
+        Assert.Equal(1, store.Saves);
         Assert.False(service.HasUnsavedChanges);
     }
 
@@ -60,7 +61,7 @@ public sealed class TranslationServiceTests
         client.Respond = (_, _) => { started.SetResult(); return release.Task; };
         var request = service.TranslateAsync(chapter.Segments[0].Id);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(SegmentStatus.Translating, store.LastSaved!.Segments[0].Status);
+        Assert.Equal(SegmentStatus.Translating, service.GetSnapshot().Segments[0].Status);
         service.UpdateDraft(chapter.Segments[0].Id, "Nháp được sửa khi AI đang chạy.");
         service.SelectSegment(chapter.Segments[1].Id);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.TranslateAsync(chapter.Segments[1].Id));
@@ -68,7 +69,7 @@ public sealed class TranslationServiceTests
         release.SetResult(FakeClient.Completion("Bản AI về sau."));
         await request;
         Assert.Equal(1, client.Calls);
-        Assert.Equal(chapter.Segments[1].Id, store.LastSaved.SelectedSegmentId);
+        Assert.Equal(chapter.Segments[1].Id, store.LastSaved!.SelectedSegmentId);
         Assert.Equal("Nháp được sửa khi AI đang chạy.", store.LastSaved.Segments[0].UserDraft);
         Assert.Empty(store.LastSaved.Segments[1].Attempts);
     }
@@ -127,14 +128,32 @@ public sealed class TranslationServiceTests
     }
 
     [Fact]
-    public async Task DiskFailureBeforeRequest_DoesNotCallAi_AndStaysUnsaved()
+    public async Task Queue_checkpoints_each_completed_segment_once_instead_of_before_and_after_request()
+    {
+        ChapterDocument chapter = TranslationService.CreateChapter("Chương thử", "甲乙丙丁戊。\r\n己庚辛壬癸。",
+            new() { MinimumHanCharacters = 3, TargetHanCharacters = 5, MaximumHanCharacters = 6 });
+        var store = new MemoryStore();
+        var client = new FakeClient();
+        var service = new TranslationService(chapter, client, store);
+        var queue = new TranslationQueue(service);
+
+        await queue.StartAsync();
+
+        Assert.Equal(2, client.Calls);
+        Assert.Equal(4, store.Saves); // queue start + one per completed segment + terminal status
+        Assert.All(store.LastSaved!.Segments, segment => Assert.True(segment.HasCompletedTranslation));
+        Assert.Equal(QueueStatus.Completed, store.LastSaved.Queue.Status);
+    }
+
+    [Fact]
+    public async Task DiskFailureAfterResponse_DoesNotLoseCompletedAiResultInMemory()
     {
         var (service, client, store, chapter) = Create();
         store.BeforeSave = (_, _) => throw new IOException("Synthetic disk full.");
         await Assert.ThrowsAsync<IOException>(() => service.TranslateAsync(chapter.Segments[0].Id));
-        Assert.Equal(0, client.Calls);
+        Assert.Equal(1, client.Calls);
         Assert.True(service.HasUnsavedChanges);
-        Assert.Equal(AttemptOutcome.Failed, service.GetSnapshot().Segments[0].Attempts[0].Outcome);
+        Assert.Equal(AttemptOutcome.Completed, service.GetSnapshot().Segments[0].Attempts[0].Outcome);
     }
 
     [Fact]
@@ -143,14 +162,14 @@ public sealed class TranslationServiceTests
         var (service, _, store, chapter) = Create();
         var id = chapter.Segments[0].Id;
         service.UpdateDraft(id, "Nháp riêng.");
-        int saves = 0;
-        store.BeforeSave = (_, _) => ++saves == 2 ? throw new IOException("Synthetic disk full.") : Task.CompletedTask;
+        store.BeforeSave = (_, _) => throw new IOException("Synthetic disk full.");
         await Assert.ThrowsAsync<IOException>(() => service.TranslateAsync(id));
         var segment = service.GetSnapshot().Segments[0];
         Assert.Equal(AttemptOutcome.Completed, segment.Attempts[0].Outcome);
         Assert.Equal("Một bản dịch thử nghiệm.", segment.Attempts[0].AiText);
         Assert.Equal("Nháp riêng.", segment.UserDraft);
         Assert.True(service.HasUnsavedChanges);
+        store.BeforeSave = null;
         await service.SaveAsync();
         Assert.False(service.HasUnsavedChanges);
         Assert.Equal(segment.Attempts[0].AiText, store.LastSaved!.Segments[0].Attempts[0].AiText);
