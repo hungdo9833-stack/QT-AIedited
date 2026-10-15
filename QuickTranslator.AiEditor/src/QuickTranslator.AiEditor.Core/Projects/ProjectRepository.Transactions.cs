@@ -123,6 +123,34 @@ public sealed partial class ProjectRepository
         finally { session.OperationGate.Release(); }
     }
 
+    public async Task<ProjectTransactionCleanupPreview> PreviewTransactionCleanupAsync(ProjectSession session,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await ProjectTransactionJournal.PreviewCleanupAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+        finally { session.OperationGate.Release(); }
+    }
+
+    public async Task<ProjectTransactionCleanupResult> CleanupTransactionsAsync(ProjectSession session,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ProjectTransactionCleanupResult result = await ProjectTransactionJournal.CleanupAsync(session, cancellationToken)
+                .ConfigureAwait(false);
+            session.RecoveryReport = await ProjectTransactionJournal.InspectAsync(session, CancellationToken.None)
+                .ConfigureAwait(false);
+            return result;
+        }
+        finally { session.OperationGate.Release(); }
+    }
+
     public async Task RestoreManifestBackupAsync(ProjectSession session, CancellationToken cancellationToken = default)
     {
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);

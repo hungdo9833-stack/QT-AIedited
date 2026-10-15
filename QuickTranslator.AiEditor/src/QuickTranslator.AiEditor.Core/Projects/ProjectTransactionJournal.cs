@@ -18,6 +18,33 @@ public sealed record ProjectRecoveryReport(IReadOnlyList<ProjectTransactionPrevi
     public bool RequiresDecision => Transactions.Any(x => x.State is not (ProjectTransactionState.Committed or ProjectTransactionState.RolledBack));
 }
 
+public enum ProjectTransactionCleanupDisposition
+{
+    EligibleCommitted,
+    EligibleRolledBack,
+    KeptPending,
+    KeptRollingBack,
+    KeptRecoveryRequired,
+    KeptRetainedData,
+    KeptUnreadable,
+    KeptUnsafePath
+}
+
+public sealed record ProjectTransactionCleanupItem(Guid Id, string Operation, ProjectTransactionState? State,
+    long Bytes, bool CanDelete, ProjectTransactionCleanupDisposition Disposition, string Reason);
+
+public sealed record ProjectTransactionCleanupPreview(IReadOnlyList<ProjectTransactionCleanupItem> Items)
+{
+    public int TotalCount => Items.Count;
+    public long TotalBytes => Items.Sum(item => item.Bytes);
+    public int DeletableCount => Items.Count(item => item.CanDelete);
+    public long DeletableBytes => Items.Where(item => item.CanDelete).Sum(item => item.Bytes);
+    public int KeptCount => TotalCount - DeletableCount;
+}
+
+public sealed record ProjectTransactionCleanupResult(int DeletedCount, long FreedBytes,
+    IReadOnlyList<string> Failures, ProjectTransactionCleanupPreview Remaining);
+
 public sealed class ProjectTransactionException(string message, Exception inner, Guid transactionId,
     bool rollbackComplete) : IOException(message, inner)
 {
@@ -90,6 +117,7 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
             journal.State = ProjectTransactionState.Committed;
             await SaveAsync(directory, journal, CancellationToken.None).ConfigureAwait(false);
             session.Manifest = ProjectRepository.Clone(after);
+            await TryDeleteCompletedDirectoryAsync(session, directory, journal, CancellationToken.None).ConfigureAwait(false);
             return journal.Id;
         }
         catch (ProjectOperationInterruptedException)
@@ -108,6 +136,8 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
             journal.State = failures.Count == 0 ? ProjectTransactionState.RolledBack : ProjectTransactionState.RecoveryRequired;
             try { await SaveAsync(directory, journal, CancellationToken.None).ConfigureAwait(false); }
             catch (Exception journalError) { failures.Add(journalError); }
+            if (failures.Count == 0)
+                await TryDeleteCompletedDirectoryAsync(session, directory, journal, CancellationToken.None).ConfigureAwait(false);
             failures.AddRange(await RefreshAfterOperationAsync(session, journal.Id, operation).ConfigureAwait(false));
             error.Data["ProjectTransactionId"] = journal.Id;
             error.Data["RollbackComplete"] = failures.Count == 0;
@@ -133,6 +163,7 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
                 if (!preview.CanConfirmCommitted) throw new InvalidOperationException("File/manifest chưa khớp trạng thái sau; không thể xác nhận commit.");
                 journal.State = ProjectTransactionState.Committed;
                 await SaveAsync(directory, journal, cancellationToken).ConfigureAwait(false);
+                await TryDeleteCompletedDirectoryAsync(session, directory, journal, CancellationToken.None).ConfigureAwait(false);
             }
             else
             {
@@ -142,6 +173,8 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
                 var failures = await RollBackFilesAsync(session, directory, journal).ConfigureAwait(false);
                 journal.State = failures.Count == 0 ? ProjectTransactionState.RolledBack : ProjectTransactionState.RecoveryRequired;
                 await SaveAsync(directory, journal, CancellationToken.None).ConfigureAwait(false);
+                if (failures.Count == 0)
+                    await TryDeleteCompletedDirectoryAsync(session, directory, journal, CancellationToken.None).ConfigureAwait(false);
                 if (failures.Count > 0) throw new ProjectTransactionException("Phục hồi chưa hoàn tất; giữ journal và thử lại sau khi xử lý quyền ghi/khóa file.",
                     new AggregateException(failures), id, false);
             }
@@ -187,7 +220,10 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var journal = await ReadAsync(session, directory, cancellationToken).ConfigureAwait(false);
+                var journal = await ReadAsync(session, directory, cancellationToken, verifyCopies: false).ConfigureAwait(false);
+                bool pending = journal.State is not (ProjectTransactionState.Committed or ProjectTransactionState.RolledBack);
+                if (!pending) continue;
+                journal = await ReadAsync(session, directory, cancellationToken, verifyCopies: true).ConfigureAwait(false);
                 var issues = new List<string>(); bool allAfter = true;
                 foreach (var file in journal.Files)
                 {
@@ -195,7 +231,6 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
                     if (hash != file.BeforeSha && hash != file.AfterSha) issues.Add($"Xung đột tại {file.Path}: không khớp trước/sau transaction.");
                     if (hash != file.AfterSha) allAfter = false;
                 }
-                bool pending = journal.State is not (ProjectTransactionState.Committed or ProjectTransactionState.RolledBack);
                 transactions.Add(new(journal.Id, journal.Operation, journal.State, pending && issues.Count == 0, pending && allAfter && issues.Count == 0, issues,
                     Path.Combine(directory, "journal.json")) { SourceArchivePath = journal.SourceArchiveRelative is null ? null : session.Resolve(journal.SourceArchiveRelative) });
             }
@@ -224,6 +259,172 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
             { orphans.Add(new(relative, null, null, path != primary, ex.Message)); }
         }
         return new(transactions, orphans);
+    }
+
+    internal static async Task<ProjectTransactionCleanupPreview> PreviewCleanupAsync(ProjectSession session,
+        CancellationToken cancellationToken)
+    {
+        var items = new List<ProjectTransactionCleanupItem>();
+        string root = session.Resolve("History/Transactions");
+        if (!Directory.Exists(root)) return new(items);
+        foreach (string directory in Directory.GetDirectories(root).Order(StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            items.Add(await ClassifyCleanupAsync(session, root, directory, cancellationToken).ConfigureAwait(false));
+        }
+        return new(items);
+    }
+
+    internal static async Task<ProjectTransactionCleanupResult> CleanupAsync(ProjectSession session,
+        CancellationToken cancellationToken)
+    {
+        string root = session.Resolve("History/Transactions");
+        ProjectTransactionCleanupPreview preview = await PreviewCleanupAsync(session, cancellationToken).ConfigureAwait(false);
+        int deleted = 0;
+        long freed = 0;
+        var failures = new List<string>();
+        foreach (ProjectTransactionCleanupItem item in preview.Items.Where(value => value.CanDelete))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string directory = Path.Combine(root, item.Id.ToString("D"));
+            try
+            {
+                ProjectTransactionCleanupItem current = await ClassifyCleanupAsync(session, root, directory, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!current.CanDelete)
+                {
+                    failures.Add($"{item.Id:D}: trạng thái đã đổi; giữ nguyên.");
+                    continue;
+                }
+                DeleteTransactionDirectory(root, directory);
+                deleted++;
+                freed += current.Bytes;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                failures.Add($"{item.Id:D}: {error.Message}");
+            }
+        }
+        ProjectTransactionCleanupPreview remaining = await PreviewCleanupAsync(session, CancellationToken.None).ConfigureAwait(false);
+        return new(deleted, freed, failures, remaining);
+    }
+
+    private static async Task<ProjectTransactionCleanupItem> ClassifyCleanupAsync(ProjectSession session,
+        string root, string directory, CancellationToken token)
+    {
+        Guid id = Guid.TryParse(Path.GetFileName(directory), out Guid parsed) ? parsed : Guid.Empty;
+        long bytes = SafeDirectoryBytes(directory);
+        try
+        {
+            EnsureSafeTransactionDirectory(root, directory);
+            Journal journal = await ReadAsync(session, directory, token, verifyCopies: false).ConfigureAwait(false);
+            bool retained = Directory.EnumerateFiles(directory, "retained-*.bin", SearchOption.TopDirectoryOnly).Any() ||
+                            Directory.EnumerateFiles(directory, "retained-changed-*.bin", SearchOption.TopDirectoryOnly).Any();
+            if (retained)
+                return new(journal.Id, journal.Operation, journal.State, bytes, false,
+                    ProjectTransactionCleanupDisposition.KeptRetainedData, "Có dữ liệu retained cần người dùng đối chiếu.");
+            var allowedNames = journal.Files.SelectMany(file => new[] { file.BeforeCopy, file.AfterCopy })
+                .Where(name => name is not null).Cast<string>()
+                .Append("journal.json").Append("journal.json.bak")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName).Any(name => name is null || !allowedNames.Contains(name)))
+                return new(journal.Id, journal.Operation, journal.State, bytes, false,
+                    ProjectTransactionCleanupDisposition.KeptUnsafePath,
+                    "Thư mục chứa file không thuộc journal; giữ nguyên để tránh xóa nhầm.");
+            if (journal.State == ProjectTransactionState.Committed)
+                return new(journal.Id, journal.Operation, journal.State, bytes, true,
+                    ProjectTransactionCleanupDisposition.EligibleCommitted, "Đã commit; bản before/after không còn cần cho recovery.");
+            if (journal.State == ProjectTransactionState.RolledBack && !retained)
+                return new(journal.Id, journal.Operation, journal.State, bytes, true,
+                    ProjectTransactionCleanupDisposition.EligibleRolledBack, "Rollback đã hoàn tất và không có dữ liệu retained.");
+            ProjectTransactionCleanupDisposition disposition = journal.State switch
+            {
+                ProjectTransactionState.Pending => ProjectTransactionCleanupDisposition.KeptPending,
+                ProjectTransactionState.RollingBack => ProjectTransactionCleanupDisposition.KeptRollingBack,
+                _ => ProjectTransactionCleanupDisposition.KeptRecoveryRequired
+            };
+            return new(journal.Id, journal.Operation, journal.State, bytes, false, disposition,
+                "Transaction chưa hoàn tất hoặc còn cần phục hồi.");
+        }
+        catch (InvalidDataException error)
+        {
+            return new(id, "Không xác định", null, bytes, false,
+                ProjectTransactionCleanupDisposition.KeptUnsafePath, error.Message);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new(id, "Không đọc được", null, bytes, false,
+                ProjectTransactionCleanupDisposition.KeptUnreadable, error.Message);
+        }
+    }
+
+    private static Task TryDeleteCompletedDirectoryAsync(ProjectSession session, string directory,
+        Journal journal, CancellationToken token)
+    {
+        if (journal.State is not (ProjectTransactionState.Committed or ProjectTransactionState.RolledBack))
+            return Task.CompletedTask;
+        string root = session.Resolve("History/Transactions");
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            bool retained = journal.State == ProjectTransactionState.RolledBack &&
+                (Directory.EnumerateFiles(directory, "retained-*.bin", SearchOption.TopDirectoryOnly).Any() ||
+                 Directory.EnumerateFiles(directory, "retained-changed-*.bin", SearchOption.TopDirectoryOnly).Any());
+            if (!retained) DeleteTransactionDirectory(root, directory);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+        {
+            // Main data is already committed/rolled back. Cleanup is best effort and can be retried from the UI.
+            _ = error;
+        }
+        return Task.CompletedTask;
+    }
+
+    private static void DeleteTransactionDirectory(string root, string directory)
+    {
+        EnsureSafeTransactionDirectory(root, directory);
+        string[] files = Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly).ToArray();
+        if (files.Select(Path.GetFileName).Any(name => name is null || !IsKnownDisposableFileName(name)))
+            throw new InvalidDataException("Thư mục transaction chứa dữ liệu không thuộc bộ before/after; giữ nguyên.");
+        string journal = Path.Combine(directory, "journal.json");
+        foreach (string file in files
+                     .Where(path => !string.Equals(path, journal, StringComparison.OrdinalIgnoreCase)))
+            File.Delete(file);
+        if (File.Exists(journal)) File.Delete(journal);
+        Directory.Delete(directory, recursive: false);
+    }
+
+    private static bool IsKnownDisposableFileName(string name)
+    {
+        if (name.Equals("journal.json", StringComparison.OrdinalIgnoreCase) ||
+            name.Equals("journal.json.bak", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!name.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)) return false;
+        string stem = name[..^4];
+        return TryIndex("before-") || TryIndex("after-");
+
+        bool TryIndex(string prefix) => stem.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(stem.AsSpan(prefix.Length), out int index) && index >= 0;
+    }
+
+    private static void EnsureSafeTransactionDirectory(string root, string directory)
+    {
+        string fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string full = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
+        if (new DirectoryInfo(root).Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+            !full.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase) ||
+            !Guid.TryParse(Path.GetFileName(full), out _) ||
+            new DirectoryInfo(full).Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+            Directory.EnumerateDirectories(full, "*", SearchOption.TopDirectoryOnly).Any() ||
+            Directory.EnumerateFiles(full, "*", SearchOption.TopDirectoryOnly)
+                .Any(file => new FileInfo(file).Attributes.HasFlag(FileAttributes.ReparsePoint)))
+            throw new InvalidDataException("Thư mục transaction không an toàn hoặc chứa liên kết/thư mục con; giữ nguyên.");
+    }
+
+    private static long SafeDirectoryBytes(string directory)
+    {
+        try { return Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly).Sum(path => new FileInfo(path).Length); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { _ = error; return 0; }
     }
 
     private async Task<List<Exception>> RollBackFilesAsync(ProjectSession session, string directory, Journal journal)
@@ -289,7 +490,8 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
         return AtomicLocalFile.WriteAsync(Path.Combine(directory, "journal.json"), JsonSerializer.SerializeToUtf8Bytes(
             new JournalEnvelope { Content = content, Sha256 = HashNullable(JsonSerializer.SerializeToUtf8Bytes(content, DocumentJson.Options))! }, Pretty), token, true);
     }
-    private static async Task<Journal> ReadAsync(ProjectSession session, string directory, CancellationToken token)
+    private static async Task<Journal> ReadAsync(ProjectSession session, string directory, CancellationToken token,
+        bool verifyCopies = true)
     {
         var envelope = JsonSerializer.Deserialize<JournalEnvelope>(await File.ReadAllBytesAsync(Path.Combine(directory, "journal.json"), token).ConfigureAwait(false), DocumentJson.Options)
             ?? throw new InvalidDataException("Journal trống.");
@@ -338,7 +540,7 @@ internal sealed class ProjectTransactionJournal(Action<string> checkpoint)
                 if ((pair.Item1 is null) != (pair.Item2 is null)) throw new InvalidDataException("Journal thiếu bản sao/hash.");
                 if (pair.Item1 is null) continue;
                 if (Path.GetFileName(pair.Item1) != pair.Item1) throw new InvalidDataException("Đường dẫn bản sao journal không hợp lệ.");
-                if (HashNullable(await File.ReadAllBytesAsync(Path.Combine(directory, pair.Item1), token).ConfigureAwait(false)) != pair.Item2)
+                if (verifyCopies && HashNullable(await File.ReadAllBytesAsync(Path.Combine(directory, pair.Item1), token).ConfigureAwait(false)) != pair.Item2)
                     throw new InvalidDataException("Bản sao journal không khớp checksum.");
             }
         }
