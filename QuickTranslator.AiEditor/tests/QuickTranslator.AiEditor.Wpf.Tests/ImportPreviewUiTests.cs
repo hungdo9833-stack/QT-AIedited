@@ -105,6 +105,12 @@ public sealed class ImportPreviewUiTests
             Assert.NotNull(window.FindName("TranslateAllTitlesButton"));
             Assert.NotNull(window.FindName("RetryFailedTitlesButton"));
             Assert.NotNull(window.FindName("RetrySelectedTitlesButton"));
+            Assert.NotNull(window.FindName("ConfirmBoundaryButton"));
+            Assert.NotNull(window.FindName("RejectBoundaryButton"));
+            Assert.Contains("Ledger:", ((TextBlock)window.FindName("CoverageSummaryText")).Text,
+                StringComparison.Ordinal);
+            Assert.Contains("chưa giải quyết", ((TextBlock)window.FindName("CoverageSummaryText")).Text,
+                StringComparison.CurrentCultureIgnoreCase);
             Assert.Contains("Số 1", ((TextBlock)window.FindName("FooterHintText")).Text +
                 string.Join(" ", ((ListBox)window.FindName("IssuesList")).Items.Cast<object>()), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(System.Windows.Media.Color.FromRgb(7, 17, 31),
@@ -125,6 +131,8 @@ public sealed class ImportPreviewUiTests
         BulkImportReport report = await task;
 
         Assert.True(report.Completed);
+        Assert.True(report.PostCommitVerified);
+        Assert.True(report.VerifiedComplete);
         Assert.Equal(50, report.ImportedCount);
         ProjectSession reopened = (await new ProjectRepository().OpenAsync(fixture.Project.ManifestPath)).Session;
         Assert.Equal(50, reopened.Manifest.ChapterCount);
@@ -162,6 +170,9 @@ public sealed class ImportPreviewUiTests
             BulkImportReport report = await (Task<BulkImportReport>)fixture.Call(
                 "ImportDetectedPlanAsync", window.CurrentPlan, null, CancellationToken.None)!;
             Assert.True(report.Completed);
+            Assert.True(report.PostCommitVerified);
+            Assert.True(report.PartialImport);
+            Assert.False(report.VerifiedComplete);
             Assert.Equal(200, report.ImportedCount);
 
             ProjectSession reopened = (await new ProjectRepository().OpenAsync(fixture.Project.ManifestPath)).Session;

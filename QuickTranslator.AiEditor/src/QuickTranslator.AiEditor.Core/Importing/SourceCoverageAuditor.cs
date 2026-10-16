@@ -110,9 +110,14 @@ public static class SourceCoverageAuditor
         {
             if (span.LengthUtf16 == 0) return;
             string value = source.Text.Substring(span.StartUtf16, span.LengthUtf16);
+            Guid? targetChapterId = status is SourceCoverageStatus.ImportedContent or SourceCoverageStatus.ImportedHeading
+                ? item.ChapterId
+                : status == SourceCoverageStatus.VerifiedDuplicate && exactDuplicateTargets.TryGetValue(item.Id, out Guid originalId)
+                    ? items.First(x => x.Id == originalId).ChapterId
+                    : null;
             entries.Add(new(source.RawSha256, span, span.LengthUtf16,
                 Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))), status, item.Id,
-                status is SourceCoverageStatus.ImportedContent or SourceCoverageStatus.ImportedHeading ? item.ChapterId : null,
+                targetChapterId,
                 decision, evidence));
         }
 
