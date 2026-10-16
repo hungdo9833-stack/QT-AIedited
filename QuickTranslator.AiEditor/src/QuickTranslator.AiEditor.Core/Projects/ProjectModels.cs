@@ -106,6 +106,7 @@ public sealed class ProjectSession
 {
     internal SemaphoreSlim OperationGate { get; } = new(1, 1);
     internal SemaphoreSlim ResourceGate { get; } = new(1, 1);
+    internal bool HasDeferredManifestCheckpoint { get; set; }
     internal ProjectSession(string manifestPath, ProjectManifest manifest)
     {
         ManifestPath = Path.GetFullPath(manifestPath);

@@ -262,12 +262,62 @@ public sealed class ProjectTranslationCoordinatorTests
             await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
 
             Assert.Equal(1, client.Calls);
-            Assert.Equal(2, coordinator.CurrentJob!.Items.Count(item => item.Status == ProjectTranslationItemStatus.Skipped));
+            Assert.Equal(1, coordinator.CurrentJob!.Items.Count(item => item.Status == ProjectTranslationItemStatus.Skipped));
+            Assert.All(coordinator.CurrentJob.Items.Where(item => item.Status == ProjectTranslationItemStatus.Skipped),
+                item => Assert.Equal(ProjectTranslationItemDisposition.ProtectedContent, item.Disposition));
+            ProjectTranslationItem approvedItem = coordinator.CurrentJob.Items.Single(item =>
+                item.ChapterId == context.ChapterIds[1]);
+            Assert.Equal(ProjectTranslationItemStatus.Completed, approvedItem.Status);
+            Assert.Equal(ProjectTranslationItemDisposition.AlreadyTranslated, approvedItem.Disposition);
             ChapterDocument draft = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[0])).Chapter;
             ChapterDocument approved = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[1])).Chapter;
             Assert.Equal("Nháp người dùng.", draft.Segments[0].UserDraft);
             Assert.Equal("Bản đã duyệt.", approved.Segments[0].EditableText);
             Assert.Single(approved.Segments[0].Approvals);
+        });
+    }
+
+    [Fact]
+    public async Task Failed_or_invalid_attempts_are_reported_as_needs_review_instead_of_clean_skip()
+    {
+        await WithProjectAsync(2, async context =>
+        {
+            AttemptOutcome[] outcomes = [AttemptOutcome.Failed, AttemptOutcome.InvalidOutput];
+            for (int index = 0; index < outcomes.Length; index++)
+            {
+                ChapterDocument chapter = (await context.Repository.LoadChapterAsync(
+                    context.Session, context.ChapterIds[index])).Chapter;
+                TranslationSegment segment = Assert.Single(chapter.Segments);
+                segment.Status = SegmentStatus.Error;
+                segment.Attempts.Add(new TranslationAttempt
+                {
+                    StartedAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+                    FinishedAt = DateTimeOffset.UtcNow,
+                    Outcome = outcomes[index],
+                    ModelOptions = context.Environment.ModelOptions with { },
+                    PromptVersion = "p0-synthetic",
+                    Prompt = "synthetic",
+                    Error = outcomes[index] == AttemptOutcome.Failed ? "synthetic failure" : null
+                });
+                await context.Repository.UpdateChapterAsync(context.Session, chapter);
+            }
+            var client = new ProjectQueueFakeClient();
+            var coordinator = context.Coordinator(client);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            Assert.Equal(0, client.Calls);
+            Assert.Equal(ProjectTranslationJobStatus.CompletedWithErrors, coordinator.CurrentJob!.Status);
+            Assert.All(coordinator.CurrentJob.Items, item =>
+            {
+                Assert.Equal(ProjectTranslationItemStatus.NeedsReview, item.Status);
+                Assert.Equal(ProjectTranslationItemDisposition.MissingEligibility, item.Disposition);
+                Assert.Contains("Còn 1 đoạn", item.Error, StringComparison.Ordinal);
+                Assert.Contains("Dịch lại lỗi", item.Error, StringComparison.Ordinal);
+                TranslationEligibilityDiagnostic diagnostic = Assert.Single(item.EligibilityDiagnostics,
+                    value => value.Stage == TranslationEligibilityDiagnosticStage.BeforeEligibilityDecision);
+                Assert.Equal(0, diagnostic.EligibleSegmentCount);
+            });
         });
     }
 

@@ -13,6 +13,12 @@ public enum ProjectTranslationItemStatus
     Pending, Running, Paused, Interrupted, Completed, Failed, Skipped, NeedsReview, Cancelled
 }
 
+public enum ProjectTranslationItemDisposition
+{
+    None, AlreadyTranslated, TranslatedThisJob, ProtectedContent, MissingEligibility,
+    Failed, NeedsReview, Cancelled
+}
+
 public enum ProjectTranslationWorkerStatus
 {
     Ready, Running, Pausing, Paused, Offline, Interrupted, Completed, Cancelled
@@ -83,16 +89,30 @@ public sealed class ProjectTranslationItem
     public DateTimeOffset? FinishedAt { get; set; }
     public string? Error { get; set; }
     public bool WorkerMetricsRecorded { get; set; }
+    public ProjectTranslationItemDisposition Disposition { get; set; }
+    public List<TranslationEligibilityDiagnostic> EligibilityDiagnostics { get; set; } = [];
 
     internal void Validate()
     {
         if (ChapterId == Guid.Empty || Number <= 0 || Order <= 0 || string.IsNullOrWhiteSpace(Title) ||
             !Enum.IsDefined(Status) || SourceFingerprint.Length != 64 || ProtectedFingerprint.Length != 64 ||
             EnqueuedDocumentFingerprint.Length != 64 || PreflightWarning?.Length > 4000 ||
+            !Enum.IsDefined(Disposition) || EligibilityDiagnostics is null || EligibilityDiagnostics.Count > 8 ||
             TotalSegments < 0 || CompletedSegments < 0 ||
             CompletedSegments > TotalSegments || ErrorSegments < 0 || ErrorSegments > TotalSegments || SourceHanCharacters < 0)
             throw new InvalidDataException("Item trong Project translation job không hợp lệ.");
+        foreach (TranslationEligibilityDiagnostic diagnostic in EligibilityDiagnostics)
+            diagnostic.Validate(ChapterId);
         AppliedSegmentationOptions?.Validate();
+    }
+
+    internal void RecordEligibilityDiagnostic(TranslationEligibilityDiagnostic diagnostic)
+    {
+        diagnostic.Validate(ChapterId);
+        EligibilityDiagnostics.RemoveAll(existing => existing.Stage == diagnostic.Stage);
+        EligibilityDiagnostics.Add(diagnostic);
+        if (EligibilityDiagnostics.Count > 8)
+            EligibilityDiagnostics.RemoveRange(0, EligibilityDiagnostics.Count - 8);
     }
 }
 

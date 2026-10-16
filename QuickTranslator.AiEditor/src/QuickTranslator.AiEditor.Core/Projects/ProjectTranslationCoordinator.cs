@@ -101,7 +101,7 @@ public sealed class ProjectTranslationCoordinator
             cancellationToken.ThrowIfCancellationRequested();
             ChapterDocument chapter = (await _repository.LoadChapterAsync(_session, entries[index].ChapterId, cancellationToken)
                 .ConfigureAwait(false)).Chapter;
-            items.Add(new ProjectTranslationItem
+            var item = new ProjectTranslationItem
             {
                 ChapterId = chapter.Id,
                 Number = entries[index].Number,
@@ -114,7 +114,10 @@ public sealed class ProjectTranslationCoordinator
                 CompletedSegments = CompletedSegments(chapter),
                 ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error),
                 SourceHanCharacters = chapter.Segments.Sum(segment => CountHan(segment.SourceText))
-            });
+            };
+            item.RecordEligibilityDiagnostic(TranslationEligibilityDiagnostics.Analyze(chapter,
+                QueueMode.MissingSegments, TranslationEligibilityDiagnosticStage.Plan));
+            items.Add(item);
         }
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var job = new ProjectTranslationJob
@@ -179,6 +182,7 @@ public sealed class ProjectTranslationCoordinator
             foreach (ProjectTranslationItem item in value.Items.Where(item => item.Status == ProjectTranslationItemStatus.Failed))
             {
                 item.Status = ProjectTranslationItemStatus.Pending;
+                item.Disposition = ProjectTranslationItemDisposition.None;
                 item.Error = null;
                 item.FinishedAt = null;
             }
@@ -240,6 +244,7 @@ public sealed class ProjectTranslationCoordinator
                 item.Status is ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview))
             {
                 item.Status = ProjectTranslationItemStatus.Pending;
+                item.Disposition = ProjectTranslationItemDisposition.None;
                 item.Error = null; item.FinishedAt = null; item.ChapterQueueRunId = null;
             }
             ProjectTranslationWorkerState state = value.Workers.Single(item => item.WorkerId == workerId);
@@ -302,6 +307,7 @@ public sealed class ProjectTranslationCoordinator
             foreach (ProjectTranslationItem item in job.Items.Where(item => item.Status == ProjectTranslationItemStatus.Pending))
             {
                 item.Status = ProjectTranslationItemStatus.Cancelled;
+                item.Disposition = ProjectTranslationItemDisposition.Cancelled;
                 item.Error = "Đã hủy trước khi gửi request.";
                 item.FinishedAt = DateTimeOffset.UtcNow;
             }
@@ -478,6 +484,9 @@ public sealed class ProjectTranslationCoordinator
                     {
                         ProjectTranslationItem target = job.Items.Single(item => item.ChapterId == next.ChapterId);
                         target.Status = staleChapter ? ProjectTranslationItemStatus.NeedsReview : ProjectTranslationItemStatus.Failed;
+                        target.Disposition = staleChapter
+                            ? ProjectTranslationItemDisposition.NeedsReview
+                            : ProjectTranslationItemDisposition.Failed;
                         target.Error = ex.Message;
                         target.FinishedAt = DateTimeOffset.UtcNow;
                         job.CurrentChapterId = null;
@@ -591,6 +600,9 @@ public sealed class ProjectTranslationCoordinator
                 {
                     ProjectTranslationItem item = job.Items.Single(value => value.ChapterId == chapterId.Value);
                     item.Status = conflict ? ProjectTranslationItemStatus.NeedsReview : ProjectTranslationItemStatus.Failed;
+                    item.Disposition = conflict
+                        ? ProjectTranslationItemDisposition.NeedsReview
+                        : ProjectTranslationItemDisposition.Failed;
                     item.Error = SafeWorkerError(error);
                     item.FinishedAt = DateTimeOffset.UtcNow;
                     ProjectTranslationWorkerState worker = job.Workers.Single(value => value.WorkerId == definition.WorkerId);
@@ -677,6 +689,7 @@ public sealed class ProjectTranslationCoordinator
             {
                 ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
                 target.Status = ProjectTranslationItemStatus.NeedsReview;
+                target.Disposition = ProjectTranslationItemDisposition.NeedsReview;
                 target.Error = conflict;
                 target.FinishedAt = DateTimeOffset.UtcNow;
                 if (workerDefinition is not null)
@@ -700,6 +713,16 @@ public sealed class ProjectTranslationCoordinator
             chapter = await RunWorkerPreflightAsync(workerDefinition, chapterId, cancellationToken).ConfigureAwait(false);
             item = CurrentJob!.Items.Single(value => value.ChapterId == chapterId);
         }
+        bool preflightChangedSegmentation = item.EligibilityDiagnostics.Any(value =>
+            value.Stage == TranslationEligibilityDiagnosticStage.AfterWorkerPreflight &&
+            value.WorkerPreflightChangedSegmentation);
+        TranslationEligibilityDiagnostic eligibility = TranslationEligibilityDiagnostics.Analyze(chapter,
+            canResumeChapter ? chapter.Queue.Mode : mode,
+            TranslationEligibilityDiagnosticStage.BeforeEligibilityDecision,
+            preflightChangedSegmentation);
+        await MutateInMemoryAsync(job => job.Items.Single(value => value.ChapterId == chapterId)
+            .RecordEligibilityDiagnostic(eligibility), CancellationToken.None).ConfigureAwait(false);
+        item = CurrentJob!.Items.Single(value => value.ChapterId == chapterId);
         bool hasEligible = chapter.Segments.Any(segment => TranslationService.IsQueueEligible(segment,
             canResumeChapter ? chapter.Queue.Mode : mode));
         if (!hasEligible && !canResumeChapter)
@@ -707,12 +730,38 @@ public sealed class ProjectTranslationCoordinator
             bool completedByThisJob = item.ChapterQueueRunId is Guid completedRun && chapter.Queue.RunId == completedRun &&
                 chapter.Queue.Status is QueueStatus.Completed or QueueStatus.CompletedWithWarnings;
             bool progressedSinceSavedJob = CompletedSegments(chapter) > completedSegmentsAtPlanCheckpoint;
+            bool alreadyTranslated = chapter.Segments.Count > 0 && chapter.Segments.All(segment =>
+                segment.HasCompletedTranslation || segment.Status == SegmentStatus.Approved);
+            bool hasProtectedContent = chapter.Segments.Any(segment => segment.IsProtectedFromAutomaticTranslation);
+            bool protectedOrCompleteOnly = hasProtectedContent && chapter.Segments.All(segment =>
+                segment.IsProtectedFromAutomaticTranslation || segment.HasCompletedTranslation);
             await PersistProgressAsync(job =>
             {
                 ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapterId);
-                bool completed = completedByThisJob || progressedSinceSavedJob;
-                target.Status = completed ? ProjectTranslationItemStatus.Completed : ProjectTranslationItemStatus.Skipped;
-                target.Error = completed ? null : "Không có segment đủ điều kiện; UserDraft và Approval được giữ nguyên.";
+                if (completedByThisJob || progressedSinceSavedJob)
+                {
+                    target.Status = ProjectTranslationItemStatus.Completed;
+                    target.Disposition = ProjectTranslationItemDisposition.TranslatedThisJob;
+                    target.Error = null;
+                }
+                else if (alreadyTranslated)
+                {
+                    target.Status = ProjectTranslationItemStatus.Completed;
+                    target.Disposition = ProjectTranslationItemDisposition.AlreadyTranslated;
+                    target.Error = null;
+                }
+                else if (protectedOrCompleteOnly)
+                {
+                    target.Status = ProjectTranslationItemStatus.Skipped;
+                    target.Disposition = ProjectTranslationItemDisposition.ProtectedContent;
+                    target.Error = "Không dịch tự động vì toàn bộ nội dung còn lại là bản nháp, đã duyệt hoặc được bảo vệ.";
+                }
+                else
+                {
+                    target.Status = ProjectTranslationItemStatus.NeedsReview;
+                    target.Disposition = ProjectTranslationItemDisposition.MissingEligibility;
+                    target.Error = EligibilityFailureMessage(eligibility);
+                }
                 target.CompletedSegments = CompletedSegments(chapter);
                 target.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
                 target.FinishedAt = DateTimeOffset.UtcNow;
@@ -880,6 +929,11 @@ public sealed class ProjectTranslationCoordinator
                 expected = ProjectTranslationJobStore.Clone(_job
                     ?? throw new InvalidOperationException("Translation job chưa được lưu."));
             }
+            // Worker preflight may start a structural chapter/manifest transaction. Flush only
+            // summaries deferred by the previous chapter so the transaction's disk guard compares
+            // against the same authoritative manifest state.
+            await _repository.FlushDeferredManifestAsync(_session, "BeforeWorkerSegmentationPreflight",
+                cancellationToken).ConfigureAwait(false);
             WorkerPreflightResult result = await _repository.PreflightWorkerChapterAsync(_session,
                 expected, definition.WorkerId, chapterId, definition.SegmentationOptions, cancellationToken)
                 .ConfigureAwait(false);
@@ -1187,6 +1241,18 @@ public sealed class ProjectTranslationCoordinator
         item.ProtectedFingerprint = ProjectTranslationFingerprints.Protected(chapter);
         item.EnqueuedDocumentFingerprint = ProjectTranslationFingerprints.Document(chapter);
         item.Error = error;
+        item.Disposition = status switch
+        {
+            ProjectTranslationItemStatus.Completed when item.Disposition == ProjectTranslationItemDisposition.AlreadyTranslated
+                => ProjectTranslationItemDisposition.AlreadyTranslated,
+            ProjectTranslationItemStatus.Completed => ProjectTranslationItemDisposition.TranslatedThisJob,
+            ProjectTranslationItemStatus.Failed => ProjectTranslationItemDisposition.Failed,
+            ProjectTranslationItemStatus.NeedsReview when item.Disposition == ProjectTranslationItemDisposition.MissingEligibility
+                => ProjectTranslationItemDisposition.MissingEligibility,
+            ProjectTranslationItemStatus.NeedsReview => ProjectTranslationItemDisposition.NeedsReview,
+            ProjectTranslationItemStatus.Cancelled => ProjectTranslationItemDisposition.Cancelled,
+            _ => item.Disposition
+        };
         if (status is not (ProjectTranslationItemStatus.Paused or ProjectTranslationItemStatus.Interrupted))
             item.FinishedAt = DateTimeOffset.UtcNow;
     }
@@ -1236,6 +1302,23 @@ public sealed class ProjectTranslationCoordinator
 
     private static int CompletedSegments(ChapterDocument chapter) => chapter.Segments.Count(segment =>
         segment.Status == SegmentStatus.Approved || segment.HasCompletedTranslation);
+
+    private static string EligibilityFailureMessage(TranslationEligibilityDiagnostic diagnostic)
+    {
+        int unresolved = diagnostic.ReasonCounts.Where(pair => pair.Key is not (
+                QueueEligibilityReason.CompletedTranslation or QueueEligibilityReason.ProtectedUserDraft or
+                QueueEligibilityReason.ProtectedApproval or QueueEligibilityReason.ProtectedPreviousEdit))
+            .Sum(pair => pair.Value);
+        if (diagnostic.FailedAttemptCount > 0 || diagnostic.InvalidOutputAttemptCount > 0)
+            return $"Còn {unresolved:N0} đoạn chưa có bản dịch hợp lệ; " +
+                $"{diagnostic.FailedAttemptCount:N0} attempt lỗi và {diagnostic.InvalidOutputAttemptCount:N0} đầu ra không hợp lệ. " +
+                "Kiểm tra chi tiết rồi dùng Dịch lại lỗi.";
+        if (diagnostic.InProgressAttemptCount > 0)
+            return $"Còn {unresolved:N0} đoạn chưa có bản dịch hợp lệ nhưng có " +
+                $"{diagnostic.InProgressAttemptCount:N0} attempt chưa kết thúc; cần kiểm tra recovery trước khi Retry.";
+        return $"Còn {unresolved:N0}/{diagnostic.SegmentCount:N0} đoạn chưa có bản dịch hợp lệ " +
+            "nhưng không có đoạn đủ điều kiện. Xem chẩn đoán eligibility trước khi Retry.";
+    }
 
     private static int CountHan(string text) => text.Count(character => character is >= '\u3400' and <= '\u9fff' or >= '\uf900' and <= '\ufaff');
 

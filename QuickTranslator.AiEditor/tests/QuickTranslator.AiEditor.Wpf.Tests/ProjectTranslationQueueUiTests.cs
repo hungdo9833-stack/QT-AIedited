@@ -77,6 +77,11 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob?.Status);
         Assert.Equal(3, fixture.Client.Calls);
         Assert.NotEqual(Guid.Empty, coordinator.CurrentJob!.JobId);
+        Assert.All(window.CurrentRows, row => Assert.Equal("Đã dịch", row.StatusLabel));
+        ((DataGrid)window.FindName("QueueGrid")).SelectedIndex = 0;
+        await Dispatcher.Yield(DispatcherPriority.DataBind);
+        Assert.Contains("Eligibility", ((TextBlock)window.FindName("SelectedDiagnosticText")).Text,
+            StringComparison.Ordinal);
         Assert.False(((Button)window.FindName("StartButton")).IsEnabled);
         Assert.Contains("3/3", ((TextBlock)window.FindName("SummaryText")).Text);
         window.Close();

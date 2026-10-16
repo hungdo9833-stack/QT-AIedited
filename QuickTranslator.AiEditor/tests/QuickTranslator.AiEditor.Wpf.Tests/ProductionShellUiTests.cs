@@ -192,6 +192,11 @@ public sealed class ProductionShellUiTests
             }
             Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob?.Status);
             Assert.Equal(3, fixture.Client.Calls);
+            Assert.All(coordinator.CurrentJob!.Items, item =>
+            {
+                Assert.Equal(ProjectTranslationItemStatus.Completed, item.Status);
+                Assert.Equal(ProjectTranslationItemDisposition.TranslatedThisJob, item.Disposition);
+            });
             await fixture.TaskCall("LoadProjectChapterAsync", snapshot.Chapters[0].ChapterId);
             fixture.Call("ShowTranslationWorkspace", false);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);

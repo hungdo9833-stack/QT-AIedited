@@ -57,6 +57,9 @@ public sealed partial class ProjectRepository
             item.PreflightCompletedAt = DateTimeOffset.UtcNow;
             item.ChapterQueueRunId = null;
             item.PreflightWarning = preview.Warnings.Count == 0 ? null : string.Join(" ", preview.Warnings);
+            item.RecordEligibilityDiagnostic(TranslationEligibilityDiagnostics.Analyze(candidate,
+                QueueMode.MissingSegments, TranslationEligibilityDiagnosticStage.AfterWorkerPreflight,
+                preview.BoundariesChanged));
 
             string chapterRelative = entry.RelativePath;
             byte[] previousChapter = await File.ReadAllBytesAsync(session.Resolve(chapterRelative), cancellationToken)
@@ -67,7 +70,11 @@ public sealed partial class ProjectRepository
                 await session.ChapterStore.SaveSerializedAsync(candidate.Id,
                     ChapterFileStore.SerializeDocument(candidate), Hash(previousChapter), cancellationToken)
                     .ConfigureAwait(false);
+                NormalizeManifest(after);
+                await WriteFastManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
                 session.Manifest = after;
+                session.HasDeferredManifestCheckpoint = false;
+                PublishManifestCommitted(session, "WorkerSegmentationPreflight");
                 return new(candidate, proposed, preview);
             }
             NormalizeManifest(after);

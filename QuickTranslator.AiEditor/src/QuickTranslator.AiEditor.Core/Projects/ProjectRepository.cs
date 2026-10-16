@@ -188,6 +188,7 @@ public sealed partial class ProjectRepository
         {
             CopySummary(entry, chapter);
             session.Manifest.CurrentChapterId = chapter.Id;
+            session.HasDeferredManifestCheckpoint = true;
             return revision;
         }
         ProjectManifest after = Clone(session.Manifest);
@@ -207,10 +208,12 @@ public sealed partial class ProjectRepository
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (!session.HasDeferredManifestCheckpoint) return;
             ProjectManifest after = Clone(session.Manifest);
             NormalizeManifest(after);
             await WriteFastManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
             session.Manifest = after;
+            session.HasDeferredManifestCheckpoint = false;
             PublishManifestCommitted(session, operation);
         }
         finally { session.OperationGate.Release(); }

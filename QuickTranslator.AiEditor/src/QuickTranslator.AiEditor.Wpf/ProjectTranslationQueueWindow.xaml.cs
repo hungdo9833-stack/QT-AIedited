@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -425,12 +426,18 @@ public partial class ProjectTranslationQueueWindow : Window
             Set(ref _title, item.Title, nameof(Title));
             Set(ref _worker, worker, nameof(Worker));
             Set(ref _status, item.Status, nameof(Status));
-            Set(ref _statusLabel, ItemStatusLabel(item.Status), nameof(StatusLabel));
+            Set(ref _statusLabel, ItemStatusLabel(item), nameof(StatusLabel));
             Set(ref _completedSegments, item.CompletedSegments, nameof(CompletedSegments));
             Set(ref _totalSegments, item.TotalSegments, nameof(TotalSegments));
             Set(ref _segmentLabel, $"{item.CompletedSegments:N0}/{item.TotalSegments:N0}", nameof(SegmentLabel));
             Set(ref _errorSegments, item.ErrorSegments, nameof(ErrorSegments));
-            Set(ref _error, item.Error ?? item.PreflightWarning ?? "", nameof(Error));
+            string detail = string.Join(" · ", new[]
+            {
+                item.Error,
+                item.PreflightWarning,
+                EligibilityDiagnosticLabel(item.EligibilityDiagnostics.LastOrDefault())
+            }.Where(value => !string.IsNullOrWhiteSpace(value)));
+            Set(ref _error, detail, nameof(Error));
         }
 
         private void Set<T>(ref T field, T value, string propertyName)
@@ -471,6 +478,15 @@ public partial class ProjectTranslationQueueWindow : Window
         ProjectTranslationJobStatus.Completed => "Hoàn tất", _ => "Hoàn tất có lỗi"
     };
 
+    private static string ItemStatusLabel(ProjectTranslationItem item) => item.Disposition switch
+    {
+        ProjectTranslationItemDisposition.AlreadyTranslated => "Đã có bản dịch",
+        ProjectTranslationItemDisposition.TranslatedThisJob => "Đã dịch",
+        ProjectTranslationItemDisposition.ProtectedContent => "Được bảo vệ",
+        ProjectTranslationItemDisposition.MissingEligibility => "Chưa dịch · cần kiểm tra",
+        _ => ItemStatusLabel(item.Status)
+    };
+
     private static string ItemStatusLabel(ProjectTranslationItemStatus status) => status switch
     {
         ProjectTranslationItemStatus.Pending => "Đang chờ", ProjectTranslationItemStatus.Running => "Đang dịch",
@@ -479,6 +495,18 @@ public partial class ProjectTranslationQueueWindow : Window
         ProjectTranslationItemStatus.Skipped => "Đã bỏ qua", ProjectTranslationItemStatus.NeedsReview => "Cần kiểm tra nguồn",
         _ => "Đã hủy"
     };
+
+    private static string EligibilityDiagnosticLabel(TranslationEligibilityDiagnostic? diagnostic)
+    {
+        if (diagnostic is null) return "";
+        return $"Eligibility {diagnostic.EligibleSegmentCount:N0}/{diagnostic.SegmentCount:N0}; " +
+            $"chưa dịch {diagnostic.UntranslatedSegmentCount:N0}; draft {diagnostic.ProtectedByUserDraftCount:N0}; " +
+            $"duyệt {diagnostic.ProtectedByApprovalCount:N0}; bảo vệ sửa {diagnostic.ProtectedByPreviousEditCount:N0}; " +
+            $"attempt {diagnostic.ExistingAttemptCount:N0} " +
+            $"(lỗi {diagnostic.FailedAttemptCount:N0}, invalid {diagnostic.InvalidOutputAttemptCount:N0}, " +
+            $"hủy {diagnostic.CancelledAttemptCount:N0}, gián đoạn {diagnostic.InterruptedAttemptCount:N0}); " +
+            $"mode {diagnostic.QueueMode}; preflight {(diagnostic.WorkerPreflightChangedSegmentation ? "có đổi phân đoạn" : "không đổi phân đoạn")}.";
+    }
 
     private static string WorkerStatusLabel(ProjectTranslationWorkerStatus status) => status switch
     {
