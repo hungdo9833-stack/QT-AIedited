@@ -38,6 +38,7 @@ public sealed class OllamaClientTests
             Assert.Equal("translategemma:12b", body.GetProperty("model").GetString());
             Assert.False(body.GetProperty("stream").GetBoolean());
             Assert.False(body.GetProperty("think").GetBoolean());
+            Assert.False(body.TryGetProperty("format", out _));
             Assert.Single(body.GetProperty("messages").EnumerateArray());
             Assert.Equal("user", body.GetProperty("messages")[0].GetProperty("role").GetString());
             Assert.Equal("test prompt", body.GetProperty("messages")[0].GetProperty("content").GetString());
@@ -58,6 +59,28 @@ public sealed class OllamaClientTests
         Assert.Equal(80, result.Metrics.InputTokens);
         Assert.Equal(45, result.Metrics.OutputTokens);
         Assert.Equal(1500000000L, result.Metrics.TotalDurationNanoseconds);
+    }
+
+    [Fact]
+    public async Task StructuredRequest_SendsJsonSchemaWithoutChangingNormalTranslationPayload()
+    {
+        using var http = new HttpClient(new FakeHandler(async (request, ct) =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            JsonElement format = json.RootElement.GetProperty("format");
+            Assert.Equal("object", format.GetProperty("type").GetString());
+            Assert.Contains("characters", format.GetProperty("required").EnumerateArray().Select(x => x.GetString()));
+            Assert.True(format.GetProperty("properties").TryGetProperty("relationships", out _));
+            return JsonResponse("{\"message\":{\"content\":\"{\\\"characters\\\":[],\\\"relationships\\\":[],\\\"glossary\\\":[]}\"},\"done\":true}");
+        })) { Timeout = Timeout.InfiniteTimeSpan };
+        using var client = new OllamaClient(http);
+        JsonElement schema = JsonSerializer.Deserialize<JsonElement>("""
+            {"type":"object","properties":{"characters":{"type":"array"},"relationships":{"type":"array"}},"required":["characters"]}
+            """);
+
+        OllamaCompletion result = await client.TranslateStructuredAsync("survey", new(), schema);
+
+        Assert.Contains("characters", result.Text);
     }
 
     [Theory]

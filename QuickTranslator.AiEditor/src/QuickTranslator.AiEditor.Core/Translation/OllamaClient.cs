@@ -8,7 +8,7 @@ using QuickTranslator.AiEditor.Core.Models;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
 
-public sealed class OllamaClient : IOllamaBackendClient
+public sealed class OllamaClient : IOllamaBackendClient, IJsonSchemaOllamaClient
 {
     public static Uri DefaultEndpoint { get; } = new("http://127.0.0.1:11434/api/chat");
     private readonly HttpClient _httpClient;
@@ -106,6 +106,18 @@ public sealed class OllamaClient : IOllamaBackendClient
     }
 
     public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
+        => await SendAsync(prompt, options, null, cancellationToken).ConfigureAwait(false);
+
+    public async Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
+        JsonElement responseSchema, CancellationToken cancellationToken = default)
+    {
+        if (responseSchema.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException("JSON Schema của Ollama phải là object.", nameof(responseSchema));
+        return await SendAsync(prompt, options, responseSchema.Clone(), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<OllamaCompletion> SendAsync(string prompt, ModelOptions options,
+        JsonElement? responseSchema, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         options.Validate();
@@ -119,14 +131,26 @@ public sealed class OllamaClient : IOllamaBackendClient
             {
                 // A localhost server can proxy cloud models. Check metadata before sending any chapter text.
                 await VerifyInstalledLocalModelAsync(options.Model, timeout.Token).ConfigureAwait(false);
-                using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
-                {
-                    Content = JsonContent.Create(new
+                object requestBody = responseSchema is JsonElement schema
+                    ? new
                     {
                         model = options.Model,
                         messages = new[] { new { role = "user", content = prompt } },
                         stream = false,
-                        // Translation uses final answers only; don't spend output tokens on model thinking.
+                        think = false,
+                        format = schema,
+                        options = new
+                        {
+                            temperature = options.Temperature,
+                            num_ctx = options.ContextSize,
+                            num_predict = options.MaximumOutputTokens
+                        }
+                    }
+                    : new
+                    {
+                        model = options.Model,
+                        messages = new[] { new { role = "user", content = prompt } },
+                        stream = false,
                         think = false,
                         options = new
                         {
@@ -134,7 +158,10 @@ public sealed class OllamaClient : IOllamaBackendClient
                             num_ctx = options.ContextSize,
                             num_predict = options.MaximumOutputTokens
                         }
-                    })
+                    };
+                using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
+                {
+                    Content = JsonContent.Create(requestBody)
                 };
                 AddAuthorization(request);
                 using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);

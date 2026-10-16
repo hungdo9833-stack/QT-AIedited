@@ -22,9 +22,9 @@ Session 2 is implemented on `codex/ai-book-intelligence-session2`. The authorita
 
 ## Verification at handoff
 
-- Core tests: 650 passed.
+- Core tests: 652 passed.
 - WPF tests: 93 passed.
-- Failed/skipped: 0/0.
+- Failed/skipped: 0/0; combined total 745.
 - Release solution build: 0 errors, 0 warnings.
 - Synthetic 500-chapter / 2,000,000-character planner benchmark completed; no real model was called.
 

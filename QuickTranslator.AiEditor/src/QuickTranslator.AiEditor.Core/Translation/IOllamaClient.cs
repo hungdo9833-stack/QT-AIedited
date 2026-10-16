@@ -1,4 +1,5 @@
 using QuickTranslator.AiEditor.Core.Models;
+using System.Text.Json;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
 
@@ -7,6 +8,12 @@ public sealed record OllamaCompletion(string Text, bool? Done, string? DoneReaso
 public interface IOllamaClient
 {
     Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default);
+}
+
+public interface IJsonSchemaOllamaClient : IOllamaClient
+{
+    Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
+        JsonElement responseSchema, CancellationToken cancellationToken = default);
 }
 
 public enum OllamaErrorKind { Connection, Timeout, Http, InvalidResponse }

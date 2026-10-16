@@ -20,11 +20,12 @@
 
 ## Verification
 
-- Core regression: **650 passed, 0 failed, 0 skipped**.
+- Core regression: **652 passed, 0 failed, 0 skipped**.
 - WPF regression: **93 passed, 0 failed, 0 skipped**.
-- Combined: **743 passed, 0 failed, 0 skipped**.
+- Combined: **745 passed, 0 failed, 0 skipped**.
 - Release solution build: **0 errors, 0 warnings**.
-- Focused AI Book Intelligence tests: **31 Core + 2 WPF passed**.
+- Focused AI Book Intelligence tests: **32 Core + 2 WPF passed**; structured Ollama request coverage is included in the Core suite.
+- Live synthetic Ollama smoke test with `translategemma:12b`: JSON Schema response parsed with all three required collections.
 - No personal Project was opened or modified. Tests use temporary synthetic Projects.
 
 ## Benchmark checkpoint

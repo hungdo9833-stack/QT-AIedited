@@ -181,6 +181,24 @@ public sealed class BookIntelligenceTests : IDisposable
     }
 
     [Fact]
+    public async Task Analyzer_uses_Ollama_json_schema_when_backend_supports_structured_output()
+    {
+        (ProjectRepository repository, ProjectSession session) = await ProjectAsync("林朝说道：她是我的妹妹。", 1);
+        var store = new BookIntelligenceStore(session);
+        ProjectResources resources = await new ProjectResourceStore(session).LoadAsync();
+        BookIntelligenceState state = await new ProjectCorpusIndexer(repository).IndexAsync(session,
+            await store.LoadAsync(), store, resources.Characters);
+        var fake = new StructuredSurveyClient();
+
+        state = await new AdaptiveBookIntelligenceAnalyzer(fake).AnalyzeAsync(session, state, store, resources, Options);
+
+        Assert.Equal(1, fake.StructuredCalls);
+        Assert.Equal(0, fake.PlainCalls);
+        Assert.True(fake.Schema.GetProperty("properties").TryGetProperty("glossary", out _));
+        Assert.True(state.Evidence.Single(x => x.IsCurrent).AiAnalyzed);
+    }
+
+    [Fact]
     public async Task Confirmed_character_and_glossary_are_saved_but_nothing_is_auto_applied()
     {
         (_, ProjectSession session) = await ProjectAsync("林朝说道：青云宗。", 1);
@@ -371,6 +389,26 @@ public sealed class BookIntelligenceTests : IDisposable
         {
             Calls++;
             return Task.FromResult(new OllamaCompletion(response(prompt), true, "stop", new()));
+        }
+    }
+
+    private sealed class StructuredSurveyClient : IJsonSchemaOllamaClient
+    {
+        public int PlainCalls { get; private set; }
+        public int StructuredCalls { get; private set; }
+        public JsonElement Schema { get; private set; }
+        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            PlainCalls++;
+            return Task.FromResult(new OllamaCompletion("{}", true, "stop", new()));
+        }
+        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
+            JsonElement responseSchema, CancellationToken cancellationToken = default)
+        {
+            StructuredCalls++; Schema = responseSchema.Clone();
+            return Task.FromResult(new OllamaCompletion(
+                "{\"characters\":[],\"relationships\":[],\"glossary\":[]}", true, "stop", new()));
         }
     }
 }

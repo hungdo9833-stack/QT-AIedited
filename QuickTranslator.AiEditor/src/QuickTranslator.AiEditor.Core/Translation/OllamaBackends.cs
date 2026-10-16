@@ -296,7 +296,7 @@ public interface IOllamaBackendClient : IOllamaClient, IDisposable
     Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default);
 }
 
-public sealed class OllamaBackendManager : IOllamaBackendClient
+public sealed class OllamaBackendManager : IOllamaBackendClient, IJsonSchemaOllamaClient
 {
     private readonly OllamaProfileStore _store;
     private readonly Func<OllamaBackendProfile, IOllamaBackendClient> _factory;
@@ -432,6 +432,21 @@ public sealed class OllamaBackendManager : IOllamaBackendClient
         finally { _gate.Release(); }
     }
 
+    public async Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
+        JsonElement responseSchema, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (ActiveProfile.Kind == OllamaBackendKind.Remote && !ActiveProfile.RemoteDisclosureAccepted)
+                throw new InvalidOperationException("Profile remote chưa được xác nhận quyền gửi nội dung truyện.");
+            return _client is IJsonSchemaOllamaClient structured
+                ? await structured.TranslateStructuredAsync(prompt, options, responseSchema, cancellationToken).ConfigureAwait(false)
+                : await _client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -480,7 +495,7 @@ public sealed class OllamaBackendManager : IOllamaBackendClient
     }
 }
 
-internal sealed class NonOwningOllamaBackendClient(IOllamaBackendClient inner) : IOllamaBackendClient
+internal sealed class NonOwningOllamaBackendClient(IOllamaBackendClient inner) : IOllamaBackendClient, IJsonSchemaOllamaClient
 {
     public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default) =>
         inner.TranslateAsync(prompt, options, cancellationToken);
@@ -488,6 +503,11 @@ internal sealed class NonOwningOllamaBackendClient(IOllamaBackendClient inner) :
         inner.CheckConnectionAsync(model, timeout, cancellationToken);
     public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
         inner.ListModelsAsync(timeout, cancellationToken);
+    public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
+        JsonElement responseSchema, CancellationToken cancellationToken = default) =>
+        inner is IJsonSchemaOllamaClient structured
+            ? structured.TranslateStructuredAsync(prompt, options, responseSchema, cancellationToken)
+            : inner.TranslateAsync(prompt, options, cancellationToken);
     public void Dispose() { }
 }
 

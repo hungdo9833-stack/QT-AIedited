@@ -42,11 +42,12 @@ The analyzer remains user-triggered. It does not edit source, translations, appr
 
 ## Regression and build
 
-- Core: 650 passed, 0 failed, 0 skipped.
+- Core: 652 passed, 0 failed, 0 skipped.
 - WPF: 93 passed, 0 failed, 0 skipped.
-- Total: 743 passed.
+- Total: 745 passed.
 - Release solution build: 0 errors, 0 warnings.
 - Synthetic temporary Projects only; no personal Project was opened.
+- A post-handoff bug report showed `translategemma:12b` could ignore the requested object shape. Analyzer calls now send Ollama's JSON Schema `format`; a live synthetic local-model smoke test returned and parsed the required Character/Relationship/Glossary structure. Normal translation requests still omit `format`.
 
 ## Files changed
 

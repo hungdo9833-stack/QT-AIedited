@@ -14,6 +14,38 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
 {
     public const int MaximumEvidencePerRequest = 8;
     public const string PromptSchemaVersion = "abi-2-json-1";
+    internal static JsonElement ResponseSchema { get; } = JsonSerializer.Deserialize<JsonElement>("""
+        {
+          "type":"object",
+          "additionalProperties":false,
+          "properties":{
+            "characters":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{
+              "chinese_name":{"type":"string"},"vietnamese_name":{"type":"string"},
+              "aliases":{"type":"array","items":{"type":"string"}},
+              "gender":{"type":"string","enum":["unknown","male","female","other"]},
+              "primary_pronoun":{"type":"string"},"secondary_pronoun":{"type":"string"},
+              "confidence":{"type":"string","enum":["unknown","ambiguous","proposed"]},
+              "evidence_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"}
+            },"required":["chinese_name","vietnamese_name","aliases","gender","primary_pronoun","secondary_pronoun","confidence","evidence_ids","reason"]}},
+            "relationships":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{
+              "speaker_chinese_name":{"type":"string"},"listener_chinese_name":{"type":"string"},
+              "relationship":{"type":"string"},"self_reference":{"type":"string"},
+              "addressee_reference":{"type":"string"},"reverse_self_reference":{"type":"string"},
+              "reverse_addressee_reference":{"type":"string"},
+              "confidence":{"type":"string","enum":["unknown","ambiguous","proposed"]},
+              "evidence_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"}
+            },"required":["speaker_chinese_name","listener_chinese_name","relationship","self_reference","addressee_reference","reverse_self_reference","reverse_addressee_reference","confidence","evidence_ids","reason"]}},
+            "glossary":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{
+              "chinese":{"type":"string"},"vietnamese":{"type":"string"},
+              "category":{"type":"string","enum":["place","organization","clan","cultivation","item","realm","title","term","addressing"]},
+              "context_dependent":{"type":"boolean"},
+              "confidence":{"type":"string","enum":["unknown","ambiguous","proposed"]},
+              "evidence_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"}
+            },"required":["chinese","vietnamese","category","context_dependent","confidence","evidence_ids","reason"]}}
+          },
+          "required":["characters","relationships","glossary"]
+        }
+        """);
 
     public async Task<BookIntelligenceState> AnalyzeAsync(ProjectSession session, BookIntelligenceState state,
         BookIntelligenceStore store, ProjectResources resources, ModelOptions options,
@@ -105,7 +137,9 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
             {
                 state.Metrics.Requests++;
                 var watch = Stopwatch.StartNew();
-                OllamaCompletion result = await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
+                OllamaCompletion result = client is IJsonSchemaOllamaClient structured
+                    ? await structured.TranslateStructuredAsync(prompt, options, ResponseSchema, cancellationToken).ConfigureAwait(false)
+                    : await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
                 watch.Stop();
                 if (result.Metrics.ClientElapsed == TimeSpan.Zero)
                     result = result with { Metrics = result.Metrics with { ClientElapsed = watch.Elapsed } };
