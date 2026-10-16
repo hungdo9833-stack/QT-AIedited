@@ -15,7 +15,9 @@ public enum ImportPreviewIssueCode
     NumberJump,
     UncertainBoundary,
     UnclassifiedSource,
-    EmptyContent
+    EmptyContent,
+    UnreviewedExclusion,
+    ExcludedDifferentContent
 }
 
 public sealed record ImportPreviewIssue(
@@ -41,6 +43,8 @@ public sealed record ImportPreviewItem(
 {
     public bool IsChapter => Kind is PlannedRegionKind.Chapter or PlannedRegionKind.SpecialChapter;
     public bool AutomaticallyExcludedDuplicate { get; init; }
+    // An excluded candidate carrying text requires an explicit user decision.
+    public bool ExplicitlyExcluded { get; init; }
     public string? VietnameseTitle { get; init; }
 }
 
@@ -128,7 +132,13 @@ public sealed class ImportPreviewPlan
                     item.Included
                         ? "Chương được chọn chưa có số hợp lệ; QT Studio không tự đánh lại số."
                         : "Chương chưa có số đang được exclude; hãy gán số trước khi include.", [item.Id]));
-            if (!item.Included) continue;
+            if (!item.Included)
+            {
+                if (!item.ExplicitlyExcluded && !string.IsNullOrWhiteSpace(source.Text.Substring(item.ContentSpan.StartUtf16, item.ContentSpan.LengthUtf16)))
+                    issues.Add(new(ImportPreviewIssueCode.UnreviewedExclusion, DetectionIssueSeverity.Error,
+                        $"Chương {item.Number?.ToString() ?? "chưa đánh số"} có nội dung nhưng đang bị loại mà chưa xác nhận. Hãy kiểm tra, ghép lại hoặc chủ động loại.", [item.Id]));
+                continue;
+            }
             if (string.IsNullOrWhiteSpace(item.Title))
                 issues.Add(new(ImportPreviewIssueCode.MissingTitle, DetectionIssueSeverity.Error,
                     "Chương được chọn chưa có tên.", [item.Id]));
@@ -146,10 +156,17 @@ public sealed class ImportPreviewPlan
                 issues.Add(new(ImportPreviewIssueCode.DuplicateNumber, DetectionIssueSeverity.Error,
                     $"Số chương {duplicate.Key} đang được chọn {includedCount} lần; chỉ được nhập một bản.",
                     duplicateItems.Select(x => x.Id).ToImmutableArray()));
-            else if (duplicateItems.Any(x => x.AutomaticallyExcludedDuplicate))
-                issues.Add(new(ImportPreviewIssueCode.DuplicateNumber, DetectionIssueSeverity.Information,
-                    $"Số chương {duplicate.Key} xuất hiện {duplicateItems.Length} lần; giữ bản xuất hiện đầu tiên và bỏ qua bản phía sau.",
+            else if (duplicateItems.Length > 1)
+            {
+                bool differentContent = duplicateItems.Select(x => source.Text.Substring(x.ContentSpan.StartUtf16, x.ContentSpan.LengthUtf16))
+                    .Distinct(StringComparer.Ordinal).Skip(1).Any();
+                issues.Add(new(differentContent ? ImportPreviewIssueCode.ExcludedDifferentContent : ImportPreviewIssueCode.DuplicateNumber,
+                    differentContent ? DetectionIssueSeverity.Warning : DetectionIssueSeverity.Information,
+                    differentContent
+                        ? $"Số chương {duplicate.Key} có nhiều phần nội dung KHÁC NHAU. Các phần đã loại vẫn nằm trong source rescue, KHÔNG nằm trong chương nhập. Hãy đối chiếu trước khi tiếp tục."
+                        : $"Số chương {duplicate.Key} có {duplicateItems.Length} bản cùng nội dung; các bản đã loại vẫn được lưu trong source rescue.",
                     duplicateItems.Select(x => x.Id).ToImmutableArray()));
+            }
         }
 
         foreach (IGrouping<string, ImportPreviewItem> volume in included.Where(x => x.Number > 0)
@@ -222,8 +239,9 @@ public sealed class ImportPreviewEditor
     {
         ArgumentNullException.ThrowIfNull(detected);
         detected.ValidateExactCoverage();
-        ImmutableArray<ImportPreviewItem> items = AutomaticallyResolveDuplicates(
-            detected.Regions.Select(region => FromRegion(detected, region)).ToImmutableArray());
+        // Never silently exclude same-number chapters: their bodies may be different continuations.
+        ImmutableArray<ImportPreviewItem> items =
+            detected.Regions.Select(region => FromRegion(detected, region)).ToImmutableArray();
         return new(new ImportPreviewPlan(detected.Source, detected.Lines, items, 0));
     }
 
@@ -273,7 +291,8 @@ public sealed class ImportPreviewEditor
     public void SetIncluded(Guid itemId, bool included)
     {
         ImportPreviewItem item = RequireChapter(itemId);
-        Replace(itemId, item with { Included = included, AutomaticallyExcludedDuplicate = false });
+        Replace(itemId, item with { Included = included, AutomaticallyExcludedDuplicate = false,
+            ExplicitlyExcluded = !included });
     }
 
     public void Split(Guid itemId, int splitAtUtf16, int? newNumber, string newTitle)
@@ -387,20 +406,6 @@ public sealed class ImportPreviewEditor
         return new(StableId(detected.Source.RawSha256, "preview-item", region.Span, region.Kind), chapterId,
             region.Kind, region.Span, region.HeadingSpan, region.BodySpan, region.ChapterNumber, title,
             region.VolumeTitle, rawHeading, included, candidate?.Decision ?? CandidateDecision.Rejected, region.CandidateIndex);
-    }
-
-    private static ImmutableArray<ImportPreviewItem> AutomaticallyResolveDuplicates(ImmutableArray<ImportPreviewItem> items)
-    {
-        var seenNumbers = new HashSet<int>();
-        var resolved = items.ToBuilder();
-        for (int index = 0; index < resolved.Count; index++)
-        {
-            ImportPreviewItem item = resolved[index];
-            if (!item.IsChapter || !item.Included || item.Number is not > 0) continue;
-            if (seenNumbers.Add(item.Number.Value)) continue;
-            resolved[index] = item with { Included = false, AutomaticallyExcludedDuplicate = true };
-        }
-        return resolved.ToImmutable();
     }
 
     private static Guid StableId(string sourceHash, string purpose, SourceSpan span, PlannedRegionKind kind)
