@@ -57,7 +57,10 @@ public partial class MainWindow
             if (request is not null)
             {
                 try { await request; }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException)
+                {
+                    // Cancellation is the expected completion path while leaving the current workspace.
+                }
                 catch (OllamaRequestException ex) { ShowError(ex); }
             }
             if (completion is not null) await completion;

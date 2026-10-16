@@ -97,7 +97,10 @@ public sealed class TranslationQueue(TranslationService service)
                     {
                         await service.TranslateQueuedAsync(id, checkpoint.ModelOptions, cancellation.Token, checkpoint.Preset, checkpoint.RunId).ConfigureAwait(false);
                     }
-                    catch (QueueSegmentSkippedException) { }
+                    catch (QueueSegmentSkippedException)
+                    {
+                        // The service checkpointed the conflicting segment; continue with the next eligible segment.
+                    }
                     catch (OllamaRequestException) { /* Segment error is already checkpointed. Continue the chapter without an automatic retry. */ }
                     // Disk errors and unexpected exceptions stop the entire queue; continuing could lose results.
                 }

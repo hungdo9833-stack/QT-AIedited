@@ -137,7 +137,10 @@ public static class RawSourceReader
             string text = StrictCodePage(codePage).GetString(bytes);
             candidates.Add((name, text, PlausibilityScore(text)));
         }
-        catch (DecoderFallbackException) { }
+        catch (DecoderFallbackException)
+        {
+            // This encoding candidate is invalid; the caller compares the remaining lossless candidates.
+        }
     }
 
     private static double PlausibilityScore(string text)

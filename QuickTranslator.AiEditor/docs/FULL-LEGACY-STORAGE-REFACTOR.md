@@ -1,63 +1,85 @@
-# Full legacy storage removal
+# Full Legacy Storage Removal & Dependency Refactor
 
-## Baseline and dependency audit
+Trạng thái: **COMPLETED theo kiến trúc Project mới**, ngày 16/10/2026.
 
-Baseline: branch `codex/import-no-silent-loss-hotfix`, commit
-`2914b6cb966697e6907cc1ef203e9fc07198235f`, 666 Core tests and 93 WPF tests.
+## Quyết định kiến trúc
 
-The former runtime graph was:
+QT Studio đang phát triển nên chỉ hỗ trợ schema hiện hành. Project thử nghiệm cũ, legacy envelope, migration và compatibility adapter đã bị loại khỏi runtime. Ứng dụng không tự xóa dữ liệu cũ trên máy; khi người dùng chọn file sai schema, thao tác dừng với lỗi rõ ràng.
 
-```text
-WPF recovery dialogs / project switching guards
-    -> ProjectSession.RecoveryReport / RecoveryInfo
-    -> ProjectRepository transaction partial
-    -> ProjectTransactionJournal
-    -> journal.json + before/after copies + rollback/replay
-
-ProjectRepository / ChapterFileStore / resource and settings stores
-Import / title translation / queue / AI Book Intelligence
-Reader preferences / presets / library / Ollama profiles
-    -> RecoveryFiles
-    -> checksum validation + backup selection + rescue ZIP
-    -> AtomicLocalFile
-    -> primary + .bak
-```
-
-The direct dependencies were classified as follows:
-
-| Area | Former dependency |
-| --- | --- |
-| Project lifecycle | manifest envelope/checksum, recovery report and transaction inspection |
-| Chapter management | journal-backed add/delete/restore/rename/resegmentation and revision-guarded checkpoints |
-| TXT import | journal chunks, recovery blocking, rescue source archive |
-| AI translation | chapter revision hash and recovery-aware checkpoint write |
-| Multi-GPU queue | checksummed job envelope and journal preflight |
-| Characters/pronouns | checksummed character envelope and backup restoration |
-| Glossary/context/resources | recovery-aware bundle/settings stores and revision blocking |
-| Presets/settings | RecoveryFiles-backed optional stores |
-| Reader/editor | recovery state surfaced by WPF and preferences stores |
-| Export | publication backup creation and recovery UI dependencies |
-| AI Book Intelligence | checksummed recovery store and optimistic storage revision |
-
-## Target graph
+Luồng storage sau refactor:
 
 ```text
-Feature services / repositories
-    -> model validation and feature-level conflict checks
-    -> SimpleFileStorage
-    -> validate proposed bytes
-    -> sibling temporary file + flush + direct atomic replacement
-    -> one current primary file
+WPF / Editor / Reader
+  -> ProjectRepository / feature services / Translation Coordinator
+  -> SimpleFileStorage
+  -> JSON UTF-8 hiện hành
 ```
 
-Legacy envelopes are read only by the owning model codec. Their checksum fields are
-ignored when the payload is valid. The next successful save writes direct JSON. There
-is no second storage engine, backup fallback, journal, replay, rescue archive, or
-recovery state machine.
+`SimpleFileStorage` validate bytes trước khi ghi, tạo file tạm cùng thư mục, flush xuống đĩa và replace file đích. Ghi cùng đường dẫn được tuần tự hóa. Không có checksum bắt buộc, `.bak`, transaction journal, rollback/replay, rescue ZIP, recovery wizard, autosave history hay recovery checkpoint.
 
-## Milestones
+## Thành phần đã xóa
 
-1. Introduce and test the direct primary-file primitive.
-2. Move every production store and dependent module to it.
-3. Remove journal/recovery infrastructure, UI, and obsolete tests/APIs.
-4. Run full integration, dependency search, and disk-I/O acceptance checks.
+Production:
+
+- `Persistence/AtomicLocalFile.cs`
+- `Persistence/RecoveryFiles.cs`
+- `Projects/ProjectBackupService.cs`
+- `Projects/ProjectTransactionJournal.cs`
+- `Projects/ProjectRepository.Transactions.cs`
+- `Projects/ProjectRepository.Queue.cs`
+- `Projects/LegacyProjectImporter.cs`
+- `BookIntelligence/BookIntelligenceMigration.cs`
+- `Wpf/MainWindow.Recovery.cs`
+- `Wpf/MainWindow.StorageCleanup.cs`
+- `Wpf/ProjectStorageCleanupWindow.cs`
+
+Các test/fixture chỉ dành cho recovery, transaction và schema v1 cũng đã bị xóa. Chúng được thay bởi test kiến trúc hiện hành, fault injection và kiểm tra từ chối schema cũ; không xóa test chức năng đang còn hiệu lực.
+
+## Module đã refactor
+
+- Project lifecycle, manifest và chapter CRUD.
+- Safe Bulk Import, title translation và resegmentation.
+- Character Profiles, quan hệ/xưng hô, Glossary và Context qua một `ProjectResources` hiện hành.
+- Prompt, Reader, Traditional, Ollama profile, Library và workspace preferences.
+- Multi-Chapter/Multi-GPU queue và current progress persistence.
+- Batch Replace, source editing, Reader/Editor/Export.
+- AI Book Intelligence và review queue.
+
+Import vẫn giữ Verified Chapter Reconstruction và Source Coverage Audit. Queue vẫn lưu trạng thái hiện tại, pause/resume/restart. `TranslationChapterStore` kiểm tra source và dữ liệu được bảo vệ trong cùng critical section với lần ghi, để kết quả AI cũ không ghi đè UserDraft/Approval hoặc source mới.
+
+## Dependency trước và sau
+
+Trước:
+
+```text
+Feature modules
+  -> RecoveryFiles / checksummed envelopes / backup selection
+  -> ProjectTransactionJournal / rollback / recovery state
+  -> AtomicLocalFile + .bak + journal copies
+```
+
+Sau:
+
+```text
+Feature modules
+  -> validation và conflict guard nghiệp vụ
+  -> SimpleFileStorage
+  -> current JSON file
+```
+
+Hash còn lại chỉ phục vụ nhận diện source, candidate import, cache và chống kết quả AI đến muộn. Chúng không chọn backup, khóa file hoặc tạo storage revision history.
+
+## Audit dependency
+
+Tìm kiếm `src` và `tools` cho các tên sau trả về 0 kết quả: `RecoveryFiles`, `RecoveryInfo`, `RecoverySource`, `RecoveryFileCondition`, `ProjectTransactionJournal`, `ProjectRecoveryReport`, `ProjectRecoveryDecision`, `TransactionRollback`, `TransactionRecovery`, `RescueArchive`, `RestoreBackupAsync`, `CheckpointHistory`, `.bak`, `Backups`, `History/Transactions`.
+
+Không có no-op wrapper hoặc implementation giả để giữ API cũ. Các phase report cũ trong `docs` là tài liệu lịch sử, không phải dependency runtime.
+
+## Milestone commits
+
+- M1: `028c46827add3bca296fff40c8ad7e8f54569a20` — direct Simple Storage primitive.
+- M2: `7825ee15d3cd10afba6c539191c3495caa4234c8` — migrate feature modules và xóa runtime legacy.
+- M3: `479f27ed4c6d5443e1f7411549ca242891e58aa3` — tài liệu kiến trúc hiện hành và dọn workflow recovery.
+- M4: commit validation/acceptance cuối trên cùng branch; SHA được ghi trong báo cáo bàn giao sau commit.
+
+Kết quả test, benchmark và giới hạn chi tiết nằm trong [VALIDATION.vi.md](VALIDATION.vi.md).
