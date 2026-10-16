@@ -295,6 +295,37 @@ public sealed class ImportPreviewEditor
             ExplicitlyExcluded = !included });
     }
 
+    public void ConfirmBoundary(Guid itemId)
+    {
+        ImportPreviewItem item = RequireChapter(itemId);
+        Replace(itemId, item with
+        {
+            Decision = CandidateDecision.Accepted,
+            Included = item.Number is > 0,
+            ExplicitlyExcluded = false,
+            AutomaticallyExcludedDuplicate = false
+        });
+    }
+
+    public void RejectFalseBoundary(Guid itemId)
+    {
+        ImportPreviewItem item = RequireChapter(itemId);
+        int index = Current.Items.IndexOf(item);
+        if (index <= 0 || !Current.Items[index - 1].IsChapter)
+            throw new InvalidOperationException("Chỉ có thể loại ranh giới giả khi có chương vật lý liền trước để nhận lại nguyên văn.");
+        ImportPreviewItem previous = Current.Items[index - 1];
+        if (previous.Span.EndUtf16 != item.Span.StartUtf16)
+            throw new InvalidOperationException("Ranh giới giả không liền kề chương chứa nó.");
+
+        var reconstructed = previous with
+        {
+            Span = new(previous.Span.StartUtf16, item.Span.EndUtf16 - previous.Span.StartUtf16),
+            ContentSpan = new(previous.ContentSpan.StartUtf16, item.Span.EndUtf16 - previous.ContentSpan.StartUtf16),
+            Decision = CandidateDecision.NeedsReview
+        };
+        Mutate(Current.Items.RemoveAt(index).SetItem(index - 1, reconstructed));
+    }
+
     public void Split(Guid itemId, int splitAtUtf16, int? newNumber, string newTitle)
     {
         ImportPreviewItem item = RequireChapter(itemId);
