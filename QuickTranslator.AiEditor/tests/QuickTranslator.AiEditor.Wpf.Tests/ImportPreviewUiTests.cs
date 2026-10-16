@@ -196,7 +196,7 @@ public sealed class ImportPreviewUiTests
     });
 
     [Fact]
-    public Task Preview_displays_unordered_chapters_by_number_and_reports_automatic_duplicate_resolution() => StaHost.Run(async () =>
+    public Task Preview_blocks_unreviewed_same_number_chapters() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
         await fixture.CreateProjectAsync();
@@ -208,12 +208,10 @@ public sealed class ImportPreviewUiTests
         {
             await window.LoadSourceAsync(path, SourceTextEncoding.Auto);
 
-            Assert.Equal([1, 2, 3], window.CurrentPlan!.ImportableChapters.Select(chapter => chapter.Number));
-            Assert.Equal(1, window.CurrentPlan.AutomaticallySkippedDuplicateCount);
-            Assert.True(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.Equal([1, 1, 2, 3], window.CurrentPlan!.ImportableChapters.Select(chapter => chapter.Number));
+            Assert.Equal(0, window.CurrentPlan.AutomaticallySkippedDuplicateCount);
+            Assert.False(((Button)window.FindName("ConfirmButton")).IsEnabled);
             Assert.Contains("tự sắp xếp", ((TextBlock)window.FindName("PreviewStatusText")).Text,
-                StringComparison.CurrentCultureIgnoreCase);
-            Assert.Contains("bỏ qua 1 bản trùng", ((TextBlock)window.FindName("PreviewStatusText")).Text,
                 StringComparison.CurrentCultureIgnoreCase);
 
             var grid = (DataGrid)window.FindName("PreviewGrid");
