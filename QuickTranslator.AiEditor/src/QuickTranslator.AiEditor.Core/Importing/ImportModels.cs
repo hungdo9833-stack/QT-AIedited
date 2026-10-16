@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace QuickTranslator.AiEditor.Core.Importing;
 
-public enum SourceTextEncoding { Auto, Utf8, Gbk, Gb18030 }
+public enum SourceTextEncoding { Auto, Utf8, Gbk, Gb18030, Utf16Le, Utf16Be }
 public enum SourceNewLineStyle { None, Lf, CrLf, Cr, Mixed }
 public enum ChapterHeadingKind { Chapter, Volume, SpecialChapter }
 public enum CandidateDecision { Accepted, NeedsReview, Rejected }
@@ -95,7 +95,10 @@ public sealed record PlannedSourceRegion(
     int? CandidateIndex,
     int? ChapterNumber,
     string Title,
-    string? VolumeTitle);
+    string? VolumeTitle)
+{
+    public string? VolumeIdentity { get; init; }
+}
 
 public sealed class ImmutableImportPlan
 {

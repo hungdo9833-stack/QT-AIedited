@@ -197,7 +197,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             await VerifySourceArchiveAsync(archivePath, session.Manifest.ProjectId, plan, importId, cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or OperationCanceledException)
         {
             return BuildReport(importId, archivePath, plan, completedChunks, chunks.Count, outcomes,
                 "Đã ghi dữ liệu nhưng kiểm toán sau commit thất bại; không đánh dấu hoàn tất. " + ex.Message, true, false);
@@ -432,6 +432,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             Title = x.Title,
             VietnameseTitle = x.VietnameseTitle,
             VolumeTitle = x.VolumeTitle,
+            VolumeIdentity = x.VolumeIdentity,
             Included = x.Included
         }).ToList(),
         Coverage = plan.CoverageAudit.Entries.Select(x => new ArchiveCoverageEntry
@@ -519,6 +520,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         public string Title { get; set; } = "";
         public string? VietnameseTitle { get; set; }
         public string? VolumeTitle { get; set; }
+        public string? VolumeIdentity { get; set; }
         public bool Included { get; set; }
     }
 

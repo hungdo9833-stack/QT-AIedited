@@ -47,6 +47,7 @@ public sealed record ImportPreviewItem(
     public bool ExplicitlyExcluded { get; init; }
     public string? VietnameseTitle { get; init; }
     public SourceStructureKind StructureKind { get; init; } = SourceStructureKind.Unclassified;
+    public string? VolumeIdentity { get; init; }
 }
 
 public sealed class ImportPreviewPlan
@@ -154,7 +155,7 @@ public sealed class ImportPreviewPlan
         }
 
         foreach (IGrouping<(string Volume, int Number), ImportPreviewItem> duplicate in chapters.Where(x => x.Number > 0)
-                     .GroupBy(x => (x.VolumeTitle ?? "", x.Number!.Value)).Where(x => x.Count() > 1))
+                     .GroupBy(x => (x.VolumeIdentity ?? "", x.Number!.Value)).Where(x => x.Count() > 1))
         {
             ImportPreviewItem[] duplicateItems = duplicate.OrderBy(x => x.Span.StartUtf16).ToArray();
             int includedCount = duplicateItems.Count(x => x.Included);
@@ -176,7 +177,7 @@ public sealed class ImportPreviewPlan
         }
 
         foreach (IGrouping<string, ImportPreviewItem> volume in included.Where(x => x.Number > 0)
-                     .GroupBy(x => x.VolumeTitle ?? "", StringComparer.Ordinal))
+                     .GroupBy(x => x.VolumeIdentity ?? "", StringComparer.Ordinal))
         {
             ImportPreviewItem[] sourceOrdered = volume.OrderBy(x => x.Span.StartUtf16).ToArray();
             ImportPreviewItem[] ordered = sourceOrdered.OrderBy(x => x.Number).ThenBy(x => x.Span.StartUtf16).ToArray();
@@ -213,14 +214,14 @@ public sealed class ImportPreviewPlan
                 .Append('|').Append(item.Number?.ToString(CultureInfo.InvariantCulture) ?? "-")
                 .Append('|').Append(item.Included ? '1' : '0').Append('|').Append(item.ExplicitlyExcluded ? '1' : '0')
                 .Append('|').Append(item.Decision).Append('|').Append(item.StructureKind).Append('|').Append(item.Title).Append('|')
-                .Append(item.VietnameseTitle).Append('|').Append(item.VolumeTitle);
+                .Append(item.VietnameseTitle).Append('|').Append(item.VolumeTitle).Append('|').Append(item.VolumeIdentity);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
     }
 
     private IEnumerable<ImportPreviewItem> OrderForImport(IEnumerable<ImportPreviewItem> chapters)
     {
         Dictionary<string, int> volumeOrder = Items.Where(x => x.IsChapter)
-            .GroupBy(x => x.VolumeTitle ?? "", StringComparer.Ordinal)
+            .GroupBy(x => x.VolumeIdentity ?? "", StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Min(x => x.Span.StartUtf16), StringComparer.Ordinal);
         return chapters.OrderBy(x => volumeOrder[x.VolumeTitle ?? ""])
             .ThenBy(x => x.Number is > 0 ? 0 : 1)
@@ -354,7 +355,7 @@ public sealed class ImportPreviewEditor
             StableId(Current.Source.RawSha256, "chapter", rightSpan, item.Kind),
             PlannedRegionKind.Chapter, rightSpan, null, rightSpan, newNumber, newTitle?.Trim() ?? "",
             item.VolumeTitle, "", true, CandidateDecision.NeedsReview, null)
-        { StructureKind = SourceStructureKind.Chapter };
+        { StructureKind = SourceStructureKind.Chapter, VolumeIdentity = item.VolumeIdentity };
         Mutate(Current.Items.RemoveAt(index).InsertRange(index, ImmutableArray.Create(left, right)));
     }
 
@@ -449,7 +450,7 @@ public sealed class ImportPreviewEditor
         return new(StableId(detected.Source.RawSha256, "preview-item", region.Span, region.Kind), chapterId,
             region.Kind, region.Span, region.HeadingSpan, region.BodySpan, region.ChapterNumber, title,
             region.VolumeTitle, rawHeading, included, candidate?.Decision ?? CandidateDecision.Rejected, region.CandidateIndex)
-        { StructureKind = structureKind };
+        { StructureKind = structureKind, VolumeIdentity = region.VolumeIdentity };
     }
 
     private static ImmutableArray<ImportPreviewItem> ResolveExactDuplicates(RawSourceSnapshot source,

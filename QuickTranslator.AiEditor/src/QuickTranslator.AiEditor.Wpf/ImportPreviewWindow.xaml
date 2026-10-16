@@ -14,7 +14,7 @@
    <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
     <TextBox x:Name="SourcePathInput" IsReadOnly="True" ToolTip="Tệp nguồn không bị sửa hoặc di chuyển (hỗ trợ kéo-thả tệp .txt vào cửa sổ)"/>
     <Expander Grid.Column="1" Header="Bảng mã" ToolTip="QT Studio tự nhận diện UTF-8, GBK và GB18030. Chỉ mở khi bản xem trước có ký tự bất thường." Margin="6,0">
-     <ComboBox x:Name="EncodingInput" Width="190" SelectedIndex="0"><ComboBoxItem Tag="Auto">Tự động (khuyên dùng)</ComboBoxItem><ComboBoxItem Tag="Utf8">UTF-8</ComboBoxItem><ComboBoxItem Tag="Gbk">GBK · CP936</ComboBoxItem><ComboBoxItem Tag="Gb18030">GB18030</ComboBoxItem></ComboBox>
+      <ComboBox x:Name="EncodingInput" Width="190" SelectedIndex="0"><ComboBoxItem Tag="Auto">Tự động (khuyên dùng)</ComboBoxItem><ComboBoxItem Tag="Utf8">UTF-8</ComboBoxItem><ComboBoxItem Tag="Gbk">GBK · CP936</ComboBoxItem><ComboBoxItem Tag="Gb18030">GB18030</ComboBoxItem><ComboBoxItem Tag="Utf16Le">UTF-16 LE</ComboBoxItem><ComboBoxItem Tag="Utf16Be">UTF-16 BE</ComboBoxItem></ComboBox>
     </Expander>
     <Button Grid.Column="2" Content="Chọn TXT…" Click="OnBrowse"/>
     <Button Grid.Column="3" Content="Phân tích" Style="{StaticResource Primary}" Click="OnAnalyze"/>

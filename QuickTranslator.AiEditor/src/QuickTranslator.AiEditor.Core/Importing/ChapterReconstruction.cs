@@ -32,7 +32,7 @@ public static class ChapterReconstructionAnalyzer
         var evidence = ImmutableArray.CreateBuilder<ChapterDuplicateEvidence>();
         foreach (IGrouping<(string Volume, int Number), ImportPreviewItem> group in items
                      .Where(x => x.IsChapter && x.Number is > 0)
-                     .GroupBy(x => (x.VolumeTitle ?? "", x.Number!.Value)))
+                     .GroupBy(x => (x.VolumeIdentity ?? "", x.Number!.Value)))
         {
             ImportPreviewItem[] values = group.OrderBy(x => x.Span.StartUtf16).ToArray();
             if (values.Length < 2) continue;
@@ -50,8 +50,17 @@ public static class ChapterReconstructionAnalyzer
         string right = source.Text.Substring(second.ContentSpan.StartUtf16, second.ContentSpan.LengthUtf16);
         string leftHash = Hash(left), rightHash = Hash(right);
         if (string.Equals(left, right, StringComparison.Ordinal))
-            return Result(ChapterDuplicateKind.ExactDuplicate, left.Length, true,
-                "SHA-256 và nguyên văn UTF-16 giống hoàn toàn.");
+        {
+            string firstHeading = first.HeadingSpan is SourceSpan firstSpan
+                ? source.Text.Substring(firstSpan.StartUtf16, firstSpan.LengthUtf16) : "";
+            string secondHeading = second.HeadingSpan is SourceSpan secondSpan
+                ? source.Text.Substring(secondSpan.StartUtf16, secondSpan.LengthUtf16) : "";
+            bool sameHeading = string.Equals(firstHeading, secondHeading, StringComparison.Ordinal);
+            return Result(ChapterDuplicateKind.ExactDuplicate, left.Length, sameHeading,
+                sameHeading
+                    ? "SHA-256, heading và nguyên văn UTF-16 giống hoàn toàn."
+                    : "Thân chương giống tuyệt đối nhưng heading khác; cần chọn bản tiêu đề, không tự loại.");
+        }
 
         if (left.Length > 0 && right.Length > 0 &&
             (left.Contains(right, StringComparison.Ordinal) || right.Contains(left, StringComparison.Ordinal)))
@@ -81,20 +90,25 @@ public static class ChapterReconstructionAnalyzer
 
     private static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
 
-    // KMP prefix function: longest prefix of right that is also a suffix of left, O(n + m).
+    // KMP scan: longest prefix of right that is also a suffix of left, O(n + m), without a sentinel character.
     private static int LongestSuffixPrefix(string left, string right)
     {
         if (left.Length == 0 || right.Length == 0) return 0;
-        string combined = right + '\0' + left;
-        int[] prefix = new int[combined.Length];
-        for (int index = 1; index < combined.Length; index++)
+        int[] prefix = new int[right.Length];
+        for (int index = 1; index < right.Length; index++)
         {
             int matched = prefix[index - 1];
-            while (matched > 0 && combined[index] != combined[matched]) matched = prefix[matched - 1];
-            if (combined[index] == combined[matched]) matched++;
-            prefix[index] = Math.Min(matched, right.Length);
+            while (matched > 0 && right[index] != right[matched]) matched = prefix[matched - 1];
+            if (right[index] == right[matched]) matched++;
+            prefix[index] = matched;
         }
-        return prefix[^1];
+        int state = 0;
+        foreach (char value in left)
+        {
+            while (state > 0 && (state == right.Length || value != right[state])) state = prefix[state - 1];
+            if (state < right.Length && value == right[state]) state++;
+        }
+        return state;
     }
 
     private static bool HasContinuationMarker(string title) =>

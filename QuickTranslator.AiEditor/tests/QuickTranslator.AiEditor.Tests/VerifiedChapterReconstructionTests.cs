@@ -74,6 +74,19 @@ public sealed class VerifiedChapterReconstructionTests
     }
 
     [Fact]
+    public void Same_body_with_different_heading_is_not_auto_excluded()
+    {
+        const string source = "第2章 标题甲\n相同正文。\n第2章 标题乙\n相同正文。\n";
+        ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source)).Current;
+
+        ChapterDuplicateEvidence duplicate = Assert.Single(plan.DuplicateEvidence);
+        Assert.Equal(ChapterDuplicateKind.ExactDuplicate, duplicate.Kind);
+        Assert.False(duplicate.IsAutomaticallyVerifiable);
+        Assert.Equal(2, plan.ImportableChapters.Count());
+        Assert.True(plan.HasBlockingIssues);
+    }
+
+    [Fact]
     public void Partial_overlap_is_detected_without_mutating_either_source_span()
     {
         const string source = "第8章 前\n段落一。\n段落二。\n段落三。\n第8章 后\n段落三。\n段落四。";
@@ -90,12 +103,12 @@ public sealed class VerifiedChapterReconstructionTests
     {
         string first = string.Concat(Enumerable.Range(1, 36).Select(i => $"第{i}章 一-{i}\n甲{i}。\n"));
         string second = string.Concat(Enumerable.Range(1, 287).Select(i => $"第{i}章 二-{i}\n乙{i}。\n"));
-        string source = "第一部 上部\n" + first + "第二部 下部\n" + second;
+        string source = "第一部 正文\n" + first + "第二部 正文\n" + second;
         ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source)).Current;
 
         Assert.Equal(323, plan.Chapters.Count());
         Assert.Empty(plan.DuplicateEvidence);
-        Assert.Equal(323, plan.Chapters.Select(x => (x.VolumeTitle, x.Number)).Distinct().Count());
+        Assert.Equal(323, plan.Chapters.Select(x => (x.VolumeIdentity, x.Number)).Distinct().Count());
         Assert.Equal(source, plan.ReconstructSource());
     }
 

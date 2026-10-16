@@ -1,6 +1,8 @@
 # Import without silent text loss — audit & completion plan
 
-Status: preliminary fail-closed hotfix. **Not a complete end-to-end repair. Do not merge without running tests.**
+Status: VCR + SCA implemented on `codex/import-no-silent-loss-hotfix`. Review the limitations and rerun the full Windows test suite before merge.
+
+Implementation details and verification evidence: [VERIFIED-CHAPTER-RECONSTRUCTION.md](VERIFIED-CHAPTER-RECONSTRUCTION.md).
 
 ## Confirmed sources of loss
 
