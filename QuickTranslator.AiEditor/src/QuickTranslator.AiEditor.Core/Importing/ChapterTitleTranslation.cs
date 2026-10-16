@@ -263,17 +263,17 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
         {
             // Some models occasionally add prose or truncate a large JSON array. Retry only
             // this failed batch as small groups; completed batches remain checkpointed.
-            int recoverySize = Math.Min(10, Math.Max(1, (titles.Count + 1) / 2));
-            var recovered = new List<ChapterTitleBackendOutput>(titles.Count);
+            int retrySize = Math.Min(10, Math.Max(1, (titles.Count + 1) / 2));
+            var retried = new List<ChapterTitleBackendOutput>(titles.Count);
             try
             {
-                for (int start = 0; start < titles.Count; start += recoverySize)
+                for (int start = 0; start < titles.Count; start += retrySize)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    ChapterTitleBackendInput[] group = titles.Skip(start).Take(recoverySize).ToArray();
-                    recovered.AddRange(await TranslateOnceAsync(group, true, cancellationToken).ConfigureAwait(false));
+                    ChapterTitleBackendInput[] group = titles.Skip(start).Take(retrySize).ToArray();
+                    retried.AddRange(await TranslateOnceAsync(group, true, cancellationToken).ConfigureAwait(false));
                 }
-                return recovered;
+                return retried;
             }
             catch (InvalidDataException retryError)
             {
@@ -285,7 +285,7 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
     }
 
     private async Task<IReadOnlyList<ChapterTitleBackendOutput>> TranslateOnceAsync(
-        IReadOnlyList<ChapterTitleBackendInput> titles, bool recovery, CancellationToken cancellationToken)
+        IReadOnlyList<ChapterTitleBackendInput> titles, bool isRetry, CancellationToken cancellationToken)
     {
         string terms = glossary is null || glossary.Count == 0 ? "(không có)" : string.Join("\n",
             glossary.Take(200).Select(term => $"- {term.Chinese} => {term.Vietnamese}"));
@@ -296,7 +296,7 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
         string prompt = "Bạn dịch tên chương tiểu thuyết Trung-Việt. Chỉ dịch phần tên, không thêm số chương. " +
             "Giữ nguyên chính xác mọi id. Trả duy nhất JSON array, mỗi phần tử có id và translated_title; " +
             "không giải thích, không Markdown, không bỏ mục.\n" +
-            (recovery ? "Đây là lần thử lại batch nhỏ: bắt buộc đóng đầy đủ dấu ngoặc JSON.\n" : "") +
+            (isRetry ? "Đây là lần thử lại batch nhỏ: bắt buộc đóng đầy đủ dấu ngoặc JSON.\n" : "") +
             "Thuật ngữ đã xác nhận:\n" + terms + "\nDữ liệu:\n" + input;
         OllamaCompletion completion = await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<ChapterTitleBackendOutput> output = Parse(completion.Text);
@@ -520,13 +520,12 @@ public sealed class ChapterTitleTranslationDraftStore(string path)
 
     public async Task<ChapterTitleTranslationDraft?> LoadAsync(CancellationToken cancellationToken = default)
     {
-        RecoveryRead<ChapterTitleTranslationDraft?> loaded = await RecoveryFiles.ReadAsync(Path, Decode,
+        return await SimpleFileStorage.ReadOptionalAsync(Path, Decode,
             () => null, cancellationToken).ConfigureAwait(false);
-        return loaded.Value;
     }
 
-    private async Task SaveCoreAsync(byte[] bytes, CancellationToken cancellationToken) =>
-        _ = await RecoveryFiles.WriteAsync(Path, bytes, Decode, cancellationToken).ConfigureAwait(false);
+    private Task SaveCoreAsync(byte[] bytes, CancellationToken cancellationToken) =>
+        SimpleFileStorage.WriteAsync(Path, bytes, Decode, cancellationToken);
 
     private static ChapterTitleTranslationDraft? Decode(byte[] bytes)
     {

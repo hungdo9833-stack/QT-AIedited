@@ -40,6 +40,6 @@ public static class ChapterTranslationComposer
         var composed = Compose(chapter);
         if (!composed.IsComplete && !allowIncomplete)
             throw new InvalidOperationException("Còn đoạn lỗi/chưa có bản dịch hợp lệ. Chỉ xuất bản nháp nếu bạn xác nhận rõ.");
-        await AtomicLocalFile.WriteAsync(path, Encoding.UTF8.GetBytes(composed.Text), cancellationToken).ConfigureAwait(false);
+        await SimpleFileStorage.WriteBytesAsync(path, Encoding.UTF8.GetBytes(composed.Text), cancellationToken).ConfigureAwait(false);
     }
 }

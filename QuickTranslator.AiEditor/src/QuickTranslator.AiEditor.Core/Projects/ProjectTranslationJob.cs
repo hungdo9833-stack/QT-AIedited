@@ -45,13 +45,13 @@ public sealed class ProjectTranslationJob
     public void Validate()
     {
         if (SchemaVersion != 1 || JobId == Guid.Empty || ProjectId == Guid.Empty || Revision < 0 ||
-            !Enum.IsDefined(Status) || ModelOptions is null || PromptPreset is null || ProjectResourceRevision < 0 ||
+            !Enum.IsDefined(Status) || ModelOptions is null || Backend is null || PromptPreset is null || ProjectResourceRevision < 0 ||
             CreatedAt == default || UpdatedAt == default || Items is null || Items.Count == 0 || Items.Count > 10_000 ||
             Items.Any(item => item is null) || Items.Select(item => item.ChapterId).Distinct().Count() != Items.Count)
             throw new InvalidDataException("Project translation job không hợp lệ.");
         ModelOptions.Validate();
-        Backend?.Validate();
-        if (Backend is not null && !string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
+        Backend.Validate();
+        if (!string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
             throw new InvalidDataException("Model trong backend snapshot không khớp Queue Plan.");
         PromptPreset.Validate();
         if (Workers is null || Workers.Count > 2 || Workers.Any(worker => worker is null) ||
@@ -75,7 +75,6 @@ public sealed class ProjectTranslationItem
     public ProjectTranslationItemStatus Status { get; set; } = ProjectTranslationItemStatus.Pending;
     public string SourceFingerprint { get; set; } = "";
     public string ProtectedFingerprint { get; set; } = "";
-    public string EnqueuedDocumentFingerprint { get; set; } = "";
     public SegmenterOptions? AppliedSegmentationOptions { get; set; }
     public DateTimeOffset? PreflightCompletedAt { get; set; }
     public string? PreflightWarning { get; set; }
@@ -96,7 +95,7 @@ public sealed class ProjectTranslationItem
     {
         if (ChapterId == Guid.Empty || Number <= 0 || Order <= 0 || string.IsNullOrWhiteSpace(Title) ||
             !Enum.IsDefined(Status) || SourceFingerprint.Length != 64 || ProtectedFingerprint.Length != 64 ||
-            EnqueuedDocumentFingerprint.Length != 64 || PreflightWarning?.Length > 4000 ||
+            PreflightWarning?.Length > 4000 ||
             !Enum.IsDefined(Disposition) || EligibilityDiagnostics is null || EligibilityDiagnostics.Count > 8 ||
             TotalSegments < 0 || CompletedSegments < 0 ||
             CompletedSegments > TotalSegments || ErrorSegments < 0 || ErrorSegments > TotalSegments || SourceHanCharacters < 0)

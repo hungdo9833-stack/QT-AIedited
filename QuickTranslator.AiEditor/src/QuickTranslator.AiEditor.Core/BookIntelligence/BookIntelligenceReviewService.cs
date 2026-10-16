@@ -221,7 +221,7 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
             throw new InvalidOperationException("Characters đã đổi sau lần gộp; mở hồ sơ để hoàn tác thủ công, tránh xóa nhầm chỉnh sửa mới.");
         CharacterProfile target = resources.Characters.Profiles.Single(x => x.Id == merge.TargetCharacterId);
         if (merge.AddedAliases.Any(a => !target.Aliases.Contains(a, StringComparer.Ordinal)))
-            throw new InvalidOperationException("Bí danh đã đổi sau lần gộp; không thể rollback tự động an toàn.");
+            throw new InvalidOperationException("Bí danh đã đổi sau lần gộp; không thể tự hoàn tác an toàn.");
         target.Aliases.RemoveAll(merge.AddedAliases.Contains);
         resources = await _resources.SaveAsync(resources, cancellationToken).ConfigureAwait(false);
         merge.UndoneAt = DateTimeOffset.UtcNow;

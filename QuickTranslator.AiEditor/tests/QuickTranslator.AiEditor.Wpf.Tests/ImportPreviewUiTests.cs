@@ -136,8 +136,6 @@ public sealed class ImportPreviewUiTests
         Assert.Equal(50, report.ImportedCount);
         ProjectSession reopened = (await new ProjectRepository().OpenAsync(fixture.Project.ManifestPath)).Session;
         Assert.Equal(50, reopened.Manifest.ChapterCount);
-        Assert.Empty(reopened.RecoveryReport.Orphans);
-        Assert.False(reopened.RecoveryReport.RequiresDecision);
         Assert.Equal(source, plan.ReconstructSource());
     });
 
@@ -179,8 +177,6 @@ public sealed class ImportPreviewUiTests
             Assert.Equal(300, reopened.Manifest.ChapterCount);
             Assert.Equal("Chương cũ 1", (await fixture.Repository.LoadChapterAsync(reopened,
                 reopened.Manifest.Chapters.Single(chapter => chapter.Number == 1 && chapter.DeletedAt is null).ChapterId)).Chapter.Title);
-            Assert.Empty(reopened.RecoveryReport.Orphans);
-            Assert.False(reopened.RecoveryReport.RequiresDecision);
             Assert.Equal(source, window.CurrentPlan.ReconstructSource());
         }
         finally { window.Close(); }

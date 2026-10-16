@@ -25,7 +25,6 @@ public partial class MainWindow
             if (_service is not null)
                 _presetManager.ImportSnapshot(_service.GetSnapshot().SelectedPreset);
             RefreshPresetEditor(); UpdateButtons();
-            if (_presetStore.RecoveredFromBackup) SetStatus("Đã phục hồi thư viện preset từ bản dự phòng.");
         }
         catch (Exception ex) { if (ReferenceEquals(store, _presetStore)) { ShowError(ex); UpdateButtons(); } }
     }

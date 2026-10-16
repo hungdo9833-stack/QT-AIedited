@@ -56,7 +56,6 @@ public sealed partial class TranslationService
         IGlossaryProvider? glossary = null, IContextMemory? memory = null, TimeProvider? clock = null)
     {
         _chapter = DocumentJson.Clone(chapter);
-        DocumentJson.Migrate(_chapter);
         DocumentJson.Validate(_chapter);
         _client = client;
         _store = store;
@@ -300,7 +299,7 @@ public sealed partial class TranslationService
                     segment.LastError = ex is OperationCanceledException ? "Đã hủy lần dịch; bản nháp vẫn được giữ." : ex.Message;
                     Touch();
                 }
-                // Do not silently retry a failed disk operation. The UI offers an explicit save/recovery path.
+                // Do not silently retry a failed disk operation. The UI offers an explicit save action.
                 if (runId is null && ex is not IOException and not UnauthorizedAccessException)
                 {
                     try { await SaveAsync(CancellationToken.None).ConfigureAwait(false); }

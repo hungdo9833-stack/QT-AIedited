@@ -30,7 +30,7 @@ public sealed partial class TranslationService
                 _batchCommitInProgress = true;
                 ownsCommit = true;
             }
-            // Persist the complete candidate through the registered Project transaction before
+            // Persist the complete candidate through the registered Project store before
             // publishing it to the live editor. A failed/cancelled write leaves live state intact.
             await _store.SaveAsync(candidate, cancellationToken).ConfigureAwait(false);
             lock (_sync)

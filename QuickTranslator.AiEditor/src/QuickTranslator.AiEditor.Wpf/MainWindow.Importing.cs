@@ -35,8 +35,7 @@ public partial class MainWindow
                             chapter.State == BulkImportChapterState.Imported)
                         .OrderBy(chapter => chapter.Number).Select(chapter => chapter.ChapterId).ToArray();
                     RefreshProjectChapterList();
-                    if (_projectSession is { RecoveryReport.RequiresDecision: false } &&
-                        _projectSession.Manifest.CurrentChapterId is Guid current)
+                    if (_projectSession?.Manifest.CurrentChapterId is Guid current)
                         await LoadProjectChapterCoreAsync(current);
                     ShowBulkImportReport(report);
                     if (report.Completed || !report.CanResume ||
@@ -44,8 +43,6 @@ public partial class MainWindow
                             "Tiếp tục bulk import", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                         break;
                 }
-                if (!report.Completed && !report.CanResume && _projectSession?.RecoveryReport.RequiresDecision == true)
-                    await ReviewProjectRecoveryAsync(_projectSession);
             });
             if (preview.ImportAndTranslate && importedChapterIds.Length > 0)
                 await OpenProjectTranslationQueueAsync(importedChapterIds);
@@ -145,7 +142,7 @@ public partial class MainWindow
     private sealed class BulkImportProgressWindow : Window
     {
         private readonly ProgressBar _bar = new() { Minimum = 0, Maximum = 1, Height = 12, Margin = new Thickness(4, 14, 4, 8) };
-        private readonly TextBlock _status = new() { Text = "Đang chuẩn bị source rescue…", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        private readonly TextBlock _status = new() { Text = "Đang kiểm tra nguồn và kế hoạch nhập…", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
         private readonly Button _cancel = new() { Content = "Hủy an toàn", Margin = new Thickness(4), Padding = new Thickness(12, 7, 12, 7) };
         private readonly CancellationTokenSource _cancellation = new();
         private bool _completed;
@@ -162,7 +159,7 @@ public partial class MainWindow
             subtitle.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
             panel.Children.Add(subtitle);
             panel.Children.Add(_bar); panel.Children.Add(_status); panel.Children.Add(_cancel); Content = panel;
-            _cancel.Click += (_, _) => { _cancel.IsEnabled = false; _status.Text = "Đang hủy an toàn và chờ rollback chunk hiện tại…"; _cancellation.Cancel(); };
+            _cancel.Click += (_, _) => { _cancel.IsEnabled = false; _status.Text = "Đang dừng sau thao tác ghi hiện tại…"; _cancellation.Cancel(); };
             Closing += OnClosing;
         }
 

@@ -109,7 +109,6 @@ public sealed class ProjectTranslationCoordinator
                 Title = entries[index].VietnameseTitle,
                 SourceFingerprint = ProjectTranslationFingerprints.Source(chapter),
                 ProtectedFingerprint = ProjectTranslationFingerprints.Protected(chapter),
-                EnqueuedDocumentFingerprint = ProjectTranslationFingerprints.Document(chapter),
                 TotalSegments = chapter.Segments.Count,
                 CompletedSegments = CompletedSegments(chapter),
                 ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error),
@@ -769,9 +768,8 @@ public sealed class ProjectTranslationCoordinator
             return;
         }
 
-        RevisionGuardedChapterStore guardedStore = await RevisionGuardedChapterStore.CreateAsync(
-            _session, _repository, chapterId, cancellationToken).ConfigureAwait(false);
-        var service = new TranslationService(chapter, workerDefinition?.Client ?? _client, guardedStore);
+        var service = new TranslationService(chapter, workerDefinition?.Client ?? _client,
+            new TranslationChapterStore(_session, _repository, chapter));
         service.UseProjectResources(environment.Resources);
         service.UseBookKnowledgeContext(environment.BookKnowledgeContext);
         var queue = new TranslationQueue(service);
@@ -900,15 +898,12 @@ public sealed class ProjectTranslationCoordinator
         if (ProjectTranslationFingerprints.Source(chapter) != item.SourceFingerprint)
             return "Nguyên văn hoặc ranh giới segment đã đổi sau khi enqueue.";
         string protectedFingerprint = ProjectTranslationFingerprints.Protected(chapter);
-        string documentFingerprint = ProjectTranslationFingerprints.Document(chapter);
-        if (protectedFingerprint != item.ProtectedFingerprint ||
-            documentFingerprint != item.EnqueuedDocumentFingerprint)
+        if (protectedFingerprint != item.ProtectedFingerprint)
         {
             await PersistAsync(job =>
             {
                 ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapter.Id);
                 target.ProtectedFingerprint = protectedFingerprint;
-                target.EnqueuedDocumentFingerprint = documentFingerprint;
                 target.TotalSegments = chapter.Segments.Count;
                 target.CompletedSegments = CompletedSegments(chapter);
                 target.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
@@ -930,11 +925,6 @@ public sealed class ProjectTranslationCoordinator
                 expected = ProjectTranslationJobStore.Clone(_job
                     ?? throw new InvalidOperationException("Translation job chưa được lưu."));
             }
-            // Worker preflight may start a structural chapter/manifest transaction. Flush only
-            // summaries deferred by the previous chapter so the transaction's disk guard compares
-            // against the same authoritative manifest state.
-            await _repository.FlushDeferredManifestAsync(_session, "BeforeWorkerSegmentationPreflight",
-                cancellationToken).ConfigureAwait(false);
             WorkerPreflightResult result = await _repository.PreflightWorkerChapterAsync(_session,
                 expected, definition.WorkerId, chapterId, definition.SegmentationOptions, cancellationToken)
                 .ConfigureAwait(false);
@@ -1209,8 +1199,6 @@ public sealed class ProjectTranslationCoordinator
                     _job = saved;
                     _progressChangesSinceSave = 0;
                 }
-                await _repository.FlushDeferredManifestAsync(_session, "ProjectTranslationProgress",
-                    cancellationToken).ConfigureAwait(false);
             }
             else lock (_sync) _job = proposed;
         }
@@ -1220,8 +1208,6 @@ public sealed class ProjectTranslationCoordinator
 
     private async Task FinishAsync(ProjectTranslationJobStatus status, string? error)
     {
-        await _repository.FlushDeferredManifestAsync(_session, "ProjectTranslationCheckpoint",
-            CancellationToken.None).ConfigureAwait(false);
         await PersistAsync(job =>
         {
             job.Status = status;
@@ -1240,7 +1226,6 @@ public sealed class ProjectTranslationCoordinator
         item.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
         item.SourceFingerprint = ProjectTranslationFingerprints.Source(chapter);
         item.ProtectedFingerprint = ProjectTranslationFingerprints.Protected(chapter);
-        item.EnqueuedDocumentFingerprint = ProjectTranslationFingerprints.Document(chapter);
         item.Error = error;
         item.Disposition = status switch
         {
@@ -1316,7 +1301,7 @@ public sealed class ProjectTranslationCoordinator
                 "Kiểm tra chi tiết rồi dùng Dịch lại lỗi.";
         if (diagnostic.InProgressAttemptCount > 0)
             return $"Còn {unresolved:N0} đoạn chưa có bản dịch hợp lệ nhưng có " +
-                $"{diagnostic.InProgressAttemptCount:N0} attempt chưa kết thúc; cần kiểm tra recovery trước khi Retry.";
+                $"{diagnostic.InProgressAttemptCount:N0} attempt chưa kết thúc; cần kiểm tra trạng thái trước khi Retry.";
         return $"Còn {unresolved:N0}/{diagnostic.SegmentCount:N0} đoạn chưa có bản dịch hợp lệ " +
             "nhưng không có đoạn đủ điều kiện. Xem chẩn đoán eligibility trước khi Retry.";
     }
@@ -1331,7 +1316,11 @@ public sealed class ProjectTranslationCoordinator
         _ => error.Message
     };
 
-    private static bool ContainsConflict(Exception exception) => exception is ProjectTranslationConflictException ||
+    private static bool ContainsConflict(Exception exception) =>
+        exception is InvalidOperationException &&
+        (exception.Message.Contains("đã đổi", StringComparison.OrdinalIgnoreCase) ||
+         exception.Message.Contains("được sửa", StringComparison.OrdinalIgnoreCase) ||
+         exception.Message.Contains("không còn", StringComparison.OrdinalIgnoreCase)) ||
         exception.InnerException is not null && ContainsConflict(exception.InnerException) ||
         exception is AggregateException aggregate && aggregate.InnerExceptions.Any(ContainsConflict);
 
@@ -1378,8 +1367,6 @@ internal static class ProjectTranslationFingerprints
             draft.Id, draft.RecordedAt, draft.Revision, draft.Text, draft.SourceAttemptId, draft.Reason
         })
     }));
-
-    public static string Document(ChapterDocument chapter) => Hash(chapter);
 
     private static string Hash<T>(T value) => Convert.ToHexString(SHA256.HashData(
         Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, DocumentJson.Options))));

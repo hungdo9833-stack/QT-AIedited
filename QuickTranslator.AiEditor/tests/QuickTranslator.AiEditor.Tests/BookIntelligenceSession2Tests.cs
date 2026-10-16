@@ -16,20 +16,12 @@ public sealed class BookIntelligenceSession2Tests
     }
 
     [Fact]
-    public void Session1_schema_migrates_without_losing_pending_suggestions_or_evidence()
+    public void Obsolete_book_intelligence_schema_is_rejected()
     {
         Guid project = Guid.NewGuid();
         BookIntelligenceState state = State(project, "林朝说道：你好。");
-        state.SchemaVersion = 1; state.AnalyzerVersion = "1";
-        CorpusEvidence evidence = state.Evidence.Single();
-        state.Characters.Add(new IntelligenceCharacterSuggestion { ChineseName = "林朝", VietnameseName = "Lâm Triều",
-            EvidenceIds = [evidence.Id], Status = IntelligenceReviewStatus.Pending });
-        BookIntelligenceState migrated = BookIntelligenceMigration.ToCurrent(state);
-        migrated.Validate();
-        Assert.Equal(2, migrated.SchemaVersion);
-        Assert.Single(migrated.Characters);
-        Assert.Single(migrated.CandidateIdentities);
-        Assert.Equal(EvidencePriority.High, evidence.Priority);
+        state.SchemaVersion = 1;
+        Assert.Throws<InvalidDataException>(state.Validate);
     }
 
     [Fact]

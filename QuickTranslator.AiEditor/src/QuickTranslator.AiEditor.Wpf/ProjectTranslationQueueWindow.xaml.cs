@@ -100,7 +100,7 @@ public partial class ProjectTranslationQueueWindow : Window
         bool planMode = _plan?.Status == ProjectTranslationJobStatus.Draft && _coordinator.CurrentJob is null;
         HeadingText.Text = planMode ? "Chuẩn bị dịch" : "Tiến độ dịch";
         BackendText.Text = job.Workers.Count > 0 ? string.Join(" + ", job.Workers.Select(worker => worker.Name)) :
-            job.Backend is null ? "Local · legacy job" : $"{job.Backend.Kind} · {job.Backend.ProfileName}";
+            job.Backend is null ? "Local · cấu hình mặc định" : $"{job.Backend.Kind} · {job.Backend.ProfileName}";
         ModelText.Text = job.Workers.Count > 0 ? string.Join(" / ", job.Workers.Select(worker => worker.ModelOptions.Model).Distinct()) : job.ModelOptions.Model;
         PromptText.Text = $"{job.PromptPreset.Name} · revision {job.PromptPreset.Revision}";
         ResourceText.Text = job.ProjectResourceRevision.ToString();
@@ -143,7 +143,7 @@ public partial class ProjectTranslationQueueWindow : Window
             CurrentText.Text = $"Tốc độ {metrics.HanCharactersPerMinute:N0} chữ Hán/phút · {eta} · " +
                 $"chi phí ước tính {metrics.EstimatedCost:N2}";
         }
-        string? recoveryHint = needsReview > 0 || progress.Status == ProjectTranslationJobStatus.Interrupted
+        string? resumeHint = needsReview > 0 || progress.Status == ProjectTranslationJobStatus.Interrupted
             ? needsReview > 0
                 ? "Một số chương đã đổi nguyên văn hoặc ranh giới. Hãy kiểm tra trước khi xử lý lại."
                 : "Bấm “Tiếp tục dịch”; cấu hình hợp lệ hiện tại sẽ được áp dụng tự động."
@@ -152,7 +152,7 @@ public partial class ProjectTranslationQueueWindow : Window
             ? $"Đang chuẩn bị dịch {job.Items.Count:N0} chương bằng {Math.Max(1, job.Workers.Count)} GPU."
             : string.Join(" ", new[]
             {
-                progress.Error ?? "Checkpoint được lưu sau từng segment; đóng/mở lại không tự Resume.", recoveryHint
+                progress.Error ?? "Tiến độ được lưu sau từng segment; đóng/mở lại không tự Resume.", resumeHint
             }.Where(value => !string.IsNullOrWhiteSpace(value)));
         StartButton.IsEnabled = !_commandBusy && planMode;
         PauseButton.IsEnabled = !_commandBusy && _coordinator.IsRunning;
@@ -456,7 +456,7 @@ public partial class ProjectTranslationQueueWindow : Window
     {
         public WorkerCard(ProjectTranslationWorkerProgress progress, ProjectTranslationWorkerState? definition) : this(
             progress.WorkerId, progress.Name, progress.Status,
-            definition is null ? "Legacy worker" : $"{definition.Backend.Kind} · {definition.Backend.ProfileName}",
+            definition is null ? "Worker mặc định" : $"{definition.Backend.Kind} · {definition.Backend.ProfileName}",
             definition?.ModelOptions.Model ?? "—", definition?.ModelOptions.ContextSize ?? 0,
             definition?.ModelOptions.MaximumOutputTokens ?? 0,
             definition is null ? "—" : $"{definition.SegmentationOptions.MinimumHanCharacters}/" +

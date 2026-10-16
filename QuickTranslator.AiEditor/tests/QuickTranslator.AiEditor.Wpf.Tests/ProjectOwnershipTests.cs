@@ -60,10 +60,11 @@ public sealed class ProjectOwnershipTests
     {
         var characters = new CharacterProject { Id = fixture.Project.Manifest.ProjectId, Name = "Hồ sơ mới",
             Profiles = [new() { ChineseName = "王秀兰", VietnameseName = "Vương Tú Lan mới", NormalizationEnabled = false }] };
-        await new CharacterProjectStore(System.IO.Path.Combine(fixture.Root, "unused"))
-            .SaveToAsync(characters, fixture.Project.Resolve(fixture.Project.Manifest.Files.CharacterProfiles));
-        var settings = new ProjectSettingsStore(fixture.Project);
-        await settings.SaveGlossaryAsync(new() { Terms = [new("新词", "Ánh xạ mới")] });
-        await settings.SaveContextNotesAsync("Ngữ cảnh mới");
+        var store = new ProjectResourceStore(fixture.Project);
+        ProjectResources resources = await store.LoadAsync();
+        resources.Characters = characters;
+        resources.Terms.Add(new("新词", "Ánh xạ mới"));
+        resources.Context = "Ngữ cảnh mới";
+        await store.SaveAsync(resources);
     }
 }

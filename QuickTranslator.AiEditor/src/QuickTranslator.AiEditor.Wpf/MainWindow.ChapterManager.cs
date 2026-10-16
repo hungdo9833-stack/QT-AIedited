@@ -102,7 +102,7 @@ public partial class MainWindow
                 $"• Có segment được bảo vệ: {preview.ProtectedChapters:N0}\n" +
                 $"• Cảnh báo: {preview.WarningCount:N0}" +
                 (warnings.Length == 0 ? "" : "\n\n" + warnings) +
-                "\n\nChỉ vùng chưa dịch được chia lại; nháp, approvals và lịch sử giữ nguyên theo anchor. Áp dụng transaction cho toàn bộ lựa chọn?";
+                "\n\nChỉ vùng chưa dịch được chia lại; nháp, approvals và lịch sử giữ nguyên theo anchor. Áp dụng cho toàn bộ lựa chọn?";
             Window owner = _chapterManagerWindow is null ? this : _chapterManagerWindow;
             if (MessageBox.Show(owner, message, "Preview chia lại đoạn", MessageBoxButton.YesNo,
                     preview.ProtectedChapters > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information,

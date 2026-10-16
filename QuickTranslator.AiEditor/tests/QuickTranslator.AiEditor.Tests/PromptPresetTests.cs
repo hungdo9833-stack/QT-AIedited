@@ -1,3 +1,4 @@
+using System.Text.Json;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Translation;
@@ -82,7 +83,7 @@ public sealed class PromptPresetTests
     }
 
     [Fact]
-    public async Task PresetStore_SavesReopens_AndRecoversBackupWithoutDestroyingIt()
+    public async Task PresetStore_SavesReopensAsDirectJsonWithoutBackup()
     {
         string directory = Path.Combine(Path.GetTempPath(), "qtaie-presets-" + Guid.NewGuid().ToString("N"));
         string path = Path.Combine(directory, "presets.qtaip.json");
@@ -95,13 +96,9 @@ public sealed class PromptPresetTests
             manager.Update(preset.Id, "Thử mới", "Dịch mới: {{source_text}}");
             await store.SaveAsync(manager.Snapshot());
             Assert.Equal("Thử mới", new PromptPresetManager(await store.LoadAsync()).Selected.Name);
-            byte[] backup = await File.ReadAllBytesAsync(path + ".bak");
-            await File.WriteAllTextAsync(path, "synthetic damage");
-            var recovered = await store.LoadAsync();
-            Assert.True(store.RecoveredFromBackup);
-            Assert.Equal("Thử", new PromptPresetManager(recovered).Selected.Name);
-            await store.SaveAsync(recovered);
-            Assert.Equal(backup, await File.ReadAllBytesAsync(path + ".bak"));
+            Assert.False(File.Exists(path + ".bak"));
+            using JsonDocument json = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+            Assert.Equal(JsonValueKind.Object, json.RootElement.ValueKind);
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }

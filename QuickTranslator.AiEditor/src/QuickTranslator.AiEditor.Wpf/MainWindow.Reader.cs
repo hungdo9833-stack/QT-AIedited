@@ -37,13 +37,9 @@ public partial class MainWindow
         {
             var preferences = await store.LoadAsync();
             if (!ReferenceEquals(store, _readerStore)) return;
-            await ConfirmRecoveredSourcesAsync(store.LastRecovery is null ? [] : [store.LastRecovery],
-                store.RecoveredFromBackup ? [() => store.RestoreBackupAsync()] : [],
-                System.IO.Path.Combine(System.IO.Path.GetDirectoryName(store.LastRecovery?.PrimaryPath ?? ReaderPreferencesStore.DefaultPath)!, "Recovery"));
             if (!ReferenceEquals(store, _readerStore)) return;
             _readerLoadFailure = null;
             _readerPreferences = preferences;
-            if (_readerStore.RecoveredFromBackup) SetStatus("Đã phục hồi thiết lập Reader từ bản dự phòng.");
         }
         catch (Exception ex)
         {
@@ -542,7 +538,7 @@ public partial class MainWindow
     private async Task SaveReaderPreferencesAsync()
     {
         if (_readerLoadFailure is not null)
-            throw new System.IO.IOException("Chưa đọc/xác nhận được Reader preferences; giữ file lỗi và backup, không lưu defaults. Hãy phục hồi rồi thử lại.", _readerLoadFailure);
+            throw new System.IO.IOException("Không đọc được Reader preferences; file lỗi được giữ nguyên và giá trị mặc định chưa được lưu đè. Hãy sửa file rồi thử lại.", _readerLoadFailure);
         if (!_readerReady) return;
         await _readerStore.SaveAsync(_readerPreferences);
     }

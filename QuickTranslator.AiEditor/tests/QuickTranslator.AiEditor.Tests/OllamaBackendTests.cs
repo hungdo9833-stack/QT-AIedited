@@ -189,10 +189,10 @@ public sealed class OllamaBackendTests : IDisposable
     }
 
     [Fact]
-    public async Task Legacy_profile_without_runtime_settings_gets_safe_application_defaults()
+    public async Task Profile_without_runtime_settings_is_rejected_by_current_schema()
     {
         Directory.CreateDirectory(_root);
-        string path = Path.Combine(_root, "legacy-profiles.json");
+        string path = Path.Combine(_root, "incomplete-profiles.json");
         Guid localId = OllamaBackendProfile.DefaultLocalId;
         await File.WriteAllTextAsync(path, $$"""
         {
@@ -201,22 +201,18 @@ public sealed class OllamaBackendTests : IDisposable
           "profiles": [
             {
               "id": "{{localId}}",
-              "name": "Ollama Local cũ",
+              "name": "Ollama Local",
               "kind": "Local",
               "endpoint": "http://127.0.0.1:11434/api/chat",
-              "model": "legacy-model:7b",
+              "model": "model:7b",
               "remoteDisclosureAccepted": false
             }
           ]
         }
         """, new UTF8Encoding(false));
 
-        OllamaProfileCatalog catalog = await new OllamaProfileStore(path, new FakeProtector()).LoadAsync();
-
-        OllamaBackendProfile profile = Assert.Single(catalog.Profiles);
-        Assert.Equal("legacy-model:7b", profile.Runtime!.ModelOptions.Model);
-        Assert.Equal(4096, profile.Runtime.ModelOptions.ContextSize);
-        Assert.Equal(400, profile.Runtime.SegmentationOptions.TargetHanCharacters);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            new OllamaProfileStore(path, new FakeProtector()).LoadAsync());
     }
 
     [Fact]

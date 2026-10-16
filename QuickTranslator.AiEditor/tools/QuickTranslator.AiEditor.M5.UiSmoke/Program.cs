@@ -92,7 +92,7 @@ internal static class Program
             Items = Enumerable.Range(1, count).Select(number => new ProjectTranslationItem
             {
                 ChapterId = Guid.NewGuid(), Number = number, Order = number, Title = "Chương " + number,
-                SourceFingerprint = hash, ProtectedFingerprint = hash, EnqueuedDocumentFingerprint = hash,
+                SourceFingerprint = hash, ProtectedFingerprint = hash,
                 TotalSegments = 12, CompletedSegments = number % 12
             }).ToList()
         };

@@ -71,12 +71,10 @@ public sealed class ProjectFileLayout
     public string ReaderSettings { get; set; } = "Settings/reader.json";
     public string ExportSettings { get; set; } = "Settings/export.json";
     public string PromptPresets { get; set; } = "Settings/prompts/presets.qtaip.json";
-    public string CharacterProfiles { get; set; } = "Characters/profiles.characters.json";
-    public string Glossary { get; set; } = "Glossary/terms.json";
-    public string ContextNotes { get; set; } = "Glossary/context.txt";
+    public string Resources { get; set; } = "Resources/project-resources.json";
 
     internal IEnumerable<string> AllRelativePaths() =>
-        [TranslationSettings, ReaderSettings, ExportSettings, PromptPresets, CharacterProfiles, Glossary, ContextNotes];
+        [TranslationSettings, ReaderSettings, ExportSettings, PromptPresets, Resources];
 }
 
 public sealed class ProjectTranslationSettings
@@ -96,18 +94,12 @@ public sealed class ProjectExportSettings
     public bool UseUtf8Bom { get; set; }
 }
 
-public sealed class ProjectGlossary
-{
-    public List<ConfirmedTerm> Terms { get; set; } = [];
-}
-
-public sealed record ProjectOpenResult(ProjectSession Session, bool RecoveredFromBackup);
+public sealed record ProjectOpenResult(ProjectSession Session);
 
 public sealed class ProjectSession
 {
     internal SemaphoreSlim OperationGate { get; } = new(1, 1);
     internal SemaphoreSlim ResourceGate { get; } = new(1, 1);
-    internal bool HasDeferredManifestCheckpoint { get; set; }
     internal ProjectSession(string manifestPath, ProjectManifest manifest)
     {
         ManifestPath = Path.GetFullPath(manifestPath);
@@ -120,8 +112,6 @@ public sealed class ProjectSession
     public string RootDirectory { get; }
     public ProjectManifest Manifest { get; internal set; }
     public Persistence.ChapterFileStore ChapterStore { get; }
-    public ProjectRecoveryReport RecoveryReport { get; internal set; } = new([], []);
-    public Persistence.RecoveryInfo? ManifestRecovery { get; internal set; }
     public string Resolve(string relativePath) => ProjectPath.Resolve(RootDirectory, relativePath);
 }
 

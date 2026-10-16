@@ -10,21 +10,18 @@ public sealed class ProjectResourceTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "qtaie-resource-tests-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task LegacyProjectStoresImportWithoutModifyingTheirBytesOrChapterSchema()
+    public async Task ProjectResources_FirstSaveCreatesOneUnifiedDirectJsonFile()
     {
         var project = await new ProjectRepository().CreateAsync(_root, "Tổng hợp");
-        var legacy = new ProjectSettingsStore(project);
-        await legacy.SaveGlossaryAsync(new() { Terms = [new("名字", "Tên mới")] });
-        await legacy.SaveContextNotesAsync("Ghi chú");
-        var before = await File.ReadAllBytesAsync(project.Resolve(project.Manifest.Files.Glossary));
         var store = new ProjectResourceStore(project);
         var resources = await store.LoadAsync();
-        var saved = await store.SaveAsync(resources);
+        resources.Terms.Add(new("名字", "Tên mới"));
+        resources.Context = "Ghi chú";
+        ProjectResources saved = await store.SaveAsync(resources);
         Assert.Equal(1, saved.Revision);
-        Assert.Equal(saved.Revision, (await store.SaveAsync(saved)).Revision);
-        Assert.Equal(before, await File.ReadAllBytesAsync(project.Resolve(project.Manifest.Files.Glossary)));
-        Assert.Equal(1, project.Manifest.SchemaVersion);
-        Assert.Equal(3, TranslationService.CreateChapter("Thử", "你好。").SchemaVersion);
+        Assert.Equal("Tên mới", (await store.LoadAsync()).Terms.Single().Vietnamese);
+        Assert.True(File.Exists(store.PathName));
+        Assert.False(File.Exists(store.PathName + ".bak"));
     }
 
     [Fact]
@@ -43,19 +40,18 @@ public sealed class ProjectResourceTests : IDisposable
     }
 
     [Fact]
-    public async Task ResourceRecoveryPreservesLastVerifiedBackup()
+    public async Task InvalidPrimaryFailsDirectlyAndLeavesOldBackupUntouched()
     {
         var project = await new ProjectRepository().CreateAsync(_root, "Tổng hợp");
         var store = new ProjectResourceStore(project);
         var first = await store.SaveAsync(await store.LoadAsync());
         var second = first.Clone(); second.Context = "Mới";
         await store.SaveAsync(second);
-        var backupBytes = await File.ReadAllBytesAsync(store.PathName + ".bak");
+        await File.WriteAllTextAsync(store.PathName + ".bak", "old user backup");
         await File.WriteAllTextAsync(store.PathName, "{broken");
-        var recovered = await store.LoadAsync();
-        Assert.Equal(first.Revision, recovered.Revision);
-        await store.SaveAsync(recovered);
-        Assert.Equal(backupBytes, await File.ReadAllBytesAsync(store.PathName + ".bak"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync());
+        Assert.Equal("{broken", await File.ReadAllTextAsync(store.PathName));
+        Assert.Equal("old user backup", await File.ReadAllTextAsync(store.PathName + ".bak"));
     }
 
     [Fact]

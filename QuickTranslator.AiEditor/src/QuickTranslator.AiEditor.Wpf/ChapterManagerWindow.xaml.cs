@@ -262,7 +262,7 @@ public partial class ChapterManagerWindow : Window
             chapter.ApprovalState == ProjectCatalogApprovalState.Approved ? "Đã duyệt" : "Chưa duyệt xong",
             chapter.SegmentCount == 0 ? "0/0" : $"{chapter.CompletedSegmentCount:N0}/{chapter.SegmentCount:N0}",
             chapter.UpdatedAt, chapter.UpdatedAt.LocalDateTime.ToString("g"), chapter.IsDeleted,
-            chapter.IsDeleted ? "History" : "Hoạt động") { }
+            chapter.IsDeleted ? "Đã xóa" : "Hoạt động") { }
 
         private static string StateLabel(ProjectChapterState state) => state switch
         {

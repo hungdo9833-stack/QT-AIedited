@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using QuickTranslator.AiEditor.Core.Models;
@@ -20,7 +19,8 @@ public sealed class ProjectSystemTests : IDisposable
         Assert.EndsWith(".qtproj", project.ManifestPath);
         Assert.True(File.Exists(project.ManifestPath));
         Assert.True(Directory.Exists(Path.Combine(project.RootDirectory, "Chapters")));
-        Assert.True(Directory.Exists(Path.Combine(project.RootDirectory, "Backups")));
+        Assert.True(Directory.Exists(Path.Combine(project.RootDirectory, "Queue")));
+        Assert.False(Directory.Exists(Path.Combine(project.RootDirectory, "Backups")));
         Assert.All(project.Manifest.Files.GetType().GetProperties().Select(x => (string)x.GetValue(project.Manifest.Files)!),
             path => Assert.False(Path.IsPathRooted(path)));
     }
@@ -37,24 +37,24 @@ public sealed class ProjectSystemTests : IDisposable
     }
 
     [Fact]
-    public async Task ManifestChecksumDamage_RecoversLastValidBackup()
+    public async Task ValidManifestEditedOutsideTheApplicationOpensWithoutChecksum()
     {
-        var project = await _repository.CreateAsync(Path.Combine(_root, "Recover"), "Bản một");
-        project.Manifest.Description = "bản hai";
-        await _repository.SaveManifestAsync(project);
-        await File.WriteAllTextAsync(project.ManifestPath, "{damaged");
-        var recovered = await _repository.OpenAsync(project.ManifestPath);
-        Assert.True(recovered.RecoveredFromBackup);
-        Assert.Equal("Bản một", recovered.Session.Manifest.VietnameseTitle);
+        var project = await _repository.CreateAsync(Path.Combine(_root, "ExternalEdit"), "Bản một");
+        var node = JsonNode.Parse(await File.ReadAllTextAsync(project.ManifestPath))!.AsObject();
+        node["description"] = "được sửa bằng công cụ ngoài";
+        await File.WriteAllTextAsync(project.ManifestPath, node.ToJsonString());
+        var opened = await _repository.OpenAsync(project.ManifestPath);
+        Assert.Equal("được sửa bằng công cụ ngoài", opened.Session.Manifest.Description);
+        Assert.False(File.Exists(project.ManifestPath + ".bak"));
     }
 
     [Fact]
     public void ManifestRejectsAbsoluteAndTraversalPaths()
     {
         var manifest = ValidManifest();
-        manifest.Files.Glossary = "../outside.json";
+        manifest.Files.Resources = "../outside.json";
         Assert.Throws<InvalidDataException>(manifest.Validate);
-        manifest.Files.Glossary = Path.GetFullPath(Path.Combine(_root, "outside.json"));
+        manifest.Files.Resources = Path.GetFullPath(Path.Combine(_root, "outside.json"));
         Assert.Throws<InvalidDataException>(manifest.Validate);
     }
 
@@ -91,7 +91,7 @@ public sealed class ProjectSystemTests : IDisposable
         var project = await CreateWithChapterAsync("Delete"); Guid id = project.Manifest.CurrentChapterId!.Value;
         await _repository.SoftDeleteChapterAsync(project, id);
         var deleted = project.Manifest.Chapters.Single();
-        Assert.NotNull(deleted.DeletedAt); Assert.Contains("History/Deleted/", deleted.RelativePath);
+        Assert.NotNull(deleted.DeletedAt); Assert.Contains("Deleted/", deleted.RelativePath);
         Assert.True(File.Exists(project.Resolve(deleted.RelativePath)));
         await _repository.RestoreDeletedChapterAsync(project, id);
         var restored = await _repository.LoadChapterAsync(project, id);
@@ -149,30 +149,29 @@ public sealed class ProjectSystemTests : IDisposable
         var project = await _repository.CreateAsync(Path.Combine(_root, "Settings"), "Truyện");
         var store = new ProjectSettingsStore(project);
         await store.SaveTranslationAsync(new() { Model = new() { Model = "model-rieng", Temperature = 0.2 }, TraditionalDataDirectory = "D:/QTData" });
-        await store.SaveGlossaryAsync(new() { Terms = [new("陸雪琪", "Lục Tuyết Kỳ")] });
-        await store.SaveContextNotesAsync("Giữ cách xưng hô đã duyệt.");
+        var resourceStore = new ProjectResourceStore(project);
+        ProjectResources resources = await resourceStore.LoadAsync();
+        resources.Terms.Add(new("陸雪琪", "Lục Tuyết Kỳ"));
+        resources.Context = "Giữ cách xưng hô đã duyệt.";
+        await resourceStore.SaveAsync(resources);
         Assert.Equal("model-rieng", (await store.LoadTranslationAsync()).Model.Model);
-        Assert.Equal("Lục Tuyết Kỳ", (await store.LoadGlossaryAsync()).Terms.Single().Vietnamese);
-        Assert.Equal("Giữ cách xưng hô đã duyệt.", await store.LoadContextNotesAsync());
+        ProjectResources reopened = await resourceStore.LoadAsync();
+        Assert.Equal("Lục Tuyết Kỳ", reopened.Terms.Single().Vietnamese);
+        Assert.Equal("Giữ cách xưng hô đã duyệt.", reopened.Context);
     }
 
     [Fact]
-    public async Task Legacy_project_settings_without_profile_id_keep_default_local_backend()
+    public async Task TranslationSettings_RequireTheCurrentUnifiedSchema()
     {
-        var project = await _repository.CreateAsync(Path.Combine(_root, "LegacyBackend"), "Truyện cũ");
-        var value = new ProjectTranslationSettings { TraditionalDataDirectory = "LegacyData" };
+        var project = await _repository.CreateAsync(Path.Combine(_root, "CurrentSchema"), "Truyện");
+        var value = new ProjectTranslationSettings { TraditionalDataDirectory = "Data" };
         JsonObject json = Assert.IsType<JsonObject>(JsonNode.Parse(JsonSerializer.Serialize(value, DocumentJson.Options)));
         Assert.True(json.Remove("ollamaProfileId"));
         string path = project.Resolve(project.Manifest.Files.TranslationSettings);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, json.ToJsonString(DocumentJson.Options));
 
-        ProjectTranslationSettings reopened = await new ProjectSettingsStore(project).LoadTranslationAsync();
-        using var manager = new OllamaBackendManager(new OllamaProfileStore(
-            Path.Combine(_root, "legacy-profiles.json"), new PassThroughProtector()));
-
-        Assert.Null(reopened.OllamaProfileId);
-        Assert.Equal(OllamaBackendProfile.DefaultLocalId, manager.GetProfile(reopened.OllamaProfileId).Id);
+        await Assert.ThrowsAsync<InvalidDataException>(() => new ProjectSettingsStore(project).LoadTranslationAsync());
     }
 
     [Fact]
@@ -201,60 +200,11 @@ public sealed class ProjectSystemTests : IDisposable
     }
 
     [Fact]
-    public async Task BackupAndRestore_VerifiesAllFilesAndUsesNewDirectory()
+    public async Task NewProjectLayout_UsesDedicatedDeletedFolderWithoutHistoryInfrastructure()
     {
-        var project = await CreateWithChapterAsync("Backup");
-        var service = new ProjectBackupService();
-        var backup = await service.CreateAsync(project, Path.Combine(_root, "out", "project.zip"));
-        Assert.True(backup.FileCount >= 2); await ProjectBackupService.VerifyArchiveAsync(backup.ArchivePath);
-        var restored = await service.RestoreAsync(backup.ArchivePath, Path.Combine(_root, "Restored"));
-        var chapter = await _repository.LoadChapterAsync(restored, restored.Manifest.CurrentChapterId!.Value);
-        Assert.Equal("你好。", chapter.Chapter.OriginalText);
-    }
-
-    [Fact]
-    public async Task Restore_RefusesNonEmptyDestination()
-    {
-        var project = await CreateWithChapterAsync("NoOverwrite"); var service = new ProjectBackupService();
-        var backup = await service.CreateAsync(project, Path.Combine(_root, "archive.zip"));
-        string target = Path.Combine(_root, "Occupied"); Directory.CreateDirectory(target); await File.WriteAllTextAsync(Path.Combine(target, "keep.txt"), "keep");
-        await Assert.ThrowsAsync<IOException>(() => service.RestoreAsync(backup.ArchivePath, target));
-        Assert.Equal("keep", await File.ReadAllTextAsync(Path.Combine(target, "keep.txt")));
-    }
-
-    [Fact]
-    public async Task Restore_RejectsZipSlip()
-    {
-        string zip = Path.Combine(_root, "unsafe.zip"); Directory.CreateDirectory(_root);
-        using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
-        { using var writer = new StreamWriter(archive.CreateEntry("../escape.qtproj").Open()); writer.Write("bad"); }
-        await Assert.ThrowsAsync<InvalidDataException>(() => new ProjectBackupService().RestoreAsync(zip, Path.Combine(_root, "UnsafeTarget")));
-        Assert.False(File.Exists(Path.Combine(_root, "escape.qtproj")));
-    }
-
-    [Fact]
-    public async Task LegacyImport_ScansBacksUpAndLeavesSourceUnchanged()
-    {
-        string legacy = Path.Combine(_root, "Legacy"); var legacyStore = new ChapterFileStore(legacy);
-        var old = Chapter("Chương cũ"); old.Segments[0].UserDraft = "Bản sửa cũ"; await legacyStore.SaveAsync(old);
-        byte[] before = await File.ReadAllBytesAsync(legacyStore.GetPath(old.Id));
-        var importer = new LegacyProjectImporter(_repository); var candidates = await importer.ScanAsync(legacy);
-        var target = await _repository.CreateAsync(Path.Combine(_root, "Imported"), "Truyện nhập");
-        var result = await importer.ImportAsync(target, [new(candidates.Single(), 7)]);
-        Assert.Equal(1, result.ImportedCount); Assert.True(File.Exists(result.SourceBackupPath));
-        Assert.Equal(before, await File.ReadAllBytesAsync(legacyStore.GetPath(old.Id)));
-        var imported = (await _repository.LoadChapterAsync(target, old.Id)).Chapter;
-        Assert.Equal("Bản sửa cũ", imported.Segments[0].UserDraft); Assert.Equal(7, imported.ChapterNumber);
-    }
-
-    [Fact]
-    public async Task LegacyImport_DuplicateNumberStopsBeforeChangingTarget()
-    {
-        var target = await CreateWithChapterAsync("Collision");
-        string legacy = Path.Combine(_root, "Legacy2"); var store = new ChapterFileStore(legacy); var old = Chapter("Cũ"); await store.SaveAsync(old);
-        var importer = new LegacyProjectImporter(_repository); var candidate = (await importer.ScanAsync(legacy)).Single();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => importer.ImportAsync(target, [new(candidate, 1)]));
-        Assert.Single(target.Manifest.Chapters);
+        ProjectSession project = await _repository.CreateAsync(Path.Combine(_root, "Layout"), "Truyện mới");
+        Assert.True(Directory.Exists(project.Resolve("Deleted")));
+        Assert.False(Directory.Exists(project.Resolve("History")));
     }
 
     [Fact]
@@ -279,9 +229,4 @@ public sealed class ProjectSystemTests : IDisposable
     private static ProjectChapterEntry Entry(int number) => new() { ChapterId = Guid.NewGuid(), Number = number, RelativePath = $"Chapters/{Guid.NewGuid():D}.qtaie.json" };
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 
-    private sealed class PassThroughProtector : IOllamaSecretProtector
-    {
-        public string Protect(string value) => value;
-        public string Unprotect(string value) => value;
-    }
 }

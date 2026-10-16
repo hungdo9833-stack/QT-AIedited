@@ -143,7 +143,7 @@ public partial class MainWindow : Window
         if (!BeginUiOperation()) return;
         try
         {
-            // Reject legacy bytes that are not UTF-8 instead of silently replacing Chinese characters.
+            // Reject non-UTF-8 bytes instead of silently replacing Chinese characters.
             AssignOriginalText(await File.ReadAllTextAsync(dialog.FileName, new UTF8Encoding(false, true)));
             TitleInput.Text = Path.GetFileNameWithoutExtension(dialog.FileName);
         }
@@ -169,14 +169,14 @@ public partial class MainWindow : Window
             {
                 var loaded = await _store.LoadAsync(dialog.FileName);
                 var openedChapter = await RegisterChapterIfNeededAsync(loaded.Chapter);
-                // Persist crash recovery before replacing the previous live service.
+                // Persist the opened document before replacing the previous live service.
                 var prepared = new TranslationService(openedChapter, _translationClient,
                     _projectSession is null ? _store : new RegisteredChapterStore(_projectSession, _projectRepository));
                 await prepared.SaveAsync();
                 AttachChapter(prepared.GetSnapshot());
                 _selectedId = openedChapter.SelectedSegmentId ?? openedChapter.Segments[0].Id; _shownAttemptId = null;
                 ApplyInputs(openedChapter); SelectChapterPreset(openedChapter.SelectedPreset); Refresh();
-                SetStatus(loaded.RecoveredFromBackup ? "Đã phục hồi từ bản dự phòng; hãy kiểm tra tiến độ." : "Đã mở tiến độ; không tự gửi lại request.");
+                SetStatus("Đã mở tiến độ; không tự gửi lại request.");
             });
         }
         catch (Exception ex) { ShowError(ex); }
@@ -466,8 +466,8 @@ public partial class MainWindow : Window
         var options = attempt.ModelOptions;
         string details = $"Model: {options.Model}\nTemperature: {options.Temperature}\nContext: {options.ContextSize}\n" +
             $"Đầu ra: {options.MaximumOutputTokens} token; timeout: {options.RequestTimeout.TotalSeconds:0} giây\n" +
-            $"Preset: {attempt.PresetSnapshot?.Name ?? "Legacy"} (v{attempt.PresetSnapshot?.Revision})\n" +
-            $"Tài nguyên project: revision {attempt.ProjectResourceRevision?.ToString() ?? "legacy/standalone"}\nPrompt: {attempt.PromptVersion}\n\n{attempt.Prompt}";
+            $"Preset: {attempt.PresetSnapshot?.Name ?? "Mặc định"} (v{attempt.PresetSnapshot?.Revision})\n" +
+            $"Tài nguyên project: revision {attempt.ProjectResourceRevision?.ToString() ?? "standalone"}\nPrompt: {attempt.PromptVersion}\n\n{attempt.Prompt}";
         var window = new Window
         {
             Owner = this, Title = "Prompt đã lưu — chỉ hiển thị trên máy này", Width = 850, Height = 600,
@@ -699,8 +699,6 @@ public partial class MainWindow : Window
     }
     private void ShowError(Exception error)
     {
-        if (error is LegacyImportException import) ShowLegacyImportReport(import.Report);
-        else if (error is LegacyImportCanceledException cancelledImport) ShowLegacyImportReport(cancelledImport.Report);
         StatusText.Text = "Lỗi: " + error.Message +
             (error is IOException or UnauthorizedAccessException
                 ? " Tác vụ chưa hoàn tất; hãy giữ ứng dụng mở, kiểm tra dung lượng/quyền ghi và thử lại thao tác lưu."

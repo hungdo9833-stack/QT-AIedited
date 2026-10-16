@@ -228,8 +228,7 @@ public sealed class ProjectPublicationService
         temporaryPath = Path.GetFullPath(temporaryPath);
         outputPath = Path.GetFullPath(outputPath);
         if (!File.Exists(temporaryPath)) throw new FileNotFoundException("Không tìm thấy file xuất tạm.", temporaryPath);
-        if (File.Exists(outputPath)) File.Replace(temporaryPath, outputPath, outputPath + ".bak", ignoreMetadataErrors: true);
-        else File.Move(temporaryPath, outputPath);
+        File.Move(temporaryPath, outputPath, overwrite: true);
     }
 
     private sealed record PublicationEntry(Guid ChapterId, int Number, string Title);

@@ -281,28 +281,6 @@ public sealed class ChapterTitleTranslationTests : IDisposable
         Assert.Equal("Tên Việt thủ công", protectedAfter.Title);
     }
 
-    [Fact]
-    public async Task Project_title_fault_rolls_back_all_chapters()
-    {
-        var repository = new ProjectRepository();
-        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "fault"), "Titles");
-        var ids = new List<Guid>();
-        for (int number = 1; number <= 3; number++)
-        {
-            ChapterDocument chapter = TranslationService.CreateChapter($"第{number}章 标题", $"原文{number}。", model: Options);
-            chapter.ChineseTitle = chapter.Title; ids.Add(chapter.Id);
-            await repository.AddChapterAsync(session, chapter, number, chapter.ChineseTitle);
-        }
-        ProjectChapterTitleUpdatePreview preview = await repository.PreviewChapterTitleUpdateAsync(session,
-            ids.Select((id, index) => new ProjectChapterTitleProposal(id, $"Chương {index + 1}: Mới")).ToArray());
-        repository.FaultPoint = point => { if (point == "AfterFile:2") throw new IOException("disk full injected"); };
-
-        await Assert.ThrowsAsync<IOException>(() => repository.ApplyChapterTitleUpdateAsync(session, preview));
-
-        Assert.All(session.Manifest.Chapters, entry => Assert.StartsWith("第", entry.VietnameseTitle));
-        foreach (Guid id in ids) Assert.StartsWith("第", (await repository.LoadChapterAsync(session, id)).Chapter.Title);
-    }
-
     private static ChapterTitleTranslationDraft Draft(int count) => ChapterTitleTranslationDraft.Create(Guid.NewGuid(),
         "synthetic", ChapterTitleTranslationMethod.Ollama, Enumerable.Range(1, count).Select(number =>
             new ChapterTitleTranslationSource(Guid.NewGuid(), number, $"第{number}章 标题{number}")));

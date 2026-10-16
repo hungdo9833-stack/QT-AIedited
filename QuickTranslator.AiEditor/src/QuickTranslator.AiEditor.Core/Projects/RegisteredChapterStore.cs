@@ -33,3 +33,33 @@ public sealed class RegisteredChapterStore(ProjectSession session, ProjectReposi
         return session.ChapterStore.LoadAsync(path, cancellationToken);
     }
 }
+
+/// <summary>
+/// Queue-only adapter. It serializes the final business-state check with the chapter write so a
+/// completed AI request cannot replace a draft, approval, source edit, or segment-boundary edit
+/// committed while that request was running.
+/// </summary>
+internal sealed class TranslationChapterStore : IChapterStore
+{
+    private readonly ProjectSession _session;
+    private readonly ProjectRepository _repository;
+    private readonly string _expectedSource;
+    private readonly string _expectedProtected;
+
+    public TranslationChapterStore(ProjectSession session, ProjectRepository repository, ChapterDocument baseline)
+    {
+        _session = session;
+        _repository = repository;
+        _expectedSource = ProjectTranslationFingerprints.Source(baseline);
+        _expectedProtected = ProjectTranslationFingerprints.Protected(baseline);
+    }
+
+    public string GetPath(Guid chapterId) => new RegisteredChapterStore(_session, _repository).GetPath(chapterId);
+
+    public Task SaveAsync(ChapterDocument chapter, CancellationToken cancellationToken = default) =>
+        _repository.UpdateTranslatedChapterAsync(_session, chapter, _expectedSource, _expectedProtected,
+            cancellationToken);
+
+    public Task<ChapterLoadResult> LoadAsync(string path, CancellationToken cancellationToken = default) =>
+        new RegisteredChapterStore(_session, _repository).LoadAsync(path, cancellationToken);
+}

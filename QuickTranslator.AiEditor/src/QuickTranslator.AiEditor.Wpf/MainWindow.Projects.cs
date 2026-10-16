@@ -17,7 +17,6 @@ namespace QuickTranslator.AiEditor.Wpf;
 public partial class MainWindow
 {
     private readonly ProjectRepository _projectRepository = new();
-    private readonly ProjectBackupService _projectBackup = new();
     private readonly ProjectLibraryStore _projectLibraryStore = new();
     private ProjectLibrary _projectLibrary = new();
     private bool _projectLibraryReady = true;
@@ -48,9 +47,6 @@ public partial class MainWindow
         try
         {
             var library = await _projectLibraryStore.LoadAsync();
-            await ConfirmRecoveredSourcesAsync(_projectLibraryStore.LastRecovery is null ? [] : [_projectLibraryStore.LastRecovery],
-                _projectLibraryStore.LastRecovery?.Source == RecoverySource.Backup ? [() => _projectLibraryStore.RestoreBackupAsync()] : [],
-                Path.Combine(Path.GetDirectoryName(_projectLibraryStore.PathName)!, "Recovery"));
             _projectLibrary = library; _projectLibraryReady = true;
         }
         catch (Exception ex) { ShowError(ex); }
@@ -78,24 +74,13 @@ public partial class MainWindow
 
     private async Task OpenProjectCoreAsync(string path)
     {
-        var opened = await _projectRepository.OpenAsync(path);
-        var candidate = opened.Session;
-        if (candidate.ManifestRecovery?.Source == RecoverySource.Backup)
-            await ConfirmRecoveredSourcesAsync([candidate.ManifestRecovery],
-                [() => _projectRepository.RestoreManifestBackupAsync(candidate)], Path.Combine(candidate.RootDirectory, "Backups"));
-        await _projectRepository.InspectRecoveryAsync(candidate);
-        await ReviewProjectRecoveryAsync(candidate);
+        var candidate = (await _projectRepository.OpenAsync(path)).Session;
         var assets = await ReadProjectAssetsAsync(candidate);
         await PrepareOllamaProfileForProjectAsync(assets.Translation.OllamaProfileId);
         ChapterDocument? chapter = candidate.Manifest.CurrentChapterId is Guid current
             ? (await _projectRepository.LoadChapterAsync(candidate, current)).Chapter : null;
         // Validate the service before touching the live context.
         if (chapter is not null) _ = new TranslationService(chapter, _translationClient, new RegisteredChapterStore(candidate, _projectRepository));
-        var chapterRecovery = candidate.ChapterStore.LastRecovery;
-        var recoverySources = assets.RecoverySources.Concat(chapterRecovery is null ? [] : new[] { chapterRecovery }).ToArray();
-        var repairs = assets.Repairs.Concat(chapterRecovery?.Source == RecoverySource.Backup
-            ? new Func<Task>[] { () => candidate.ChapterStore.RestoreBackupAsync() } : []).ToArray();
-        await ConfirmRecoveredSourcesAsync(recoverySources, repairs, Path.Combine(candidate.RootDirectory, "Backups"));
         candidate.Manifest.LastOpenedAt = DateTimeOffset.UtcNow;
         await _projectRepository.SaveManifestAsync(candidate);
         var library = System.Text.Json.JsonSerializer.Deserialize<ProjectLibrary>(
@@ -123,10 +108,8 @@ public partial class MainWindow
         }
         else ClearChapterEditor();
         RefreshProjectSwitcher(); RefreshProjectChapterList(); Refresh();
-        SetStatus((opened.RecoveredFromBackup
-            ? "Đã mở dự án từ bản dự phòng manifest; hãy kiểm tra tiến độ. Không tự dịch."
-            : $"Đã mở dự án “{candidate.Manifest.VietnameseTitle}”.") +
-            (_projectLibraryReady ? "" : " Danh sách gần đây chưa đọc/xác nhận được; chưa ghi shortcut, file lỗi và backup được giữ."));
+        SetStatus($"Đã mở dự án “{candidate.Manifest.VietnameseTitle}”." +
+            (_projectLibraryReady ? "" : " Danh sách gần đây không đọc được; chưa ghi shortcut."));
     }
 
     private async Task SafelyLeaveCurrentProjectAsync()
@@ -158,14 +141,7 @@ public partial class MainWindow
         var resources = new ProjectResourceStore(session);
         var loadedPresets = await presets.LoadAsync(); var loadedReader = await reader.LoadAsync(); var loadedResources = await resources.LoadAsync();
         BookIntelligenceState intelligence = await new BookIntelligenceStore(session).LoadAsync();
-        var sources = settings.RecoverySources.Concat(resources.RecoverySources)
-            .Concat(new[] { presets.LastRecovery!, reader.LastRecovery! }).ToArray();
-        var repairs = new List<Func<Task>>();
-        if (settings.RecoverySources.Any(x => x.Source == RecoverySource.Backup)) repairs.Add(() => settings.RestoreRecoveredBackupsAsync());
-        if (resources.RecoverySources.Any(x => x.Source == RecoverySource.Backup)) repairs.Add(() => resources.RestoreRecoveredBackupsAsync());
-        if (presets.RecoveredFromBackup) repairs.Add(() => presets.RestoreBackupAsync());
-        if (reader.RecoveredFromBackup) repairs.Add(() => reader.RestoreBackupAsync());
-        return new(new PromptPresetManager(loadedPresets), loadedReader, loadedResources, translation, intelligence, sources, repairs);
+        return new(new PromptPresetManager(loadedPresets), loadedReader, loadedResources, translation, intelligence);
     }
 
     private void ApplyProjectAssets(ProjectAssetState assets)
@@ -185,8 +161,7 @@ public partial class MainWindow
     }
 
     private sealed record ProjectAssetState(PromptPresetManager Presets, ReaderPreferences Reader,
-        ProjectResources Resources, ProjectTranslationSettings Translation, BookIntelligenceState BookIntelligence,
-        IReadOnlyList<RecoveryInfo> RecoverySources, IReadOnlyList<Func<Task>> Repairs);
+        ProjectResources Resources, ProjectTranslationSettings Translation, BookIntelligenceState BookIntelligence);
 
     private async Task SaveProjectAssetsAsync()
     {
@@ -291,8 +266,7 @@ public partial class MainWindow
         AttachChapter(loaded.Chapter); _selectedId = loaded.Chapter.SelectedSegmentId ?? loaded.Chapter.Segments[0].Id; _shownAttemptId = null;
         ApplyInputs(loaded.Chapter); SelectChapterPreset(loaded.Chapter.SelectedPreset);
         RefreshProjectChapterList(); Refresh();
-        SetStatus(loaded.RecoveredFromBackup ? "Chương được phục hồi từ bản dự phòng; không tự tiếp tục hàng đợi."
-            : $"Đã mở chương “{loaded.Chapter.Title}” sau khi lưu trạng thái trước đó.");
+        SetStatus($"Đã mở chương “{loaded.Chapter.Title}” sau khi lưu trạng thái trước đó.");
     }
 
     private void RefreshProjectChapterList()
@@ -513,8 +487,7 @@ public partial class MainWindow
                 ProjectLibrarySummary summary = await ProjectRepository.ReadLibrarySummaryAsync(recent.ManifestPath);
                 cards.Add(new(summary.ProjectId, summary.VietnameseTitle, summary.Author, summary.Status,
                     recent.ManifestPath, summary.CoverImagePath, summary.ChapterCount, summary.CompletedChapterCount,
-                    summary.Progress, summary.CurrentChapterTitle, recent.LastOpenedAt, false,
-                    summary.RecoveredFromBackup ? "Đang hiển thị metadata từ backup đã kiểm tra." : null));
+                    summary.Progress, summary.CurrentChapterTitle, recent.LastOpenedAt, false, null));
             }
             catch (Exception ex)
             {
@@ -565,37 +538,6 @@ public partial class MainWindow
         catch (Exception ex) { ShowError(ex); }
     }
 
-    private async void OnBackupProject(object sender, RoutedEventArgs e)
-    {
-        if (_projectSession is null || !BeginUiOperation()) return;
-        try
-        {
-            await SafelyLeaveCurrentProjectAsync();
-            var dialog = new SaveFileDialog { Filter = "Bản sao dự án (*.zip)|*.zip", DefaultExt = ".zip", AddExtension = true,
-                FileName = SafeFolderName(_projectSession.Manifest.VietnameseTitle) + "-backup.zip" };
-            if (dialog.ShowDialog(this) != true) return;
-            var result = await _projectBackup.CreateAsync(_projectSession, dialog.FileName);
-            SetStatus($"Đã tạo và kiểm chứng bản sao {result.FileCount} tệp: {result.ArchivePath}");
-        }
-        catch (Exception ex) { ShowError(ex); }
-        finally { EndUiOperation(); }
-    }
-
-    private async void OnRestoreProject(object sender, RoutedEventArgs e)
-    {
-        var file = new OpenFileDialog { Filter = "Bản sao dự án (*.zip)|*.zip" }; if (file.ShowDialog(this) != true) return;
-        var folder = new OpenFolderDialog { Title = "Chọn thư mục cha để khôi phục thành dự án mới", Multiselect = false }; if (folder.ShowDialog(this) != true) return;
-        string target = Path.Combine(folder.FolderName, "Restored-" + DateTimeOffset.Now.ToString("yyyyMMdd-HHmmss"));
-        try
-        {
-            await RunWorkspaceTransitionAsync(async () =>
-            {
-                var restored = await _projectBackup.RestoreAsync(file.FileName, target);
-                await OpenProjectCoreAsync(restored.ManifestPath);
-            });
-        }
-        catch (Exception ex) { ShowError(ex); }
-    }
 
     private async void OnAddChapterFromText(object sender, RoutedEventArgs e)
     {
@@ -688,40 +630,6 @@ public partial class MainWindow
         if (_projectSession?.Manifest.CurrentChapterId is not Guid current) return;
         var ordered = _projectCatalog.Query(_projectSession, new()).ToList(); int index = ordered.FindIndex(x => x.ChapterId == current);
         int next = index + delta; if (next >= 0 && next < ordered.Count) await LoadProjectChapterAsync(ordered[next].ChapterId);
-    }
-
-    private async void OnImportLegacyProject(object sender, RoutedEventArgs e)
-    {
-        if (_projectSession is null) { ShowError(new InvalidOperationException("Hãy mở hoặc tạo dự án đích trước.")); return; }
-        var folder = new OpenFolderDialog { Title = "Chọn thư mục Chapters cũ", Multiselect = false, InitialDirectory = Directory.Exists(ChapterFileStore.DefaultDirectory) ? ChapterFileStore.DefaultDirectory : null };
-        if (folder.ShowDialog(this) != true) return;
-        try
-        {
-            await RunWorkspaceTransitionAsync(async () =>
-            {
-            var importer = new LegacyProjectImporter(_projectRepository); var candidates = await importer.ScanAsync(folder.FolderName);
-            var valid = candidates.Where(x => x.Error is null).ToList();
-            var list = new ListBox { ItemsSource = valid, SelectionMode = SelectionMode.Extended, DisplayMemberPath = "Title", Margin = new Thickness(10) };
-            var window = new Window { Owner = this, Title = "Chọn chương cũ để nhập (Ctrl/Shift để chọn nhiều)", Width = 760, Height = 520 };
-            ClampWindowToWorkArea(window, 760, 520);
-            var import = new Button { Content = "Sao lưu nguồn và nhập", Style = (Style)FindResource("PrimaryButton") }; var cancel = new Button { Content = "Hủy" };
-            var buttons = new WrapPanel(); buttons.Children.Add(import); buttons.Children.Add(cancel); var panel = new DockPanel(); DockPanel.SetDock(buttons, Dock.Bottom); panel.Children.Add(buttons); panel.Children.Add(list); window.Content = panel;
-            import.Click += (_, _) => { if (list.SelectedItems.Count > 0) window.DialogResult = true; }; cancel.Click += (_, _) => window.DialogResult = false;
-            if (window.ShowDialog() != true) return;
-            int number = NextChapterNumber(); var selections = list.SelectedItems.Cast<LegacyChapterCandidate>().Select(x => new LegacyChapterSelection(x, number++)).ToArray();
-                var result = await importer.ImportAsync(_projectSession, selections);
-                RefreshProjectChapterList();
-                try { if (_projectSession.Manifest.CurrentChapterId is Guid current) await LoadProjectChapterCoreAsync(current); }
-                catch (Exception ex)
-                {
-                    if (result.Report is not null) ShowLegacyImportReport(result.Report);
-                    ShowError(new IOException($"Đã commit {result.ImportedCount} chương nhưng chưa nạp được editor. Chọn lại chương sau khi xử lý lỗi đọc; dữ liệu import và ZIP được giữ.", ex));
-                    return;
-                }
-                SetStatus($"Đã nhập {result.ImportedCount} chương. Nguồn cũ không đổi; bản sao trước nhập: {result.SourceBackupPath}");
-            });
-        }
-        catch (Exception ex) { ShowError(ex); }
     }
 
     private static string SafeFolderName(string value)

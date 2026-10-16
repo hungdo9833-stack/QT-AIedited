@@ -120,8 +120,6 @@ public sealed class ImportedChapterQueueRegressionTests : IDisposable
         Assert.Equal(expectedRequests, client.RequestCount);
 
         ProjectSession reopened = (await new ProjectRepository().OpenAsync(session.ManifestPath)).Session;
-        Assert.False(reopened.RecoveryReport.RequiresDecision);
-        Assert.Empty(reopened.RecoveryReport.Orphans);
         foreach (Guid chapterId in importedIds)
         {
             ChapterDocument chapter = (await reopenedRepository.LoadChapterAsync(reopened, chapterId)).Chapter;

@@ -228,7 +228,7 @@ public partial class MainWindow
                 AddExtension = true, FileName = SafeFileName(_characterProject.Name) + ".characters.json" };
             if (dialog.ShowDialog(this) != true) return;
             await _characterStore.SaveToAsync(_characterProject, dialog.FileName);
-            SetStatus("Đã xuất hồ sơ nhân vật JSON UTF-8 có checksum.");
+            SetStatus("Đã xuất hồ sơ nhân vật JSON UTF-8.");
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }

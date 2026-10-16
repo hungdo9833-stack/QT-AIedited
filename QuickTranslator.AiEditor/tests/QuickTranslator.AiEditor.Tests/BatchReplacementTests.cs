@@ -263,7 +263,7 @@ public sealed class BatchReplacementTests : IDisposable
     }
 
     [Fact]
-    public async Task ProjectReplacementOnlyTouchesMatchingProjectAndCreatesBackup()
+    public async Task ProjectReplacementOnlyTouchesMatchingProjectWithoutCreatingBackup()
     {
         var store = new ChapterFileStore(_directory);
         var first = Chapter("王秀兰 chương một.", "Một");
@@ -279,7 +279,7 @@ public sealed class BatchReplacementTests : IDisposable
 
         Assert.Equal(2, report.AppliedChapters);
         Assert.Equal(0, report.FailedChapters);
-        Assert.True(Directory.Exists(report.BackupDirectory));
+        Assert.False(Directory.Exists(Path.Combine(_directory, "Backups")));
         Assert.Equal("Vương Tú Lan chương một.", (await store.LoadAsync(store.GetPath(first.Id))).Chapter.Segments[0].EditableText);
         Assert.Equal("王秀兰 dự án khác.", (await store.LoadAsync(store.GetPath(foreign.Id))).Chapter.Segments[0].EditableText);
 

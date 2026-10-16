@@ -240,7 +240,6 @@ public sealed class ProjectTranslationQueueUiTests
                 Title = "Chương tổng hợp " + number,
                 SourceFingerprint = fingerprint,
                 ProtectedFingerprint = fingerprint,
-                EnqueuedDocumentFingerprint = fingerprint,
                 TotalSegments = 12,
                 CompletedSegments = number % 12
             }).ToList()

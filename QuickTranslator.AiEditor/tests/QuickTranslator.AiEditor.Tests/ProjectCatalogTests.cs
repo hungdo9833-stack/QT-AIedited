@@ -55,7 +55,7 @@ public sealed class ProjectCatalogTests : IDisposable
     }
 
     [Fact]
-    public async Task Successful_commits_invalidate_catalog_but_rolled_back_transactions_do_not_publish_changes()
+    public async Task Failed_direct_add_does_not_publish_catalog_change_or_leave_orphan()
     {
         var repository = new ProjectRepository();
         ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "commit-events"), "Synthetic commits");
@@ -66,12 +66,13 @@ public sealed class ProjectCatalogTests : IDisposable
         ChapterDocument chapter = TranslationService.CreateChapter("Một", "原文。");
         repository.FaultPoint = point =>
         {
-            if (point == "AfterFile:0") throw new IOException("Injected write failure.");
+            if (point == "AfterChapterWrite") throw new IOException("Injected manifest write failure.");
         };
 
         await Assert.ThrowsAsync<IOException>(() => repository.AddChapterAsync(session, chapter, 1));
         Assert.Empty(changes);
         Assert.Empty(catalog.GetSnapshot(session).Chapters);
+        Assert.Empty(session.ChapterStore.EnumerateChapterPaths());
 
         repository.FaultPoint = null;
         await repository.AddChapterAsync(session, chapter, 1);
@@ -136,28 +137,20 @@ public sealed class ProjectCatalogTests : IDisposable
     }
 
     [Fact]
-    public async Task Recovery_commit_notification_rebuilds_catalog_after_crash_rollback()
+    public async Task Successful_add_notification_rebuilds_catalog_without_loading_chapter_body()
     {
         var repository = new ProjectRepository();
-        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "recovery"), "Synthetic recovery");
-        ChapterDocument chapter = TranslationService.CreateChapter("Gián đoạn", "原文。");
-        repository.FaultPoint = point =>
-        {
-            if (point == "BeforeCommit") throw new ProjectOperationInterruptedException(point);
-        };
-        await Assert.ThrowsAsync<ProjectOperationInterruptedException>(() => repository.AddChapterAsync(session, chapter, 1));
+        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "direct-add"), "Synthetic direct storage");
+        using var catalog = new ProjectCatalog(repository);
+        Assert.Empty(catalog.GetSnapshot(session).Chapters);
 
-        var recoveryRepository = new ProjectRepository();
-        ProjectSession reopened = (await recoveryRepository.OpenAsync(session.ManifestPath)).Session;
-        using var catalog = new ProjectCatalog(recoveryRepository);
-        Assert.Single(catalog.GetSnapshot(reopened).Chapters);
-        ProjectTransactionPreview pending = Assert.Single(reopened.RecoveryReport.Transactions,
-            transaction => transaction.State == ProjectTransactionState.Pending);
+        ChapterDocument chapter = TranslationService.CreateChapter("Đã thêm", "原文。");
+        await repository.AddChapterAsync(session, chapter, 1);
 
-        await recoveryRepository.RecoverTransactionAsync(reopened, pending.Id, ProjectRecoveryDecision.RollBack);
-
-        Assert.Empty(catalog.GetSnapshot(reopened).Chapters);
-        Assert.False(reopened.RecoveryReport.RequiresDecision);
+        ProjectCatalogChapter added = Assert.Single(catalog.GetSnapshot(session).Chapters);
+        Assert.Equal(chapter.Id, added.ChapterId);
+        Assert.Equal("Đã thêm", added.VietnameseTitle);
+        Assert.False(Directory.Exists(session.Resolve("History/Transactions")));
     }
 
     private static void AddManifestEntries(ProjectSession session, int count)

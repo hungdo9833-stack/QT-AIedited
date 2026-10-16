@@ -2,7 +2,7 @@ using QuickTranslator.AiEditor.Core.Models;
 
 namespace QuickTranslator.AiEditor.Core.Persistence;
 
-public sealed record ChapterLoadResult(ChapterDocument Chapter, bool RecoveredFromBackup, string LoadedPath);
+public sealed record ChapterLoadResult(ChapterDocument Chapter, string LoadedPath);
 
 public interface IChapterStore
 {

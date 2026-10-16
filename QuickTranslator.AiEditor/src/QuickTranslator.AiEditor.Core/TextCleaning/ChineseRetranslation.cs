@@ -18,7 +18,7 @@ public enum ChineseRetranslationMethod
 /// <summary>
 /// Converts one fresh Chinese-text scan result and a reviewed translation into the
 /// existing immutable Batch Replace preview. Applying it therefore reuses revision,
-/// approval, draft-history, undo and project-backup guards instead of creating a second writer.
+/// approval, draft-history and undo guards instead of creating a second writer.
 /// </summary>
 public static class ChineseRetranslationPreviewBuilder
 {

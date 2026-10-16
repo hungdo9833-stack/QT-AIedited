@@ -170,8 +170,8 @@ public sealed class ImportPreviewPlan
                 issues.Add(new(differentContent ? ImportPreviewIssueCode.ExcludedDifferentContent : ImportPreviewIssueCode.DuplicateNumber,
                     differentContent ? DetectionIssueSeverity.Warning : DetectionIssueSeverity.Information,
                     differentContent
-                        ? $"Số chương {duplicate.Key.Number} có nhiều phần nội dung KHÁC NHAU. Các phần đã loại vẫn nằm trong source rescue, KHÔNG nằm trong chương nhập. Hãy đối chiếu trước khi tiếp tục."
-                        : $"Số chương {duplicate.Key.Number} có {duplicateItems.Length} bản cùng nội dung; các bản đã loại vẫn được lưu trong source rescue.",
+                        ? $"Số chương {duplicate.Key.Number} có nhiều phần nội dung KHÁC NHAU. Các phần đã loại vẫn nằm trong snapshot nguyên văn, KHÔNG nằm trong chương nhập. Hãy đối chiếu trước khi tiếp tục."
+                        : $"Số chương {duplicate.Key.Number} có {duplicateItems.Length} bản cùng nội dung; các bản đã loại vẫn có trong snapshot nguyên văn.",
                     duplicateItems.Select(x => x.Id).ToImmutableArray()));
             }
         }
@@ -198,7 +198,7 @@ public sealed class ImportPreviewPlan
         foreach (ImportPreviewItem item in items.Where(x => x.Kind == PlannedRegionKind.Unclassified &&
                      !string.IsNullOrWhiteSpace(source.Text.Substring(x.Span.StartUtf16, x.Span.LengthUtf16))))
             issues.Add(new(ImportPreviewIssueCode.UnclassifiedSource, DetectionIssueSeverity.Information,
-                "Vùng nguồn chưa phân loại được giữ nguyên trong source rescue và không tự nhập thành chương.", [item.Id]));
+                "Vùng nguồn chưa phân loại được giữ nguyên trong snapshot nguyên văn và không tự nhập thành chương.", [item.Id]));
         foreach (string issue in coverage.BlockingIssues)
             issues.Add(new(ImportPreviewIssueCode.UnclassifiedSource, DetectionIssueSeverity.Error, issue, []));
         return issues.ToImmutable();

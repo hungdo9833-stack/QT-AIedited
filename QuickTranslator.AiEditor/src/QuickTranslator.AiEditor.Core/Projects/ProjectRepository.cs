@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
@@ -29,7 +27,6 @@ public sealed partial class ProjectRepository
             VietnameseTitle = vietnameseTitle.Trim(), CreatedAt = now, UpdatedAt = now, LastOpenedAt = now,
             ApplicationVersion = typeof(ProjectRepository).Assembly.GetName().Version?.ToString() ?? ""
         };
-        manifest.Files.CharacterProfiles = $"Characters/{manifest.ProjectId:D}.characters.json";
         manifest.Validate();
         CreateLayout(root);
         await WriteManifestAsync(manifestPath, manifest, cancellationToken).ConfigureAwait(false);
@@ -44,15 +41,11 @@ public sealed partial class ProjectRepository
         manifestPath = Path.GetFullPath(manifestPath);
         if (!string.Equals(Path.GetExtension(manifestPath), ".qtproj", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Hãy chọn đúng tệp dự án .qtproj.");
-        var loaded = await RecoveryFiles.ReadAsync(manifestPath, DecodeManifest, cancellationToken: cancellationToken).ConfigureAwait(false);
-        var manifest = loaded.Value;
-        bool recovered = loaded.Info.Source == RecoverySource.Backup;        string root = Path.GetDirectoryName(manifestPath)!;
+        ProjectManifest manifest = await SimpleFileStorage.ReadRequiredAsync(manifestPath, DecodeManifest, cancellationToken).ConfigureAwait(false);
+        string root = Path.GetDirectoryName(manifestPath)!;
         CreateLayout(root);
-        var session = new ProjectSession(manifestPath, manifest) { ManifestRecovery = loaded.Info };
-        session.RecoveryReport = await ProjectTransactionJournal.InspectAsync(session, cancellationToken).ConfigureAwait(false);
-        if (!session.RecoveryReport.RequiresDecision)
-            await ReconcileFastCheckpointSummariesAsync(session, cancellationToken).ConfigureAwait(false);
-        return new(session, recovered);
+        var session = new ProjectSession(manifestPath, manifest);
+        return new(session);
     }
 
     public async Task SaveManifestAsync(ProjectSession session, CancellationToken cancellationToken = default)
@@ -61,8 +54,6 @@ public sealed partial class ProjectRepository
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-        if (session.RecoveryReport.RequiresDecision)
-            throw new InvalidOperationException("Còn transaction chưa đối chiếu; không lưu manifest đè trạng thái phục hồi.");
         session.Manifest.UpdatedAt = DateTimeOffset.UtcNow;
         session.Manifest.ChapterCount = session.Manifest.Chapters.Count(x => x.DeletedAt is null);
         session.Manifest.DeletedChapterCount = session.Manifest.Chapters.Count(x => x.DeletedAt is not null);
@@ -81,7 +72,28 @@ public sealed partial class ProjectRepository
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            _ = await WriteFastChapterCheckpointAsync(session, chapter, null, "UpdateChapter", cancellationToken)
+            await WriteFastChapterCheckpointAsync(session, chapter, "UpdateChapter", cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally { session.OperationGate.Release(); }
+    }
+
+    internal async Task UpdateTranslatedChapterAsync(ProjectSession session, ChapterDocument chapter,
+        string expectedSource, string expectedProtected, CancellationToken cancellationToken)
+    {
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ProjectChapterEntry entry = session.Manifest.Chapters.SingleOrDefault(item =>
+                item.ChapterId == chapter.Id && item.DeletedAt is null)
+                ?? throw new FileNotFoundException("Chapter đang dịch không còn active trong Project.");
+            ChapterDocument current = await ReadRegisteredChapterAsync(session, entry, cancellationToken)
+                .ConfigureAwait(false);
+            if (ProjectTranslationFingerprints.Source(current) != expectedSource ||
+                ProjectTranslationFingerprints.Protected(current) != expectedProtected)
+                throw new InvalidOperationException(
+                    "Chapter đã được sửa trong lúc AI đang xử lý; kết quả đến muộn không được ghi đè.");
+            await WriteFastChapterCheckpointAsync(session, chapter, "SaveTranslationProgress", cancellationToken)
                 .ConfigureAwait(false);
         }
         finally { session.OperationGate.Release(); }
@@ -93,7 +105,6 @@ public sealed partial class ProjectRepository
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (session.RecoveryReport.RequiresDecision) throw new InvalidOperationException("Còn transaction cần phục hồi; không ghi manifest.");
             var after = Clone(session.Manifest);
             var entry = after.Chapters.SingleOrDefault(x => x.ChapterId == chapter.Id && x.DeletedAt is null)
                 ?? throw new InvalidOperationException("Chương không thuộc dự án đang mở.");
@@ -166,12 +177,9 @@ public sealed partial class ProjectRepository
         entry.State = AggregateState(chapter); entry.UpdatedAt = chapter.UpdatedAt;
     }
 
-    private async Task<string> WriteFastChapterCheckpointAsync(ProjectSession session, ChapterDocument chapter,
-        string? expectedStorageRevision, string operation, CancellationToken cancellationToken,
-        bool deferManifestCheckpoint = false)
+    private async Task WriteFastChapterCheckpointAsync(ProjectSession session, ChapterDocument chapter,
+        string operation, CancellationToken cancellationToken)
     {
-        if (session.RecoveryReport.RequiresDecision)
-            throw new InvalidOperationException("Còn transaction cần phục hồi; không ghi checkpoint chương.");
         ProjectChapterEntry entry = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == chapter.Id && x.DeletedAt is null)
             ?? throw new InvalidOperationException("Chương không thuộc dự án đang mở.");
         if (chapter.ProjectId is not null && chapter.ProjectId != session.Manifest.ProjectId)
@@ -181,16 +189,8 @@ public sealed partial class ProjectRepository
         chapter.CharacterProject.Id = session.Manifest.ProjectId;
         byte[] chapterBytes = ChapterFileStore.SerializeDocument(chapter);
         FaultPoint?.Invoke("BeforeFastChapterWrite");
-        string revision = await session.ChapterStore.SaveSerializedAsync(chapter.Id, chapterBytes,
-            expectedStorageRevision, cancellationToken).ConfigureAwait(false);
+        await session.ChapterStore.SaveSerializedAsync(chapter.Id, chapterBytes, cancellationToken).ConfigureAwait(false);
         FaultPoint?.Invoke("AfterFastChapterWrite");
-        if (deferManifestCheckpoint)
-        {
-            CopySummary(entry, chapter);
-            session.Manifest.CurrentChapterId = chapter.Id;
-            session.HasDeferredManifestCheckpoint = true;
-            return revision;
-        }
         ProjectManifest after = Clone(session.Manifest);
         CopySummary(after.Chapters.Single(x => x.ChapterId == chapter.Id), chapter);
         after.CurrentChapterId = chapter.Id;
@@ -199,56 +199,7 @@ public sealed partial class ProjectRepository
         FaultPoint?.Invoke("AfterFastManifestWrite");
         session.Manifest = after;
         PublishManifestCommitted(session, operation);
-        return revision;
     }
-
-    internal async Task FlushDeferredManifestAsync(ProjectSession session, string operation,
-        CancellationToken cancellationToken = default)
-    {
-        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (!session.HasDeferredManifestCheckpoint) return;
-            ProjectManifest after = Clone(session.Manifest);
-            NormalizeManifest(after);
-            await WriteFastManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
-            session.Manifest = after;
-            session.HasDeferredManifestCheckpoint = false;
-            PublishManifestCommitted(session, operation);
-        }
-        finally { session.OperationGate.Release(); }
-    }
-
-    private static async Task ReconcileFastCheckpointSummariesAsync(ProjectSession session,
-        CancellationToken cancellationToken)
-    {
-        DateTime manifestWritten = File.GetLastWriteTimeUtc(session.ManifestPath);
-        ProjectManifest? reconciled = null;
-        foreach (ProjectChapterEntry entry in session.Manifest.Chapters.Where(value => value.DeletedAt is null))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            string path = session.Resolve(entry.RelativePath);
-            if (!File.Exists(path) || File.GetLastWriteTimeUtc(path) <= manifestWritten) continue;
-            ChapterDocument chapter = (await session.ChapterStore.LoadAsync(path, cancellationToken).ConfigureAwait(false)).Chapter;
-            if (chapter.Id != entry.ChapterId || chapter.ProjectId is Guid projectId && projectId != session.Manifest.ProjectId)
-                throw new InvalidDataException("Checkpoint chapter mới hơn manifest nhưng identity không khớp Project.");
-            if (SummaryMatches(entry, chapter)) continue;
-            reconciled ??= Clone(session.Manifest);
-            CopySummary(reconciled.Chapters.Single(value => value.ChapterId == chapter.Id), chapter);
-        }
-        if (reconciled is null) return;
-        NormalizeManifest(reconciled);
-        await WriteManifestAsync(session.ManifestPath, reconciled, cancellationToken).ConfigureAwait(false);
-        session.Manifest = reconciled;
-    }
-
-    private static bool SummaryMatches(ProjectChapterEntry entry, ChapterDocument chapter) =>
-        string.Equals(entry.VietnameseTitle, chapter.Title, StringComparison.Ordinal) &&
-        string.Equals(entry.ChineseTitle, chapter.ChineseTitle, StringComparison.Ordinal) &&
-        entry.SegmentCount == chapter.Segments.Count &&
-        entry.CompletedSegmentCount == chapter.Segments.Count(segment =>
-            segment.HasCompletedTranslation || segment.Status == SegmentStatus.Approved) &&
-        entry.State == AggregateState(chapter) && entry.UpdatedAt == chapter.UpdatedAt;
 
     public static ProjectChapterState AggregateState(ChapterDocument chapter)
     {
@@ -266,41 +217,25 @@ public sealed partial class ProjectRepository
     internal static byte[] SerializeManifest(ProjectManifest manifest)
     {
         StorageIoMetricsCapture.Serialization();
-        var content = JsonSerializer.SerializeToElement(manifest, DocumentJson.Options);
-        var envelope = new ManifestEnvelope { SchemaVersion = 1, ContentSha256 = Hash(content), Project = content };
-        return JsonSerializer.SerializeToUtf8Bytes(envelope, PrettyJson);
+        manifest.Validate();
+        return JsonSerializer.SerializeToUtf8Bytes(manifest, PrettyJson);
     }
 
     private static Task WriteManifestAsync(string path, ProjectManifest manifest, CancellationToken cancellationToken) =>
-        WriteSafeManifestAsync(path, manifest, cancellationToken);
+        SimpleFileStorage.WriteAsync(path, SerializeManifest(manifest), DecodeManifest, cancellationToken);
 
-    private static async Task WriteFastManifestAsync(string path, ProjectManifest manifest,
+    private static Task WriteFastManifestAsync(string path, ProjectManifest manifest,
         CancellationToken cancellationToken) =>
-        _ = await RecoveryFiles.WriteFastCheckedAsync(path, SerializeManifest(manifest), DecodeManifest,
-            null, cancellationToken).ConfigureAwait(false);
+        SimpleFileStorage.WriteAsync(path, SerializeManifest(manifest), DecodeManifest, cancellationToken);
 
     internal static async Task<ProjectManifest> ReadManifestAsync(string path, CancellationToken cancellationToken)
     {
         return DecodeManifest(await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false));
     }
-    private static async Task WriteSafeManifestAsync(string path, ProjectManifest manifest, CancellationToken token) =>
-        _ = await RecoveryFiles.WriteAsync(path, SerializeManifest(manifest), DecodeManifest, token).ConfigureAwait(false);
     internal static ProjectManifest DecodeManifest(byte[] bytes)
-    {        var envelope = JsonSerializer.Deserialize<ManifestEnvelope>(bytes, DocumentJson.Options)
-            ?? throw new InvalidDataException("Tệp dự án trống.");
-        if (envelope.SchemaVersion != 1 || envelope.Project.ValueKind != JsonValueKind.Object ||
-            !string.Equals(envelope.ContentSha256, Hash(envelope.Project), StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Tệp dự án sai định dạng hoặc checksum không khớp.");
-        var manifest = envelope.Project.Deserialize<ProjectManifest>(DocumentJson.Options)
-            ?? throw new InvalidDataException("Manifest dự án bị thiếu.");
-        manifest.Validate(); return manifest;
-    }
-
-    private static string Hash(JsonElement content)
     {
-        StorageIoMetricsCapture.Hash();
-        return Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(content, DocumentJson.Options))));
+        return JsonFileCodec.DecodeDirect<ProjectManifest>(bytes, value => value.Validate(),
+            "schemaVersion", "projectId", "vietnameseTitle", "chapters");
     }
     private static bool IsRecoverable(Exception ex) => ex is IOException or JsonException or InvalidDataException;
     private static string SafeFileName(string value)
@@ -310,14 +245,8 @@ public sealed partial class ProjectRepository
     }
     private static void CreateLayout(string root)
     {
-        foreach (string directory in new[] { "Chapters", "Characters", "Glossary", "Settings", "Settings/prompts", "Resources", "Backups", "History", "History/Deleted", "Cache" })
+        foreach (string directory in new[] { "Chapters", "Settings", "Settings/prompts", "Resources", "Deleted", "Cache", "Queue" })
             Directory.CreateDirectory(Path.Combine(root, directory.Replace('/', Path.DirectorySeparatorChar)));
     }
 
-    private sealed class ManifestEnvelope
-    {
-        public int SchemaVersion { get; set; }
-        public string ContentSha256 { get; set; } = "";
-        public JsonElement Project { get; set; }
-    }
 }

@@ -114,8 +114,7 @@ public sealed class BatchReplacementSegmentRevision
     public SegmentStatus PreviousStatus { get; set; }
     public string? PreviousLastError { get; set; }
     public int AppliedDraftRevision { get; set; }
-    // Null marks legacy runs whose approval state cannot be verified safely.
-    public int? AppliedApprovalVersion { get; set; }
+    public int AppliedApprovalVersion { get; set; }
     public Guid? AppliedLastApprovalId { get; set; }
     public List<BatchReplacementChange> Changes { get; set; } = [];
 }
@@ -138,7 +137,7 @@ public sealed record BatchProjectChapterResult(
     Guid ChapterId, string ChapterTitle, bool Applied, int OccurrencesChanged, string? Error);
 
 public sealed record BatchProjectApplyReport(
-    Guid BatchId, string? BackupDirectory, IReadOnlyList<BatchProjectChapterResult> Chapters)
+    Guid BatchId, IReadOnlyList<BatchProjectChapterResult> Chapters)
 {
     public int AppliedChapters => Chapters.Count(x => x.Applied);
     public int FailedChapters => Chapters.Count(x => !x.Applied);

@@ -76,8 +76,8 @@ public static class SourceCoverageAuditor
                 {
                     SourceCoverageStatus.ImportedContent => "Nhập vào ChapterDocument.OriginalText",
                     SourceCoverageStatus.VerifiedDuplicate => "Không nhập lặp; đối chiếu SHA-256 tuyệt đối",
-                    SourceCoverageStatus.ExplicitlyExcluded => "Người dùng chủ động loại; vẫn lưu source rescue",
-                    SourceCoverageStatus.SourceMetadata => "Giữ trong source rescue dưới dạng metadata",
+                    SourceCoverageStatus.ExplicitlyExcluded => "Người dùng chủ động loại; vẫn có trong snapshot nguyên văn",
+                    SourceCoverageStatus.SourceMetadata => "Giữ trong snapshot nguyên văn dưới dạng metadata",
                     _ => "Chưa có quyết định an toàn"
                 };
                 string evidence = exactDuplicateTargets.TryGetValue(item.Id, out Guid original)

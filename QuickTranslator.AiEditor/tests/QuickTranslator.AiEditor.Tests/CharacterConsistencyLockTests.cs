@@ -158,7 +158,7 @@ public sealed class CharacterConsistencyLockTests
     }
 
     [Fact]
-    public async Task NewFieldsRoundTripAndLegacyJsonDefaultsToUnlocked()
+    public async Task CurrentFieldsRoundTripAndIncompleteJsonIsRejected()
     {
         string directory = Path.Combine(Path.GetTempPath(), "qt-consistency-" + Guid.NewGuid().ToString("N"));
         try
@@ -174,15 +174,15 @@ public sealed class CharacterConsistencyLockTests
             Assert.True(loaded.Profiles[0].NarrativePronounLocked);
             Assert.Equal("ta", loaded.Profiles[0].Relationships[0].SelfReference);
 
-            string legacy = JsonSerializer.Serialize(new
+            string incomplete = JsonSerializer.Serialize(new
             {
                 schemaVersion = 1, id = Guid.NewGuid(), name = "Cũ", updatedAt = DateTimeOffset.UtcNow,
                 normalizeAfterTranslation = false,
                 profiles = Array.Empty<object>()
             }, DocumentJson.Options);
-            CharacterProject legacyProject = JsonSerializer.Deserialize<CharacterProject>(legacy, DocumentJson.Options)!;
-            legacyProject.Validate();
-            Assert.False(legacyProject.ConsistencyLockEnabled);
+            string path = Path.Combine(directory, "incomplete.characters.json");
+            await File.WriteAllTextAsync(path, incomplete);
+            await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync(path));
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }

@@ -121,9 +121,8 @@ public sealed class ProjectTranslationCoordinatorTests
             ChapterDocument first = (await context.Repository.LoadChapterAsync(context.Session,
                 context.ChapterIds[0])).Chapter;
             var firstClient = new ProjectQueueFakeClient();
-            RevisionGuardedChapterStore guarded = await RevisionGuardedChapterStore.CreateAsync(
-                context.Session, context.Repository, first.Id);
-            var service = new TranslationService(first, firstClient, guarded);
+            var service = new TranslationService(first, firstClient,
+                new RegisteredChapterStore(context.Session, context.Repository));
             await service.TranslateAsync(first.Segments[0].Id);
             Assert.Equal(1, firstClient.Calls);
 
@@ -604,7 +603,7 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
-    public async Task Legacy_job_without_backend_snapshot_resumes_on_default_local_backend()
+    public async Task Job_without_backend_snapshot_is_rejected_by_current_schema()
     {
         await WithProjectAsync(1, async context =>
         {
@@ -612,21 +611,9 @@ public sealed class ProjectTranslationCoordinatorTests
             var store = new ProjectTranslationJobStore(context.Session);
             var first = new ProjectTranslationCoordinator(context.Session, context.Repository,
                 new ProjectQueueFakeClient(), Load, store);
-            ProjectTranslationJob legacy = await first.PlanAsync(context.ChapterIds);
-            legacy.Backend = null;
-            ProjectTranslationJob saved = await store.SaveNewAsync(legacy);
-            saved.Status = ProjectTranslationJobStatus.Interrupted;
-            await store.SaveAsync(saved);
-            var client = new ProjectQueueFakeClient();
-            var reopened = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load,
-                new ProjectTranslationJobStore(context.Session));
-
-            ProjectTranslationJob loaded = Assert.IsType<ProjectTranslationJob>(await reopened.LoadAsync());
-            await reopened.ResumeAsync();
-
-            Assert.Null(loaded.Backend);
-            Assert.Equal(1, client.Calls);
-            Assert.Equal(ProjectTranslationJobStatus.Completed, reopened.CurrentJob!.Status);
+            ProjectTranslationJob invalid = await first.PlanAsync(context.ChapterIds);
+            invalid.Backend = null;
+            await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveNewAsync(invalid));
         });
     }
 

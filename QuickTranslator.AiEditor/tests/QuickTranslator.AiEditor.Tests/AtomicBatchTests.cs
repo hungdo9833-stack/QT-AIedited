@@ -120,7 +120,7 @@ public sealed class AtomicBatchTests
             Assert.Equal(before, File.ReadAllText(store.GetPath(second.Id)));
             Assert.Single((await store.LoadAsync(store.GetPath(first.Id))).Chapter.BatchReplacementHistory);
             Assert.Empty(second.BatchReplacementHistory);
-            Assert.True(Directory.Exists(report.BackupDirectory));
+            Assert.False(Directory.Exists(Path.Combine(root, "Backups")));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

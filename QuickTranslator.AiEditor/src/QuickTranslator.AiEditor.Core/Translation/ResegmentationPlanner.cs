@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Segmentation;
@@ -18,7 +16,7 @@ public static class ResegmentationPlanner
         Build(chapter, options, out List<TranslationSegment> proposed, out int retained,
             out int protectedCount, out int regions, out List<string> warnings);
         bool changed = !chapter.Segments.Select(segment => segment.Id).SequenceEqual(proposed.Select(segment => segment.Id));
-        return new(DocumentHash(chapter), options with { }, chapter.Segments.Count, proposed.Count,
+        return new(chapter.Segments.Select(segment => segment.Id).ToArray(), options with { }, chapter.Segments.Count, proposed.Count,
             retained, protectedCount, regions, changed, warnings.AsReadOnly());
     }
 
@@ -28,7 +26,7 @@ public static class ResegmentationPlanner
         ArgumentNullException.ThrowIfNull(chapter);
         ArgumentNullException.ThrowIfNull(preview);
         EnsureQueueIdle(chapter, allowRecoverableCheckpoint);
-        if (!string.Equals(DocumentHash(chapter), preview.ExpectedDocumentSha256, StringComparison.Ordinal))
+        if (!chapter.Segments.Select(segment => segment.Id).SequenceEqual(preview.ExpectedSegmentIds))
             throw new InvalidOperationException("Chương đã thay đổi sau khi tạo preview chia lại đoạn. Hãy xem trước lại.");
         if (preview.ProtectedSegmentCount > 0 && !confirmed)
             throw new SegmentationConfirmationRequiredException();
@@ -121,7 +119,4 @@ public static class ResegmentationPlanner
             chapter.Queue.Status is QueueStatus.Paused or QueueStatus.Interrupted)
             throw new InvalidOperationException("Queue của chương chưa ở trạng thái an toàn. Hãy hoàn tất hoặc hủy checkpoint trước khi chia lại đoạn.");
     }
-
-    private static string DocumentHash(ChapterDocument chapter) =>
-        Convert.ToHexString(SHA256.HashData(ChapterFileStore.SerializeDocument(chapter)));
 }

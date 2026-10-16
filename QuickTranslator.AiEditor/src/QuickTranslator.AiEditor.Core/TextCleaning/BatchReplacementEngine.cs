@@ -152,8 +152,6 @@ public sealed class BatchReplacementEngine
         {
             var segment = chapter.Segments.SingleOrDefault(x => x.Id == revision.SegmentId)
                 ?? throw new InvalidOperationException("Không thể hoàn tác vì cấu trúc segment đã thay đổi.");
-            if (revision.AppliedApprovalVersion is null)
-                throw new InvalidOperationException($"Đoạn {segment.Order}: lịch sử batch cũ không ghi phiên bản duyệt; không thể xác minh hoàn tác an toàn. Hãy đối chiếu lịch sử/backup và sửa thủ công.");
             if (segment.Approvals.Count != revision.AppliedApprovalVersion ||
                 segment.Approvals.LastOrDefault()?.Id != revision.AppliedLastApprovalId)
                 throw new InvalidOperationException($"Đoạn {segment.Order} có quyết định duyệt mới sau batch; không tự ghi đè khi hoàn tác.");

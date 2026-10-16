@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Translation;
@@ -9,80 +8,34 @@ namespace QuickTranslator.AiEditor.Tests;
 public sealed class ChapterUpgradeTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "qtaie-upgrade-" + Guid.NewGuid().ToString("N"));
-    private static string LegacyFixture => Path.Combine(AppContext.BaseDirectory, "Fixtures", "legacy-v1.fixture");
-
     [Fact]
-    public async Task RealPhase1File_MigratesAfterChecksumVerification_AndKeepsOriginalDraftAndHistory()
+    public async Task CurrentSchema_RoundTripsDraftApprovalAndQueueState()
     {
-        // This synthetic fixture was written by the actual, unmodified Phase 1 assembly.
         var store = new ChapterFileStore(_directory);
-        var loaded = await store.LoadAsync(LegacyFixture);
-        Assert.False(loaded.RecoveredFromBackup);
-        var chapter = loaded.Chapter;
-        Assert.Equal(3, chapter.SchemaVersion);
-        Assert.Equal("Bản sửa từ phiên bản cũ.", chapter.Segments[0].UserDraft);
-        Assert.Equal(SegmentStatus.Approved, chapter.Segments[0].Status);
-        Assert.Single(chapter.Segments[0].Approvals);
-        Assert.Null(chapter.Segments[0].Attempts[0].PresetSnapshot);
-        Assert.Contains("Chinese (zh)", chapter.Segments[0].Attempts[0].Prompt);
-        Assert.Equal("甲乙丙丁戊。\r\n己庚辛壬癸。\r\n天地玄黄宇。", chapter.OriginalText);
-        var client = new FakeClient();
-        var service = new TranslationService(chapter, client, store);
-        await new TranslationQueue(service).StartAsync();
-        Assert.Equal(1, client.Calls); // One approved, one already translated, only one missing.
-        var reopened = await store.LoadAsync(store.GetPath(chapter.Id));
-        Assert.Equal("Bản sửa từ phiên bản cũ.", reopened.Chapter.Segments[0].EditableText);
-        Assert.Equal(3, reopened.Chapter.Segments.Count);
+        var chapter = TranslationService.CreateChapter("Hiện tại", "你好。");
+        chapter.Segments[0].UserDraft = "Xin chào.";
+        chapter.Segments[0].DraftRevision = 1;
+        chapter.Segments[0].Status = SegmentStatus.Approved;
+        chapter.Segments[0].Approvals.Add(new() { ApprovedAt = DateTimeOffset.UtcNow, DraftRevision = 1, Text = "Xin chào." });
+        chapter.Queue.Status = QueueStatus.Paused;
+        await store.SaveAsync(chapter);
+
+        ChapterDocument reopened = (await store.LoadAsync(store.GetPath(chapter.Id))).Chapter;
+        Assert.Equal(3, reopened.SchemaVersion);
+        Assert.Equal("Xin chào.", reopened.Segments[0].UserDraft);
+        Assert.Single(reopened.Segments[0].Approvals);
+        Assert.Equal(QueueStatus.Paused, reopened.Queue.Status);
     }
 
     [Fact]
-    public async Task V1Backup_CanRecoverADamagedPrimary_WithoutOverwritingBackup()
+    public async Task EnvelopeSchema_IsRejectedInsteadOfKeepingACompatibilityReader()
     {
         Directory.CreateDirectory(_directory);
         string path = Path.Combine(_directory, "synthetic.qtaie.json");
-        File.Copy(LegacyFixture, path + ".bak");
-        await File.WriteAllTextAsync(path, "synthetic damage");
-        var store = new ChapterFileStore(_directory);
-        var loaded = await store.LoadAsync(path);
-        Assert.True(loaded.RecoveredFromBackup);
-        Assert.Equal(3, loaded.Chapter.SchemaVersion);
-        Assert.Equal("Bản sửa từ phiên bản cũ.", loaded.Chapter.Segments[0].UserDraft);
-        Assert.Equal(await File.ReadAllBytesAsync(LegacyFixture), await File.ReadAllBytesAsync(path + ".bak"));
-    }
-
-    [Fact]
-    public void Schema2Chapter_MigratesToCharacterSchemaWithoutLosingQueueOrTranslations()
-    {
-        var chapter = TranslationService.CreateChapter("Schema 2", "你好。");
-        chapter.SchemaVersion = 2;
-        chapter.CharacterProject = null!;
-        chapter.Segments[0].NormalizationHistory = null!;
-        chapter.Segments[0].Attempts.Add(new TranslationAttempt { StartedAt = DateTimeOffset.UtcNow,
-            FinishedAt = DateTimeOffset.UtcNow, Outcome = AttemptOutcome.Completed, AiText = "Xin chào.",
-            ModelOptions = new(), PromptVersion = "v2", Prompt = "legacy" });
-        chapter.Segments[0].Status = SegmentStatus.AwaitingReview;
-        chapter.Queue.Status = QueueStatus.Paused;
-        var service = new TranslationService(chapter, new FakeClient(), new MemoryStore());
-        var migrated = service.GetSnapshot();
-        Assert.Equal(3, migrated.SchemaVersion);
-        Assert.Equal("Xin chào.", migrated.Segments[0].EditableText);
-        Assert.Empty(migrated.Segments[0].NormalizationHistory);
-        Assert.Equal(QueueStatus.Paused, migrated.Queue.Status);
-        Assert.Empty(migrated.CharacterProject.Profiles);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(2)]
-    public void OlderSchemaWithStoredCharacterSnapshotPreservesEverySnapshotField(int schema)
-    {
         var chapter = TranslationService.CreateChapter("Snapshot cũ", "你好。");
-        chapter.SchemaVersion = schema;
-        chapter.CharacterProject.Name = "Hồ sơ đã sửa";
-        chapter.CharacterProject.Profiles = [new() { ChineseName = "王秀兰", VietnameseName = "Vương Tú Lan", NormalizationEnabled = false }];
-        string before = JsonSerializer.Serialize(chapter.CharacterProject, DocumentJson.Options);
-        DocumentJson.Migrate(chapter);
-        Assert.Equal(before, JsonSerializer.Serialize(chapter.CharacterProject, DocumentJson.Options));
+        string envelope = System.Text.Json.JsonSerializer.Serialize(new { chapter }, DocumentJson.Options);
+        await File.WriteAllTextAsync(path, envelope);
+        await Assert.ThrowsAsync<InvalidDataException>(() => new ChapterFileStore(_directory).LoadAsync(path));
     }
 
     [Fact]

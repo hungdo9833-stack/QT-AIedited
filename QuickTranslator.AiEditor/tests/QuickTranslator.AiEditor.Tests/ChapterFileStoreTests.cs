@@ -27,7 +27,6 @@ public sealed class ChapterFileStoreTests : IDisposable
         service.SelectSegment(chapter.Segments[1].Id);
         await service.SaveAsync();
         var loaded = await store.LoadAsync(store.GetPath(chapter.Id));
-        Assert.False(loaded.RecoveredFromBackup);
         Assert.Equal(JsonSerializer.Serialize(service.GetSnapshot(), DocumentJson.Options),
             JsonSerializer.Serialize(loaded.Chapter, DocumentJson.Options));
         Assert.Equal(chapter.OriginalText, TextSegmenter.Reconstruct(loaded.Chapter.Segments));
@@ -40,7 +39,7 @@ public sealed class ChapterFileStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task DamagedPrimary_UsesLastValidBackup_AndDoesNotReplaceItWithDamage()
+    public async Task DamagedPrimary_ThrowsAndDoesNotReadOrChangeAnOldBackup()
     {
         var store = new ChapterFileStore(_directory);
         var chapter = TranslationService.CreateChapter("Thử phục hồi", "你好。再见。");
@@ -49,18 +48,15 @@ public sealed class ChapterFileStoreTests : IDisposable
         chapter.Segments[0].UserDraft = "Nháp phiên bản 2.";
         await store.SaveAsync(chapter);
         var path = store.GetPath(chapter.Id);
-        var backupBytes = await File.ReadAllBytesAsync(path + ".bak");
+        await File.WriteAllTextAsync(path + ".bak", "old backup is left untouched");
         await File.WriteAllTextAsync(path, "{damaged synthetic file");
-        var recovered = await store.LoadAsync(path);
-        Assert.True(recovered.RecoveredFromBackup);
-        Assert.Equal("Nháp phiên bản 1.", recovered.Chapter.Segments[0].UserDraft);
-        await store.SaveAsync(recovered.Chapter);
-        Assert.Equal(backupBytes, await File.ReadAllBytesAsync(path + ".bak"));
-        Assert.False((await store.LoadAsync(path)).RecoveredFromBackup);
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync(path));
+        Assert.Equal("{damaged synthetic file", await File.ReadAllTextAsync(path));
+        Assert.Equal("old backup is left untouched", await File.ReadAllTextAsync(path + ".bak"));
     }
 
     [Fact]
-    public async Task ValidJsonWithModifiedText_IsDetectedByChecksum()
+    public async Task ValidJsonModifiedOutsideTheApplicationLoadsWithoutChecksumValidation()
     {
         var store = new ChapterFileStore(_directory);
         var chapter = TranslationService.CreateChapter("Tiêu đề gốc", "你好。");
@@ -69,11 +65,11 @@ public sealed class ChapterFileStoreTests : IDisposable
         await store.SaveAsync(chapter);
         var path = store.GetPath(chapter.Id);
         var node = JsonNode.Parse(await File.ReadAllTextAsync(path))!;
-        node["chapter"]!["title"] = "Nội dung bị sửa ngoài ứng dụng";
+        node["title"] = "Nội dung được sửa ngoài ứng dụng";
         await File.WriteAllTextAsync(path, node.ToJsonString());
         var loaded = await store.LoadAsync(path);
-        Assert.True(loaded.RecoveredFromBackup);
-        Assert.Equal("Tiêu đề gốc", loaded.Chapter.Title);
+        Assert.Equal("Nội dung được sửa ngoài ứng dụng", loaded.Chapter.Title);
+        Assert.False(File.Exists(path + ".bak"));
     }
 
     [Fact]

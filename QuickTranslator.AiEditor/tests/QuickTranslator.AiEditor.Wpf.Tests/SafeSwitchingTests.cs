@@ -61,7 +61,7 @@ public sealed class SafeSwitchingTests
         fixture.Attach(first);
         var service = fixture.Service;
         var target = await fixture.Repository.CreateAsync(Path.Combine(fixture.Root, "BadResources"), "Đích lỗi");
-        await File.WriteAllTextAsync(target.Resolve("Settings/resources.json"), "{broken");
+        await File.WriteAllTextAsync(target.Resolve(target.Manifest.Files.Resources), "{broken");
         await fixture.TaskCall("OpenProjectPathAsync", target.ManifestPath);
         Assert.Same(service, fixture.Service);
         Assert.Same(fixture.Project, fixture.Get<QuickTranslator.AiEditor.Core.Projects.ProjectSession>("_projectSession"));

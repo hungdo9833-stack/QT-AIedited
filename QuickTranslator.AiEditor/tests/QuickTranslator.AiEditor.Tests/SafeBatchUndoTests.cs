@@ -83,23 +83,6 @@ public sealed class SafeBatchUndoTests
     }
 
     [Fact]
-    public async Task F06_LegacyRunRemainsReadableButCannotGuessApprovalStateForUndo()
-    {
-        var service = await ReplacedAsync(new MemoryStore());
-        var chapter = service.GetSnapshot();
-        foreach (var revision in chapter.BatchReplacementHistory.Single().Segments)
-        {
-            revision.AppliedApprovalVersion = null;
-            revision.AppliedLastApprovalId = null;
-        }
-        DocumentJson.Validate(chapter);
-        string before = AtomicBatchTests.Serialize(chapter);
-        var error = Assert.Throws<InvalidOperationException>(() => BatchReplacementEngine.UndoLatest(chapter, DateTimeOffset.UtcNow));
-        Assert.Contains("lịch sử batch cũ", error.Message);
-        Assert.Equal(before, AtomicBatchTests.Serialize(chapter));
-    }
-
-    [Fact]
     public async Task F06_ApprovalBeforeBatchCanBePreservedAndRestoredWithoutDeletingItsHistory()
     {
         var service = new TranslationService(AtomicBatchTests.CreateChapter(), new FakeClient(), new MemoryStore());

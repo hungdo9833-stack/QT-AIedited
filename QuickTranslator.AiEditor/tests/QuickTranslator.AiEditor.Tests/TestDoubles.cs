@@ -19,7 +19,7 @@ internal sealed class MemoryStore : IChapterStore
     }
 
     public Task<ChapterLoadResult> LoadAsync(string path, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new ChapterLoadResult(DocumentJson.Clone(LastSaved!), false, path));
+        Task.FromResult(new ChapterLoadResult(DocumentJson.Clone(LastSaved!), path));
 }
 
 internal sealed class FakeClient : IOllamaClient

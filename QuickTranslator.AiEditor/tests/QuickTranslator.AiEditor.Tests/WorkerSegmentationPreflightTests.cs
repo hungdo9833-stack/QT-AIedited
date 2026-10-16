@@ -55,9 +55,7 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
         Assert.NotEmpty(remoteClient.Options);
 
         ProjectSession reopened = (await new ProjectRepository().OpenAsync(session.ManifestPath)).Session;
-        Assert.False(reopened.RecoveryReport.RequiresDecision);
-        Assert.DoesNotContain(reopened.RecoveryReport.Transactions,
-            transaction => transaction.Operation == "Journal không đọc được");
+        Assert.False(Directory.Exists(reopened.Resolve("History/Transactions")));
     }
 
     [Fact]
@@ -91,7 +89,7 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
     }
 
     [Fact]
-    public async Task Crash_during_preflight_rolls_back_chapter_and_never_calls_provider()
+    public async Task Failure_after_preflight_checkpoint_reports_interrupted_without_calling_provider()
     {
         (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =
             await CreateProjectAsync(1);
@@ -102,7 +100,7 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
             Segmentation(80, 120, 160));
         _repository.FaultPoint = point =>
         {
-            if (point == "BeforeCommit") throw new IOException("synthetic preflight crash");
+            if (point == "AfterFastChapterWrite") throw new IOException("synthetic preflight failure");
         };
         var coordinator = new ProjectTranslationCoordinator(session, _repository, [worker], load);
 
@@ -110,8 +108,8 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
 
         _repository.FaultPoint = null;
         ChapterDocument after = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
-        Assert.Equal(before.SegmentationOptions, after.SegmentationOptions);
-        Assert.Equal(before.Segments.Select(segment => segment.Id), after.Segments.Select(segment => segment.Id));
+        Assert.NotEqual(before.SegmentationOptions, after.SegmentationOptions);
+        Assert.Equal(worker.SegmentationOptions, after.SegmentationOptions);
         Assert.Empty(client.Options);
         Assert.Equal(ProjectTranslationJobStatus.Interrupted, coordinator.CurrentJob!.Status);
     }

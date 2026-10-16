@@ -171,14 +171,11 @@ public class OllamaProfileStore
     }
 
     public string PathName { get; }
-    public RecoveryInfo? LastRecovery { get; private set; }
-
     public async Task<OllamaProfileCatalog> LoadAsync(CancellationToken cancellationToken = default)
     {
-        RecoveryRead<StoredCatalog> read = await RecoveryFiles.ReadAsync(PathName, DecodeStored,
+        StoredCatalog read = await SimpleFileStorage.ReadOptionalAsync(PathName, DecodeStored,
             () => EncodeCatalog(OllamaProfileCatalog.CreateDefault()), cancellationToken).ConfigureAwait(false);
-        LastRecovery = read.Info;
-        return DecodeCatalog(read.Value);
+        return DecodeCatalog(read);
     }
 
     public async Task SaveAsync(OllamaProfileCatalog catalog, CancellationToken cancellationToken = default)
@@ -190,7 +187,7 @@ public class OllamaProfileStore
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(stored,
             new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
         Directory.CreateDirectory(Path.GetDirectoryName(PathName)!);
-        LastRecovery = await RecoveryFiles.WriteAsync(PathName, bytes, DecodeStored, cancellationToken).ConfigureAwait(false);
+        await SimpleFileStorage.WriteAsync(PathName, bytes, DecodeStored, cancellationToken).ConfigureAwait(false);
     }
 
     private StoredCatalog EncodeCatalog(OllamaProfileCatalog catalog) => new()
@@ -223,7 +220,7 @@ public class OllamaProfileStore
             {
                 Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Endpoint = profile.Endpoint,
                 Model = profile.Model, RemoteDisclosureAccepted = profile.RemoteDisclosureAccepted,
-                Runtime = profile.Runtime?.Clone() ?? AiRuntimeProfile.CreateDefault(profile.Model),
+                Runtime = profile.Runtime!.Clone(),
                 Token = Unprotect(profile.ProtectedToken), HourlyPrice = profile.HourlyPrice,
                 Ssh = profile.Ssh is null ? null : new GpuSshSettings
                 {
@@ -239,11 +236,11 @@ public class OllamaProfileStore
         return catalog;
     }
 
-    private static StoredCatalog DecodeStored(byte[] bytes) => RecoveryFiles.DecodeJson<StoredCatalog>(bytes, stored =>
+    private static StoredCatalog DecodeStored(byte[] bytes) => JsonFileCodec.DecodeDirect<StoredCatalog>(bytes, stored =>
     {
         if (stored.SchemaVersion != 1 || stored.Profiles is null || stored.Profiles.Count is < 1 or > 100 ||
             stored.Profiles.Any(profile => profile is null || profile.Id == Guid.Empty || string.IsNullOrWhiteSpace(profile.Name) ||
-                string.IsNullOrWhiteSpace(profile.Endpoint) || string.IsNullOrWhiteSpace(profile.Model)) ||
+                string.IsNullOrWhiteSpace(profile.Endpoint) || string.IsNullOrWhiteSpace(profile.Model) || profile.Runtime is null) ||
             stored.Profiles.Select(profile => profile.Id).Distinct().Count() != stored.Profiles.Count ||
             stored.Profiles.All(profile => profile.Id != stored.ActiveProfileId))
             throw new InvalidDataException("File profile Ollama không hợp lệ.");

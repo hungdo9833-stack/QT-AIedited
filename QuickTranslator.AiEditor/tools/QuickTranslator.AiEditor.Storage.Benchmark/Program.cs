@@ -30,25 +30,10 @@ try
     saves.Stop();
     StorageIoMetricsSnapshot ioMetrics = io.Snapshot();
 
-    string transactions = session.Resolve("History/Transactions");
-    int directories = Directory.Exists(transactions)
-        ? Directory.EnumerateDirectories(transactions, "*", SearchOption.TopDirectoryOnly).Count() : 0;
-    int files = Directory.Exists(transactions)
-        ? Directory.EnumerateFiles(transactions, "*", SearchOption.AllDirectories).Count() : 0;
-    long bytes = Directory.Exists(transactions)
-        ? Directory.EnumerateFiles(transactions, "*", SearchOption.AllDirectories).Sum(path => new FileInfo(path).Length) : 0;
-
     Stopwatch reopen = Stopwatch.StartNew();
     ProjectSession reopened = (await new ProjectRepository().OpenAsync(session.ManifestPath)).Session;
     reopen.Stop();
     var finalChapter = (await new ProjectRepository().LoadChapterAsync(reopened, chapter.Id)).Chapter;
-    ChapterDocument interrupted = DocumentJson.Clone(finalChapter);
-    interrupted.Title = "Checkpoint đã ghi trước crash";
-    interrupted.UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1);
-    await reopened.ChapterStore.SaveAsync(interrupted); // Simulate process loss after chapter, before manifest.
-    Stopwatch resume = Stopwatch.StartNew();
-    ProjectSession resumed = (await new ProjectRepository().OpenAsync(reopened.ManifestPath)).Session;
-    resume.Stop();
     double[] sorted = samples.Order().ToArray();
     long projectBytes = Directory.EnumerateFiles(session.RootDirectory, "*", SearchOption.AllDirectories)
         .Sum(path => new FileInfo(path).Length);
@@ -67,18 +52,12 @@ try
             FileReads = Ratio(ioMetrics.FileReads), BytesRead = Ratio(ioMetrics.BytesRead),
             FileWrites = Ratio(ioMetrics.FileWrites), BytesWritten = Ratio(ioMetrics.BytesWritten),
             TemporaryFilesCreated = Ratio(ioMetrics.TemporaryFilesCreated),
-            BackupReplacements = Ratio(ioMetrics.BackupReplacements), FileDeletes = Ratio(ioMetrics.FileDeletes)
+            FileReplacements = Ratio(ioMetrics.FileReplacements), FileDeletes = Ratio(ioMetrics.FileDeletes)
         },
-        TransactionDirectories = directories,
-        TransactionFiles = files,
-        TransactionBytes = bytes,
         ProjectBytes = projectBytes,
         ChapterNewerThanManifest = chapterWriteTime > manifestWriteTime,
         ReopenMilliseconds = Math.Round(reopen.Elapsed.TotalMilliseconds, 3),
-        ResumeAfterStaleManifestMilliseconds = Math.Round(resume.Elapsed.TotalMilliseconds, 3),
-        RecoveryItems = reopened.RecoveryReport.Transactions.Count,
-        FinalCheckpointExact = finalChapter.ConfirmedContextNotes == "Synthetic checkpoint " + (checkpoints - 1),
-        CrashReconciliationExact = resumed.Manifest.Chapters.Single().VietnameseTitle == interrupted.Title
+        FinalCheckpointExact = finalChapter.ConfirmedContextNotes == "Synthetic checkpoint " + (checkpoints - 1)
     }, new JsonSerializerOptions { WriteIndented = true }));
 
     double Ratio(long value) => Math.Round((double)value / checkpoints, 3);

@@ -369,7 +369,7 @@ public partial class MainWindow
                     await ReloadCurrentChapterAfterProjectBatchAsync(currentId);
                     ShowProjectReport(report, "Thay thế nhiều chương");
                     status.Text = $"Đã thay {report.Chapters.Sum(x => x.OccurrencesChanged)} vị trí; " +
-                        $"thành công {report.AppliedChapters} chương, lỗi {report.FailedChapters}. Backup: {report.BackupDirectory}";
+                        $"thành công {report.AppliedChapters} chương, lỗi {report.FailedChapters}.";
                 }
                 else
                 {
@@ -633,7 +633,7 @@ public partial class MainWindow
         string details = string.Join(Environment.NewLine, report.Chapters.Select(x =>
             $"{(x.Applied ? "ĐÃ GHI" : "CHƯA GHI")} · {x.ChapterTitle} · {x.OccurrencesChanged} vị trí" +
             (x.Error is null ? "" : " · " + x.Error)));
-        MessageBox.Show(this, $"Backup: {report.BackupDirectory}\n\n{details}", title,
+        MessageBox.Show(this, details, title,
             MessageBoxButton.OK, report.FailedChapters == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 

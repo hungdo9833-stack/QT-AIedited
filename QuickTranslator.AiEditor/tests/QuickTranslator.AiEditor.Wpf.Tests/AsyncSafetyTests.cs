@@ -142,7 +142,7 @@ public sealed class AsyncSafetyTests
             ChineseName = "王秀兰", VietnameseName = "Vương Tú Lan", NormalizationEnabled = false
         });
         fixture.Call("SetGlossaryTerms", (object)new ConfirmedTerm[] { new("王秀兰", "Vương Tú Lan") });
-        string path = Path.Combine(fixture.Project.RootDirectory, "Settings", "resources.json");
+        string path = fixture.Project.Resolve(fixture.Project.Manifest.Files.Resources);
         string before = File.ReadAllText(path);
         using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
             await Assert.ThrowsAnyAsync<IOException>(() => fixture.TaskCall(method));
@@ -199,7 +199,7 @@ public sealed class AsyncSafetyTests
         // Both editors place Chinese then Vietnamese before other fields.
         Descendants<TextBox>(dialog).Skip(1).First().Text = "Vương Tú Lan";
         foreach (var check in Descendants<CheckBox>(dialog)) check.IsChecked = false;
-        string path = Path.Combine(fixture.Project.RootDirectory, "Settings", "resources.json");
+        string path = fixture.Project.Resolve(fixture.Project.Manifest.Files.Resources);
         using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
             Descendants<Button>(dialog).Single(x => Equals(x.Content, button)).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

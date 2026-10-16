@@ -27,21 +27,18 @@ public sealed class ProjectLibraryStore(string? path = null)
         "QuickTranslatorAiEditor", "Projects", "library.json");
     public string PathName { get; } = System.IO.Path.GetFullPath(path ?? DefaultPath);
 
-    public RecoveryInfo? LastRecovery { get; private set; }
     public async Task<ProjectLibrary> LoadAsync(CancellationToken cancellationToken = default)
     {
-        var result = await RecoveryFiles.ReadAsync(PathName, Decode, () => new ProjectLibrary(), cancellationToken).ConfigureAwait(false);
-        LastRecovery = result.Info; RefreshMissing(result.Value); return result.Value;
+        ProjectLibrary result = await SimpleFileStorage.ReadOptionalAsync(PathName, Decode, () => new ProjectLibrary(), cancellationToken).ConfigureAwait(false);
+        RefreshMissing(result); return result;
     }
-    private static ProjectLibrary Decode(byte[] bytes) => RecoveryFiles.DecodeJson<ProjectLibrary>(bytes, Validate, "schemaVersion", "recentProjects");
-    public async Task RestoreBackupAsync(CancellationToken cancellationToken = default) =>
-        LastRecovery = await RecoveryFiles.RestoreBackupAsync(LastRecovery ?? throw new InvalidOperationException("Hãy đọc preview trước."), Decode, cancellationToken).ConfigureAwait(false);
+    private static ProjectLibrary Decode(byte[] bytes) => JsonFileCodec.DecodeDirect<ProjectLibrary>(bytes, Validate, "schemaVersion", "recentProjects");
     public async Task SaveAsync(ProjectLibrary library, CancellationToken cancellationToken = default)
     {
         Validate(library);
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(library,
             new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
-        LastRecovery = await RecoveryFiles.WriteAsync(PathName, bytes, Decode, cancellationToken).ConfigureAwait(false);
+        await SimpleFileStorage.WriteAsync(PathName, bytes, Decode, cancellationToken).ConfigureAwait(false);
     }
 
     public static void Remember(ProjectLibrary library, ProjectSession session)

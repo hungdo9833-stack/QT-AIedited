@@ -38,9 +38,8 @@ internal sealed class WorkspaceLayoutStore(string? path = null)
 
     public async Task<WorkspaceLayoutPreferences> LoadAsync(CancellationToken cancellationToken = default)
     {
-        var read = await RecoveryFiles.ReadAsync(PathName, Decode, () => new WorkspaceLayoutPreferences(), cancellationToken)
+        return await SimpleFileStorage.ReadOptionalAsync(PathName, Decode, () => new WorkspaceLayoutPreferences(), cancellationToken)
             .ConfigureAwait(false);
-        return read.Value;
     }
 
     public Task SaveAsync(WorkspaceLayoutPreferences value, CancellationToken cancellationToken = default)
@@ -48,7 +47,7 @@ internal sealed class WorkspaceLayoutStore(string? path = null)
         value.Validate();
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(value,
             new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
-        return RecoveryFiles.WriteAsync(PathName, bytes, Decode, cancellationToken);
+        return SimpleFileStorage.WriteAsync(PathName, bytes, Decode, cancellationToken);
     }
 
     private static WorkspaceLayoutPreferences Decode(byte[] bytes)

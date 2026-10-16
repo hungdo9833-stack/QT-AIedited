@@ -130,7 +130,7 @@ public sealed class ReaderModeTests
     }
 
     [Fact]
-    public async Task Legacy_reader_preferences_without_m6_fields_remain_compatible()
+    public async Task Reader_preferences_missing_current_fields_are_rejected()
     {
         string directory = Path.Combine(Path.GetTempPath(), "qtaie-reader-legacy-" + Guid.NewGuid());
         string path = Path.Combine(directory, "reader.json");
@@ -138,20 +138,16 @@ public sealed class ReaderModeTests
         try
         {
             Guid chapterId = Guid.NewGuid();
-            var legacy = new ReaderPreferences
+            var incomplete = new ReaderPreferences
             {
                 ChapterPositions = { [chapterId] = new() { CharacterOffset = 41, SegmentId = Guid.NewGuid() } }
             };
-            JsonObject json = JsonNode.Parse(JsonSerializer.Serialize(legacy, DocumentJson.Options))!.AsObject();
+            JsonObject json = JsonNode.Parse(JsonSerializer.Serialize(incomplete, DocumentJson.Options))!.AsObject();
             json.Remove("tableOfContentsVisible");
             json["chapterPositions"]![chapterId.ToString()]!.AsObject().Remove("segmentOffset");
             await File.WriteAllTextAsync(path, json.ToJsonString(DocumentJson.Options));
 
-            ReaderPreferences loaded = await new ReaderPreferencesStore(path).LoadAsync();
-
-            Assert.True(loaded.TableOfContentsVisible);
-            Assert.Null(loaded.ChapterPositions[chapterId].SegmentOffset);
-            Assert.Equal(41, loaded.ChapterPositions[chapterId].CharacterOffset);
+            await Assert.ThrowsAsync<InvalidDataException>(() => new ReaderPreferencesStore(path).LoadAsync());
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
     }

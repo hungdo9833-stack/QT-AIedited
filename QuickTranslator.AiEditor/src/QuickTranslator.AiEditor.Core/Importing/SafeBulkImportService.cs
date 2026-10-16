@@ -1,9 +1,6 @@
 using System.Collections.Immutable;
-using System.Diagnostics;
-using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
@@ -36,9 +33,7 @@ public enum BulkImportChapterState
     NotStarted,
     Imported,
     AlreadyImported,
-    RolledBack,
-    Failed,
-    NeedsRecovery
+    Failed
 }
 
 public sealed record BulkImportChapterOutcome(
@@ -58,7 +53,6 @@ public sealed record BulkImportProgress(
 
 public sealed record BulkImportReport(
     Guid ImportId,
-    string SourceArchivePath,
     string SourceRawSha256,
     int CompletedChunks,
     int TotalChunks,
@@ -112,7 +106,6 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             throw new BulkImportValidationException("Preview còn lỗi chặn import.", previewErrors);
 
         Guid importId = StableGuid($"qtaie-m2-import:{session.Manifest.ProjectId:D}:{plan.Fingerprint}");
-        string archivePath = session.Resolve($"Backups/detected-source-{importId:N}.zip");
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync(cancellationToken).ConfigureAwait(false);
         resources.Validate();
         if (resources.ProjectId != session.Manifest.ProjectId)
@@ -121,26 +114,11 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         var outcomes = selected.Select(item => new MutableOutcome(item)).ToArray();
         IReadOnlyList<string> collisions = await PreflightAsync(session, plan, outcomes, options, cancellationToken).ConfigureAwait(false);
         if (collisions.Count > 0)
-            throw new BulkImportValidationException("Bulk import có collision; chưa ghi source rescue hoặc Project.", collisions);
+            throw new BulkImportValidationException("Bulk import có collision; Project chưa thay đổi.", collisions);
 
         if (cancellationToken.IsCancellationRequested)
-            return BuildReport(importId, archivePath, plan, 0, 0, outcomes,
-                "Đã hủy trước khi ghi source rescue; Project chưa thay đổi.", true, false);
-
-        try
-        {
-            await EnsureSourceArchiveAsync(session, plan, importId, archivePath, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException ex)
-        {
-            return BuildReport(importId, archivePath, plan, 0, 0, outcomes,
-                "Đã hủy khi đang tạo source rescue; Project chưa thay đổi. " + ex.Message, true, false);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            return BuildReport(importId, archivePath, plan, 0, 0, outcomes,
-                "Không thể tạo/xác minh source rescue; Project chưa thay đổi. " + ex.Message, true, false);
-        }
+            return BuildReport(importId, plan, 0, 0, outcomes,
+                "Đã hủy trước khi ghi Project; Project chưa thay đổi.", true, false);
         MutableOutcome[] pending = outcomes.Where(x => x.State == BulkImportChapterState.NotStarted).ToArray();
         List<MutableOutcome[]> chunks = CreateChunks(plan, pending, options);
         int completedChunks = 0;
@@ -148,7 +126,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
         {
             if (cancellationToken.IsCancellationRequested)
-                return BuildReport(importId, archivePath, plan, completedChunks, chunks.Count, outcomes,
+                return BuildReport(importId, plan, completedChunks, chunks.Count, outcomes,
                     "Đã hủy giữa các chunk. Các chunk đã commit được giữ; phần còn lại có thể tiếp tục an toàn.", true, false);
 
             MutableOutcome[] chunk = chunks[chunkIndex];
@@ -156,7 +134,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             var published = new HashSet<Guid>();
             try
             {
-                await repository.ImportDetectedChapterChunkAsync(session, documents, archivePath,
+                await repository.ImportDetectedChapterChunkAsync(session, documents,
                     $"DetectedBulkImport:{importId:N}:{chunkIndex + 1}/{chunks.Count}", id => published.Add(id),
                     options.ReplaceSoftDeletedHistory, cancellationToken)
                     .ConfigureAwait(false);
@@ -168,25 +146,17 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
                     outcomes.Count(x => x.State is BulkImportChapterState.Imported or BulkImportChapterState.AlreadyImported),
                     outcomes.Length, $"Đã commit chunk {completedChunks}/{chunks.Count}."));
             }
-            catch (ProjectOperationInterruptedException)
-            {
-                throw; // Test seam models a real process loss: durable journal is handled after reopen.
-            }
             catch (Exception ex)
             {
-                bool rollbackComplete = ex.Data["RollbackComplete"] is true ||
-                    ex is ProjectTransactionException transaction && transaction.RollbackComplete;
-                BulkImportChapterState state = rollbackComplete ? BulkImportChapterState.RolledBack : BulkImportChapterState.NeedsRecovery;
                 foreach (MutableOutcome item in chunk)
                 {
-                    item.State = state;
+                    item.State = session.Manifest.Chapters.Any(entry => entry.ChapterId == item.Item.ChapterId && entry.DeletedAt is null)
+                        ? BulkImportChapterState.Imported : BulkImportChapterState.Failed;
                     item.Error = ex.Message;
                 }
-                return BuildReport(importId, archivePath, plan, completedChunks, chunks.Count, outcomes,
-                    rollbackComplete
-                        ? "Chunk lỗi đã rollback toàn bộ; các chunk trước vẫn giữ nguyên và có thể tiếp tục. " + ex.Message
-                        : "Chunk lỗi cần recovery trước khi ghi tiếp. " + ex.Message,
-                    rollbackComplete, false);
+                return BuildReport(importId, plan, completedChunks, chunks.Count, outcomes,
+                    "Import dừng giữa chừng. Các chương đã lưu được giữ; các chương lỗi/chưa xử lý có thể thử lại. " + ex.Message,
+                    true, false);
             }
         }
 
@@ -194,15 +164,13 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         {
             await VerifyPersistedItemsAsync(session.ManifestPath, plan, outcomes.Select(x => x.Item), cancellationToken)
                 .ConfigureAwait(false);
-            await VerifySourceArchiveAsync(archivePath, session.Manifest.ProjectId, plan, importId, cancellationToken)
-                .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or OperationCanceledException)
         {
-            return BuildReport(importId, archivePath, plan, completedChunks, chunks.Count, outcomes,
+            return BuildReport(importId, plan, completedChunks, chunks.Count, outcomes,
                 "Đã ghi dữ liệu nhưng kiểm toán sau commit thất bại; không đánh dấu hoàn tất. " + ex.Message, true, false);
         }
-        return BuildReport(importId, archivePath, plan, completedChunks, chunks.Count, outcomes, null, true, true);
+        return BuildReport(importId, plan, completedChunks, chunks.Count, outcomes, null, true, true);
     }
 
     private async Task<IReadOnlyList<string>> PreflightAsync(ProjectSession session, ImportPreviewPlan plan,
@@ -214,7 +182,7 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             .ToDictionary(x => x.Number);
         foreach (IGrouping<int, MutableOutcome> duplicate in outcomes.GroupBy(x => x.Item.Number!.Value).Where(x => x.Count() > 1))
             issues.Add($"Project schema hiện yêu cầu số chapter active duy nhất: số {duplicate.Key} xuất hiện ở nhiều quyển. " +
-                "Giữ nguyên số gốc trong preview và chưa ghi Project cho đến khi có migration metadata an toàn.");
+                "Giữ nguyên số gốc trong preview; schema Project hiện tại chưa hỗ trợ số active trùng giữa các quyển.");
         foreach (MutableOutcome outcome in outcomes)
         {
             token.ThrowIfCancellationRequested();
@@ -237,13 +205,6 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
                             session.Resolve(sameId.RelativePath), token).ConfigureAwait(false);
                         if (deleted.Id != sameId.ChapterId || deleted.ProjectId != session.Manifest.ProjectId)
                             throw new InvalidDataException("File History không thuộc ChapterId/Project cần thay thế.");
-                        string backupPath = session.Resolve(sameId.RelativePath) + ".bak";
-                        if (File.Exists(backupPath))
-                        {
-                            ChapterDocument backup = await ChapterFileStore.ReadVerifiedFileAsync(backupPath, token).ConfigureAwait(false);
-                            if (backup.Id != sameId.ChapterId || backup.ProjectId != session.Manifest.ProjectId)
-                                throw new InvalidDataException("Backup History không thuộc ChapterId/Project cần thay thế.");
-                        }
                     }
                     catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
                     {
@@ -267,8 +228,8 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             if (activeByNumber.TryGetValue(number, out ProjectChapterEntry? collision))
                 issues.Add($"Số chương {number} đã thuộc chapter “{collision.VietnameseTitle}”; không ghi đè.");
             string path = session.ChapterStore.GetPath(item.ChapterId);
-            if (File.Exists(path) || File.Exists(path + ".bak") || Directory.Exists(path) || Directory.Exists(path + ".bak"))
-                issues.Add($"Đích {Path.GetFileName(path)} đã tồn tại ngoài manifest, có thể là orphan; cần đối chiếu recovery.");
+            if (File.Exists(path) || Directory.Exists(path))
+                issues.Add($"Đích {Path.GetFileName(path)} đã tồn tại ngoài manifest; không tự ghi đè.");
         }
         return issues;
     }
@@ -279,8 +240,6 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         VerificationFaultPoint?.Invoke("BeforePostCommitVerify");
         var verifier = new ProjectRepository();
         ProjectSession reopened = (await verifier.OpenAsync(manifestPath, token).ConfigureAwait(false)).Session;
-        if (reopened.RecoveryReport.RequiresDecision)
-            throw new InvalidDataException("Project còn transaction/orphan cần recovery sau commit.");
         foreach (ImportPreviewItem item in items)
         {
             token.ThrowIfCancellationRequested();
@@ -342,115 +301,10 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         return result;
     }
 
-    private static async Task EnsureSourceArchiveAsync(ProjectSession session, ImportPreviewPlan plan, Guid importId,
-        string destination, CancellationToken token)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        if (File.Exists(destination))
-        {
-            await VerifySourceArchiveAsync(destination, session.Manifest.ProjectId, plan, importId, token).ConfigureAwait(false);
-            return;
-        }
-
-        string temporary = destination + ".tmp-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None,
-                             81920, FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
-                {
-                    ZipArchiveEntry raw = archive.CreateEntry("source-original.bin", CompressionLevel.Optimal);
-                    await using (Stream stream = raw.Open())
-                        await stream.WriteAsync(plan.Source.OriginalBytes.ToArray(), token).ConfigureAwait(false);
-                    ZipArchiveEntry metadata = archive.CreateEntry("import-plan.json", CompressionLevel.Optimal);
-                    await using Stream metadataStream = metadata.Open();
-                    await JsonSerializer.SerializeAsync(metadataStream, CreateArchiveManifest(session.Manifest.ProjectId, plan, importId),
-                        DocumentJson.Options, token).ConfigureAwait(false);
-                }
-                await output.FlushAsync(token).ConfigureAwait(false);
-                output.Flush(true);
-            }
-            await VerifySourceArchiveAsync(temporary, session.Manifest.ProjectId, plan, importId, token).ConfigureAwait(false);
-            File.Move(temporary, destination, overwrite: false);
-        }
-        finally
-        {
-            if (File.Exists(temporary))
-            {
-                try { File.Delete(temporary); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                { Trace.TraceError($"Không dọn được source rescue tạm {temporary}: {ex.Message}"); }
-            }
-        }
-    }
-
-    private static async Task VerifySourceArchiveAsync(string path, Guid projectId, ImportPreviewPlan plan, Guid importId,
-        CancellationToken token)
-    {
-        using ZipArchive archive = ZipFile.OpenRead(path);
-        ZipArchiveEntry raw = archive.GetEntry("source-original.bin")
-            ?? throw new InvalidDataException("Source rescue thiếu raw source.");
-        await using var rawStream = raw.Open();
-        using var bytes = new MemoryStream();
-        await rawStream.CopyToAsync(bytes, token).ConfigureAwait(false);
-        if (!string.Equals(RecoveryFiles.Hash(bytes.ToArray()), plan.Source.RawSha256, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Source rescue không khớp raw hash của preview; không ghi Project.");
-        ZipArchiveEntry metadata = archive.GetEntry("import-plan.json")
-            ?? throw new InvalidDataException("Source rescue thiếu import plan.");
-        await using Stream metadataStream = metadata.Open();
-        ArchiveManifest saved = await JsonSerializer.DeserializeAsync<ArchiveManifest>(metadataStream, DocumentJson.Options, token)
-            .ConfigureAwait(false) ?? throw new InvalidDataException("Source rescue có metadata trống.");
-        if (saved.SchemaVersion != 2 || saved.ProjectId != projectId || saved.ImportId != importId ||
-            saved.RawSha256 != plan.Source.RawSha256 || saved.TextSha256 != plan.Source.TextSha256 ||
-            saved.PlanFingerprint != plan.Fingerprint || saved.Items.Count != plan.Items.Length ||
-            saved.CoverageFingerprint != CoverageFingerprint(plan.CoverageAudit.Entries) ||
-            saved.Coverage.Count != plan.CoverageAudit.Entries.Length)
-            throw new InvalidDataException("Source rescue không thuộc đúng Project/preview hiện tại.");
-    }
-
-    private static ArchiveManifest CreateArchiveManifest(Guid projectId, ImportPreviewPlan plan, Guid importId) => new()
-    {
-        ProjectId = projectId,
-        ImportId = importId,
-        SourceName = plan.Source.SourceName,
-        EncodingName = plan.Source.EncodingName,
-        RawSha256 = plan.Source.RawSha256,
-        TextSha256 = plan.Source.TextSha256,
-        PlanFingerprint = plan.Fingerprint,
-        CoverageFingerprint = CoverageFingerprint(plan.CoverageAudit.Entries),
-        Items = plan.Items.Select(x => new ArchiveItem
-        {
-            PreviewItemId = x.Id,
-            ChapterId = x.ChapterId,
-            Kind = x.Kind,
-            StartUtf16 = x.Span.StartUtf16,
-            LengthUtf16 = x.Span.LengthUtf16,
-            ContentStartUtf16 = x.ContentSpan.StartUtf16,
-            ContentLengthUtf16 = x.ContentSpan.LengthUtf16,
-            Number = x.Number,
-            Title = x.Title,
-            VietnameseTitle = x.VietnameseTitle,
-            VolumeTitle = x.VolumeTitle,
-            VolumeIdentity = x.VolumeIdentity,
-            Included = x.Included
-        }).ToList(),
-        Coverage = plan.CoverageAudit.Entries.Select(x => new ArchiveCoverageEntry
-        {
-            StartUtf16 = x.Span.StartUtf16,
-            LengthUtf16 = x.Span.LengthUtf16,
-            Sha256 = x.Sha256,
-            Status = x.Status,
-            PreviewItemId = x.PreviewItemId,
-            TargetChapterId = x.TargetChapterId,
-            Decision = x.Decision,
-            Evidence = x.Evidence
-        }).ToList()
-    };
-
     private static void ValidateSourceSnapshot(RawSourceSnapshot source)
     {
-        if (source.OriginalBytes.IsDefault || RecoveryFiles.Hash(source.OriginalBytes.ToArray()) != source.RawSha256)
+        if (source.OriginalBytes.IsDefault ||
+            Convert.ToHexString(SHA256.HashData(source.OriginalBytes.AsSpan())) != source.RawSha256)
             throw new InvalidDataException("Raw source đã đổi sau preview.");
         byte[] textBytes;
         try { textBytes = new UTF8Encoding(false, true).GetBytes(source.Text); }
@@ -459,9 +313,9 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             throw new InvalidDataException("Text source đã đổi sau preview.");
     }
 
-    private static BulkImportReport BuildReport(Guid importId, string archive, ImportPreviewPlan plan, int completedChunks,
+    private static BulkImportReport BuildReport(Guid importId, ImportPreviewPlan plan, int completedChunks,
         int totalChunks, IEnumerable<MutableOutcome> outcomes, string? error, bool canResume, bool postCommitVerified) =>
-        new(importId, archive, plan.Source.RawSha256, completedChunks, totalChunks,
+        new(importId, plan.Source.RawSha256, completedChunks, totalChunks,
             outcomes.Select(x => new BulkImportChapterOutcome(x.Item.Id, x.Item.ChapterId, x.Item.Number!.Value,
                 Title(x.Item), x.State, x.Error)).ToArray(), error, canResume)
         {
@@ -492,47 +346,4 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
         public string? Error { get; set; }
     }
 
-    private sealed class ArchiveManifest
-    {
-        public int SchemaVersion { get; set; } = 2;
-        public Guid ProjectId { get; set; }
-        public Guid ImportId { get; set; }
-        public string SourceName { get; set; } = "";
-        public string EncodingName { get; set; } = "";
-        public string RawSha256 { get; set; } = "";
-        public string TextSha256 { get; set; } = "";
-        public string PlanFingerprint { get; set; } = "";
-        public string CoverageFingerprint { get; set; } = "";
-        public List<ArchiveItem> Items { get; set; } = [];
-        public List<ArchiveCoverageEntry> Coverage { get; set; } = [];
-    }
-
-    private sealed class ArchiveItem
-    {
-        public Guid PreviewItemId { get; set; }
-        public Guid ChapterId { get; set; }
-        public PlannedRegionKind Kind { get; set; }
-        public int StartUtf16 { get; set; }
-        public int LengthUtf16 { get; set; }
-        public int ContentStartUtf16 { get; set; }
-        public int ContentLengthUtf16 { get; set; }
-        public int? Number { get; set; }
-        public string Title { get; set; } = "";
-        public string? VietnameseTitle { get; set; }
-        public string? VolumeTitle { get; set; }
-        public string? VolumeIdentity { get; set; }
-        public bool Included { get; set; }
-    }
-
-    private sealed class ArchiveCoverageEntry
-    {
-        public int StartUtf16 { get; set; }
-        public int LengthUtf16 { get; set; }
-        public string Sha256 { get; set; } = "";
-        public SourceCoverageStatus Status { get; set; }
-        public Guid? PreviewItemId { get; set; }
-        public Guid? TargetChapterId { get; set; }
-        public string Decision { get; set; } = "";
-        public string Evidence { get; set; } = "";
-    }
 }

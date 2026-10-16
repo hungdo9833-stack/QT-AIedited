@@ -1,7 +1,7 @@
 namespace QuickTranslator.AiEditor.Core.Models;
 
 public sealed record ResegmentationPreview(
-    string ExpectedDocumentSha256,
+    IReadOnlyList<Guid> ExpectedSegmentIds,
     SegmenterOptions Options,
     int OldSegmentCount,
     int NewSegmentCount,

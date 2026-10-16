@@ -125,7 +125,7 @@ public sealed class ProjectPublicationTests : IDisposable
         ProjectSession session = await _repository.CreateAsync(Path.Combine(_root, "Managed"), "Truyện an toàn");
         await AddChapterAsync(session, 1, "Một", "Bản dịch.");
         var service = new ProjectPublicationService(_repository, new ProjectCatalog(_repository));
-        string managedPath = session.Resolve(session.Manifest.Files.ContextNotes);
+        string managedPath = session.Resolve(session.Manifest.Files.Resources);
         Directory.CreateDirectory(Path.GetDirectoryName(managedPath)!);
         await File.WriteAllTextAsync(managedPath, "Ngữ cảnh cần bảo vệ.");
         string original = await File.ReadAllTextAsync(managedPath);

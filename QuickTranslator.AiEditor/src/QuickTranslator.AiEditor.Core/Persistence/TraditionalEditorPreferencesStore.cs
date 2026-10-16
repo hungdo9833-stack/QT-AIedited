@@ -25,22 +25,16 @@ public sealed class TraditionalEditorPreferencesStore(string path)
     public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "QuickTranslatorAiEditor", "Traditional", "traditional-settings.json");
 
-    public RecoveryInfo? LastRecovery { get; private set; }
-    public async Task<TraditionalEditorPreferences> LoadAsync(CancellationToken cancellationToken = default)
-    {
-        var loaded = await RecoveryFiles.ReadAsync(path, Decode, () => new TraditionalEditorPreferences(), cancellationToken).ConfigureAwait(false);
-        LastRecovery = loaded.Info; return loaded.Value;
-    }
-    private static TraditionalEditorPreferences Decode(byte[] bytes) => RecoveryFiles.DecodeJson<TraditionalEditorPreferences>(bytes,
+    public Task<TraditionalEditorPreferences> LoadAsync(CancellationToken cancellationToken = default) =>
+        SimpleFileStorage.ReadOptionalAsync(path, Decode, () => new TraditionalEditorPreferences(), cancellationToken);
+    private static TraditionalEditorPreferences Decode(byte[] bytes) => JsonFileCodec.DecodeDirect<TraditionalEditorPreferences>(bytes,
         value => value.Validate(), "schemaVersion", "dataDirectory");
-    public async Task RestoreBackupAsync(CancellationToken cancellationToken = default) =>
-        LastRecovery = await RecoveryFiles.RestoreBackupAsync(LastRecovery ?? throw new InvalidOperationException("Hãy đọc preview trước."), Decode, cancellationToken).ConfigureAwait(false);
     public async Task SaveAsync(TraditionalEditorPreferences value, CancellationToken cancellationToken = default)
     {
         value.Validate();
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(value, new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { LastRecovery = await RecoveryFiles.WriteAsync(path, bytes, Decode, cancellationToken).ConfigureAwait(false); }
+        try { await SimpleFileStorage.WriteAsync(path, bytes, Decode, cancellationToken).ConfigureAwait(false); }
         finally { _gate.Release(); }
     }
 }

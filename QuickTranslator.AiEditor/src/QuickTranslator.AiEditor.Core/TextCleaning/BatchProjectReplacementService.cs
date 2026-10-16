@@ -47,7 +47,6 @@ public sealed class BatchProjectReplacementService(ChapterFileStore store, TimeP
         var targetIds = items.Select(x => x.ChapterId).Distinct().ToArray();
         if (targetIds.Any(id => chapterList.All(x => x.Id != id)))
             throw new InvalidOperationException("Có kết quả xem trước thuộc chương không còn trong dự án.");
-        string backup = await store.CreateBatchBackupAsync(targetIds, batchId, cancellationToken).ConfigureAwait(false);
         var results = new List<BatchProjectChapterResult>();
         foreach (var chapter in chapterList.Where(x => targetIds.Contains(x.Id)))
         {
@@ -74,7 +73,7 @@ public sealed class BatchProjectReplacementService(ChapterFileStore store, TimeP
                 results.Add(new(chapter.Id, chapter.Title, false, 0, ex.Message));
             }
         }
-        return new(batchId, backup, results);
+        return new(batchId, results);
     }
 
     public async Task<BatchProjectApplyReport> UndoAsync(IEnumerable<ChapterDocument> chapters, Guid batchId,
@@ -85,8 +84,6 @@ public sealed class BatchProjectReplacementService(ChapterFileStore store, TimeP
         Guid projectId = targets[0].CharacterProject.Id;
         if (targets.Any(x => x.CharacterProject.Id != projectId))
             throw new InvalidOperationException("Không thể hoàn tác lẫn nhiều dự án.");
-        string backup = await store.CreateBatchBackupAsync(targets.Select(x => x.Id), Guid.NewGuid(), cancellationToken)
-            .ConfigureAwait(false);
         var results = new List<BatchProjectChapterResult>();
         foreach (var chapter in targets)
         {
@@ -111,10 +108,10 @@ public sealed class BatchProjectReplacementService(ChapterFileStore store, TimeP
                 results.Add(new(chapter.Id, chapter.Title, false, 0, ex.Message));
             }
         }
-        return new(batchId, backup, results);
+        return new(batchId, results);
     }
 
     private static BatchProjectChapterResult CancelledChapter(ChapterDocument chapter) => new(
         chapter.Id, chapter.Title, false, 0,
-        "Đã hủy; chương này chưa được ghi. Các chương đã ghi được báo riêng và có backup để đối chiếu/phục hồi.");
+        "Đã hủy; chương này chưa được ghi. Các chương đã lưu trước đó được báo riêng.");
 }

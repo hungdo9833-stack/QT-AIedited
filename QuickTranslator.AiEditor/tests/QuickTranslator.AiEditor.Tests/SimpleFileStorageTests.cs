@@ -49,7 +49,7 @@ public sealed class SimpleFileStorageTests : IDisposable
         await File.WriteAllTextAsync(path, "{broken");
         await File.WriteAllTextAsync(path + ".bak", JsonSerializer.Serialize(new Sample("legacy backup")));
 
-        await Assert.ThrowsAsync<JsonException>(() => SimpleFileStorage.ReadRequiredAsync(path, Decode));
+        await Assert.ThrowsAsync<InvalidDataException>(() => SimpleFileStorage.ReadRequiredAsync(path, Decode));
         Assert.Equal("{broken", await File.ReadAllTextAsync(path));
     }
 

@@ -91,9 +91,6 @@ try
         .Where(value => value > 0).DefaultIfEmpty().Min();
     double resumeMilliseconds = firstRequest > resumeStarted
         ? Stopwatch.GetElapsedTime(resumeStarted, firstRequest).TotalMilliseconds : double.NaN;
-    string transactionRoot = session.Resolve("Transactions");
-    string[] transactionFiles = Directory.Exists(transactionRoot)
-        ? Directory.GetFiles(transactionRoot, "*", SearchOption.AllDirectories) : [];
     long projectBytes = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
         .Sum(path => new FileInfo(path).Length);
 
@@ -108,7 +105,6 @@ try
     Console.WriteLine($"DistinctChapterIds: {result.Items.Select(item => item.ChapterId).Distinct().Count():N0}");
     Console.WriteLine($"LocalCalls: {local.Calls:N0}; RemoteCalls: {remote.Calls:N0}");
     Console.WriteLine($"IoReads: {io.FileReads:N0}; IoWrites: {io.FileWrites:N0}; BytesWritten: {io.BytesWritten:N0}");
-    Console.WriteLine($"TransactionFiles: {transactionFiles.Length:N0}; TransactionBytes: {transactionFiles.Sum(path => new FileInfo(path).Length):N0}");
     Console.WriteLine($"ProjectBytes: {projectBytes:N0}");
     Console.WriteLine($"CancelRunningRequestMs: {await MeasureCancellationAsync():F3}");
 }

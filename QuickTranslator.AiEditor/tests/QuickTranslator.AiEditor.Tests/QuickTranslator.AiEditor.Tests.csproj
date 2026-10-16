@@ -14,8 +14,8 @@
     <ProjectReference Include="../../src/QuickTranslator.AiEditor.Core/QuickTranslator.AiEditor.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <None Update="Fixtures/legacy-v1.fixture" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/ChapterDetection/golden-headings.tsv" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/CharacterConsistency/golden-v1.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
+

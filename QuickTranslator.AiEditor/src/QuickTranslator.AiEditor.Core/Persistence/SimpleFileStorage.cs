@@ -19,9 +19,15 @@ public static class SimpleFileStorage
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(decode);
-        byte[] bytes = await File.ReadAllBytesAsync(Path.GetFullPath(path), cancellationToken).ConfigureAwait(false);
+        string fullPath = Path.GetFullPath(path);
+        byte[] bytes = await File.ReadAllBytesAsync(fullPath, cancellationToken).ConfigureAwait(false);
         StorageIoMetricsCapture.Read(bytes.Length);
-        return decode(bytes);
+        try { return decode(bytes); }
+        catch (InvalidDataException) { throw; }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            throw new InvalidDataException($"Không đọc được JSON trong {Path.GetFileName(fullPath)}.", error);
+        }
     }
 
     public static async Task<T> ReadOptionalAsync<T>(string path, Func<byte[], T> decode, Func<T> missingDefault,
@@ -91,7 +97,15 @@ public static class SimpleFileStorage
 
             FaultPoint.Value?.Invoke("AfterTemporaryFlush");
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, path, overwrite: true);
+            try
+            {
+                File.Move(temporary, path, overwrite: true);
+                StorageIoMetricsCapture.Replaced();
+            }
+            catch (UnauthorizedAccessException error)
+            {
+                throw new IOException($"Không thể thay thế file {Path.GetFileName(path)} vì bị khóa hoặc không có quyền ghi.", error);
+            }
         }
         finally
         {

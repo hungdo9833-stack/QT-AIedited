@@ -45,26 +45,6 @@ public sealed class ProjectResegmentationTests : IDisposable
         Assert.Contains(preserved.Segments, segment => segment.UserDraft == "Nháp được bảo vệ");
     }
 
-    [Fact]
-    public async Task Batch_fault_rolls_back_every_chapter_and_manifest()
-    {
-        ProjectSession session = await CreateProjectAsync(5);
-        Guid[] ids = session.Manifest.Chapters.Select(entry => entry.ChapterId).ToArray();
-        ProjectResegmentationPreview preview = await _repository.PreviewResegmentationAsync(session, ids, Small);
-        Dictionary<string, byte[]> before = Capture(session);
-        string manifest = JsonSerializer.Serialize(session.Manifest, DocumentJson.Options);
-        _repository.FaultPoint = point =>
-        {
-            if (point == "AfterFile:3") throw new IOException("synthetic batch failure");
-        };
-
-        await Assert.ThrowsAsync<IOException>(() => _repository.ResegmentChaptersAsync(session, preview, confirmed: false));
-
-        _repository.FaultPoint = null;
-        Assert.Equal(manifest, JsonSerializer.Serialize(session.Manifest, DocumentJson.Options));
-        AssertExact(before, Capture(session));
-    }
-
     private async Task<ProjectSession> CreateProjectAsync(int count)
     {
         ProjectSession session = await _repository.CreateAsync(_root, "Chia lại tổng hợp");
@@ -83,7 +63,6 @@ public sealed class ProjectResegmentationTests : IDisposable
 
     private static Dictionary<string, byte[]> Capture(ProjectSession session) => Directory
         .GetFiles(session.RootDirectory, "*", SearchOption.AllDirectories)
-        .Where(path => !path.Contains(Path.Combine("History", "Transactions"), StringComparison.OrdinalIgnoreCase))
         .ToDictionary(path => Path.GetRelativePath(session.RootDirectory, path), File.ReadAllBytes);
 
     private static void AssertExact(Dictionary<string, byte[]> before, Dictionary<string, byte[]> after)

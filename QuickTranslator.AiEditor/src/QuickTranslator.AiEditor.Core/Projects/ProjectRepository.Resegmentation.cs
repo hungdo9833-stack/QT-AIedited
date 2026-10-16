@@ -41,27 +41,23 @@ public sealed partial class ProjectRepository
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (session.RecoveryReport.RequiresDecision)
-                throw new InvalidOperationException("Còn transaction cần phục hồi; chưa thể chia lại đoạn.");
-            ProjectManifest after = Clone(session.Manifest);
-            var changes = new List<PlannedProjectFile>(ids.Length * 2);
+            var candidates = new List<ChapterDocument>(ids.Length);
             foreach (ProjectResegmentationItem item in preview.Chapters)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ProjectChapterEntry entry = after.Chapters.SingleOrDefault(chapter =>
+                ProjectChapterEntry entry = session.Manifest.Chapters.SingleOrDefault(chapter =>
                     chapter.ChapterId == item.ChapterId && chapter.DeletedAt is null)
                     ?? throw new FileNotFoundException($"Không tìm thấy chương hoạt động {item.ChapterId:D}.");
                 ChapterDocument current = await ReadRegisteredChapterAsync(session, entry, cancellationToken).ConfigureAwait(false);
                 ChapterDocument candidate = ResegmentationPlanner.Apply(current, item.Preview, confirmed, DateTimeOffset.UtcNow);
-                string relative = entry.RelativePath;
-                byte[] previous = await File.ReadAllBytesAsync(session.Resolve(relative), cancellationToken).ConfigureAwait(false);
-                changes.Add(new(relative + ".bak", previous));
-                changes.Add(new(relative, ChapterFileStore.SerializeDocument(candidate)));
-                CopySummary(entry, candidate);
+                candidates.Add(candidate);
             }
-            NormalizeManifest(after);
-            await Transactions.ExecuteAsync(session, "ResegmentChapters", after, changes, cancellationToken).ConfigureAwait(false);
-            PublishManifestCommitted(session, "ResegmentChapters");
+            foreach (ChapterDocument candidate in candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await WriteFastChapterCheckpointAsync(session, candidate, "ResegmentChapter", cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
         finally { session.OperationGate.Release(); }
     }

@@ -22,8 +22,6 @@ public partial class MainWindow
                 return false;
             }
             if (_sourceEditMode) EndSourceEditMode(assignSnapshot: true);
-            if (_projectSession?.RecoveryReport.RequiresDecision == true)
-                await ReviewProjectRecoveryAsync(_projectSession); // Resolve the journal before guarded saves can resume.
             if (_service is null && !string.IsNullOrWhiteSpace(ChapterInput.Text))
             {
                 if (!ConfirmWorkspaceChange("Lưu nguyên văn chưa chia thành chương trước khi chuyển? Chọn Không để giữ nguyên cửa sổ và nội dung đang nhập.",
@@ -52,8 +50,6 @@ public partial class MainWindow
                 return false;
             }
             if (_sourceEditMode) EndSourceEditMode(assignSnapshot: true);
-            if (_projectSession?.RecoveryReport.RequiresDecision == true)
-                await ReviewProjectRecoveryAsync(_projectSession);
             var queue = _queue;
             var request = _activeRequest;
             var completion = _activeWorkCompletion;

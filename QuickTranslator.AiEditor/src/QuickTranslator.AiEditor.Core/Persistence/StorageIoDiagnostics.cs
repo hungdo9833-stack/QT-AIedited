@@ -2,7 +2,7 @@ namespace QuickTranslator.AiEditor.Core.Persistence;
 
 public sealed record StorageIoMetricsSnapshot(long Serializations, long Hashes, long FileReads,
     long BytesRead, long FileWrites, long BytesWritten, long TemporaryFilesCreated,
-    long BackupReplacements, long FileDeletes);
+    long FileReplacements, long FileDeletes);
 
 public sealed class StorageIoMetricsCapture : IDisposable
 {
@@ -15,7 +15,7 @@ public sealed class StorageIoMetricsCapture : IDisposable
     private long _fileWrites;
     private long _bytesWritten;
     private long _temporaryFilesCreated;
-    private long _backupReplacements;
+    private long _fileReplacements;
     private long _fileDeletes;
     private bool _disposed;
 
@@ -31,7 +31,7 @@ public sealed class StorageIoMetricsCapture : IDisposable
         Interlocked.Read(ref _serializations), Interlocked.Read(ref _hashes),
         Interlocked.Read(ref _fileReads), Interlocked.Read(ref _bytesRead),
         Interlocked.Read(ref _fileWrites), Interlocked.Read(ref _bytesWritten),
-        Interlocked.Read(ref _temporaryFilesCreated), Interlocked.Read(ref _backupReplacements),
+        Interlocked.Read(ref _temporaryFilesCreated), Interlocked.Read(ref _fileReplacements),
         Interlocked.Read(ref _fileDeletes));
 
     internal static void Serialization()
@@ -68,10 +68,10 @@ public sealed class StorageIoMetricsCapture : IDisposable
         if (value is not null) Interlocked.Increment(ref value._temporaryFilesCreated);
     }
 
-    internal static void BackupReplaced()
+    internal static void Replaced()
     {
         StorageIoMetricsCapture? value = CurrentCapture.Value;
-        if (value is not null) Interlocked.Increment(ref value._backupReplacements);
+        if (value is not null) Interlocked.Increment(ref value._fileReplacements);
     }
 
     internal static void Deleted()

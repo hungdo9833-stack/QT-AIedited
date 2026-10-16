@@ -24,36 +24,10 @@ public static class DocumentJson
     public static TranslationSegment CloneSegment(TranslationSegment segment) =>
         JsonSerializer.Deserialize<TranslationSegment>(JsonSerializer.Serialize(segment, Options), Options)!;
 
-    public static void Migrate(ChapterDocument chapter)
-    {
-        if (chapter.SchemaVersion == 1)
-            foreach (var segment in chapter.Segments)
-                if (segment.Status == SegmentStatus.AwaitingReview && segment.LatestAiAttempt?.Issues.Count > 0)
-                    segment.Status = SegmentStatus.InspectionRequired;
-        if (chapter.SchemaVersion is 1 or 2)
-        {
-            chapter.SchemaVersion = 3;
-            // Keep stored snapshots; initialize only fields absent in the older schema.
-            chapter.CharacterProject ??= new() { Id = chapter.ProjectId ?? chapter.Id, UpdatedAt = chapter.UpdatedAt,
-                Name = string.IsNullOrWhiteSpace(chapter.Title) ? "Bộ truyện mới" : chapter.Title };
-            foreach (var segment in chapter.Segments) segment.NormalizationHistory ??= [];
-        }
-        chapter.TextCleaner ??= new();
-        chapter.TextCleaner.IgnoredChineseText ??= [];
-        chapter.BatchReplacementHistory ??= [];
-        chapter.SourceEditHistory ??= [];
-        if (chapter.SourceRevision < 1) chapter.SourceRevision = 1;
-        foreach (var segment in chapter.Segments)
-        {
-            segment.DraftHistory ??= [];
-            segment.NormalizationHistory ??= [];
-        }
-    }
-
     public static void Validate(ChapterDocument chapter)
     {
-        if (chapter.SchemaVersion is not (1 or 2 or 3))
-            throw new InvalidDataException("Phiên bản dữ liệu chưa được hỗ trợ. Hãy giữ bản gốc và mở bằng phiên bản ứng dụng phù hợp.");
+        if (chapter.SchemaVersion != 3)
+            throw new InvalidDataException("Schema chương không đúng phiên bản hiện tại.");
         if (chapter.Id == Guid.Empty || chapter.Title is null || string.IsNullOrWhiteSpace(chapter.OriginalText) || chapter.SourceRevision < 1 ||
             chapter.Segments is null || chapter.Segments.Count == 0 || chapter.SegmentationOptions is null || chapter.DefaultModelOptions is null)
             throw new InvalidDataException("Dữ liệu chương không đầy đủ.");

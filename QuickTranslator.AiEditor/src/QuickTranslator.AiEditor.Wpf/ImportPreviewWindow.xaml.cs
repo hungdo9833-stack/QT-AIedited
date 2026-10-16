@@ -583,8 +583,8 @@ public partial class ImportPreviewWindow : Window
         bool replaceHistory = historyCollisions > 0 && ReplaceHistoryCheck.IsChecked == true;
         if (replaceHistory && MessageBox.Show(this,
                 $"Xóa vĩnh viễn {historyCollisions:N0} chương đang nằm trong History và nhập lại từ TXT?\n\n" +
-                "Bản dịch, bản nháp, duyệt và lịch sử của các bản cũ sẽ bị xóa khi transaction commit. " +
-                "Nếu import thất bại, transaction sẽ phục hồi chúng.",
+                "Bản dịch, bản nháp, duyệt và lịch sử của các bản cũ sẽ bị xóa khi chương thay thế được lưu. " +
+                "Các chương đã lưu thành công được báo riêng nếu import dừng giữa chừng.",
                 "Xác nhận ghi đè History", MessageBoxButton.YesNo, MessageBoxImage.Warning,
                 MessageBoxResult.No) != MessageBoxResult.Yes)
             return;
