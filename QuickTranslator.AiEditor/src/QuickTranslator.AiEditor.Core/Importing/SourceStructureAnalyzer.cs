@@ -67,7 +67,8 @@ internal static class SourceStructureAnalyzer
                                  line.StartsWith("版权", StringComparison.Ordinal) ||
                                  line.StartsWith("版權", StringComparison.Ordinal)))
             return (SourceStructureKind.Metadata, 0.82, "Metadata nguồn");
-        if (atStart && nonBlank.Length == 1 && nonBlank[0].Length <= 80)
+        if (atStart && nonBlank.Length == 1 && nonBlank[0].Length <= 80 &&
+            nonBlank[0].IndexOfAny(['。', '！', '？', '；']) < 0)
             return (SourceStructureKind.WorkTitle, 0.58, nonBlank[0]);
         return (SourceStructureKind.Unclassified, 0.35, "Vùng chưa phân loại");
     }

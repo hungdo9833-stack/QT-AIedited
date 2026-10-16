@@ -46,6 +46,7 @@ public sealed record ImportPreviewItem(
     // An excluded candidate carrying text requires an explicit user decision.
     public bool ExplicitlyExcluded { get; init; }
     public string? VietnameseTitle { get; init; }
+    public SourceStructureKind StructureKind { get; init; } = SourceStructureKind.Unclassified;
 }
 
 public sealed class ImportPreviewPlan
@@ -58,7 +59,9 @@ public sealed class ImportPreviewPlan
         Items = items;
         Revision = revision;
         ValidateExactCoverage();
-        Issues = Analyze(items, source);
+        DuplicateEvidence = ChapterReconstructionAnalyzer.Analyze(source, items);
+        CoverageAudit = SourceCoverageAuditor.Audit(source, items, DuplicateEvidence);
+        Issues = Analyze(items, source, DuplicateEvidence, CoverageAudit);
         Fingerprint = CalculateFingerprint(source, items);
     }
 
@@ -68,6 +71,8 @@ public sealed class ImportPreviewPlan
     public ImmutableArray<ImportPreviewIssue> Issues { get; }
     public int Revision { get; }
     public string Fingerprint { get; }
+    public ImmutableArray<ChapterDuplicateEvidence> DuplicateEvidence { get; }
+    public SourceCoverageAudit CoverageAudit { get; }
     public IEnumerable<ImportPreviewItem> Chapters => Items.Where(x => x.IsChapter);
     public IEnumerable<ImportPreviewItem> ChaptersInImportOrder => OrderForImport(Chapters);
     public IEnumerable<ImportPreviewItem> ImportableChapters => ChaptersInImportOrder.Where(x => x.Included);
@@ -112,7 +117,8 @@ public sealed class ImportPreviewPlan
             throw new InvalidDataException("Không thể tái tạo chính xác nguyên văn từ preview.");
     }
 
-    private static ImmutableArray<ImportPreviewIssue> Analyze(ImmutableArray<ImportPreviewItem> items, RawSourceSnapshot source)
+    private static ImmutableArray<ImportPreviewIssue> Analyze(ImmutableArray<ImportPreviewItem> items, RawSourceSnapshot source,
+        ImmutableArray<ChapterDuplicateEvidence> duplicateEvidence, SourceCoverageAudit coverage)
     {
         var issues = ImmutableArray.CreateBuilder<ImportPreviewIssue>();
         ImportPreviewItem[] chapters = items.Where(x => x.IsChapter).ToArray();
@@ -147,14 +153,14 @@ public sealed class ImportPreviewPlan
                     "Chương được chọn không có nội dung nguyên văn.", [item.Id]));
         }
 
-        foreach (IGrouping<int, ImportPreviewItem> duplicate in chapters.Where(x => x.Number > 0)
-                     .GroupBy(x => x.Number!.Value).Where(x => x.Count() > 1))
+        foreach (IGrouping<(string Volume, int Number), ImportPreviewItem> duplicate in chapters.Where(x => x.Number > 0)
+                     .GroupBy(x => (x.VolumeTitle ?? "", x.Number!.Value)).Where(x => x.Count() > 1))
         {
             ImportPreviewItem[] duplicateItems = duplicate.OrderBy(x => x.Span.StartUtf16).ToArray();
             int includedCount = duplicateItems.Count(x => x.Included);
             if (includedCount > 1)
                 issues.Add(new(ImportPreviewIssueCode.DuplicateNumber, DetectionIssueSeverity.Error,
-                    $"Số chương {duplicate.Key} đang được chọn {includedCount} lần; chỉ được nhập một bản.",
+                    $"Số chương {duplicate.Key.Number} trong cùng quyển đang được chọn {includedCount} lần; cần giải quyết quan hệ nội dung.",
                     duplicateItems.Select(x => x.Id).ToImmutableArray()));
             else if (duplicateItems.Length > 1)
             {
@@ -163,8 +169,8 @@ public sealed class ImportPreviewPlan
                 issues.Add(new(differentContent ? ImportPreviewIssueCode.ExcludedDifferentContent : ImportPreviewIssueCode.DuplicateNumber,
                     differentContent ? DetectionIssueSeverity.Warning : DetectionIssueSeverity.Information,
                     differentContent
-                        ? $"Số chương {duplicate.Key} có nhiều phần nội dung KHÁC NHAU. Các phần đã loại vẫn nằm trong source rescue, KHÔNG nằm trong chương nhập. Hãy đối chiếu trước khi tiếp tục."
-                        : $"Số chương {duplicate.Key} có {duplicateItems.Length} bản cùng nội dung; các bản đã loại vẫn được lưu trong source rescue.",
+                        ? $"Số chương {duplicate.Key.Number} có nhiều phần nội dung KHÁC NHAU. Các phần đã loại vẫn nằm trong source rescue, KHÔNG nằm trong chương nhập. Hãy đối chiếu trước khi tiếp tục."
+                        : $"Số chương {duplicate.Key.Number} có {duplicateItems.Length} bản cùng nội dung; các bản đã loại vẫn được lưu trong source rescue.",
                     duplicateItems.Select(x => x.Id).ToImmutableArray()));
             }
         }
@@ -192,6 +198,8 @@ public sealed class ImportPreviewPlan
                      !string.IsNullOrWhiteSpace(source.Text.Substring(x.Span.StartUtf16, x.Span.LengthUtf16))))
             issues.Add(new(ImportPreviewIssueCode.UnclassifiedSource, DetectionIssueSeverity.Information,
                 "Vùng nguồn chưa phân loại được giữ nguyên trong source rescue và không tự nhập thành chương.", [item.Id]));
+        foreach (string issue in coverage.BlockingIssues)
+            issues.Add(new(ImportPreviewIssueCode.UnclassifiedSource, DetectionIssueSeverity.Error, issue, []));
         return issues.ToImmutable();
     }
 
@@ -203,7 +211,8 @@ public sealed class ImportPreviewPlan
                 .Append('|').Append(item.Kind).Append('|').Append(item.Span.StartUtf16).Append(':').Append(item.Span.LengthUtf16)
                 .Append('|').Append(item.ContentSpan.StartUtf16).Append(':').Append(item.ContentSpan.LengthUtf16)
                 .Append('|').Append(item.Number?.ToString(CultureInfo.InvariantCulture) ?? "-")
-                .Append('|').Append(item.Included ? '1' : '0').Append('|').Append(item.Title).Append('|')
+                .Append('|').Append(item.Included ? '1' : '0').Append('|').Append(item.ExplicitlyExcluded ? '1' : '0')
+                .Append('|').Append(item.Decision).Append('|').Append(item.StructureKind).Append('|').Append(item.Title).Append('|')
                 .Append(item.VietnameseTitle).Append('|').Append(item.VolumeTitle);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
     }
@@ -242,6 +251,7 @@ public sealed class ImportPreviewEditor
         // Never silently exclude same-number chapters: their bodies may be different continuations.
         ImmutableArray<ImportPreviewItem> items =
             detected.Regions.Select(region => FromRegion(detected, region)).ToImmutableArray();
+        items = ResolveExactDuplicates(detected.Source, items);
         return new(new ImportPreviewPlan(detected.Source, detected.Lines, items, 0));
     }
 
@@ -320,8 +330,7 @@ public sealed class ImportPreviewEditor
         var reconstructed = previous with
         {
             Span = new(previous.Span.StartUtf16, item.Span.EndUtf16 - previous.Span.StartUtf16),
-            ContentSpan = new(previous.ContentSpan.StartUtf16, item.Span.EndUtf16 - previous.ContentSpan.StartUtf16),
-            Decision = CandidateDecision.NeedsReview
+            ContentSpan = new(previous.ContentSpan.StartUtf16, item.Span.EndUtf16 - previous.ContentSpan.StartUtf16)
         };
         Mutate(Current.Items.RemoveAt(index).SetItem(index - 1, reconstructed));
     }
@@ -344,7 +353,8 @@ public sealed class ImportPreviewEditor
             StableId(Current.Source.RawSha256, "preview-item", rightSpan, item.Kind),
             StableId(Current.Source.RawSha256, "chapter", rightSpan, item.Kind),
             PlannedRegionKind.Chapter, rightSpan, null, rightSpan, newNumber, newTitle?.Trim() ?? "",
-            item.VolumeTitle, "", true, CandidateDecision.NeedsReview, null);
+            item.VolumeTitle, "", true, CandidateDecision.NeedsReview, null)
+        { StructureKind = SourceStructureKind.Chapter };
         Mutate(Current.Items.RemoveAt(index).InsertRange(index, ImmutableArray.Create(left, right)));
     }
 
@@ -434,9 +444,24 @@ public sealed class ImportPreviewEditor
         bool isChapter = region.Kind is PlannedRegionKind.Chapter or PlannedRegionKind.SpecialChapter;
         bool included = isChapter && candidate?.Decision == CandidateDecision.Accepted && region.ChapterNumber is > 0;
         Guid chapterId = isChapter ? StableId(detected.Source.RawSha256, "chapter", region.Span, region.Kind) : Guid.Empty;
+        SourceStructureKind structureKind = detected.Structure.FirstOrDefault(x => x.Span == region.Span)?.Kind ??
+            (isChapter ? SourceStructureKind.Chapter : SourceStructureKind.Unclassified);
         return new(StableId(detected.Source.RawSha256, "preview-item", region.Span, region.Kind), chapterId,
             region.Kind, region.Span, region.HeadingSpan, region.BodySpan, region.ChapterNumber, title,
-            region.VolumeTitle, rawHeading, included, candidate?.Decision ?? CandidateDecision.Rejected, region.CandidateIndex);
+            region.VolumeTitle, rawHeading, included, candidate?.Decision ?? CandidateDecision.Rejected, region.CandidateIndex)
+        { StructureKind = structureKind };
+    }
+
+    private static ImmutableArray<ImportPreviewItem> ResolveExactDuplicates(RawSourceSnapshot source,
+        ImmutableArray<ImportPreviewItem> items)
+    {
+        ImmutableArray<ChapterDuplicateEvidence> evidence = ChapterReconstructionAnalyzer.Analyze(source, items);
+        HashSet<Guid> exactLaterCopies = evidence.Where(x => x.Kind == ChapterDuplicateKind.ExactDuplicate && x.IsAutomaticallyVerifiable)
+            .Select(x => x.SecondItemId).ToHashSet();
+        if (exactLaterCopies.Count == 0) return items;
+        return items.Select(item => exactLaterCopies.Contains(item.Id)
+            ? item with { Included = false, AutomaticallyExcludedDuplicate = true }
+            : item).ToImmutableArray();
     }
 
     private static Guid StableId(string sourceHash, string purpose, SourceSpan span, PlannedRegionKind kind)
