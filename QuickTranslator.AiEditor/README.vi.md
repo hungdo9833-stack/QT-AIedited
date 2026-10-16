@@ -1,6 +1,6 @@
 # QuickTranslator AI Editor — AI offline, Reader Mode và Editor bốn ô
 
-Kết quả ổn định dữ liệu M0/F01–F04 trên Windows, cách chạy regression tests và lưu ý tương thích tài nguyên Project: [DATA-SAFETY-PHASE1.vi.md](docs/DATA-SAFETY-PHASE1.vi.md).
+Kiến trúc lưu trữ hiện hành và kết quả refactor được ghi tại [FULL-LEGACY-STORAGE-REFACTOR.md](docs/FULL-LEGACY-STORAGE-REFACTOR.md).
 
 Ứng dụng độc lập để dịch tiểu thuyết Trung–Việt bằng **Ollama trên máy Windows**. Người dùng nhập một chương, bấm **Dịch toàn chương** một lần; ứng dụng chia đoạn, dịch tuần tự từng đoạn, lưu sau mỗi đoạn và ghép bản Việt theo đúng thứ tự. Người dùng vẫn có thể sửa, duyệt hoặc dịch lại riêng từng đoạn.
 
@@ -10,13 +10,11 @@ Mã mới nằm hoàn toàn trong thư mục này, dùng **C# / .NET 10 LTS / WP
 
 AI Editor lưu một bộ truyện trong một thư mục riêng có manifest `*.qtproj`. Các đường dẫn chương, preset, Reader, hồ sơ nhân vật, glossary và tài nguyên trong manifest đều là đường dẫn tương đối, nên có thể đóng ứng dụng rồi di chuyển **cả thư mục dự án** sang ổ khác. Không di chuyển riêng từng tệp khi ứng dụng đang mở.
 
-1. Chọn **Tệp → Dự án mới**, nhập tên truyện và chọn thư mục cha. Ứng dụng tạo thư mục dự án gồm `Chapters`, `Characters`, `Glossary`, `Settings`, `Resources`, `Backups`, `History` và `Cache`.
+1. Chọn **Tệp → Dự án mới**, nhập tên truyện và chọn thư mục cha. Ứng dụng tạo layout gọn gồm `Chapters`, `Deleted`, `Settings`, `Resources`, `Queue` và `Cache`.
 2. Dùng nút **+ TXT** ở danh sách bên trái để thêm một hoặc nhiều chương UTF-8. Tìm kiếm, lọc trạng thái và sắp xếp chương ngay phía trên danh sách. Nút Trước/Sau chuyển chương theo số chương.
-3. Khi đổi dự án/chương, ứng dụng chờ request Ollama hiện tại kết thúc, tạm dừng queue, lưu checkpoint, bản sửa, preset và manifest rồi mới chuyển. Queue chỉ thuộc chương và dự án đang mở.
-4. **Dự án → Sao lưu ZIP** tạo tệp mới, đọc kiểm chứng toàn bộ ZIP và không đưa `Cache` hay các backup cũ vào. **Khôi phục bản sao** luôn dùng một thư mục mới; không ghi đè thư mục có dữ liệu.
-5. **Tệp → Nhập tiến độ cũ** quét thư mục Chapters cũ, cho chọn chương, tạo ZIP nguồn trước khi nhập và xác minh nguyên văn/lịch sử ở đích. Nguồn cũ không bị sửa hoặc xóa.
-6. **Bỏ khỏi danh sách** trong Thư viện chỉ xóa lối tắt recent. Lệnh xóa dự án riêng chuyển toàn bộ thư mục vào Thùng rác Windows sau khi người dùng xác nhận; không áp dụng cho dự án đang mở.
-7. Chọn **Workspace → Xuất bản** để ghép toàn bộ chương đang hoạt động theo thứ tự mục lục thành một file TXT UTF-8 hoặc PDF A4. Chương đã xóa mềm không được xuất; chương chưa hoàn tất/cần kiểm tra chỉ được đưa vào file sau khi người dùng xác nhận xuất bản nháp.
+3. Khi đổi dự án/chương, ứng dụng chờ request Ollama hiện tại kết thúc, tạm dừng queue, lưu tiến độ hiện tại, bản sửa, preset và manifest rồi mới chuyển. Queue chỉ thuộc chương và dự án đang mở.
+4. **Bỏ khỏi danh sách** trong Thư viện chỉ xóa lối tắt recent. Lệnh xóa dự án riêng chuyển toàn bộ thư mục vào Thùng rác Windows sau khi người dùng xác nhận; không áp dụng cho dự án đang mở.
+5. Chọn **Workspace → Xuất bản** để ghép toàn bộ chương đang hoạt động theo thứ tự mục lục thành một file TXT UTF-8 hoặc PDF A4. Chương đã xóa mềm không được xuất; chương chưa hoàn tất/cần kiểm tra chỉ được đưa vào file sau khi người dùng xác nhận xuất bản nháp.
 
 Có thể mở dự án bằng `QuickTranslator.AiEditor.exe "D:\Truyen\TenTruyen.qtproj"`. Ứng dụng không ghi Windows Registry. Trình **Xuất bản** hiện chỉ ghép toàn bộ chương vào một file; chưa có dàn trang bìa, mục lục PDF hay xuất nhiều tập.
 
@@ -74,7 +72,7 @@ Lần restore đầu cần Internet để tải bộ tham chiếu WPF và thư v
 5. Bản Việt ở cột phải cập nhật theo từng đoạn và mỗi khối vẫn gắn với ID đoạn. Có thể sửa ngay; bản sửa được tự lưu theo nhịp 500 ms và hàng đợi không ghi đè lên đoạn đã sửa hoặc đã duyệt.
 6. Trong tab **Phân đoạn & chỉnh sửa**, chọn một đoạn để dùng Editor 2×2: **Trung | Hán Việt / VP đơn ý | AI dịch**. Chọn chữ/cụm trong một trong ba ô đầu sẽ tô vùng tương ứng ở hai ô còn lại bằng lớp highlight xanh độc lập với focus, kể cả từ lặp. Ô đang thao tác giữ selection chuẩn của Windows; ứng dụng không chuyển focus sang ô khác. Ô AI độc lập và vẫn có dịch lại, nháp, duyệt, prompt cùng lịch sử. Có thể kéo splitter, ẩn hoặc phóng lớn từng ô. Việc tách/gộp/đổi ranh giới vẫn yêu cầu tạm dừng và bảo vệ bản sửa như trước.
 7. Bấm **Xuất TXT UTF-8** để tạo bản dịch theo đúng thứ tự. Nếu còn đoạn lỗi hoặc chưa có bản dịch, ứng dụng cảnh báo và không gọi chương là hoàn tất; người dùng vẫn có thể chủ động xuất bản hiện có.
-8. Bấm **Lưu tiến độ** trước khi nghỉ. Với dự án mới, lần sau mở tệp `.qtproj` hoặc chọn từ **Dự án gần đây**; checkpoint hàng đợi, đoạn, bản sửa, lịch sử, preset và cấu hình được khôi phục. **Mở tiến độ cũ** dành cho tệp `.qtaie.json` legacy. Ứng dụng không tự gửi dữ liệu sau khi mở lại; bấm **Tiếp tục** khi đã kiểm tra.
+8. Bấm **Lưu tiến độ** trước khi nghỉ. Lần sau mở tệp `.qtproj` hoặc chọn từ **Dự án gần đây**; trạng thái hàng đợi hiện tại, đoạn, bản sửa, lịch sử biên tập, preset và cấu hình được nạp lại. Ứng dụng không tự gửi dữ liệu sau khi mở lại; bấm **Tiếp tục** khi đã kiểm tra.
 
 Khi chưa có bản sửa, ô nháp hiển thị bản AI gần nhất để bạn bắt đầu chỉnh. Nút **Xem prompt / cấu hình lần dịch** cho xem snapshot chính xác của từng lần gọi. Chuyển preset về sau không thay lịch sử cũ.
 
@@ -122,7 +120,7 @@ Tên nhân vật bị giới hạn 16 ký tự hiển thị, phải có chữ H�
 3. Nhập một cặp Tìm/Thay hoặc nhiều dòng dạng `王秀兰 => Vương Tú Lan`. Có thể bật ánh xạ từ Glossary/CharacterProfile. Gợi ý Names/Names2, VietPhrase hoặc Hán Việt truyền thống được ghi rõ là **chỉ gợi ý** và mặc định không được chọn tự động.
 4. Bấm **Tìm tất cả / Xem trước**. Bảng cho biết chương, segment, câu trước/sau, phần đổi trong dấu `【…】`, nguồn quy tắc, xung đột và trạng thái bảo vệ. Khớp cụm dài hơn được xét trước; không dùng ranh giới từ tiếng Anh cho chữ Hán. Nếu hai ánh xạ xung đột, nhập cặp Tìm/Thay trực tiếp để chọn cách viết rồi tạo lại preview.
 5. Các vị trí đã sửa tay/đã duyệt và gợi ý chưa xác nhận mặc định bỏ chọn. Nếu chủ động chọn bản được bảo vệ, ứng dụng hỏi lại, tạo revision mới và đưa đoạn về chờ duyệt. Bấm **Thay vị trí đang chọn** hoặc **Thay tất cả vị trí được chọn**; không có dữ liệu nào được ghi trước bước xác nhận này.
-6. **Hoàn tác lần thay thế** trả lại toàn bộ đợt gần nhất khi nội dung chưa bị sửa tiếp. Nếu có sửa mới, ứng dụng từ chối ghi đè. Thao tác nhiều chương tạo bản sao trong `Chapters\BatchBackups` trước khi ghi và báo riêng chương đã ghi/chưa ghi.
+6. **Hoàn tác lần thay thế** trả lại toàn bộ đợt gần nhất khi nội dung chưa bị sửa tiếp. Nếu có sửa mới, ứng dụng từ chối ghi đè. Thao tác nhiều chương validate trước, ghi từng chương và báo riêng chương đã ghi/chưa ghi nếu có lỗi giữa danh sách.
 
 Tab **Chữ Hán còn sót** nhận diện các vùng CJK Unicode mở rộng, gom ký tự Hán liền nhau, đếm số lần và phân loại tên/thuật ngữ đã xác nhận, xung đột, chưa biết hoặc đã đánh dấu giữ nguyên. Tìm kiếm và cột bảng dùng để lọc/sắp xếp; nhấp đúp mở đúng chương, segment và offset. Có thể xác nhận cụm đang chọn vào Glossary hoặc CharacterProfile. Ứng dụng không mặc định mọi cụm là tên và không tự đoán âm Hán Việt.
 
@@ -164,7 +162,7 @@ Kiểm tra tự động gợi ý kết quả rỗng, hết giới hạn token/ch
 
 Prompt mặc định yêu cầu dịch Chinese (zh) → Vietnamese (vi), giữ tên/lời thoại/đoạn, không tóm tắt hoặc giải thích; Ollama áp dụng chat template của model. Prompt Preset Manager cho phép tạo, sửa, nhân bản, chọn và xem trước prompt thực tế. Thuật ngữ, ghi chú và một phần ngữ cảnh đã duyệt ngắn có thể được thêm; ứng dụng không nhét toàn bộ các đoạn trước vào prompt. Chất lượng vẫn **chưa được kiểm chứng bằng TranslateGemma thật** trong Codex Cloud.
 
-## 5. Dữ liệu và phục hồi
+## 5. Dữ liệu và lưu trữ
 
 Mặc định lưu ở:
 
@@ -172,19 +170,19 @@ Mặc định lưu ở:
 %LOCALAPPDATA%\QuickTranslatorAiEditor\Chapters
 ```
 
-Dán đường dẫn trên vào thanh địa chỉ File Explorer để mở thư mục. Mỗi chương có file `{ID}.qtaie.json` và bản dự phòng `.qtaie.json.bak`; thư viện preset và `CharacterProjects` nằm trong thư mục dữ liệu ứng dụng. Các file chứa nguyên văn, ranh giới/ID đoạn, bản AI, bản chuẩn hóa, bản sửa, hồ sơ nhân vật, lịch sử, checkpoint hàng đợi, preset, prompt/cấu hình và số token/thời gian API trả về.
+Dán đường dẫn trên vào thanh địa chỉ File Explorer để mở thư mục. Mỗi chương có một file `{ID}.qtaie.json`; thư viện preset và cấu hình độc lập nằm trong thư mục dữ liệu ứng dụng. Các file chứa nguyên văn, ranh giới/ID đoạn, bản AI, bản chuẩn hóa, bản sửa, hồ sơ nhân vật, lịch sử biên tập, tiến độ hàng đợi, preset, prompt/cấu hình và số token/thời gian API trả về.
 
-Mỗi đợt Batch Replace lưu các vị trí, nội dung trước/sau, nguồn quy tắc và revision của segment trong file chương. Bản AI gốc trong `TranslationAttempt` không bị sửa. Với phạm vi nhiều chương, bản sao trước thao tác nằm tại `%LOCALAPPDATA%\QuickTranslatorAiEditor\Chapters\BatchBackups\{thời-gian}-{batch-id}` cùng manifest cục bộ; thư mục này có thể lớn dần và người dùng tự quản lý sau khi đã sao lưu an toàn.
+Mỗi đợt Batch Replace lưu các vị trí, nội dung trước/sau, nguồn quy tắc và revision nghiệp vụ của segment trong file chương để hỗ trợ hoàn tác biên tập. Bản AI gốc trong `TranslationAttempt` không bị sửa. Phạm vi nhiều chương được xử lý tuần tự; báo cáo cho biết rõ chương thành công và chương lỗi.
 
-Tùy chỉnh Reader, bookmark và vị trí đọc nằm riêng tại `%LOCALAPPDATA%\QuickTranslatorAiEditor\Reader\reader-settings.json`, có bản dự phòng. Tệp chương không đổi schema vì đây là sở thích hiển thị của máy.
+Tùy chỉnh Reader, bookmark và vị trí đọc nằm riêng tại `%LOCALAPPDATA%\QuickTranslatorAiEditor\Reader\reader-settings.json`. Đây là sở thích hiển thị của máy.
 
 Đường dẫn Data và lựa chọn engine truyền thống nằm tại `%LOCALAPPDATA%\QuickTranslatorAiEditor\Traditional\traditional-settings.json`. File này chỉ chứa đường dẫn/cấu hình, không chứa nội dung từ điển. Kết quả Hán Việt, VP và alignment được cache trong bộ nhớ theo hash nguyên văn cùng fingerprint Data; đổi nguyên văn hoặc Data sẽ tự tạo lại. Ứng dụng không ghi vào thư mục Data.
 
-Khi lưu, ứng dụng ghi tệp tạm cùng thư mục, flush xuống đĩa rồi thay tệp chính; lưu trước đó thành `.bak`. Có checksum và kiểm tra nguyên văn/ID/thứ tự để phát hiện dữ liệu hỏng. Nếu file chính lỗi, ứng dụng thử bản dự phòng và báo rõ đang phục hồi. Nếu cả hai lỗi, ứng dụng báo lỗi và giữ các tệp. Không tự tạo dữ liệu rỗng đè lên tệp hỏng.
+Khi lưu, ứng dụng serialize JSON UTF-8, kiểm tra model, ghi tệp tạm cùng thư mục, flush xuống đĩa rồi thay tệp chính. Ứng dụng không tạo `.bak`, journal, rescue ZIP hoặc checksum bảo vệ file. Nếu file không đọc được, ứng dụng báo lỗi ngắn gọn và không tự ghi dữ liệu mặc định đè lên file đó.
 
 Ứng dụng lưu trước request, sau mỗi đoạn, lúc sửa/duyệt/đổi ranh giới, lúc chuyển chương và khi đóng bình thường. Nếu chưa lưu được lúc đóng, cửa sổ vẫn mở để giữ nháp. Một cửa sổ được cho phép trong mỗi phiên Windows để giảm nguy cơ hai ứng dụng ghi cùng dữ liệu. Không mở cùng chương bằng công cụ hoặc phiên Windows khác để sửa đồng thời.
 
-Mất điện/tắt cưỡng bức vẫn có thể mất phần sửa kể từ lần lưu hoàn tất gần nhất; nhịp 500 ms và bản dự phòng giảm rủi ro, không bảo đảm chống mọi lỗi ổ đĩa. Trước thử nghiệm quan trọng, sao lưu cả thư mục dữ liệu sang một thư mục cục bộ khác. Không sửa tay JSON vì checksum sẽ không khớp. Dữ liệu là văn bản thuần, không mã hóa; ai có quyền đọc thư mục Windows có thể đọc được.
+Mất điện/tắt cưỡng bức vẫn có thể mất phần sửa kể từ lần lưu hoàn tất gần nhất. Trước thử nghiệm quan trọng, tự sao chép cả thư mục dự án sang vị trí khác. JSON hợp lệ có thể được sửa bằng công cụ ngoài khi ứng dụng đã đóng. Dữ liệu là văn bản thuần, không mã hóa; ai có quyền đọc thư mục Windows có thể đọc được.
 
 Không có chức năng tải dữ liệu lên GitHub hoặc telemetry. `.gitignore` của module loại trừ dữ liệu tiến độ, thư mục `data`, `artifacts`, `bin`, `obj`, kết quả test. Giữ chương truyện, từ điển và bản sao lưu bên ngoài repository; ignore không bảo vệ một tệp riêng tư được bạn cố ý đặt dưới tên khác và commit. Không commit bản dịch/dữ liệu riêng tư.
 
@@ -197,7 +195,7 @@ Không có chức năng tải dữ liệu lên GitHub hoặc telemetry. `.gitign
 | Quá thời gian chờ | Tăng timeout lên 600–900 giây; thử chương mới với đoạn nhỏ hơn; kiểm tra model có tràn VRAM sang RAM hay không |
 | Bản dịch bị cắt | Tăng giới hạn đầu ra; nếu tổng đầu vào/đầu ra quá lớn, tăng context trong khả năng bộ nhớ hoặc giảm cỡ đoạn. Dịch lại thủ công |
 | Không lưu được | Giữ ứng dụng mở, kiểm tra dung lượng/quyền ghi rồi bấm Lưu tiến độ; sao lưu dữ liệu hiện có |
-| Không mở được cả chính và dự phòng | Giữ nguyên hai file và dùng bản sao lưu bên ngoài; không ghi đè chúng |
+| Không mở được file Project | Giữ nguyên file lỗi, dùng bản sao bên ngoài nếu có và không ghi dữ liệu mặc định đè lên file đó |
 | Máy báo thiếu .NET khi mở EXE | Cài .NET 10 **Desktop Runtime** x64 cho bản phụ thuộc runtime, hoặc dùng bản đóng gói kèm runtime |
 
 ## 7. Tạo thư mục chạy riêng

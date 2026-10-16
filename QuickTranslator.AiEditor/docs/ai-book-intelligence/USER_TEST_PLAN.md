@@ -42,9 +42,9 @@ Use a copied or synthetic Project. Do not begin with the only copy of a personal
 3. Start a request, then edit knowledge before the response returns. Verify the active request used its original snapshot and the next request uses the update.
 4. Run a small Project queue and confirm the same rules apply to queued translation.
 
-## Recovery checks
+## Restart and current-state checks
 
-1. Close during a reviewed resource save, reopen, and verify reconciliation does not duplicate the resource.
+1. Close after a reviewed resource save completes, reopen, and verify the current resource appears exactly once.
 2. Change a chapter source, rescan, and verify the old evidence is retired while new offsets match the new source.
 3. Confirm translations, approvals, queue jobs, and Project Manifest are unchanged by survey/review operations.
 
@@ -59,9 +59,11 @@ Use a copied or synthetic Project. Do not begin with the only copy of a personal
 ## Evidence to capture when something fails
 
 - Screenshot the selected row, detail pane, evidence chapter/range, filter state, and error banner.
-- Save the Project's `Settings/ai-book-intelligence.json` and its recovery backup from the copied Project.
+- Save a diagnostic copy of the Project's current `Settings/ai-book-intelligence.json` when needed.
 - Record model/profile, scan mode, chapter count, the last completed count, and whether restart/resume was involved.
 - For prompt issues, use the existing prompt viewer and capture the relevant `BOOK KNOWLEDGE` block without sharing private source unnecessarily.
 - For Ollama failures, preserve the visible error kind/status and endpoint/profile name; do not include access tokens.
 
 Record the selected model/profile, Project size, elapsed time, request/token metrics, false positives, false negatives, and any evidence mismatch.
+
+
