@@ -18,6 +18,7 @@ public sealed class BookIntelligenceReviewWindow : Window
     private readonly Func<IntelligenceCharacterSuggestion, CharacterProfile?> _editCharacter;
     private readonly Action<ProjectResources> _resourcesChanged;
     private readonly Func<CorpusEvidence, Task> _openEvidence;
+    private readonly Action<BookIntelligenceState, bool> _stateChanged;
     private BookIntelligenceState? _state;
     private CancellationTokenSource? _cancellation;
 
@@ -28,7 +29,7 @@ public sealed class BookIntelligenceReviewWindow : Window
     private readonly TextBlock _summary = new() { TextWrapping = TextWrapping.Wrap };
     private readonly ProgressBar _progress = new() { Height = 5, Minimum = 0, Maximum = 1 };
     private readonly DataGrid _queue = new() { AutoGenerateColumns = false, IsReadOnly = true,
-        CanUserAddRows = false, SelectionMode = DataGridSelectionMode.Single };
+        CanUserAddRows = false, SelectionMode = DataGridSelectionMode.Extended };
     private readonly TextBox _details = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MinHeight = 150 };
     private readonly ListBox _evidence = new() { DisplayMemberPath = nameof(EvidenceRow.Label), MinHeight = 100 };
@@ -39,11 +40,18 @@ public sealed class BookIntelligenceReviewWindow : Window
     private readonly Button _later = new() { Content = "Xem xét sau" };
     private readonly Button _reject = new() { Content = "Không phải / Bỏ đề xuất" };
     private readonly Button _open = new() { Content = "Mở đoạn nguyên tác" };
+    private readonly ComboBox _scanMode = new() { Width = 170, ItemsSource = Enum.GetValues<IntelligenceScanMode>() };
+    private readonly CheckBox _translationContext = new() { Content = "Dùng Knowledge Context khi dịch (thử nghiệm)", Margin = new Thickness(10, 4, 0, 4) };
+    private readonly TextBox _search = new() { Width = 190, ToolTip = "Tìm tên Trung, Việt hoặc bí danh" };
+    private readonly ComboBox _kindFilter = new() { Width = 145, ItemsSource = new[] { "Tất cả loại", "Nhân vật", "Quan hệ", "Suy luận", "Glossary" }, SelectedIndex = 0 };
+    private readonly ComboBox _statusFilter = new() { Width = 145, ItemsSource = new[] { "Tất cả trạng thái", "Chờ duyệt", "Đã xử lý", "Xung đột/Stale" }, SelectedIndex = 0 };
+    private bool _loading;
 
     public BookIntelligenceReviewWindow(ProjectSession session, ProjectRepository repository,
         ProjectResources resources, IReadOnlyList<OllamaBackendProfile> profiles,
         Func<IntelligenceCharacterSuggestion, CharacterProfile?> editCharacter,
-        Action<ProjectResources> resourcesChanged, Func<CorpusEvidence, Task> openEvidence)
+        Action<ProjectResources> resourcesChanged, Func<CorpusEvidence, Task> openEvidence,
+        Action<BookIntelligenceState, bool> stateChanged)
     {
         _session = session;
         _repository = repository;
@@ -52,6 +60,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         _editCharacter = editCharacter;
         _resourcesChanged = resourcesChanged;
         _openEvidence = openEvidence;
+        _stateChanged = stateChanged;
         Title = "QT Studio · Khảo sát nhân vật & Glossary bằng AI";
         Width = 1220; Height = 780; MinWidth = 900; MinHeight = 620;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -74,7 +83,13 @@ public sealed class BookIntelligenceReviewWindow : Window
         controls.Children.Add(new TextBlock { Text = "Backend khảo sát", VerticalAlignment = VerticalAlignment.Center });
         controls.Children.Add(_profile);
         controls.Children.Add(new TextBlock { Text = "Model độc lập", VerticalAlignment = VerticalAlignment.Center });
-        controls.Children.Add(_model); controls.Children.Add(_run); controls.Children.Add(_cancel);
+        controls.Children.Add(_model); controls.Children.Add(new TextBlock { Text = "Chế độ", VerticalAlignment = VerticalAlignment.Center });
+        controls.Children.Add(_scanMode); controls.Children.Add(_run); controls.Children.Add(_cancel);
+        controls.Children.Add(_translationContext);
+        var filters = new WrapPanel { Margin = new Thickness(0, 5, 0, 3) };
+        filters.Children.Add(new TextBlock { Text = "Lọc", VerticalAlignment = VerticalAlignment.Center });
+        filters.Children.Add(_kindFilter); filters.Children.Add(_statusFilter); filters.Children.Add(_search);
+        header.Children.Add(filters);
         header.Children.Add(controls); header.Children.Add(_progress); header.Children.Add(_summary);
         root.Children.Add(header);
 
@@ -92,6 +107,8 @@ public sealed class BookIntelligenceReviewWindow : Window
         _queue.Columns.Add(new DataGridTextColumn { Header = "Đề xuất", Binding = new Binding(nameof(ReviewRow.Title)), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
         _queue.Columns.Add(new DataGridTextColumn { Header = "Mức tin cậy", Binding = new Binding(nameof(ReviewRow.Confidence)), Width = 105 });
         _queue.Columns.Add(new DataGridTextColumn { Header = "Trạng thái", Binding = new Binding(nameof(ReviewRow.Status)), Width = 110 });
+        _queue.Columns.Add(new DataGridTextColumn { Header = "Nguồn", Binding = new Binding(nameof(ReviewRow.Origin)), Width = 85 });
+        _queue.Columns.Add(new DataGridTextColumn { Header = "Chứng cứ", Binding = new Binding(nameof(ReviewRow.EvidenceCount)), Width = 75 });
         _queue.SelectionChanged += (_, _) => ShowSelection();
         grid.Children.Add(_queue);
         var splitter = new GridSplitter { Width = 5, HorizontalAlignment = HorizontalAlignment.Center,
@@ -113,6 +130,10 @@ public sealed class BookIntelligenceReviewWindow : Window
         _reject.Click += async (_, _) => await SetStatusAsync(IntelligenceReviewStatus.Rejected);
         _open.Click += async (_, _) => await OpenSelectedEvidenceAsync();
         _evidence.MouseDoubleClick += async (_, _) => await OpenSelectedEvidenceAsync();
+        _translationContext.Click += async (_, _) => await SaveContextFeatureFlagAsync();
+        _search.TextChanged += (_, _) => RefreshQueue();
+        _kindFilter.SelectionChanged += (_, _) => RefreshQueue();
+        _statusFilter.SelectionChanged += (_, _) => RefreshQueue();
         return root;
     }
 
@@ -120,7 +141,12 @@ public sealed class BookIntelligenceReviewWindow : Window
     {
         try
         {
-            _state = await new BookIntelligenceStore(_session).LoadAsync();
+            _loading = true;
+            IntelligenceCommitResult reconciled = await new BookIntelligenceReviewService(_session).ReconcileAsync();
+            _state = reconciled.State; _resources = reconciled.Resources;
+            ProjectTranslationSettings translation = await new ProjectSettingsStore(_session).LoadTranslationAsync();
+            _translationContext.IsChecked = translation.BookKnowledgeContextEnabled;
+            _scanMode.SelectedItem = _state.ScanMode;
             OllamaBackendProfile selected = _profiles.FirstOrDefault(p => p.Id == _state.AnalyzerProfileId)
                 ?? _profiles.FirstOrDefault(p => p.Id == OllamaBackendProfile.DefaultLocalId)
                 ?? _profiles.First();
@@ -129,6 +155,7 @@ public sealed class BookIntelligenceReviewWindow : Window
             RefreshQueue();
         }
         catch (Exception ex) { ShowFailure(ex); }
+        finally { _loading = false; }
     }
 
     private async Task RunAsync()
@@ -140,6 +167,7 @@ public sealed class BookIntelligenceReviewWindow : Window
             var store = new BookIntelligenceStore(_session);
             _summary.Text = "Đang quét 100% nguyên tác bằng CPU…";
             _state.AnalyzerProfileId = profile.Id; _state.AnalyzerModel = _model.Text.Trim();
+            _state.ScanMode = _scanMode.SelectedItem is IntelligenceScanMode mode ? mode : IntelligenceScanMode.FastAdaptive;
             var indexProgress = new Progress<CorpusIndexProgress>(p =>
             {
                 _progress.Maximum = Math.Max(1, p.TotalChapters); _progress.Value = p.ProcessedChapters;
@@ -160,6 +188,14 @@ public sealed class BookIntelligenceReviewWindow : Window
             });
             _state = await new AdaptiveBookIntelligenceAnalyzer(backend).AnalyzeAsync(_session, _state, store,
                 _resources, options, aiProgress, _cancellation.Token);
+            var scenes = new SceneContextService();
+            foreach (ProjectChapterEntry entry in _session.Manifest.Chapters.Where(x => x.DeletedAt is null).OrderBy(x => x.Number))
+            {
+                ChapterDocument chapter = (await _repository.LoadChapterAsync(_session, entry.ChapterId, _cancellation.Token)).Chapter;
+                scenes.RebuildChapter(_state, chapter, _resources);
+            }
+            _state = await store.SaveAsync(_state, _cancellation.Token);
+            _stateChanged(_state, _translationContext.IsChecked == true);
             RefreshQueue();
             ReviewRow? newest = Rows().FirstOrDefault(x => x.Status == IntelligenceReviewStatus.Pending.ToString());
             _summary.Text = newest is null ? "Khảo sát hoàn tất; không có đề xuất mới có chứng cứ."
@@ -193,6 +229,9 @@ public sealed class BookIntelligenceReviewWindow : Window
                     if (!EditRelationship(relationship)) return;
                     result = await review.AcceptRelationshipAsync(_state, relationship.Id, _resources.Revision);
                     break;
+                case DerivedRelationship derived:
+                    result = await review.AcceptDerivedRelationshipAsync(_state, derived.Id);
+                    break;
                 default: return;
             }
             ApplyCommit(result); _summary.Text = "Đã lưu mục được xác nhận. Các mục khác vẫn ở hàng chờ.";
@@ -211,10 +250,13 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private async Task SetStatusAsync(IntelligenceReviewStatus status)
     {
-        if (_state is null || _queue.SelectedItem is not ReviewRow row) return;
+        if (_state is null || _queue.SelectedItems.Count == 0) return;
         try
         {
-            _state = await new BookIntelligenceReviewService(_session).SetReviewStatusAsync(_state, row.Id, status);
+            ReviewRow[] selected = _queue.SelectedItems.Cast<ReviewRow>().Where(x => x.Value is not DerivedRelationship d ||
+                d.ValidityStatus == InferenceValidityStatus.Valid).ToArray();
+            foreach (ReviewRow row in selected)
+                _state = await new BookIntelligenceReviewService(_session).SetReviewStatusAsync(_state, row.Id, status);
             RefreshQueue();
         }
         catch (Exception ex) { ShowFailure(ex); }
@@ -227,7 +269,25 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private void ApplyCommit(IntelligenceCommitResult result)
     {
-        _resources = result.Resources; _state = result.State; _resourcesChanged(_resources); RefreshQueue();
+        _resources = result.Resources; _state = result.State; _resourcesChanged(_resources);
+        _stateChanged(_state, _translationContext.IsChecked == true); RefreshQueue();
+    }
+
+    private async Task SaveContextFeatureFlagAsync()
+    {
+        if (_loading || _state is null) return;
+        try
+        {
+            var settings = new ProjectSettingsStore(_session);
+            ProjectTranslationSettings translation = await settings.LoadTranslationAsync();
+            translation.BookKnowledgeContextEnabled = _translationContext.IsChecked == true;
+            await settings.SaveTranslationAsync(translation);
+            _stateChanged(_state, translation.BookKnowledgeContextEnabled);
+            _summary.Text = translation.BookKnowledgeContextEnabled
+                ? "Knowledge Context đã bật. Chỉ dữ liệu đã duyệt và đúng timeline được thêm vào request mới."
+                : "Knowledge Context đã tắt. Pipeline dịch dùng hành vi cũ.";
+        }
+        catch (Exception ex) { _translationContext.IsChecked = false; ShowFailure(ex); }
     }
 
     private void RefreshQueue()
@@ -241,9 +301,23 @@ public sealed class BookIntelligenceReviewWindow : Window
     private List<ReviewRow> Rows()
     {
         if (_state is null) return [];
-        return _state.Characters.Select(x => new ReviewRow(x.Id, "Nhân vật", $"{x.ChineseName} → {x.VietnameseName}", x.Confidence.ToString(), x.Status.ToString(), x))
-            .Concat(_state.Relationships.Select(x => new ReviewRow(x.Id, "Quan hệ", $"{x.SpeakerChineseName} → {x.ListenerChineseName}: {x.Relationship}", x.Confidence.ToString(), x.Status.ToString(), x)))
-            .Concat(_state.Glossary.Select(x => new ReviewRow(x.Id, "Glossary", $"{x.Chinese} → {x.Vietnamese}", x.Confidence.ToString(), x.Status.ToString(), x)))
+        IEnumerable<ReviewRow> rows = _state.Characters.Select(x => new ReviewRow(x.Id, "Nhân vật", $"{x.ChineseName} → {x.VietnameseName}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x))
+            .Concat(_state.Relationships.Select(x => new ReviewRow(x.Id, "Quan hệ", $"{x.SpeakerChineseName} → {x.ListenerChineseName}: {x.Relationship}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x)))
+            .Concat(_state.DerivedRelationships.Select(x => new ReviewRow(x.Id, "Suy luận", $"{CharacterName(x.SubjectCharacterId)} → {CharacterName(x.TargetCharacterId)}: {x.OutputRelation}",
+                x.ValidityStatus.ToString(), x.Status.ToString(), x.RuleId, x.SupportingEvidenceIds.Count, x)))
+            .Concat(_state.Glossary.Select(x => new ReviewRow(x.Id, "Glossary", $"{x.Chinese} → {x.Vietnamese}", x.Confidence.ToString(), x.Status.ToString(), x.Scope.ToString(), x.EvidenceIds.Count, x)));
+        string query = _search.Text.Trim();
+        if (query.Length > 0) rows = rows.Where(x => x.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            x.Value is IntelligenceCharacterSuggestion c && c.Aliases.Any(a => a.Contains(query, StringComparison.OrdinalIgnoreCase)));
+        if (_kindFilter.SelectedIndex > 0 && _kindFilter.SelectedItem is string kind) rows = rows.Where(x => x.Kind == kind);
+        rows = _statusFilter.SelectedIndex switch
+        {
+            1 => rows.Where(x => x.Status.Contains("Pending", StringComparison.OrdinalIgnoreCase) || x.Status.Contains("Review", StringComparison.OrdinalIgnoreCase) || x.Status.Contains("Awaiting", StringComparison.OrdinalIgnoreCase)),
+            2 => rows.Where(x => x.Status.Contains("Accepted", StringComparison.OrdinalIgnoreCase) || x.Status.Contains("Merged", StringComparison.OrdinalIgnoreCase) || x.Status.Contains("Rejected", StringComparison.OrdinalIgnoreCase)),
+            3 => rows.Where(x => x.Status.Contains("Conflict", StringComparison.OrdinalIgnoreCase) || x.Status.Contains("Stale", StringComparison.OrdinalIgnoreCase) || x.Confidence is "Conflict" or "Stale" or "Ambiguous"),
+            _ => rows
+        };
+        return rows
             .OrderBy(x => x.Status is nameof(IntelligenceReviewStatus.Pending) or nameof(IntelligenceReviewStatus.ReviewLater) ? 0 : 1)
             .ThenBy(x => x.Kind).ThenBy(x => x.Title).ToList();
     }
@@ -265,6 +339,9 @@ public sealed class BookIntelligenceReviewWindow : Window
             case IntelligenceGlossarySuggestion x:
                 reason = $"{x.Chinese} → {x.Vietnamese}\nLoại: {x.Category}\nPhụ thuộc ngữ cảnh: {(x.ContextDependent ? "Có — cần thận trọng" : "Không")}\n\n{x.Reason}";
                 ids = x.EvidenceIds; break;
+            case DerivedRelationship x:
+                reason = $"Quan hệ suy luận: {CharacterName(x.SubjectCharacterId)} → {CharacterName(x.TargetCharacterId)} = {x.OutputRelation}\nQuy tắc: {x.RuleId}\nĐộ sâu: {x.InferenceDepth}\nValidity: {x.ValidityStatus}\nInput relations: {string.Join(", ", x.InputRelationIds)}\n\n{x.Explanation}\n\nQuan hệ thực tế này không tự tạo cách xưng hô.";
+                ids = x.SupportingEvidenceIds; break;
             default: reason = ""; ids = Array.Empty<Guid>(); break;
         }
         _details.Text = reason;
@@ -275,6 +352,10 @@ public sealed class BookIntelligenceReviewWindow : Window
         _mergeTarget.IsEnabled = _merge.IsEnabled;
     }
 
+    private string CharacterName(Guid id) => _resources.Characters.Profiles.SingleOrDefault(x => x.Id == id)?.VietnameseName
+        ?? _state?.CandidateIdentities.SingleOrDefault(x => x.Id == id)?.VietnameseName
+        ?? id.ToString("D");
+
     private bool EditRelationship(IntelligenceRelationshipSuggestion item)
     {
         var panel = new StackPanel { Margin = new Thickness(12) };
@@ -282,14 +363,29 @@ public sealed class BookIntelligenceReviewWindow : Window
         TextBox relationship = Field("Quan hệ", item.Relationship), self = Field("Người nói tự xưng", item.SelfReference),
             address = Field("Người nói gọi đối phương", item.AddresseeReference),
             reverseSelf = Field("Chiều ngược tự xưng (để trống nếu chưa xác nhận)", item.ReverseSelfReference),
-            reverseAddress = Field("Chiều ngược gọi đối phương", item.ReverseAddresseeReference);
+            reverseAddress = Field("Chiều ngược gọi đối phương", item.ReverseAddresseeReference),
+            validFrom = Field("Có hiệu lực từ chương (để trống nếu chưa rõ)", item.ValidFromChapter?.ToString() ?? ""),
+            validTo = Field("Có hiệu lực đến chương (để trống nếu chưa rõ)", item.ValidToChapter?.ToString() ?? ""),
+            revealedAt = Field("Được tiết lộ từ chương", item.RevealedAtChapter?.ToString() ?? "");
         var save = new Button { Content = "Xác nhận", IsDefault = true }; panel.Children.Add(save);
-        var dialog = new Window { Owner = this, Title = "Xác nhận quan hệ & xưng hô", Width = 460, Height = 410,
+        var dialog = new Window { Owner = this, Title = "Xác nhận quan hệ & xưng hô", Width = 500, Height = 610,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = panel };
-        save.Click += (_, _) => { item.Relationship = relationship.Text.Trim(); item.SelfReference = self.Text.Trim();
+        save.Click += (_, _) => {
+            if (!TryChapter(validFrom.Text, out int? from) || !TryChapter(validTo.Text, out int? to) ||
+                !TryChapter(revealedAt.Text, out int? revealed) || from is not null && to is not null && from > to)
+            { MessageBox.Show(dialog, "Mốc chương không hợp lệ hoặc chương bắt đầu lớn hơn chương kết thúc.", "QT Studio", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+            item.Relationship = relationship.Text.Trim(); item.SelfReference = self.Text.Trim();
             item.AddresseeReference = address.Text.Trim(); item.ReverseSelfReference = reverseSelf.Text.Trim();
-            item.ReverseAddresseeReference = reverseAddress.Text.Trim(); dialog.DialogResult = true; };
+            item.ReverseAddresseeReference = reverseAddress.Text.Trim(); item.ValidFromChapter = from;
+            item.ValidToChapter = to; item.RevealedAtChapter = revealed; dialog.DialogResult = true; };
         return dialog.ShowDialog() == true;
+    }
+
+    private static bool TryChapter(string value, out int? chapter)
+    {
+        if (string.IsNullOrWhiteSpace(value)) { chapter = null; return true; }
+        if (int.TryParse(value.Trim(), out int parsed) && parsed > 0) { chapter = parsed; return true; }
+        chapter = null; return false;
     }
 
     private string AskText(string title, string chinese, string value)
@@ -308,6 +404,7 @@ public sealed class BookIntelligenceReviewWindow : Window
     private string ShortChapter(Guid id) => _session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == id) is { } c ? $"Chương {c.Number}" : id.ToString("D");
     private static string Preview(string text) { string one = text.Replace('\r', ' ').Replace('\n', ' ').Trim(); return one.Length <= 90 ? one : one[..90] + "…"; }
 
-    private sealed record ReviewRow(Guid Id, string Kind, string Title, string Confidence, string Status, object Value);
+    private sealed record ReviewRow(Guid Id, string Kind, string Title, string Confidence, string Status,
+        string Origin, int EvidenceCount, object Value);
     private sealed record EvidenceRow(CorpusEvidence Evidence, string Label);
 }

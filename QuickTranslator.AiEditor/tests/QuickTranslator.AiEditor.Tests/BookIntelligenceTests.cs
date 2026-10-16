@@ -134,6 +134,53 @@ public sealed class BookIntelligenceTests : IDisposable
     }
 
     [Fact]
+    public async Task Audit_discovery_expands_similar_low_priority_scope_without_marking_unchecked_evidence_complete()
+    {
+        string source = "阿九藏在暗处。" + string.Concat(Enumerable.Repeat("风吹过原野，夜色依旧安静。", 260));
+        (ProjectRepository repository, ProjectSession session) = await ProjectAsync(source, 1);
+        var store = new BookIntelligenceStore(session);
+        ProjectResources resources = await new ProjectResourceStore(session).LoadAsync();
+        BookIntelligenceState state = await new ProjectCorpusIndexer(repository).IndexAsync(session,
+            await store.LoadAsync(), store, resources.Characters);
+        CorpusEvidence seed = state.Evidence.First(x => x.IsCurrent && x.Excerpt.Contains("阿九", StringComparison.Ordinal));
+        Assert.Equal(EvidencePriority.Low, seed.Priority);
+        seed.IsAuditSample = true;
+        state = await store.SaveAsync(state);
+        int call = 0;
+        var fake = new SurveyClient(prompt =>
+        {
+            call++;
+            if (call > 1) return "{\"characters\":[],\"relationships\":[],\"glossary\":[]}";
+            Guid id = Guid.Parse(Regex.Match(prompt, @"EVIDENCE ([0-9a-f-]{36})", RegexOptions.IgnoreCase).Groups[1].Value);
+            return JsonSerializer.Serialize(new { characters = new[] { new { chinese_name = "阿九", vietnamese_name = "A Cửu",
+                aliases = Array.Empty<string>(), gender = "unknown", primary_pronoun = "", secondary_pronoun = "",
+                confidence = "proposed", evidence_ids = new[] { id }, reason = "Audit found a named person" } },
+                relationships = Array.Empty<object>(), glossary = Array.Empty<object>() }, DocumentJson.Options);
+        });
+        state = await new AdaptiveBookIntelligenceAnalyzer(fake).AnalyzeAsync(session, state, store, resources, Options);
+        Assert.Equal(1, state.Metrics.AuditDiscoveries);
+        Assert.Contains(state.Evidence, x => x.AuditExpanded && x.AiAnalyzed);
+        Assert.DoesNotContain(state.Evidence, x => !x.AiAnalyzed && x.AuditExpanded);
+    }
+
+    [Fact]
+    public async Task Malformed_json_is_retried_once_then_checkpointed()
+    {
+        (ProjectRepository repository, ProjectSession session) = await ProjectAsync("林朝说道：她是我的妹妹。", 1);
+        var store = new BookIntelligenceStore(session);
+        ProjectResources resources = await new ProjectResourceStore(session).LoadAsync();
+        BookIntelligenceState state = await new ProjectCorpusIndexer(repository).IndexAsync(session,
+            await store.LoadAsync(), store, resources.Characters);
+        int call = 0;
+        var fake = new SurveyClient(_ => ++call == 1 ? "not-json" :
+            "{\"characters\":[],\"relationships\":[],\"glossary\":[]}");
+        state = await new AdaptiveBookIntelligenceAnalyzer(fake).AnalyzeAsync(session, state, store, resources, Options);
+        Assert.Equal(2, fake.Calls);
+        Assert.Equal(1, state.Metrics.Retries);
+        Assert.True(state.Evidence.Single(x => x.IsCurrent).AiAnalyzed);
+    }
+
+    [Fact]
     public async Task Confirmed_character_and_glossary_are_saved_but_nothing_is_auto_applied()
     {
         (_, ProjectSession session) = await ProjectAsync("林朝说道：青云宗。", 1);
@@ -186,6 +233,10 @@ public sealed class BookIntelligenceTests : IDisposable
         state.Chapters.Add(new() { ChapterId = evidence.ChapterId, ChapterNumber = 1, SourceSha256 = sourceHash, SourceLengthUtf16 = 11, Evidence = [evidence] });
         var alias = new IntelligenceCharacterSuggestion { ChineseName = "小朝", VietnameseName = "Tiểu Triều",
             EvidenceIds = [evidence.Id], PossibleExistingCharacterId = target.Id };
+        var identity = new CandidateIdentity { ChineseName = "小朝", VietnameseName = "Tiểu Triều",
+            EvidenceHistory = [evidence.Id], ProposedExistingCharacterId = target.Id,
+            Status = CandidateIdentityStatus.ProposedAliasLink };
+        alias.CandidateIdentityId = identity.Id; state.CandidateIdentities.Add(identity);
         var relation = new IntelligenceRelationshipSuggestion { SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
             Relationship = "mới", SelfReference = "ta", AddresseeReference = "ngươi", EvidenceIds = [evidence.Id] };
         state.Characters.Add(alias); state.Relationships.Add(relation); state = await stateStore.SaveAsync(state);
@@ -196,6 +247,79 @@ public sealed class BookIntelligenceTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => review.AcceptRelationshipAsync(merged.State,
             relation.Id, merged.Resources.Revision));
         Assert.True((await resourceStore.LoadAsync()).Characters.Profiles.Single(x => x.Id == target.Id).Relationships.Single().Locked);
+        IdentityMergeRecord merge = Assert.Single(merged.State.CandidateIdentities.Single().MergeHistory);
+        IntelligenceCommitResult undone = await review.UndoCharacterMergeAsync(merged.State, merge.Id, merged.Resources.Revision);
+        Assert.DoesNotContain("小朝", undone.Resources.Characters.Profiles.Single(x => x.Id == target.Id).Aliases);
+    }
+
+    [Fact]
+    public async Task Prepared_commit_is_reconciled_idempotently_after_resource_was_saved()
+    {
+        (_, ProjectSession session) = await ProjectAsync("青云宗位于山巅。", 1);
+        var stateStore = new BookIntelligenceStore(session);
+        BookIntelligenceState state = await stateStore.LoadAsync();
+        string source = "青云宗位于山巅。", hash = Hash(source);
+        var evidence = new CorpusEvidence { ChapterId = session.Manifest.Chapters.Single().ChapterId,
+            StartUtf16 = 0, LengthUtf16 = source.Length, SourceSha256 = hash, Excerpt = source };
+        state.Chapters.Add(new CorpusChapterIndex { ChapterId = evidence.ChapterId, ChapterNumber = 1,
+            SourceSha256 = hash, SourceLengthUtf16 = source.Length, Evidence = [evidence] });
+        var term = new IntelligenceGlossarySuggestion { Chinese = "青云宗", Vietnamese = "Thanh Vân Tông",
+            EvidenceIds = [evidence.Id], Scope = GlossaryKnowledgeScope.Global };
+        state.Glossary.Add(term);
+        state.PendingResourceCommits.Add(new IntelligenceResourceCommit { Kind = ResourceCommitKind.Glossary,
+            State = ResourceCommitState.Prepared, SuggestionId = term.Id,
+            IntendedFingerprint = "glossary:青云宗:Thanh Vân Tông", CreatedAt = DateTimeOffset.UtcNow });
+        state = await stateStore.SaveAsync(state);
+        var resourceStore = new ProjectResourceStore(session);
+        ProjectResources resources = await resourceStore.LoadAsync();
+        resources.Terms.Add(new("青云宗", "Thanh Vân Tông"));
+        _ = await resourceStore.SaveAsync(resources);
+
+        IntelligenceCommitResult recovered = await new BookIntelligenceReviewService(session).ReconcileAsync();
+        Assert.Equal(IntelligenceReviewStatus.Accepted, recovered.State.Glossary.Single().Status);
+        Assert.Empty(recovered.State.PendingResourceCommits);
+        IntelligenceCommitResult second = await new BookIntelligenceReviewService(session).ReconcileAsync();
+        Assert.Equal(recovered.State.Revision, second.State.Revision);
+    }
+
+    [Fact]
+    public async Task Accepted_two_way_addressing_is_added_to_timeline_with_evidence_chapter()
+    {
+        const string source = "林朝对苏雨说道：妹妹。";
+        (_, ProjectSession session) = await ProjectAsync(source, 7);
+        var resourceStore = new ProjectResourceStore(session);
+        ProjectResources resources = await resourceStore.LoadAsync();
+        var speaker = new CharacterProfile { ChineseName = "林朝", VietnameseName = "Lâm Triều", NormalizationEnabled = false };
+        var listener = new CharacterProfile { ChineseName = "苏雨", VietnameseName = "Tô Vũ", NormalizationEnabled = false };
+        resources.Characters.Profiles.AddRange([speaker, listener]);
+        resources = await resourceStore.SaveAsync(resources);
+
+        var stateStore = new BookIntelligenceStore(session);
+        BookIntelligenceState state = await stateStore.LoadAsync();
+        var evidence = new CorpusEvidence { ChapterId = session.Manifest.Chapters.Single().ChapterId,
+            StartUtf16 = 0, LengthUtf16 = source.Length, SourceSha256 = Hash(source), Excerpt = source };
+        state.Chapters.Add(new CorpusChapterIndex { ChapterId = evidence.ChapterId, ChapterNumber = 7,
+            SourceSha256 = evidence.SourceSha256, SourceLengthUtf16 = source.Length, Evidence = [evidence] });
+        var knowledge = new KnowledgeRelationship { SubjectCharacterId = speaker.Id, TargetCharacterId = listener.Id,
+            RelationType = KnowledgeRelationType.UnknownSibling, EvidenceIds = [evidence.Id],
+            DiscoveryMethod = RelationshipDiscoveryMethod.DirectAi, Status = KnowledgeRelationshipStatus.Proposed,
+            FirstObservedChapter = 7, RevealedAtChapter = 7 };
+        var suggestion = new IntelligenceRelationshipSuggestion { SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
+            Relationship = "anh em", SelfReference = "anh", AddresseeReference = "em",
+            ReverseSelfReference = "em", ReverseAddresseeReference = "anh", EvidenceIds = [evidence.Id],
+            KnowledgeRelationshipId = knowledge.Id };
+        state.RelationshipGraph.Add(knowledge); state.Relationships.Add(suggestion); state = await stateStore.SaveAsync(state);
+
+        IntelligenceCommitResult result = await new BookIntelligenceReviewService(session)
+            .AcceptRelationshipAsync(state, suggestion.Id, resources.Revision);
+
+        Assert.Equal(KnowledgeRelationshipStatus.Confirmed, result.State.RelationshipGraph.Single().Status);
+        Assert.Equal(2, result.State.AddressingTimeline.Count);
+        Assert.All(result.State.AddressingTimeline, x => { Assert.True(x.Approved); Assert.Equal(7, x.RevealedAtChapter); });
+        Assert.Contains(result.State.AddressingTimeline, x => x.SpeakerCharacterId == speaker.Id &&
+            x.ListenerCharacterId == listener.Id && x.SelfReference == "anh" && x.AddresseeReference == "em");
+        Assert.Contains(result.State.AddressingTimeline, x => x.SpeakerCharacterId == listener.Id &&
+            x.ListenerCharacterId == speaker.Id && x.SelfReference == "em" && x.AddresseeReference == "anh");
     }
 
     [Fact]

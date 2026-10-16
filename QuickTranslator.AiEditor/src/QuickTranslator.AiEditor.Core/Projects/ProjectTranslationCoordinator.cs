@@ -773,6 +773,7 @@ public sealed class ProjectTranslationCoordinator
             _session, _repository, chapterId, cancellationToken).ConfigureAwait(false);
         var service = new TranslationService(chapter, workerDefinition?.Client ?? _client, guardedStore);
         service.UseProjectResources(environment.Resources);
+        service.UseBookKnowledgeContext(environment.BookKnowledgeContext);
         var queue = new TranslationQueue(service);
         queue.ProgressChanged += (_, _) => OnChapterProgress(chapterId, service, queue);
         lock (_sync)

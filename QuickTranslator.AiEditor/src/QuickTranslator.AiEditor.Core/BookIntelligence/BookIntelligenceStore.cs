@@ -62,6 +62,7 @@ public sealed class BookIntelligenceStore(ProjectSession session)
             throw new InvalidDataException("File khảo sát sai checksum hoặc schema.");
         BookIntelligenceState state = envelope.Content.Deserialize<BookIntelligenceState>(DocumentJson.Options)
             ?? throw new InvalidDataException("File khảo sát thiếu nội dung.");
+        state = BookIntelligenceMigration.ToCurrent(state);
         state.Validate();
         return state;
     }

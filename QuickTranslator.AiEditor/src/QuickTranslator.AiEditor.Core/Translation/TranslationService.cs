@@ -1,6 +1,7 @@
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Segmentation;
+using QuickTranslator.AiEditor.Core.BookIntelligence;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
 
@@ -21,6 +22,7 @@ public sealed partial class TranslationService
     private long _revision;
     private long _savedRevision = -1;
     private Projects.ProjectResources? _projectResources;
+    private IBookKnowledgeContextProvider? _bookKnowledgeContext;
 
     public void UseProjectResources(Projects.ProjectResources resources)
     {
@@ -30,6 +32,11 @@ public sealed partial class TranslationService
             if (_chapter.ProjectId != copy.ProjectId) throw new InvalidOperationException("Tài nguyên không thuộc project của chương.");
             _projectResources = copy;
         }
+    }
+
+    public void UseBookKnowledgeContext(IBookKnowledgeContextProvider? provider)
+    {
+        lock (_sync) _bookKnowledgeContext = provider;
     }
 
     private ChapterDocument GetOperationSnapshot() => GetOperationSnapshot(out _);
@@ -206,7 +213,10 @@ public sealed partial class TranslationService
             var entries = await _glossary.GetEntriesAsync(selected.SourceText, cancellationToken).ConfigureAwait(false);
             string notes = await _memory.GetNotesAsync(context, segmentId, cancellationToken).ConfigureAwait(false);
             preset ??= context.SelectedPreset;
-            string prompt = BuildPrompt(context, selected, entries, notes, preset);
+            IBookKnowledgeContextProvider? provider;
+            lock (_sync) provider = _bookKnowledgeContext;
+            BookKnowledgeContextSnapshot? knowledge = provider?.GetSnapshot(context, selected);
+            string prompt = BuildPrompt(context, selected, entries, notes, preset, knowledge);
             attempt = new()
             {
                 StartedAt = _clock.GetUtcNow(), Outcome = AttemptOutcome.InProgress,

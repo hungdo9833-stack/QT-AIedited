@@ -27,10 +27,16 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
             (p.VietnameseName.Equals(profile.VietnameseName, StringComparison.OrdinalIgnoreCase) ||
              HasNameCollision(p, profile.ChineseName, profile.Aliases))))
             throw new InvalidOperationException("Tên hoặc bí danh đã thuộc nhân vật hiện có. Hãy dùng Gộp vào nhân vật đã có.");
+        state = await PrepareCommitAsync(state, ResourceCommitKind.Character, suggestion.Id,
+            $"character:{profile.Id:D}:{profile.ChineseName}:{profile.VietnameseName}", expectedResourceRevision, cancellationToken).ConfigureAwait(false);
+        suggestion = state.Characters.Single(x => x.Id == suggestionId);
         resources.Characters.Profiles.Add(profile);
         resources.Validate();
         resources = await _resources.SaveAsync(resources, cancellationToken).ConfigureAwait(false);
         suggestion.Status = IntelligenceReviewStatus.Accepted;
+        CandidateIdentity? identity = state.CandidateIdentities.SingleOrDefault(x => x.Id == suggestion.CandidateIdentityId);
+        if (identity is not null) { identity.ProposedExistingCharacterId = profile.Id; identity.Status = CandidateIdentityStatus.ConfirmedIdentityMerge; }
+        CompleteCommit(state, suggestion.Id, resources.Revision);
         state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
         return new(resources, state);
     }
@@ -45,18 +51,36 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
         CharacterProfile target = resources.Characters.Profiles.Single(x => x.Id == targetCharacterId);
         IEnumerable<string> proposedNames = new[] { suggestion.ChineseName }.Concat(suggestion.Aliases)
             .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.Ordinal);
+        var addedAliases = new List<string>();
         foreach (string name in proposedNames)
         {
             CharacterProfile? owner = resources.Characters.Profiles.FirstOrDefault(p => p.Id != target.Id &&
                 (p.ChineseName == name || p.Aliases.Contains(name, StringComparer.Ordinal)));
             if (owner is not null) throw new InvalidOperationException($"Tên {name} đã thuộc {owner.VietnameseName}; không thể gộp.");
             if (string.IsNullOrWhiteSpace(target.ChineseName)) target.ChineseName = name;
-            else if (target.ChineseName != name && !target.Aliases.Contains(name, StringComparer.Ordinal)) target.Aliases.Add(name);
+            else if (target.ChineseName != name && !target.Aliases.Contains(name, StringComparer.Ordinal))
+            { target.Aliases.Add(name); addedAliases.Add(name); }
         }
         target.Validate();
+        state = await PrepareCommitAsync(state, ResourceCommitKind.CharacterMerge, suggestion.Id,
+            $"merge:{target.Id:D}:{string.Join('|', addedAliases.Order())}", expectedResourceRevision, cancellationToken).ConfigureAwait(false);
+        suggestion = state.Characters.Single(x => x.Id == suggestionId);
         resources = await _resources.SaveAsync(resources, cancellationToken).ConfigureAwait(false);
         suggestion.Status = IntelligenceReviewStatus.Merged;
         suggestion.PossibleExistingCharacterId = target.Id;
+        CandidateIdentity? identity = state.CandidateIdentities.SingleOrDefault(x => x.Id == suggestion.CandidateIdentityId);
+        if (identity is not null)
+        {
+            identity.ProposedExistingCharacterId = target.Id;
+            identity.Status = CandidateIdentityStatus.ConfirmedIdentityMerge;
+            identity.MergeHistory.Add(new IdentityMergeRecord
+            {
+                CandidateIdentityId = identity.Id, TargetCharacterId = target.Id, AddedAliases = addedAliases,
+                ResourceRevisionBefore = expectedResourceRevision, ResourceRevisionAfter = resources.Revision,
+                CommittedAt = DateTimeOffset.UtcNow
+            });
+        }
+        CompleteCommit(state, suggestion.Id, resources.Revision);
         state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
         return new(resources, state);
     }
@@ -69,15 +93,26 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
         await EnsureEvidenceCurrentAsync(state, suggestion.EvidenceIds, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(vietnamese)) throw new ArgumentException("Bản dịch Glossary không được để trống.");
         ProjectResources resources = await LoadExpectedAsync(expectedResourceRevision, cancellationToken).ConfigureAwait(false);
+        if (suggestion.Scope != GlossaryKnowledgeScope.Global || suggestion.ContextDependent)
+        {
+            suggestion.Vietnamese = vietnamese.Trim();
+            suggestion.Status = IntelligenceReviewStatus.Accepted;
+            state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+            return new(resources, state);
+        }
         if (resources.Characters.Profiles.Any(p => p.ChineseName == suggestion.Chinese || p.Aliases.Contains(suggestion.Chinese, StringComparer.Ordinal)))
             throw new InvalidOperationException("Cụm này thuộc hồ sơ nhân vật; không lưu thành Glossary toàn cục.");
         ConfirmedTerm? existing = resources.Terms.SingleOrDefault(x => x.Chinese == suggestion.Chinese);
         if (existing is not null && existing.Vietnamese != vietnamese.Trim())
             throw new InvalidOperationException("Glossary đã có bản dịch khác; không ghi đè chỉnh sửa của người dùng.");
+        state = await PrepareCommitAsync(state, ResourceCommitKind.Glossary, suggestion.Id,
+            $"glossary:{suggestion.Chinese}:{vietnamese.Trim()}", expectedResourceRevision, cancellationToken).ConfigureAwait(false);
+        suggestion = state.Glossary.Single(x => x.Id == suggestionId);
         if (existing is null) resources.Terms.Add(new(suggestion.Chinese, vietnamese.Trim()));
         resources = await _resources.SaveAsync(resources, cancellationToken).ConfigureAwait(false);
         suggestion.Vietnamese = vietnamese.Trim();
         suggestion.Status = IntelligenceReviewStatus.Accepted;
+        CompleteCommit(state, suggestion.Id, resources.Revision);
         state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
         return new(resources, state);
     }
@@ -88,9 +123,27 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
         IntelligenceRelationshipSuggestion suggestion = state.Relationships.Single(x => x.Id == suggestionId);
         EnsureReviewable(suggestion.Status);
         await EnsureEvidenceCurrentAsync(state, suggestion.EvidenceIds, cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(suggestion.SelfReference) || string.IsNullOrWhiteSpace(suggestion.AddresseeReference))
-            throw new InvalidOperationException("Quan hệ cần được chỉnh và xác nhận đủ cách tự xưng/gọi đối phương trong hồ sơ nhân vật.");
         ProjectResources resources = await LoadExpectedAsync(expectedResourceRevision, cancellationToken).ConfigureAwait(false);
+        KnowledgeRelationship? knowledge = suggestion.KnowledgeRelationshipId is Guid knowledgeId
+            ? state.RelationshipGraph.SingleOrDefault(x => x.Id == knowledgeId) : null;
+        if (knowledge is not null)
+        {
+            suggestion.ValidFromChapter ??= knowledge.ValidFromChapter;
+            suggestion.ValidToChapter ??= knowledge.ValidToChapter;
+            suggestion.RevealedAtChapter ??= knowledge.RevealedAtChapter;
+            knowledge.Status = KnowledgeRelationshipStatus.Confirmed;
+            knowledge.ValidFromChapter = suggestion.ValidFromChapter;
+            knowledge.ValidToChapter = suggestion.ValidToChapter;
+            knowledge.RevealedAtChapter = suggestion.RevealedAtChapter;
+        }
+        if (string.IsNullOrWhiteSpace(suggestion.SelfReference) || string.IsNullOrWhiteSpace(suggestion.AddresseeReference))
+        {
+            suggestion.Status = IntelligenceReviewStatus.Accepted;
+            state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+            _ = new KinshipInferenceEngine().Recalculate(state);
+            state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+            return new(resources, state);
+        }
         CharacterProfile speaker = FindCharacter(resources, suggestion.SpeakerChineseName);
         CharacterProfile listener = FindCharacter(resources, suggestion.ListenerChineseName);
         CharacterRelationship? existing = speaker.Relationships.SingleOrDefault(x => x.EffectiveListenerCharacterId == listener.Id);
@@ -98,6 +151,10 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
             throw new InvalidOperationException(existing.Locked
                 ? "Quan hệ hiện có đang khóa; AI không được ghi đè."
                 : "Quan hệ đã được người dùng chỉnh; hãy mở hồ sơ nhân vật để đối chiếu, không ghi đè tự động.");
+        state = await PrepareCommitAsync(state, ResourceCommitKind.Relationship, suggestion.Id,
+            $"relationship:{speaker.Id:D}:{listener.Id:D}:{suggestion.SelfReference}:{suggestion.AddresseeReference}",
+            expectedResourceRevision, cancellationToken).ConfigureAwait(false);
+        suggestion = state.Relationships.Single(x => x.Id == suggestionId);
         speaker.Relationships.Add(new CharacterRelationship
         {
             TargetCharacterId = listener.Id, SpeakerCharacterId = speaker.Id, ListenerCharacterId = listener.Id,
@@ -124,7 +181,88 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
         resources.Validate();
         resources = await _resources.SaveAsync(resources, cancellationToken).ConfigureAwait(false);
         suggestion.Status = IntelligenceReviewStatus.Accepted;
+        AddApprovedAddressingPeriods(state, suggestion, knowledge, speaker.Id, listener.Id);
+        CompleteCommit(state, suggestion.Id, resources.Revision);
+        _ = new KinshipInferenceEngine().Recalculate(state);
         state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+        return new(resources, state);
+    }
+
+    public async Task<IntelligenceCommitResult> AcceptDerivedRelationshipAsync(BookIntelligenceState state, Guid derivedId,
+        CancellationToken cancellationToken = default)
+    {
+        DerivedRelationship derived = state.DerivedRelationships.Single(x => x.Id == derivedId);
+        if (derived.ValidityStatus != InferenceValidityStatus.Valid || derived.Status != KnowledgeRelationshipStatus.DerivedAwaitingReview)
+            throw new InvalidOperationException("Quan hệ suy luận đang mơ hồ, stale, xung đột hoặc đã được xử lý.");
+        await EnsureEvidenceCurrentAsync(state, derived.SupportingEvidenceIds, cancellationToken).ConfigureAwait(false);
+        derived.Status = KnowledgeRelationshipStatus.Accepted;
+        KnowledgeRelationship[] inputs = state.RelationshipGraph.Where(x => derived.InputRelationIds.Contains(x.Id)).ToArray();
+        state.RelationshipGraph.Add(new KnowledgeRelationship
+        {
+            SubjectCharacterId = derived.SubjectCharacterId, TargetCharacterId = derived.TargetCharacterId,
+            RelationType = derived.OutputRelation, RelationQualifier = derived.Explanation,
+            OriginalDescription = derived.Explanation, EvidenceIds = derived.SupportingEvidenceIds.ToList(),
+            DiscoveryMethod = RelationshipDiscoveryMethod.CpuInference, Status = KnowledgeRelationshipStatus.Accepted,
+            FirstObservedChapter = inputs.Select(x => x.FirstObservedChapter).Where(x => x is not null).DefaultIfEmpty().Max(),
+            RevealedAtChapter = inputs.Select(x => x.RevealedAtChapter).Where(x => x is not null).DefaultIfEmpty().Max()
+        });
+        state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+        return new(await _resources.LoadAsync(cancellationToken).ConfigureAwait(false), state);
+    }
+
+    public async Task<IntelligenceCommitResult> UndoCharacterMergeAsync(BookIntelligenceState state, Guid mergeId,
+        long expectedResourceRevision, CancellationToken cancellationToken = default)
+    {
+        CandidateIdentity identity = state.CandidateIdentities.Single(x => x.MergeHistory.Any(m => m.Id == mergeId));
+        IdentityMergeRecord merge = identity.MergeHistory.Single(x => x.Id == mergeId);
+        if (merge.UndoneAt is not null) throw new InvalidOperationException("Lần gộp này đã được hoàn tác.");
+        ProjectResources resources = await LoadExpectedAsync(expectedResourceRevision, cancellationToken).ConfigureAwait(false);
+        if (resources.Revision != merge.ResourceRevisionAfter)
+            throw new InvalidOperationException("Characters đã đổi sau lần gộp; mở hồ sơ để hoàn tác thủ công, tránh xóa nhầm chỉnh sửa mới.");
+        CharacterProfile target = resources.Characters.Profiles.Single(x => x.Id == merge.TargetCharacterId);
+        if (merge.AddedAliases.Any(a => !target.Aliases.Contains(a, StringComparer.Ordinal)))
+            throw new InvalidOperationException("Bí danh đã đổi sau lần gộp; không thể rollback tự động an toàn.");
+        target.Aliases.RemoveAll(merge.AddedAliases.Contains);
+        resources = await _resources.SaveAsync(resources, cancellationToken).ConfigureAwait(false);
+        merge.UndoneAt = DateTimeOffset.UtcNow;
+        identity.Status = CandidateIdentityStatus.Candidate;
+        IntelligenceCharacterSuggestion? suggestion = state.Characters.SingleOrDefault(x => x.CandidateIdentityId == identity.Id);
+        if (suggestion is not null) suggestion.Status = IntelligenceReviewStatus.ReviewLater;
+        state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+        return new(resources, state);
+    }
+
+    public async Task<IntelligenceCommitResult> ReconcileAsync(CancellationToken cancellationToken = default)
+    {
+        BookIntelligenceState state = await _state.LoadAsync(cancellationToken).ConfigureAwait(false);
+        ProjectResources resources = await _resources.LoadAsync(cancellationToken).ConfigureAwait(false);
+        bool changed = false;
+        foreach (IntelligenceResourceCommit marker in state.PendingResourceCommits.ToArray())
+        {
+            if (!IsApplied(marker, state, resources)) continue;
+            MarkSuggestionAccepted(state, marker.SuggestionId, marker.Kind);
+            if (marker.Kind == ResourceCommitKind.Relationship)
+            {
+                IntelligenceRelationshipSuggestion suggestion = state.Relationships.Single(x => x.Id == marker.SuggestionId);
+                CharacterProfile speaker = FindCharacter(resources, suggestion.SpeakerChineseName);
+                CharacterProfile listener = FindCharacter(resources, suggestion.ListenerChineseName);
+                KnowledgeRelationship? knowledge = suggestion.KnowledgeRelationshipId is Guid knowledgeId
+                    ? state.RelationshipGraph.SingleOrDefault(x => x.Id == knowledgeId) : null;
+                if (knowledge is not null)
+                {
+                    suggestion.ValidFromChapter ??= knowledge.ValidFromChapter;
+                    suggestion.ValidToChapter ??= knowledge.ValidToChapter;
+                    suggestion.RevealedAtChapter ??= knowledge.RevealedAtChapter;
+                    knowledge.Status = KnowledgeRelationshipStatus.Confirmed;
+                    knowledge.ValidFromChapter = suggestion.ValidFromChapter;
+                    knowledge.ValidToChapter = suggestion.ValidToChapter;
+                    knowledge.RevealedAtChapter = suggestion.RevealedAtChapter;
+                }
+                AddApprovedAddressingPeriods(state, suggestion, knowledge, speaker.Id, listener.Id);
+            }
+            state.PendingResourceCommits.Remove(marker); changed = true;
+        }
+        if (changed) state = await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
         return new(resources, state);
     }
 
@@ -133,14 +271,25 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
     {
         if (status is IntelligenceReviewStatus.Accepted or IntelligenceReviewStatus.Merged)
             throw new ArgumentException("Trạng thái lưu/gộp chỉ được đặt sau khi Project Resources commit thành công.");
-        object item = state.Characters.Cast<object>().Concat(state.Relationships).Concat(state.Glossary)
-            .Single(x => x switch
+        object? item = state.Characters.Cast<object>().Concat(state.Relationships).Concat(state.Glossary)
+            .SingleOrDefault(x => x switch
             {
                 IntelligenceCharacterSuggestion c => c.Id == id,
                 IntelligenceRelationshipSuggestion r => r.Id == id,
                 IntelligenceGlossarySuggestion g => g.Id == id,
                 _ => false
             });
+        if (item is null)
+        {
+            DerivedRelationship derived = state.DerivedRelationships.Single(x => x.Id == id);
+            derived.Status = status switch
+            {
+                IntelligenceReviewStatus.Rejected => KnowledgeRelationshipStatus.Rejected,
+                IntelligenceReviewStatus.ReviewLater => KnowledgeRelationshipStatus.DerivedAwaitingReview,
+                _ => throw new ArgumentException("Trạng thái không hợp lệ cho quan hệ suy luận.")
+            };
+            return await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+        }
         switch (item)
         {
             case IntelligenceCharacterSuggestion c: c.Status = status; break;
@@ -156,6 +305,93 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
         if (resources.Revision != expectedRevision)
             throw new InvalidOperationException("Characters/Glossary đã đổi sau khi mở hàng chờ. Hãy nạp lại đề xuất trước khi lưu.");
         return resources;
+    }
+
+    private async Task<BookIntelligenceState> PrepareCommitAsync(BookIntelligenceState state, ResourceCommitKind kind,
+        Guid suggestionId, string fingerprint, long expectedRevision, CancellationToken cancellationToken)
+    {
+        state.PendingResourceCommits.RemoveAll(x => x.SuggestionId == suggestionId);
+        state.PendingResourceCommits.Add(new IntelligenceResourceCommit
+        {
+            Kind = kind, State = ResourceCommitState.Prepared, SuggestionId = suggestionId,
+            IntendedFingerprint = fingerprint, ExpectedResourceRevision = expectedRevision, CreatedAt = DateTimeOffset.UtcNow
+        });
+        return await _state.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void CompleteCommit(BookIntelligenceState state, Guid suggestionId, long resourceRevision)
+    {
+        IntelligenceResourceCommit marker = state.PendingResourceCommits.Single(x => x.SuggestionId == suggestionId);
+        marker.State = ResourceCommitState.ResourceCommitted; marker.CommittedResourceRevision = resourceRevision;
+        state.PendingResourceCommits.Remove(marker);
+    }
+
+    private static bool IsApplied(IntelligenceResourceCommit marker, BookIntelligenceState state, ProjectResources resources)
+    {
+        string[] parts = marker.IntendedFingerprint.Split(':');
+        return marker.Kind switch
+        {
+            ResourceCommitKind.Character when parts.Length >= 4 && Guid.TryParse(parts[1], out Guid id) =>
+                resources.Characters.Profiles.Any(x => x.Id == id),
+            ResourceCommitKind.CharacterMerge when parts.Length >= 3 && Guid.TryParse(parts[1], out Guid target) =>
+                resources.Characters.Profiles.Any(x => x.Id == target && parts[2].Split('|', StringSplitOptions.RemoveEmptyEntries).All(a => x.Aliases.Contains(a))),
+            ResourceCommitKind.Glossary when parts.Length >= 3 => resources.Terms.Any(x => x.Chinese == parts[1] && x.Vietnamese == parts[2]),
+            ResourceCommitKind.Relationship when parts.Length >= 5 && Guid.TryParse(parts[1], out Guid speakerId) &&
+                Guid.TryParse(parts[2], out Guid listenerId) => resources.Characters.Profiles.Any(p => p.Id == speakerId &&
+                    p.Relationships.Any(r => r.Enabled && r.EffectiveListenerCharacterId == listenerId &&
+                        r.SelfReference == parts[3] && r.AddresseeReference == parts[4])),
+            _ => false
+        };
+    }
+
+    private static void AddApprovedAddressingPeriods(BookIntelligenceState state,
+        IntelligenceRelationshipSuggestion suggestion, KnowledgeRelationship? knowledge,
+        Guid speakerId, Guid listenerId)
+    {
+        if (string.IsNullOrWhiteSpace(suggestion.SelfReference) || string.IsNullOrWhiteSpace(suggestion.AddresseeReference)) return;
+        int? observed = FirstEvidenceChapter(state, suggestion.EvidenceIds);
+        AddAddressingPeriod(state, speakerId, listenerId, suggestion.SelfReference, suggestion.AddresseeReference,
+            suggestion.ValidFromChapter ?? knowledge?.ValidFromChapter ?? suggestion.RevealedAtChapter ?? knowledge?.RevealedAtChapter ?? observed,
+            suggestion.ValidToChapter ?? knowledge?.ValidToChapter,
+            suggestion.RevealedAtChapter ?? knowledge?.RevealedAtChapter ?? observed, suggestion.EvidenceIds);
+        if (!string.IsNullOrWhiteSpace(suggestion.ReverseSelfReference) &&
+            !string.IsNullOrWhiteSpace(suggestion.ReverseAddresseeReference))
+            AddAddressingPeriod(state, listenerId, speakerId, suggestion.ReverseSelfReference,
+                suggestion.ReverseAddresseeReference,
+                suggestion.ValidFromChapter ?? knowledge?.ValidFromChapter ?? suggestion.RevealedAtChapter ?? knowledge?.RevealedAtChapter ?? observed,
+                suggestion.ValidToChapter ?? knowledge?.ValidToChapter,
+                suggestion.RevealedAtChapter ?? knowledge?.RevealedAtChapter ?? observed, suggestion.EvidenceIds);
+    }
+
+    private static void AddAddressingPeriod(BookIntelligenceState state, Guid speakerId, Guid listenerId,
+        string selfReference, string addresseeReference, int? validFrom, int? validTo, int? revealedAt,
+        IEnumerable<Guid> evidenceIds)
+    {
+        if (state.AddressingTimeline.Any(x => x.SpeakerCharacterId == speakerId && x.ListenerCharacterId == listenerId &&
+            x.SelfReference == selfReference && x.AddresseeReference == addresseeReference &&
+            x.ValidFromChapter == validFrom && x.ValidToChapter == validTo && x.RevealedAtChapter == revealedAt)) return;
+        state.AddressingTimeline.Add(new AddressingRulePeriod
+        {
+            SpeakerCharacterId = speakerId, ListenerCharacterId = listenerId,
+            SelfReference = selfReference, AddresseeReference = addresseeReference,
+            ValidFromChapter = validFrom, ValidToChapter = validTo, RevealedAtChapter = revealedAt,
+            Approved = true, Locked = false, EvidenceIds = evidenceIds.Distinct().ToList()
+        });
+    }
+
+    private static int? FirstEvidenceChapter(BookIntelligenceState state, IEnumerable<Guid> evidenceIds)
+    {
+        HashSet<Guid> ids = evidenceIds.ToHashSet();
+        return state.Chapters.Where(c => c.Evidence.Any(e => ids.Contains(e.Id)))
+            .Select(c => (int?)c.ChapterNumber).OrderBy(x => x).FirstOrDefault();
+    }
+
+    private static void MarkSuggestionAccepted(BookIntelligenceState state, Guid id, ResourceCommitKind kind)
+    {
+        if (kind is ResourceCommitKind.Character or ResourceCommitKind.CharacterMerge)
+            state.Characters.Single(x => x.Id == id).Status = kind == ResourceCommitKind.CharacterMerge ? IntelligenceReviewStatus.Merged : IntelligenceReviewStatus.Accepted;
+        else if (kind == ResourceCommitKind.Glossary) state.Glossary.Single(x => x.Id == id).Status = IntelligenceReviewStatus.Accepted;
+        else state.Relationships.Single(x => x.Id == id).Status = IntelligenceReviewStatus.Accepted;
     }
     private async Task EnsureEvidenceCurrentAsync(BookIntelligenceState state, IEnumerable<Guid> evidenceIds,
         CancellationToken cancellationToken)

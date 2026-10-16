@@ -1,41 +1,47 @@
-# AI Book Intelligence — Session 1 Progress
+# AI Book Intelligence — Session 2 Progress
 
 ## Implemented
 
-- [x] Audited existing Characters, directional Relationships, Glossary, Project Resources, Ollama profiles, and WPF Character form.
-- [x] Confirmed there was no existing Corpus Indexer.
-- [x] Added a full-source CPU index with ChapterId, UTF-16 offsets, source hash, exact evidence, per-chapter checkpoint, resume, and incremental rescan.
-- [x] Added bounded adaptive Ollama analysis with an independent model/profile selection, JSON schema, evidence checks, deduplication, and completed-request cache.
-- [x] Added durable Character, Relationship, and Glossary suggestions with Unknown/Ambiguous states.
-- [x] Added a modeless review queue and exact source-evidence navigation.
-- [x] Reused the current Character form for edit-before-save.
-- [x] Added explicit Character create/merge, Relationship forward/reverse save, Glossary save, later, and reject actions.
-- [x] Added revision conflict checks and locked relationship protection through existing Project Resources persistence.
-- [x] Kept `AutoApplyVerified=false`; the analyzer is never called before the user presses **Bắt đầu khảo sát**.
-- [x] Added focused Core and WPF regression tests.
+- [x] Migrated Session 1 content schema 1 to content schema 2 without changing Project/chapter schemas.
+- [x] Replaced sparse-only scanning with exact 100% source windows and High/Medium/Low planning.
+- [x] Added deterministic Low-priority audit, same-group expansion after discoveries, Fast Adaptive and Full Semantic modes.
+- [x] Added relevant-context cache keys, bounded Ollama retry, malformed-JSON retry, checkpoints, and metrics.
+- [x] Added stable candidate identities, evidence/alias aggregation, backward evidence search, exact-match merge proposals, safe merge undo.
+- [x] Added structured direct relationship graph and dependency-tracked kinship inference to depth two.
+- [x] Added stale/conflict handling and exclusions for adoptive/step/sworn/social/ambiguous relationships.
+- [x] Added chapter-aware relationship/addressing timeline to prevent future knowledge leakage.
+- [x] Added chapter-local scene snapshots that keep unnamed/multi-party dialogue ambiguous.
+- [x] Added bounded immutable translation context behind a Project feature flag that defaults off.
+- [x] Wired the provider into both editor translation and Project queue translation without replacing either pipeline.
+- [x] Added type/status/search/origin/evidence filters, derived relationship review, and safe multi-select defer/reject to the modeless review UI.
+- [x] Added cross-file resource commit markers and restart reconciliation.
+- [x] Added focused quality, migration, cache, entity resolution, inference, timeline, scene, recovery, retry, and WPF integration tests.
+- [x] Added a deterministic 500-chapter / 2,000,000-character CPU/planner benchmark.
 
-## Verified invariants
+## Verification
 
-- Index/analyze operations do not write `.qtproj` or chapter files.
-- Source excerpts must match stored UTF-16 ranges.
-- Restart reloads the review queue and request cache.
-- Changed source is rescanned while unchanged source is skipped.
-- Invalid/uncited findings cannot enter the queue.
-- Confirmed Character/Glossary entries use Project Resource revision guards.
-- Character merge preserves locked narrative pronouns.
-- Existing locked Relationships are not overwritten.
-
-## Verification completed
-
-- Core regression: **628 passed, 0 failed, 0 skipped**.
-- WPF regression: **92 passed, 0 failed, 0 skipped**.
-- Combined: **720 passed, 0 failed, 0 skipped**.
+- Core regression: **650 passed, 0 failed, 0 skipped**.
+- WPF regression: **93 passed, 0 failed, 0 skipped**.
+- Combined: **743 passed, 0 failed, 0 skipped**.
 - Release solution build: **0 errors, 0 warnings**.
-- Automated WPF integration verifies the explicit survey entry point. A live Ollama model was not invoked during acceptance, so model quality and the visual result of a long real scan still need a synthetic/manual Windows smoke test. No personal Project was opened.
+- Focused AI Book Intelligence tests: **31 Core + 2 WPF passed**.
+- No personal Project was opened or modified. Tests use temporary synthetic Projects.
 
-## Risks recorded during implementation
+## Benchmark checkpoint
 
-- Candidate recall is bounded by CPU signal quality. This is safer than sending the entire novel to AI but means the review queue is not exhaustive.
-- Durable review state and Project Resources are separate atomic files. Resources commit first; if the subsequent review-state write fails, retry detects the already-existing resource instead of overwriting it, but the queue item may still appear pending until reconciled manually.
-- Project Resources currently cap Characters and Glossary at 1,000 each. The review service respects those limits.
+- Fixture: 500 synthetic chapters, 2,000,000 UTF-16 characters.
+- CPU indexing/planning: 262 ms on this run.
+- Full Semantic plan: 2,000 evidence windows, 250 requests at 8 windows/request, about 1,000,000 estimated input tokens.
+- Fast Adaptive plan: 769 evidence windows, 97 requests, about 368,773 estimated input tokens.
+- Planner reduction on this fixture: 61.2% requests and 63.1% estimated input tokens.
+- Managed-memory sample: about 4.82 MB; serialized knowledge state: 26,204,050 bytes.
+- Ollama duration/output tokens are zero because this benchmark deliberately does not invoke a real model.
 
+## Remaining validation and limitations
+
+- Run a human-reviewed Chinese novel corpus through a real selected Ollama model to measure true Character/Alias/Relationship/Glossary precision and recall.
+- Validate visual density and long-running review interaction on Windows with a large synthetic Project.
+- Analyzer requests currently run sequentially on one selected profile. Per-GPU analyzer scheduling is not part of this implementation.
+- Bulk accept remains field-by-field; safe bulk defer/reject is available.
+- Scene/coreference quality remains conservative and returns Ambiguous when explicit evidence is insufficient.
+- The deterministic 15% Low audit target is hash sampling; small/structured fixtures may observe a different realized ratio.

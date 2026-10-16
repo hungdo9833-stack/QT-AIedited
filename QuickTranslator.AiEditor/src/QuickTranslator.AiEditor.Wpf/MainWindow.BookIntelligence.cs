@@ -31,10 +31,18 @@ public partial class MainWindow
             _ollamaBackends.Profiles,
             EditSuggestedCharacter,
             ApplyBookIntelligenceResources,
-            OpenBookIntelligenceEvidenceAsync)
-        { Owner = this };
+            OpenBookIntelligenceEvidenceAsync,
+            ApplyBookIntelligenceState)
+        { Owner = IsVisible ? this : null };
         _bookIntelligenceWindow.Closed += (_, _) => _bookIntelligenceWindow = null;
         _bookIntelligenceWindow.Show();
+    }
+
+    private void ApplyBookIntelligenceState(BookIntelligenceState state, bool contextEnabled)
+    {
+        _bookIntelligenceState = BookIntelligenceStore.Clone(state);
+        _bookKnowledgeContextEnabled = contextEnabled;
+        ApplyCurrentProjectResources();
     }
 
     private CharacterProfile? EditSuggestedCharacter(IntelligenceCharacterSuggestion suggestion)

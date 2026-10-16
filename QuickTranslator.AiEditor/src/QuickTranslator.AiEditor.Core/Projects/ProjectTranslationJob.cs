@@ -180,7 +180,8 @@ public sealed record OllamaBackendSnapshot(Guid ProfileId, OllamaBackendKind Kin
 }
 
 public sealed record ProjectTranslationEnvironment(ModelOptions ModelOptions, PromptPreset PromptPreset,
-    ProjectResources Resources, OllamaBackendSnapshot? Backend = null);
+    ProjectResources Resources, OllamaBackendSnapshot? Backend = null,
+    BookIntelligence.IBookKnowledgeContextProvider? BookKnowledgeContext = null);
 
 public sealed record ProjectTranslationProgress(ProjectTranslationJobStatus Status, int TotalChapters,
     int CompletedChapters, int FailedChapters, int SkippedChapters, int PendingChapters,

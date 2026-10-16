@@ -1,82 +1,70 @@
 # QT Studio AI Book Intelligence — Master Specification
 
-## Session 1 boundary
+## Product boundary
 
-AI Book Intelligence is a project-level, user-triggered assistant for surveying Chinese source text. It does not participate in translation, segmentation, approval, or the project translation queue. The first session implements corpus indexing, evidence-bound AI extraction, a durable review queue, and explicit commits to existing Character/Relationship/Glossary resources.
+AI Book Intelligence is a project-level, user-triggered assistant for surveying Chinese source text. It builds an evidence-backed knowledge base for Characters, aliases, direct relationships, derived blood relationships, addressing periods, scenes, and glossary terms. It never changes `ChapterDocument.OriginalText`, completed translations, approvals, the Project Manifest, or the translation queue.
 
-`AutoApplyVerified` is fixed to `false`. An AI response is a proposal even when its confidence is high. Only a review action can change Project Resources.
+`AutoApplyVerified` is always `false`. AI output remains a proposal until the user accepts it. Derived relationships are also proposals and never become an addressing rule automatically.
 
-## File-level architecture
+## Durable data and compatibility
 
-- `Core/BookIntelligence/BookIntelligenceModels.cs`: durable knowledge-base/index schema, evidence offsets, suggestions, review states.
-- `Core/BookIntelligence/BookIntelligenceStore.cs`: checksummed, atomic `Settings/ai-book-intelligence.json` persistence and optimistic revision guard.
-- `Core/BookIntelligence/ProjectCorpusIndexer.cs`: reads every active `ChapterDocument.OriginalText`, computes source hashes, records UTF-16 evidence, checkpoints changed chapters, and retains retired evidence for audit references.
-- `Core/BookIntelligence/AdaptiveBookIntelligenceAnalyzer.cs`: bounded evidence batches, independent model options, structured JSON parsing, evidence validation, deduplication, request cache, and restart checkpoint.
-- `Core/BookIntelligence/BookIntelligenceReviewService.cs`: explicit Character merge/create, Relationship create, Glossary create, Project Resource revision checks, and locked-rule protection.
-- `Wpf/BookIntelligenceReviewWindow.cs`: modeless scan/review window; evidence navigation; accept, edit, merge, later, and reject actions.
-- `Wpf/MainWindow.BookIntelligence.cs`: entry point, reuse of the current Character editor, project-resource refresh, and exact evidence navigation.
+The auxiliary state is stored in `Settings/ai-book-intelligence.json` through the existing checksummed, atomic recovery store. The envelope remains schema 1; content schema 2 adds:
 
-## Knowledge-base schema
+- adaptive scan mode, evidence priority/reason/group, deterministic audit state, and metrics;
+- stable candidate identities, alias evidence history, merge proposals, and reversible merge history;
+- direct relationship graph facts and derived relationship dependencies/status;
+- chapter-aware addressing periods and scene snapshots;
+- glossary category and global/context-dependent scope;
+- cross-file resource commit markers for crash reconciliation.
 
-The envelope has schema version 1 and SHA-256 over its JSON content. Its content is `BookIntelligenceState`:
+Content schema 1 is migrated in memory to schema 2 on load. The first subsequent save uses the existing backup path. The Project Manifest, chapter JSON schema, Characters schema, and Glossary schema are unchanged.
 
-- Project identity, state revision, analyzer version/model/profile, `AutoApplyVerified=false`.
-- Per-chapter source SHA-256, UTF-16 source length, scan time, and evidence.
-- Evidence identity, ChapterId, UTF-16 start/length, source hash, short exact excerpt, signal classification, and current/retired flag.
-- Completed analysis keys derived from analyzer version, model, and exact evidence identity/hash/range.
-- Character, Relationship, and Glossary review queues with confidence, evidence IDs, reason, and durable review status.
+## Corpus indexing and adaptive planning
 
-This is an auxiliary Project Settings file. It does not add fields to `.qtproj` or chapter JSON and cannot write back to either.
+`ProjectCorpusIndexer` reads 100% of every active `ChapterDocument.OriginalText`. It divides source into exact, non-overlapping windows of about 900 UTF-16 code units, preserving ChapterId, start, length, source hash, excerpt, and signals. Concatenating the current windows reconstructs the original source exactly; long lines and multiline source are covered.
 
-## Indexing and incremental behavior
+Each window is classified High, Medium, or Low from several CPU signals: known names/aliases, repeated name-action forms, identity introductions, direct relationship words, dialogue structure, and domain-term suffixes. No single regex verifies an entity. Fast Adaptive sends High/Medium windows plus a deterministic audit sample of Low windows. Full Semantic sends every current window. A finding in a Low audit sample expands the remaining same-group scope in that chapter.
 
-The indexer loads every active chapter through `ProjectRepository.LoadChapterAsync` and reads `OriginalText` in full. Candidate extraction is deliberately a multi-signal CPU stage: known names and aliases, name-before-action forms, relationship/address terms, and domain-term suffixes. No single regex decides that a candidate is a verified entity.
+Unchanged chapter hashes are not rescanned. Changed chapters receive new current windows; old windows stay retired while referenced by review/audit history. `BookIntelligenceCompactor` is an explicit maintenance helper that can remove only retired, unreferenced evidence; it is not called automatically.
 
-Each exact source is hashed. An unchanged chapter is not rescanned. A changed chapter receives a new current evidence set; old evidence is retained as retired so already reviewed findings keep an auditable reference. Deleted chapters are retired. The state is checkpointed after each changed chapter.
+## AI analysis and cache
 
-Offsets are .NET string indices, therefore UTF-16 code-unit offsets. Evidence navigation verifies ranges against the current source before selection.
+`AdaptiveBookIntelligenceAnalyzer` sends at most eight excerpts per request and caps prompt characters against the selected context size. It validates schema JSON, evidence IDs, literal Chinese forms, and evidence ranges. Malformed JSON is retried once; transient Ollama connection/timeout/HTTP/invalid-response failures use bounded retry. Each completed request is checkpointed.
 
-## Adaptive analyzer contract
+The cache key contains model, analyzer schema version, exact source hashes/ranges, and only relevant Character/Glossary context present in the excerpts. Unrelated Project Resource edits do not invalidate prior analysis. Model, schema, relevant context, or source changes do.
 
-The analyzer receives at most eight evidence excerpts per request. Prompts include known Characters and bounded Glossary context to reduce duplicates. Output must be one JSON object containing `characters`, `relationships`, and `glossary` arrays. Every result cites request-local evidence IDs.
+The analysis concurrency policy is persisted, but the current Session 2 runner deliberately uses one sequential request lane for the selected analyzer backend. Multi-profile/GPU analyzer scheduling is not yet implemented.
 
-Validation rules:
+## Entity resolution and relationship knowledge
 
-- cited evidence must belong to the request;
-- Chinese names, aliases, relationship endpoints, and terms must occur literally in cited source;
-- unknown gender/confidence remains Unknown;
-- existing Character names/aliases and Glossary entries are not proposed as new global entries;
-- context-dependent terms remain marked for review;
-- malformed JSON fails the batch and preserves the last checkpoint;
-- hallucinated or uncited individual findings are discarded;
-- completed input/model/version hashes are not sent again.
+`EntityResolutionService` gives each candidate a stable ID, aggregates evidence/aliases, searches backwards across indexed evidence, and proposes exact alias matches against existing Characters. It never auto-merges by name similarity. A user can merge a candidate into an existing Character; the operation records added aliases and the resource revision. Undo is allowed only when the current resource revision still matches, preventing removal of later manual edits.
 
-The analyzer model and backend profile are stored separately from translation settings. The default backend is the local Ollama profile. Selecting a remote profile still requires the existing remote disclosure approval.
+Direct graph facts record subject, target, structured relationship type, status, evidence IDs, source/reveal chapters, and origin. Only confirmed or explicitly accepted facts can participate in inference.
 
-## Review and safe sync
+`KinshipInferenceEngine` is intentionally narrow and dependency based. It supports compatible biological father/mother propagation through full or matching half-sibling facts, inverse biological child, and grandparent/grandchild at maximum depth two. It excludes maternal/paternal mismatches, unknown sibling type, adoptive, step, sworn, social, and ambiguous facts. Each derived relation retains its input relation IDs and evidence. Rejecting a premise marks dependents stale. Conflicting inputs produce a conflict state rather than a forced answer.
 
-The WPF review queue is modeless, so scans do not open repeated dialogs. It offers:
+## Timeline, scene, and translation context
 
-- Character: open the existing Character form with proposed values, then create; or merge names/aliases into an existing Character.
-- Relationship: review/edit forward and optional reverse address rules, then save only if both endpoint Characters exist.
-- Glossary: review/edit the Vietnamese value, then create.
-- All types: open exact source evidence, review later, or reject.
+Relationships and approved addressing periods have reveal/validity boundaries. `RelationshipTimelineService` returns only data valid at the requested chapter, so later discoveries cannot leak into earlier chapters.
 
-Every commit reloads `ProjectResources`, compares the expected revision, validates existing limits, and uses `ProjectResourceStore.SaveAsync`. Character merges only add confirmed Chinese names/aliases and never replace pronouns or user fields. Existing relationship rules are never overwritten; locked rules return a specific error. Glossary conflicts and Character-name collisions require manual resolution.
+`SceneContextService` builds immutable, chapter-local segment snapshots in source order. Explicit speaker/listener syntax can be resolved; unnamed or multi-party dialogue is marked ambiguous. Ambiguity is preserved and is never converted into a guessed pronoun.
 
-## Recovery and invariants
+`BookKnowledgeContextProvider` creates a bounded immutable snapshot before each translation request. It includes relevant confirmed Characters, relationships already revealed, approved addressing periods, accepted global glossary, and the current scene resolution. It excludes rejected/stale/conflicting knowledge and warns the prompt when the scene is ambiguous.
 
-- Checkpoints and the review queue survive restart through `RecoveryFiles` primary/backup handling.
-- Network failure saves `LastError` and leaves the current batch unfinished for retry.
-- Cancel stops after the current awaited operation and retains committed checkpoints.
-- Indexing and analysis do not change source, translation drafts, approvals, history, manifest, queue, or chapter files.
-- Resource changes occur only after an explicit review action.
+The Project setting `BookKnowledgeContextEnabled` defaults to `false`. With it off, the existing translation prompt path is unchanged. With it on, editor and queue translation services use the same provider. An in-flight request keeps the snapshot captured at request start; later knowledge changes apply only to later requests.
 
-## Known Session 1 limits
+## Review and safe synchronization
 
-- CPU signals intentionally favor precision and can miss names written without dialogue/action/relationship/term cues.
-- Identity resolution is direct evidence plus current aliases; multi-hop kinship/identity inference is deferred to Session 2.
-- No automatic conflict resolution is attempted for an existing unlocked relationship or a Glossary term with another translation.
-- An SSH-only remote profile must already expose a reachable Ollama endpoint; the survey window does not create a second SSH tunnel manager.
-- Large-project throughput depends on chapter file I/O and the selected local model. Requests are sequential and checkpointed.
+The modeless review window supports type/status/search filtering, origin and evidence count, multi-selection for safe bulk defer/reject, exact evidence navigation, Character edit/create/merge, direct relationship review, glossary review, and derived inference-chain review. The existing Character form remains the editor of record.
 
+Context-dependent/addressing terms can be accepted into the knowledge base but are not written as global Glossary replacements. Direct relationship knowledge may be accepted without inventing addressing. Locked Character/Relationship rules are never overwritten.
+
+Cross-file commits write a pending marker to the knowledge state, save Project Resources through the existing revision-guarded store, then finalize the marker. On restart, reconciliation recognizes resources that already committed and completes the review state idempotently.
+
+## Explicit limitations
+
+- Real-model precision/recall and token cost require a human-reviewed novel corpus; the included benchmark is CPU/planner-only.
+- Analyzer execution is currently sequential for one chosen backend despite the persisted concurrency policy.
+- Bulk accept is intentionally absent; bulk defer/reject is supported because acceptance may need field-level review.
+- Relationship review is integrated in the review grid; there is no separate rich relationship editor.
+- Scene resolution handles explicit signals and preserves ambiguity; it is not a general coreference model.

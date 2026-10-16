@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -12,80 +13,172 @@ namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
 {
     public const int MaximumEvidencePerRequest = 8;
+    public const string PromptSchemaVersion = "abi-2-json-1";
 
     public async Task<BookIntelligenceState> AnalyzeAsync(ProjectSession session, BookIntelligenceState state,
         BookIntelligenceStore store, ProjectResources resources, ModelOptions options,
         IProgress<AnalyzerProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(state);
-        ArgumentNullException.ThrowIfNull(store);
-        ArgumentNullException.ThrowIfNull(resources);
+        ArgumentNullException.ThrowIfNull(session); ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(store); ArgumentNullException.ThrowIfNull(resources);
         options.Validate();
         if (state.ProjectId != session.Manifest.ProjectId || resources.ProjectId != session.Manifest.ProjectId)
             throw new InvalidOperationException("Analyzer nhận dữ liệu của Project khác.");
 
         state.AnalyzerModel = options.Model;
-        CorpusEvidence[] all = state.Evidence.Where(x => x.IsCurrent)
-            .OrderBy(x => state.Chapters.Single(c => c.ChapterId == x.ChapterId).ChapterNumber)
-            .ThenBy(x => x.StartUtf16).ToArray();
-        int processed = 0;
-        foreach (CorpusEvidence[] batch in all.Chunk(MaximumEvidencePerRequest))
+        state.AnalyzerVersion = "2";
+        int total = Eligible(state).Count();
+        int processed = state.Evidence.Count(x => x.IsCurrent && x.AiAnalyzed);
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            string key = AnalysisKey(batch, options.Model, state.AnalyzerVersion, resources.Revision);
+            CorpusEvidence[] pending = Eligible(state).Where(x => !x.AiAnalyzed)
+                .OrderByDescending(x => x.Priority).ThenBy(x => ChapterNumber(state, x.ChapterId))
+                .ThenBy(x => x.StartUtf16).ToArray();
+            if (pending.Length == 0) break;
+            CorpusEvidence[] batch = TakeBatch(pending, options.ContextSize);
+            string relevantContext = RelevantContextFingerprint(batch, resources);
+            string key = AnalysisKey(batch, options.Model, PromptSchemaVersion, relevantContext);
             if (state.CompletedAnalysisKeys.Contains(key))
             {
+                foreach (CorpusEvidence evidence in batch) evidence.AiAnalyzed = true;
+                state.Metrics.CacheHits++;
                 processed += batch.Length;
-                progress?.Report(new(processed, all.Length, state.PendingCount));
+                state = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+                progress?.Report(new(processed, Math.Max(total, Eligible(state).Count()), state.PendingCount));
                 continue;
             }
+
             try
             {
                 string prompt = BuildPrompt(batch, resources);
-                OllamaCompletion completion = await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
-                AnalyzerResponse response = Parse(completion.Text);
+                (OllamaCompletion completion, AnalyzerResponse response) =
+                    await RequestAndParseWithRetryAsync(prompt, options, state, cancellationToken).ConfigureAwait(false);
+                HashSet<Guid> referenced = response.Characters.SelectMany(x => x.EvidenceIds)
+                    .Concat(response.Relationships.SelectMany(x => x.EvidenceIds))
+                    .Concat(response.Glossary.SelectMany(x => x.EvidenceIds)).ToHashSet();
                 ApplyValidatedResponse(state, response, batch, resources);
+                bool auditDiscovery = batch.Any(x => x.Priority == EvidencePriority.Low && x.IsAuditSample && referenced.Contains(x.Id));
+                foreach (CorpusEvidence evidence in batch)
+                {
+                    evidence.AiAnalyzed = true;
+                    evidence.ImportantFinding = referenced.Contains(evidence.Id);
+                }
+                if (auditDiscovery)
+                {
+                    state.Metrics.AuditDiscoveries++;
+                    ExpandAuditScope(state, batch.Where(x => x.Priority == EvidencePriority.Low && referenced.Contains(x.Id)));
+                    total = Eligible(state).Count();
+                }
+                state.Metrics.InputTokens += completion.Metrics.InputTokens ?? 0;
+                state.Metrics.OutputTokens += completion.Metrics.OutputTokens ?? 0;
+                state.Metrics.AiDurationMilliseconds += (long)completion.Metrics.ClientElapsed.TotalMilliseconds;
+                state.Metrics.EvidenceAnalyzed += batch.Length;
                 state.CompletedAnalysisKeys.Add(key);
                 state.LastError = "";
                 processed += batch.Length;
                 state.NextEvidenceIndex = processed;
                 state = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
-                progress?.Report(new(processed, all.Length, state.PendingCount));
+                progress?.Report(new(processed, Math.Max(total, Eligible(state).Count()), state.PendingCount));
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
+                state.Metrics.Errors++;
                 state.LastError = ex.Message;
                 state.NextEvidenceIndex = processed;
                 _ = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
                 throw;
             }
         }
-        state.NextEvidenceIndex = all.Length;
-        state.LastError = "";
+        state.Metrics.EvidenceSkipped = state.Evidence.LongCount(x => x.IsCurrent && !x.AiAnalyzed);
+        state.NextEvidenceIndex = processed; state.LastError = "";
         return await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<OllamaCompletion> RequestWithRetryAsync(string prompt, ModelOptions options,
+        BookIntelligenceState state, CancellationToken cancellationToken)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                state.Metrics.Requests++;
+                var watch = Stopwatch.StartNew();
+                OllamaCompletion result = await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
+                watch.Stop();
+                if (result.Metrics.ClientElapsed == TimeSpan.Zero)
+                    result = result with { Metrics = result.Metrics with { ClientElapsed = watch.Elapsed } };
+                return result;
+            }
+            catch (OllamaRequestException ex) when (attempt < 2 && ex.Kind is OllamaErrorKind.Connection or OllamaErrorKind.Timeout or OllamaErrorKind.Http or OllamaErrorKind.InvalidResponse)
+            {
+                state.Metrics.Retries++;
+                await Task.Delay(TimeSpan.FromMilliseconds(100 * (attempt + 1)), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<(OllamaCompletion Completion, AnalyzerResponse Response)> RequestAndParseWithRetryAsync(
+        string prompt, ModelOptions options, BookIntelligenceState state, CancellationToken cancellationToken)
+    {
+        for (int parseAttempt = 0; ; parseAttempt++)
+        {
+            OllamaCompletion completion = await RequestWithRetryAsync(prompt, options, state, cancellationToken).ConfigureAwait(false);
+            try { return (completion, Parse(completion.Text)); }
+            catch (InvalidDataException) when (parseAttempt < 1) { state.Metrics.Retries++; }
+        }
+    }
+
+    private static IEnumerable<CorpusEvidence> Eligible(BookIntelligenceState state) =>
+        state.Evidence.Where(x => x.IsCurrent && (state.ScanMode == IntelligenceScanMode.FullSemantic ||
+            x.Priority is EvidencePriority.High or EvidencePriority.Medium || x.IsAuditSample || x.AuditExpanded));
+
+    private static CorpusEvidence[] TakeBatch(CorpusEvidence[] pending, int contextSize)
+    {
+        int characterBudget = Math.Max(1800, Math.Min(16000, contextSize * 2));
+        var result = new List<CorpusEvidence>(); int used = 0;
+        foreach (CorpusEvidence evidence in pending)
+        {
+            if (result.Count >= MaximumEvidencePerRequest || (result.Count > 0 && used + evidence.Excerpt.Length > characterBudget)) break;
+            result.Add(evidence); used += evidence.Excerpt.Length;
+        }
+        return result.ToArray();
+    }
+
+    private static void ExpandAuditScope(BookIntelligenceState state, IEnumerable<CorpusEvidence> discoveries)
+    {
+        foreach (CorpusEvidence hit in discoveries)
+            foreach (CorpusEvidence similar in state.Evidence.Where(x => x.IsCurrent && !x.AiAnalyzed &&
+                x.Priority == EvidencePriority.Low && x.SemanticGroup == hit.SemanticGroup && x.ChapterId == hit.ChapterId))
+            {
+                similar.AuditExpanded = true;
+                similar.PriorityReason += "; expanded after deterministic audit discovered important data";
+            }
     }
 
     internal static string BuildPrompt(IReadOnlyCollection<CorpusEvidence> evidence, ProjectResources resources)
     {
-        string knownCharacters = string.Join('\n', resources.Characters.Profiles.Select(p =>
-            $"- {p.ChineseName} = {p.VietnameseName}; aliases=[{string.Join(", ", p.Aliases)}]; gender={p.Gender}"));
-        string knownTerms = string.Join('\n', resources.Terms.Take(300).Select(t => $"- {t.Chinese} = {t.Vietnamese}"));
+        string combined = string.Join('\n', evidence.Select(x => x.Excerpt));
+        string knownCharacters = string.Join('\n', resources.Characters.Profiles.Where(p =>
+                combined.Contains(p.ChineseName, StringComparison.Ordinal) || p.Aliases.Any(combined.Contains))
+            .Select(p => $"- {p.ChineseName} = {p.VietnameseName}; aliases=[{string.Join(", ", p.Aliases)}]; gender={p.Gender}"));
+        string knownTerms = string.Join('\n', resources.Terms.Where(t => combined.Contains(t.Chinese, StringComparison.Ordinal))
+            .Take(300).Select(t => $"- {t.Chinese} = {t.Vietnamese}"));
         string excerpts = string.Join("\n\n", evidence.Select(e =>
-            $"EVIDENCE {e.Id:D} | chapter={e.ChapterId:D} | startUtf16={e.StartUtf16}\n{e.Excerpt}"));
+            $"EVIDENCE {e.Id:D} | chapter={e.ChapterId:D} | startUtf16={e.StartUtf16} | priority={e.Priority} | reason={e.PriorityReason}\n{e.Excerpt}"));
         return $$"""
             Bạn là bộ trích xuất dữ kiện cho tiểu thuyết Trung văn. Chỉ dùng chứng cứ được cung cấp; không suy đoán.
-            Trả về DUY NHẤT một JSON object đúng schema dưới đây. confidence chỉ nhận unknown, ambiguous, proposed.
+            Trả về DUY NHẤT một JSON object đúng schema. confidence chỉ nhận unknown, ambiguous, proposed.
             Mọi mục phải dẫn ít nhất một evidence_id. Tên/thuật ngữ Trung phải xuất hiện nguyên văn trong evidence được dẫn.
-            Không biến danh xưng phụ thuộc ngữ cảnh thành glossary toàn cục. Không tự xác minh giới tính hoặc xưng hô nếu chứng cứ chưa rõ.
-            Schema:
-            {"characters":[{"chinese_name":"","vietnamese_name":"","aliases":[],"gender":"unknown|male|female|other","primary_pronoun":"","secondary_pronoun":"","confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}],"relationships":[{"speaker_chinese_name":"","listener_chinese_name":"","relationship":"","self_reference":"","addressee_reference":"","reverse_self_reference":"","reverse_addressee_reference":"","confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}],"glossary":[{"chinese":"","vietnamese":"","category":"person|place|organization|cultivation|item|term","context_dependent":false,"confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}]}
+            Không biến danh xưng phụ thuộc ngữ cảnh thành glossary toàn cục. Không tự xác minh giới tính, danh tính hoặc xưng hô nếu chứng cứ chưa rõ.
+            Schema {{PromptSchemaVersion}}:
+            {"characters":[{"chinese_name":"","vietnamese_name":"","aliases":[],"gender":"unknown|male|female|other","primary_pronoun":"","secondary_pronoun":"","confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}],"relationships":[{"speaker_chinese_name":"","listener_chinese_name":"","relationship":"","self_reference":"","addressee_reference":"","reverse_self_reference":"","reverse_addressee_reference":"","confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}],"glossary":[{"chinese":"","vietnamese":"","category":"place|organization|clan|cultivation|item|realm|title|term|addressing","context_dependent":false,"confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}]}
 
-            NHÂN VẬT ĐÃ CÓ:
+            NHÂN VẬT LIÊN QUAN ĐÃ CÓ:
             {{knownCharacters}}
 
-            GLOSSARY ĐÃ CÓ:
+            GLOSSARY LIÊN QUAN ĐÃ CÓ:
             {{knownTerms}}
 
             CHỨNG CỨ:
@@ -96,17 +189,14 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
     internal static AnalyzerResponse Parse(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) throw new InvalidDataException("Ollama trả phản hồi khảo sát rỗng.");
-        int start = text.IndexOf('{');
-        int end = text.LastIndexOf('}');
+        int start = text.IndexOf('{'), end = text.LastIndexOf('}');
         if (start < 0 || end <= start) throw new InvalidDataException("Ollama không trả JSON khảo sát hợp lệ.");
         try
         {
             AnalyzerResponse response = JsonSerializer.Deserialize<AnalyzerResponse>(text[start..(end + 1)],
                 new JsonSerializerOptions(DocumentJson.Options) { PropertyNameCaseInsensitive = true })
                 ?? throw new InvalidDataException("JSON khảo sát rỗng.");
-            response.Characters ??= [];
-            response.Relationships ??= [];
-            response.Glossary ??= [];
+            response.Characters ??= []; response.Relationships ??= []; response.Glossary ??= [];
             foreach (CharacterFinding item in response.Characters) { item.Aliases ??= []; item.EvidenceIds ??= []; }
             foreach (RelationshipFinding item in response.Relationships) item.EvidenceIds ??= [];
             foreach (GlossaryFinding item in response.Glossary) item.EvidenceIds ??= [];
@@ -122,86 +212,129 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
         foreach (CharacterFinding finding in response.Characters)
         {
             Guid[] ids = ValidateEvidenceIds(finding.EvidenceIds, allowed);
-            if (ids.Length == 0) continue;
             string chinese = finding.ChineseName.Trim();
-            if (chinese.Length == 0 || !Appears(chinese, ids, allowed)) continue;
+            if (ids.Length == 0 || chinese.Length == 0 || !Appears(chinese, ids, allowed)) continue;
             string[] aliases = finding.Aliases.Where(x => !string.IsNullOrWhiteSpace(x) && Appears(x.Trim(), ids, allowed))
                 .Select(x => x.Trim()).Distinct(StringComparer.Ordinal).ToArray();
-            CharacterProfile? existing = resources.Characters.Profiles.FirstOrDefault(p =>
-                p.ChineseName == chinese || p.Aliases.Contains(chinese, StringComparer.Ordinal) ||
-                aliases.Any(a => p.ChineseName == a || p.Aliases.Contains(a, StringComparer.Ordinal)));
-            if (state.Characters.Any(x => x.Status != IntelligenceReviewStatus.Rejected &&
-                (x.ChineseName == chinese || x.Aliases.Contains(chinese, StringComparer.Ordinal)))) continue;
+            CandidateIdentity identity = EntityResolutionService.Resolve(state, resources, chinese,
+                finding.VietnameseName.Trim(), aliases, ids);
+            IntelligenceCharacterSuggestion? existing = state.Characters.FirstOrDefault(x =>
+                x.CandidateIdentityId == identity.Id || x.ChineseName == chinese || x.Aliases.Contains(chinese, StringComparer.Ordinal));
+            if (existing is not null)
+            {
+                bool newEvidence = ids.Any(id => !existing.EvidenceIds.Contains(id));
+                foreach (Guid id in ids.Where(id => !existing.EvidenceIds.Contains(id))) existing.EvidenceIds.Add(id);
+                foreach (string alias in aliases.Where(a => !existing.Aliases.Contains(a, StringComparer.Ordinal))) existing.Aliases.Add(alias);
+                if (existing.Status == IntelligenceReviewStatus.Rejected && newEvidence)
+                { existing.Status = IntelligenceReviewStatus.ReviewLater; existing.Reason += "\nCó bằng chứng mới sau lần từ chối trước."; }
+                continue;
+            }
             state.Characters.Add(new IntelligenceCharacterSuggestion
             {
-                ChineseName = chinese,
-                VietnameseName = finding.VietnameseName.Trim(),
-                Aliases = aliases.ToList(),
-                Gender = ParseGender(finding.Gender),
-                PrimaryNarrativePronoun = finding.PrimaryPronoun.Trim(),
-                SecondaryNarrativePronoun = finding.SecondaryPronoun.Trim(),
-                Confidence = ParseConfidence(finding.Confidence),
-                EvidenceIds = ids.ToList(),
-                Reason = finding.Reason.Trim(),
-                PossibleExistingCharacterId = existing?.Id
+                ChineseName = chinese, VietnameseName = finding.VietnameseName.Trim(), Aliases = aliases.ToList(),
+                Gender = ParseGender(finding.Gender), PrimaryNarrativePronoun = finding.PrimaryPronoun.Trim(),
+                SecondaryNarrativePronoun = finding.SecondaryPronoun.Trim(), Confidence = ParseConfidence(finding.Confidence),
+                EvidenceIds = ids.ToList(), Reason = finding.Reason.Trim(),
+                PossibleExistingCharacterId = identity.ProposedExistingCharacterId, CandidateIdentityId = identity.Id
             });
         }
 
         foreach (RelationshipFinding finding in response.Relationships)
         {
             Guid[] ids = ValidateEvidenceIds(finding.EvidenceIds, allowed);
-            if (ids.Length == 0) continue;
             string speaker = finding.SpeakerChineseName.Trim(), listener = finding.ListenerChineseName.Trim();
-            if (speaker.Length == 0 || listener.Length == 0 || speaker == listener ||
+            if (ids.Length == 0 || speaker.Length == 0 || listener.Length == 0 || speaker == listener ||
                 !Appears(speaker, ids, allowed) || !Appears(listener, ids, allowed)) continue;
-            if (state.Relationships.Any(x => x.Status != IntelligenceReviewStatus.Rejected &&
-                x.SpeakerChineseName == speaker && x.ListenerChineseName == listener)) continue;
-            state.Relationships.Add(new IntelligenceRelationshipSuggestion
+            IntelligenceRelationshipSuggestion? existing = state.Relationships.FirstOrDefault(x =>
+                x.SpeakerChineseName == speaker && x.ListenerChineseName == listener &&
+                x.Relationship == finding.Relationship.Trim());
+            if (existing is not null)
+            {
+                bool newEvidence = ids.Any(id => !existing.EvidenceIds.Contains(id));
+                foreach (Guid id in ids.Where(id => !existing.EvidenceIds.Contains(id))) existing.EvidenceIds.Add(id);
+                if (existing.Status == IntelligenceReviewStatus.Rejected && newEvidence)
+                { existing.Status = IntelligenceReviewStatus.ReviewLater; existing.Reason += "\nCó bằng chứng mới sau lần từ chối trước."; }
+                RelationshipKnowledgeService.AddOrAggregateDirect(state, resources, existing);
+                continue;
+            }
+            var suggestion = new IntelligenceRelationshipSuggestion
             {
                 SpeakerChineseName = speaker, ListenerChineseName = listener,
                 Relationship = finding.Relationship.Trim(), SelfReference = finding.SelfReference.Trim(),
-                AddresseeReference = finding.AddresseeReference.Trim(),
-                ReverseSelfReference = finding.ReverseSelfReference.Trim(),
+                AddresseeReference = finding.AddresseeReference.Trim(), ReverseSelfReference = finding.ReverseSelfReference.Trim(),
                 ReverseAddresseeReference = finding.ReverseAddresseeReference.Trim(),
                 Confidence = ParseConfidence(finding.Confidence), EvidenceIds = ids.ToList(), Reason = finding.Reason.Trim()
-            });
+            };
+            state.Relationships.Add(suggestion);
+            RelationshipKnowledgeService.AddOrAggregateDirect(state, resources, suggestion);
         }
 
         foreach (GlossaryFinding finding in response.Glossary)
         {
             Guid[] ids = ValidateEvidenceIds(finding.EvidenceIds, allowed);
-            if (ids.Length == 0) continue;
             string chinese = finding.Chinese.Trim();
-            if (chinese.Length == 0 || !Appears(chinese, ids, allowed) ||
-                resources.Terms.Any(x => x.Chinese == chinese) ||
-                resources.Characters.Profiles.Any(p => p.ChineseName == chinese || p.Aliases.Contains(chinese, StringComparer.Ordinal)) ||
-                state.Glossary.Any(x => x.Status != IntelligenceReviewStatus.Rejected && x.Chinese == chinese)) continue;
+            if (ids.Length == 0 || chinese.Length == 0 || !Appears(chinese, ids, allowed) ||
+                resources.Characters.Profiles.Any(p => p.ChineseName == chinese || p.Aliases.Contains(chinese, StringComparer.Ordinal))) continue;
+            IntelligenceGlossarySuggestion? existing = state.Glossary.FirstOrDefault(x => x.Chinese == chinese);
+            if (existing is not null)
+            {
+                bool newEvidence = ids.Any(id => !existing.EvidenceIds.Contains(id));
+                foreach (Guid id in ids.Where(id => !existing.EvidenceIds.Contains(id))) existing.EvidenceIds.Add(id);
+                if (existing.Status == IntelligenceReviewStatus.Rejected && newEvidence)
+                { existing.Status = IntelligenceReviewStatus.ReviewLater; existing.Reason += "\nCó bằng chứng mới sau lần từ chối trước."; }
+                continue;
+            }
+            if (resources.Terms.Any(x => x.Chinese == chinese)) continue;
+            (GlossaryKnowledgeCategory category, GlossaryKnowledgeScope scope) = ClassifyGlossary(finding);
             state.Glossary.Add(new IntelligenceGlossarySuggestion
             {
                 Chinese = chinese, Vietnamese = finding.Vietnamese.Trim(), Category = finding.Category.Trim(),
                 ContextDependent = finding.ContextDependent, Confidence = ParseConfidence(finding.Confidence),
-                EvidenceIds = ids.ToList(), Reason = finding.Reason.Trim()
+                EvidenceIds = ids.ToList(), Reason = finding.Reason.Trim(), KnowledgeCategory = category, Scope = scope
             });
         }
         state.Validate();
     }
 
-    private static Guid[] ValidateEvidenceIds(List<Guid> ids, IReadOnlyDictionary<Guid, CorpusEvidence> allowed)
+    internal static string RelevantContextFingerprint(IReadOnlyCollection<CorpusEvidence> evidence, ProjectResources resources)
     {
-        return ids.Where(allowed.ContainsKey).Distinct().ToArray();
-    }
-    private static bool Appears(string value, IEnumerable<Guid> ids, IReadOnlyDictionary<Guid, CorpusEvidence> evidence) =>
-        ids.Any(id => evidence[id].Excerpt.Contains(value, StringComparison.Ordinal));
-    private static CharacterGender ParseGender(string value) => value.Trim().ToLowerInvariant() switch
-    { "male" => CharacterGender.Male, "female" => CharacterGender.Female, "other" => CharacterGender.Other, _ => CharacterGender.Unknown };
-    private static IntelligenceConfidence ParseConfidence(string value) => value.Trim().ToLowerInvariant() switch
-    { "proposed" => IntelligenceConfidence.Proposed, "ambiguous" => IntelligenceConfidence.Ambiguous, _ => IntelligenceConfidence.Unknown };
-    private static string AnalysisKey(IEnumerable<CorpusEvidence> evidence, string model, string version, long resourceRevision)
-    {
-        string value = model + "|" + version + "|resources:" + resourceRevision + "|" +
-            string.Join('|', evidence.Select(x => $"{x.Id:D}:{x.SourceSha256}:{x.StartUtf16}:{x.LengthUtf16}"));
+        string source = string.Join('\n', evidence.Select(x => x.Excerpt));
+        IEnumerable<string> characters = resources.Characters.Profiles.Where(p => source.Contains(p.ChineseName, StringComparison.Ordinal) ||
+                p.Aliases.Any(source.Contains))
+            .Select(p => $"C:{p.Id:D}:{p.ChineseName}:{p.VietnameseName}:{p.Gender}:{string.Join(',', p.Aliases.Order())}");
+        IEnumerable<string> terms = resources.Terms.Where(t => source.Contains(t.Chinese, StringComparison.Ordinal))
+            .Select(t => $"T:{t.Chinese}:{t.Vietnamese}");
+        string value = string.Join('|', characters.Concat(terms).Order(StringComparer.Ordinal));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
+
+    internal static string AnalysisKey(IEnumerable<CorpusEvidence> evidence, string model, string version, string relevantContext)
+    {
+        string value = model + "|" + version + "|context:" + relevantContext + "|" +
+            string.Join('|', evidence.Select(x => $"{x.SourceSha256}:{x.StartUtf16}:{x.LengthUtf16}"));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    }
+
+    private static (GlossaryKnowledgeCategory, GlossaryKnowledgeScope) ClassifyGlossary(GlossaryFinding finding)
+    {
+        string c = finding.Category.Trim().ToLowerInvariant();
+        GlossaryKnowledgeCategory category = c switch
+        {
+            "place" => GlossaryKnowledgeCategory.Place, "organization" => GlossaryKnowledgeCategory.Organization,
+            "clan" => GlossaryKnowledgeCategory.Clan, "cultivation" => GlossaryKnowledgeCategory.CultivationMethod,
+            "item" => GlossaryKnowledgeCategory.Item, "realm" => GlossaryKnowledgeCategory.Realm,
+            "title" => GlossaryKnowledgeCategory.Title, _ => GlossaryKnowledgeCategory.StoryTerm
+        };
+        GlossaryKnowledgeScope scope = c == "addressing" ? GlossaryKnowledgeScope.AddressingKinship :
+            finding.ContextDependent || c == "title" ? GlossaryKnowledgeScope.ContextDependent : GlossaryKnowledgeScope.Global;
+        return (category, scope);
+    }
+
+    private static int ChapterNumber(BookIntelligenceState state, Guid chapterId) => state.Chapters.Single(c => c.ChapterId == chapterId).ChapterNumber;
+    private static Guid[] ValidateEvidenceIds(List<Guid> ids, IReadOnlyDictionary<Guid, CorpusEvidence> allowed) => ids.Where(allowed.ContainsKey).Distinct().ToArray();
+    private static bool Appears(string value, IEnumerable<Guid> ids, IReadOnlyDictionary<Guid, CorpusEvidence> evidence) => ids.Any(id => evidence[id].Excerpt.Contains(value, StringComparison.Ordinal));
+    private static CharacterGender ParseGender(string value) => value.Trim().ToLowerInvariant() switch { "male" => CharacterGender.Male, "female" => CharacterGender.Female, "other" => CharacterGender.Other, _ => CharacterGender.Unknown };
+    private static IntelligenceConfidence ParseConfidence(string value) => value.Trim().ToLowerInvariant() switch { "proposed" => IntelligenceConfidence.Proposed, "ambiguous" => IntelligenceConfidence.Ambiguous, _ => IntelligenceConfidence.Unknown };
 }
 
 public sealed class AnalyzerResponse
@@ -212,39 +345,27 @@ public sealed class AnalyzerResponse
 }
 public sealed class CharacterFinding
 {
-    [JsonPropertyName("chinese_name")]
-    public string ChineseName { get; set; } = "";
-    [JsonPropertyName("vietnamese_name")]
-    public string VietnameseName { get; set; } = "";
+    [JsonPropertyName("chinese_name")] public string ChineseName { get; set; } = "";
+    [JsonPropertyName("vietnamese_name")] public string VietnameseName { get; set; } = "";
     public List<string> Aliases { get; set; } = [];
     public string Gender { get; set; } = "unknown";
-    [JsonPropertyName("primary_pronoun")]
-    public string PrimaryPronoun { get; set; } = "";
-    [JsonPropertyName("secondary_pronoun")]
-    public string SecondaryPronoun { get; set; } = "";
+    [JsonPropertyName("primary_pronoun")] public string PrimaryPronoun { get; set; } = "";
+    [JsonPropertyName("secondary_pronoun")] public string SecondaryPronoun { get; set; } = "";
     public string Confidence { get; set; } = "unknown";
-    [JsonPropertyName("evidence_ids")]
-    public List<Guid> EvidenceIds { get; set; } = [];
+    [JsonPropertyName("evidence_ids")] public List<Guid> EvidenceIds { get; set; } = [];
     public string Reason { get; set; } = "";
 }
 public sealed class RelationshipFinding
 {
-    [JsonPropertyName("speaker_chinese_name")]
-    public string SpeakerChineseName { get; set; } = "";
-    [JsonPropertyName("listener_chinese_name")]
-    public string ListenerChineseName { get; set; } = "";
+    [JsonPropertyName("speaker_chinese_name")] public string SpeakerChineseName { get; set; } = "";
+    [JsonPropertyName("listener_chinese_name")] public string ListenerChineseName { get; set; } = "";
     public string Relationship { get; set; } = "";
-    [JsonPropertyName("self_reference")]
-    public string SelfReference { get; set; } = "";
-    [JsonPropertyName("addressee_reference")]
-    public string AddresseeReference { get; set; } = "";
-    [JsonPropertyName("reverse_self_reference")]
-    public string ReverseSelfReference { get; set; } = "";
-    [JsonPropertyName("reverse_addressee_reference")]
-    public string ReverseAddresseeReference { get; set; } = "";
+    [JsonPropertyName("self_reference")] public string SelfReference { get; set; } = "";
+    [JsonPropertyName("addressee_reference")] public string AddresseeReference { get; set; } = "";
+    [JsonPropertyName("reverse_self_reference")] public string ReverseSelfReference { get; set; } = "";
+    [JsonPropertyName("reverse_addressee_reference")] public string ReverseAddresseeReference { get; set; } = "";
     public string Confidence { get; set; } = "unknown";
-    [JsonPropertyName("evidence_ids")]
-    public List<Guid> EvidenceIds { get; set; } = [];
+    [JsonPropertyName("evidence_ids")] public List<Guid> EvidenceIds { get; set; } = [];
     public string Reason { get; set; } = "";
 }
 public sealed class GlossaryFinding
@@ -252,10 +373,8 @@ public sealed class GlossaryFinding
     public string Chinese { get; set; } = "";
     public string Vietnamese { get; set; } = "";
     public string Category { get; set; } = "";
-    [JsonPropertyName("context_dependent")]
-    public bool ContextDependent { get; set; }
+    [JsonPropertyName("context_dependent")] public bool ContextDependent { get; set; }
     public string Confidence { get; set; } = "unknown";
-    [JsonPropertyName("evidence_ids")]
-    public List<Guid> EvidenceIds { get; set; } = [];
+    [JsonPropertyName("evidence_ids")] public List<Guid> EvidenceIds { get; set; } = [];
     public string Reason { get; set; } = "";
 }

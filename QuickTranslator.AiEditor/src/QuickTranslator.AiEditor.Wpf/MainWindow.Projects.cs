@@ -10,6 +10,7 @@ using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Reading;
 using QuickTranslator.AiEditor.Core.Translation;
+using QuickTranslator.AiEditor.Core.BookIntelligence;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -27,6 +28,8 @@ public partial class MainWindow
     private readonly ObservableCollection<ProjectChapterItem> _projectChapters = [];
     private bool _syncingProjectUi;
     private bool _syncingProjectSummary;
+    private BookIntelligenceState? _bookIntelligenceState;
+    private bool _bookKnowledgeContextEnabled;
 
     private void InitializeProjectWorkspace()
     {
@@ -154,6 +157,7 @@ public partial class MainWindow
         var reader = new ReaderPreferencesStore(session.Resolve(session.Manifest.Files.ReaderSettings));
         var resources = new ProjectResourceStore(session);
         var loadedPresets = await presets.LoadAsync(); var loadedReader = await reader.LoadAsync(); var loadedResources = await resources.LoadAsync();
+        BookIntelligenceState intelligence = await new BookIntelligenceStore(session).LoadAsync();
         var sources = settings.RecoverySources.Concat(resources.RecoverySources)
             .Concat(new[] { presets.LastRecovery!, reader.LastRecovery! }).ToArray();
         var repairs = new List<Func<Task>>();
@@ -161,7 +165,7 @@ public partial class MainWindow
         if (resources.RecoverySources.Any(x => x.Source == RecoverySource.Backup)) repairs.Add(() => resources.RestoreRecoveredBackupsAsync());
         if (presets.RecoveredFromBackup) repairs.Add(() => presets.RestoreBackupAsync());
         if (reader.RecoveredFromBackup) repairs.Add(() => reader.RestoreBackupAsync());
-        return new(new PromptPresetManager(loadedPresets), loadedReader, loadedResources, translation, sources, repairs);
+        return new(new PromptPresetManager(loadedPresets), loadedReader, loadedResources, translation, intelligence, sources, repairs);
     }
 
     private void ApplyProjectAssets(ProjectAssetState assets)
@@ -172,6 +176,8 @@ public partial class MainWindow
             _presetManager = assets.Presets; _presetsReady = true; RefreshPresetEditor();
             _readerPreferences = assets.Reader; _readerLoadFailure = null; _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
             _projectResources = assets.Resources; LoadCharacterProject(assets.Resources.Characters);
+            _bookIntelligenceState = assets.BookIntelligence;
+            _bookKnowledgeContextEnabled = assets.Translation.BookKnowledgeContextEnabled;
             ApplyProjectDefaults(assets.Translation); SetGlossaryTerms(assets.Resources.Terms); ContextNotesInput.Text = assets.Resources.Context;
             ApplyCurrentProjectResources(); _settingsDirty = false;
         }
@@ -179,7 +185,8 @@ public partial class MainWindow
     }
 
     private sealed record ProjectAssetState(PromptPresetManager Presets, ReaderPreferences Reader,
-        ProjectResources Resources, ProjectTranslationSettings Translation, IReadOnlyList<RecoveryInfo> RecoverySources, IReadOnlyList<Func<Task>> Repairs);
+        ProjectResources Resources, ProjectTranslationSettings Translation, BookIntelligenceState BookIntelligence,
+        IReadOnlyList<RecoveryInfo> RecoverySources, IReadOnlyList<Func<Task>> Repairs);
 
     private async Task SaveProjectAssetsAsync()
     {
@@ -193,7 +200,8 @@ public partial class MainWindow
             Model = ReadModelOptions(), Segmentation = ReadSegmenterOptions(),
             SelectedPromptPresetId = _presetsReady ? _presetManager.Selected.Id : null,
             OllamaProfileId = SelectedOllamaProfileId,
-            TraditionalDataDirectory = TraditionalDataDirectoryInput.Text
+            TraditionalDataDirectory = TraditionalDataDirectoryInput.Text,
+            BookKnowledgeContextEnabled = _bookKnowledgeContextEnabled
         });
         await _projectRepository.SaveManifestAsync(_projectSession);
     }
@@ -201,7 +209,11 @@ public partial class MainWindow
     private void ApplyCurrentProjectResources()
     {
         if (_projectResources is not null && _service?.GetSnapshot().ProjectId == _projectResources.ProjectId)
+        {
             _service.UseProjectResources(_projectResources);
+            _service.UseBookKnowledgeContext(_bookKnowledgeContextEnabled && _bookIntelligenceState is not null
+                ? new BookKnowledgeContextProvider(_bookIntelligenceState, _projectResources) : null);
+        }
     }
 
     private async Task SaveProjectResourcesAsync()

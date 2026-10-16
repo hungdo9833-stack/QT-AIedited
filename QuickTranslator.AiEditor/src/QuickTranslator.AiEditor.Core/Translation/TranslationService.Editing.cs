@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using QuickTranslator.AiEditor.Core.Models;
+using QuickTranslator.AiEditor.Core.BookIntelligence;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
 
@@ -49,7 +50,9 @@ public sealed partial class TranslationService
         if (terms is not null) chapter.ConfirmedTerms = terms.ToList();
         if (confirmedContext is not null) chapter.ConfirmedContextNotes = confirmedContext;
         var segment = chapter.Segments.Single(s => s.Id == segmentId);
-        return BuildPrompt(chapter, segment, [], "", preset);
+        IBookKnowledgeContextProvider? provider;
+        lock (_sync) provider = _bookKnowledgeContext;
+        return BuildPrompt(chapter, segment, [], "", preset, provider?.GetSnapshot(chapter, segment));
     }
 
     public CharacterConsistencySelection PreviewCharacterConsistency(Guid segmentId)
@@ -59,7 +62,8 @@ public sealed partial class TranslationService
         return _characterConsistency.Select(chapter.CharacterProject, segment.SourceText);
     }
 
-    private string BuildPrompt(ChapterDocument chapter, TranslationSegment segment, IReadOnlyList<GlossaryEntry> external, string memory, PromptPreset preset)
+    private string BuildPrompt(ChapterDocument chapter, TranslationSegment segment, IReadOnlyList<GlossaryEntry> external,
+        string memory, PromptPreset preset, BookKnowledgeContextSnapshot? knowledge = null)
     {
         CharacterConsistencySelection consistency = _characterConsistency.Select(chapter.CharacterProject, segment.SourceText);
         var confirmed = chapter.ConfirmedTerms.Where(t => segment.SourceText.Contains(t.Chinese, StringComparison.Ordinal) &&
@@ -77,6 +81,7 @@ public sealed partial class TranslationService
             notes += "\nPrevious human-approved excerpt (reference only): " + approved;
         }
         if (!string.IsNullOrWhiteSpace(memory)) notes += "\n" + memory;
+        if (!string.IsNullOrWhiteSpace(knowledge?.PromptBlock)) notes += "\n" + knowledge.PromptBlock;
         return _prompts.Build(segment.SourceText, glossary, notes, preset, consistency.PromptBlock);
     }
 

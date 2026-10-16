@@ -2,6 +2,7 @@ using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Translation;
+using QuickTranslator.AiEditor.Core.BookIntelligence;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -57,8 +58,11 @@ public partial class MainWindow
         if (_ollamaBackends.ActiveProfile.Id != profile.Id)
             throw new InvalidOperationException("Profile Ollama của Project chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại backend.");
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
+        IBookKnowledgeContextProvider? knowledge = null;
+        if (translation.BookKnowledgeContextEnabled)
+            knowledge = new BookKnowledgeContextProvider(await new BookIntelligenceStore(session).LoadAsync(cancellationToken), resources);
         return new(runtime.ModelOptions with { }, presets.Selected, resources,
-            BackendSnapshot(profile, runtime.ModelOptions.Model));
+            BackendSnapshot(profile, runtime.ModelOptions.Model), knowledge);
     }
 
     private async Task OpenProjectTranslationQueueAsync(IReadOnlyList<Guid> chapterIds)

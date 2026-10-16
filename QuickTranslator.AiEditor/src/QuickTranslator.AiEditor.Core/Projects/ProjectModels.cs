@@ -86,6 +86,7 @@ public sealed class ProjectTranslationSettings
     public Guid? SelectedPromptPresetId { get; set; }
     public Guid? OllamaProfileId { get; set; }
     public string TraditionalDataDirectory { get; set; } = "";
+    public bool BookKnowledgeContextEnabled { get; set; }
 }
 
 public sealed class ProjectExportSettings
