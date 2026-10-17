@@ -323,7 +323,7 @@ public partial class GpuManagerWindow : Window
         var stack = new StackPanel { Margin = new Thickness(16) };
         stack.Children.Add(new TextBlock
         {
-            Text = "Ubuntu yêu cầu xác thực để cài/khởi động Ollama.\\nDùng mật khẩu SSH hoặc nhập mật khẩu sudo riêng:",
+            Text = "Ubuntu yêu cầu xác thực để cài/khởi động Ollama.\nDùng mật khẩu SSH hoặc nhập mật khẩu sudo riêng:",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12)
         });
         var input = new PasswordBox { Margin = new Thickness(0, 0, 0, 12), MinWidth = 345 };
