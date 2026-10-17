@@ -32,6 +32,15 @@ Trong cửa sổ `Khảo sát bằng AI`:
 
 Không tự động gọi lại API khi đổi model hoặc mở lại Project. Dùng `Khảo sát lại` khi cần benchmark model khác trên cùng nguyên tác.
 
+## Phản hồi không có candidates / nội dung bị Google từ chối
+
+Google HTTP 200 nhưng không có `candidates` không tự động đồng nghĩa với bị chặn. Adapter đọc `promptFeedback.blockReason` và `candidate.finishReason` theo whitelist, không in response thô hoặc API key.
+
+- Nếu Google xác nhận một lý do chặn (ví dụ `SAFETY`, `PROHIBITED_CONTENT`), batch liên quan được lưu với `AiBlocked=true`, `AiBlockReason` là mã an toàn. Các batch khác tiếp tục khảo sát. **Không** tự retry batch bị chặn, tự đổi model để vượt bộ lọc, hoặc đánh dấu `AiAnalyzed=true` cho đoạn bị từ chối.
+- Các đoạn bị chặn được liệt kê trong nút **Đoạn bị chặn** cùng chapter/vị trí UTF-16 để người dùng mở nguyên tác kiểm tra thủ công. Mỗi lần Resume không gửi lại chúng. Phải chọn **Khảo sát lại** có xác nhận (và sao lưu) mới xóa trạng thái chặn.
+- Nếu HTTP 200 thiếu candidate nhưng **không có blockReason rõ ràng**, hoặc có `MAX_TOKENS`/lỗi định dạng, hiện lỗi có mã chẩn đoán và để batch chưa hoàn thành. Không tự coi là an toàn hay thành công. Người dùng có thể điều tra rồi bấm Resume.
+- Con số `AiBlocked` là **số excerpt chưa khảo sát**, không phải số chứng cứ đã được xác nhận. Khi đánh giá precision/recall cần tính riêng tỷ lệ bỏ sót do provider từ chối.
+
 ## Scheduling
 
 - Each model has its own 5 RPM / 250K input TPM / 20 RPD **initial, user-observed, configurable code defaults**. Actual Google limits depend on the AI project and model. The sum of model limits is only a theoretical ceiling if those buckets are genuinely independent and no stricter shared limits apply.
