@@ -391,10 +391,15 @@ public sealed class BookIntelligenceTests : IDisposable
         Assert.Contains(done.Evidence, x => x.IsCurrent && x.AiBlocked && x.AiBlockReason == "SAFETY"
             && !x.AiAnalyzed);
         Assert.Contains(done.Evidence, x => x.IsCurrent && x.AiAnalyzed && !x.AiBlocked);
+        Assert.All(done.Evidence.Where(x => x.IsCurrent && !x.AiBlocked), x => Assert.True(x.AiAnalyzed));
+        Assert.Equal((long)tries, done.Metrics.Requests);
         Assert.False(BookIntelligenceResurveyService.HasUnanalyzedEvidence(done, IntelligenceScanMode.FullSemantic));
 
         var resumed = new SurveyClient(_ => throw new InvalidOperationException("Resume must not resend."));
         BookIntelligenceState reopened = await store.LoadAsync();
+        Assert.Equal(done.CompletedAnalysisKeys.Order(), reopened.CompletedAnalysisKeys.Order());
+        Assert.Equal(JsonSerializer.Serialize(done.Chapters, DocumentJson.Options),
+            JsonSerializer.Serialize(reopened.Chapters, DocumentJson.Options));
         await new AdaptiveBookIntelligenceAnalyzer(resumed).AnalyzeAsync(
             session, reopened, store, resources, Options);
         Assert.Equal(0, resumed.Calls);
@@ -497,6 +502,55 @@ public sealed class BookIntelligenceTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => BookIntelligenceResurveyService.BeginFreshAsync(state, store));
         Assert.Single((await store.LoadAsync()).PendingResourceCommits);
+    }
+
+    [Fact]
+    public async Task Legacy_relationship_normalization_survives_reopen_without_losing_evidence_or_review_decisions()
+    {
+        (ProjectRepository repository, ProjectSession session) = await ProjectAsync("林朝对苏雨说道：你是我的妹妹。", 1);
+        await repository.AddChapterAsync(session,
+            TranslationService.CreateChapter("Chương 2", "苏雨对林朝说道：哥哥。"), 2);
+        var store = new BookIntelligenceStore(session);
+        var resourceStore = new ProjectResourceStore(session);
+        ProjectResources resources = await resourceStore.SaveAsync(await resourceStore.LoadAsync());
+        BookIntelligenceState state = await new ProjectCorpusIndexer(repository).IndexAsync(session,
+            await store.LoadAsync(), store, resources.Characters);
+        Guid[] evidenceIds = state.Evidence.Select(x => x.Id).ToArray();
+        Assert.Equal(2, evidenceIds.Length);
+        var first = new IntelligenceRelationshipSuggestion { SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
+            Relationship = "sibling", EvidenceIds = [evidenceIds[0]] };
+        var duplicate = new IntelligenceRelationshipSuggestion { SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
+            Relationship = "siblings", EvidenceIds = [evidenceIds[1]] };
+        var accepted = new IntelligenceRelationshipSuggestion { SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
+            Relationship = "sister-brother", Status = IntelligenceReviewStatus.Accepted,
+            Reason = "Quyết định đã duyệt", EvidenceIds = [evidenceIds[0]] };
+        var rejected = new IntelligenceRelationshipSuggestion { SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
+            Relationship = "romantic interest", Status = IntelligenceReviewStatus.Rejected,
+            Reason = "Quyết định đã từ chối", EvidenceIds = [evidenceIds[1]] };
+        var deferred = new IntelligenceRelationshipSuggestion { SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
+            Relationship = "siblings", Status = IntelligenceReviewStatus.ReviewLater,
+            SelfReference = "anh", AddresseeReference = "em", EvidenceIds = [evidenceIds[1]] };
+        state.Relationships = [first, duplicate, accepted, rejected, deferred];
+        state = await store.SaveAsync(state);
+        string evidenceBefore = JsonSerializer.Serialize(state.Chapters, DocumentJson.Options);
+        string decisionsBefore = JsonSerializer.Serialize(state.Relationships.Where(x => x.Status is
+            IntelligenceReviewStatus.Accepted or IntelligenceReviewStatus.Rejected), DocumentJson.Options);
+        string resourcesBefore = JsonSerializer.Serialize(resources, DocumentJson.Options);
+
+        state = await new BookIntelligenceStore(session).LoadAsync();
+        Assert.True(RelationshipLabelNormalizer.NormalizePending(state));
+        await store.SaveAsync(state);
+        BookIntelligenceState reopened = await new BookIntelligenceStore(session).LoadAsync();
+
+        Assert.Equal(5, reopened.Relationships.Count);
+        Assert.Equal(evidenceBefore, JsonSerializer.Serialize(reopened.Chapters, DocumentJson.Options));
+        Assert.Equal(decisionsBefore, JsonSerializer.Serialize(reopened.Relationships.Where(x => x.Status is
+            IntelligenceReviewStatus.Accepted or IntelligenceReviewStatus.Rejected), DocumentJson.Options));
+        Assert.Equal(resourcesBefore, JsonSerializer.Serialize(await new ProjectResourceStore(session).LoadAsync(), DocumentJson.Options));
+        Assert.Equal(evidenceIds.Order(), reopened.Relationships.Single(x => x.Id == first.Id).EvidenceIds.Order());
+        Assert.Equal(IntelligenceReviewStatus.Merged, reopened.Relationships.Single(x => x.Id == duplicate.Id).Status);
+        Assert.Contains("xưng hô", reopened.Relationships.Single(x => x.Id == deferred.Id).Reason);
+        Assert.False(RelationshipLabelNormalizer.NormalizePending(reopened));
     }
 
     private async Task<(ProjectRepository Repository, ProjectSession Session)> ProjectAsync(string source, int number)

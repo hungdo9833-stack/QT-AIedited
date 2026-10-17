@@ -21,7 +21,7 @@ public sealed class GeminiSurveyHttpException(HttpStatusCode statusCode, TimeSpa
 /// automatically or pass it to another model to evade the provider decision.
 /// </summary>
 public sealed class GeminiSurveyBlockedException(string reasonCode)
-    : InvalidDataException("Gemini đã từ chối batch khảo sát (" + reasonCode +
+    : Exception("Gemini đã từ chối batch khảo sát (" + reasonCode +
         "). Đã giữ nguyên chứng cứ để kiểm tra thủ công; không tự gửi lại nội dung bị chặn.")
 {
     public string ReasonCode { get; } = reasonCode;

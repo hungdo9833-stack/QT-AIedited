@@ -409,7 +409,8 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private void ShowGeminiConfiguration()
     {
-        IReadOnlyList<GeminiSurveyModel> models = GeminiSurveyPoolClient.ModelsFromSettings(_model.Text);
+        IReadOnlyList<GeminiSurveyModel> models = GeminiSurveyPoolClient.ModelsFromSettings(
+            _model.SelectedItem as string ?? _model.Text);
         int? maximumRequests = GeminiSurveyPoolClient.MaximumRequestsFromSettings(
             Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS"));
         bool hasKey = !string.IsNullOrWhiteSpace(GeminiApiKeyVault.ResolveForSurvey());
