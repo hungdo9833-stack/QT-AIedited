@@ -17,14 +17,14 @@ For legacy scripts only, `QTSTUDIO_GEMINI_API_KEY` is an optional fallback when 
 - `QTSTUDIO_GEMINI_SURVEY_MODELS`: comma-separated Flash-only model IDs. Default: `gemini-3.8-flash,gemini-3.6-flash`. Flash Lite is rejected deliberately and reserved for a future translation API workflow.
 - `QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS`: optional hard per-run HTTP request budget. It counts initial calls, retries and model fallbacks; when exhausted, the current batch remains uncommitted for Resume. Use `5` for the first live preflight.
 
-As of 2026-10-17, Google's model documentation marks 3.7 Flash as deprecated and automatically routes its API ID to 3.8 Flash. Keep it configurable for compatibility, but do not assume 3.7 and 3.8 provide independent provider capacity or independent effective quota. Confirm active limits in AI Studio before enabling live use.
+As of 2026-10-17, Google's model documentation marks 3.7 Flash as deprecated and automatically routes its API ID to 3.8 Flash. It remains accepted when explicitly configured for compatibility, but is not in the default pool and must not be treated as independent provider capacity or quota. Confirm active limits in AI Studio before enabling live use.
 
-In the existing Book Intelligence dialog, enter a model that occurs in the configured survey pool (for example `gemini-3.8-flash`). The dialog remains otherwise unchanged and asks permission before uploading source excerpts.
+In the existing Book Intelligence dialog, select **Gemini Flash Pool**. The preferred model is filled from the first configured pool entry (3.8 by default), while 3.6 remains available for fallback. The dialog shows whether the key and request budget are configured without displaying the key, and asks permission before uploading source excerpts.
 
 ## Scheduling
 
-- Each model has its own 5 RPM / 250K input TPM / 20 RPD **initial, user-observed, configurable code defaults**. Actual Google limits depend on the AI project and model. The sum 15 RPM / 750K TPM / 60 RPD is a theoretical ceiling only if those buckets are genuinely independent and no stricter shared limits apply.
-- The pool enforces at most two in-flight calls per model (six across three models), even when a caller submits more parallel work. The adapter additionally enforces the same per-model bound.
+- Each model has its own 5 RPM / 250K input TPM / 20 RPD **initial, user-observed, configurable code defaults**. Actual Google limits depend on the AI project and model. The sum of model limits is only a theoretical ceiling if those buckets are genuinely independent and no stricter shared limits apply.
+- The pool enforces at most two in-flight calls per model, even when a caller submits more parallel work. The adapter additionally enforces the same per-model bound.
 - A single batch is submitted to one model. On 429, this model enters a cooldown of at least 60 seconds. On RPD exhaustion, 403 or 404, the model is disabled for the current survey session; another configured Flash may try the not-yet-committed batch.
 - If all models become unavailable, the survey stops. The analyzer keeps previously committed evidence and does not automatically use Flash Lite or paid models.
 - The Google API may have quota usage outside QT Studio. Counters are best-effort local reservations and are not proof that provider quota remains.

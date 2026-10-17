@@ -12,6 +12,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public sealed class BookIntelligenceReviewWindow : Window
 {
+    internal static Guid GeminiFlashPoolProfileId { get; } = Guid.Parse("c528d3a8-147a-4b7d-8471-e4cbe39d6f38");
     private readonly ProjectSession _session;
     private readonly ProjectRepository _repository;
     private ProjectResources _resources;
@@ -57,7 +58,11 @@ public sealed class BookIntelligenceReviewWindow : Window
         _session = session;
         _repository = repository;
         _resources = resources.Clone();
-        _profiles = profiles;
+        _profiles =
+        [
+            CreateGeminiFlashPoolProfile(),
+            .. profiles.Where(profile => profile.Id != GeminiFlashPoolProfileId)
+        ];
         _editCharacter = editCharacter;
         _resourcesChanged = resourcesChanged;
         _openEvidence = openEvidence;
@@ -132,6 +137,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         _open.Click += async (_, _) => await OpenSelectedEvidenceAsync();
         _evidence.MouseDoubleClick += async (_, _) => await OpenSelectedEvidenceAsync();
         _translationContext.Click += async (_, _) => await SaveContextFeatureFlagAsync();
+        _profile.SelectionChanged += (_, _) => SelectSurveyBackend();
         _search.TextChanged += (_, _) => RefreshQueue();
         _kindFilter.SelectionChanged += (_, _) => RefreshQueue();
         _statusFilter.SelectionChanged += (_, _) => RefreshQueue();
@@ -148,18 +154,17 @@ public sealed class BookIntelligenceReviewWindow : Window
             ProjectTranslationSettings translation = await new ProjectSettingsStore(_session).LoadTranslationAsync();
             _translationContext.IsChecked = translation.BookKnowledgeContextEnabled;
             _scanMode.SelectedItem = _state.ScanMode;
-            OllamaBackendProfile selected = _profiles.FirstOrDefault(p => p.Id == _state.AnalyzerProfileId)
+            bool stateUsesGemini = _state.AnalyzerModel?.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase) == true;
+            bool hasGeminiKey = !string.IsNullOrWhiteSpace(GeminiApiKeyVault.ResolveForSurvey());
+            OllamaBackendProfile selected = (stateUsesGemini || hasGeminiKey
+                    ? _profiles.FirstOrDefault(p => p.Id == GeminiFlashPoolProfileId)
+                    : _profiles.FirstOrDefault(p => p.Id == _state.AnalyzerProfileId))
                 ?? _profiles.FirstOrDefault(p => p.Id == OllamaBackendProfile.DefaultLocalId)
                 ?? _profiles.First();
             _profile.ItemsSource = _profiles; _profile.SelectedItem = selected;
-            // Prefer Gemini on first use if the user saved a key in QT Studio.
-            // Preserve an explicitly saved Gemini survey model when reopening.
-            string preferredModel = string.IsNullOrWhiteSpace(_state.AnalyzerModel)
-                ? selected.Model : _state.AnalyzerModel;
-            _model.Text = !preferredModel.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrWhiteSpace(GeminiApiKeyVault.Read())
-                    ? "gemini-3.8-flash" : preferredModel;
+            _model.Text = stateUsesGemini ? _state.AnalyzerModel! : selected.Model;
             RefreshQueue();
+            if (selected.Id == GeminiFlashPoolProfileId) ShowGeminiConfiguration();
         }
         catch (Exception ex) { ShowFailure(ex); }
         finally { _loading = false; }
@@ -183,7 +188,8 @@ public sealed class BookIntelligenceReviewWindow : Window
             _state = await new ProjectCorpusIndexer(_repository).IndexAsync(_session, _state, store,
                 _resources.Characters, indexProgress, _cancellation.Token);
             _summary.Text = "Đã lập chỉ mục. Đang phân tích các đoạn có tín hiệu bằng model khảo sát…";
-            bool isGemini = _model.Text.Trim().StartsWith("gemini-", StringComparison.OrdinalIgnoreCase);
+            bool isGemini = profile.Id == GeminiFlashPoolProfileId ||
+                _model.Text.Trim().StartsWith("gemini-", StringComparison.OrdinalIgnoreCase);
             if (!isGemini && profile.Kind == OllamaBackendKind.Remote && !profile.RemoteDisclosureAccepted)
                 throw new InvalidOperationException("Profile Remote chưa xác nhận quyền gửi các đoạn nguyên tác để khảo sát.");
             if (isGemini && MessageBox.Show(this,
@@ -224,7 +230,7 @@ public sealed class BookIntelligenceReviewWindow : Window
                     if (!models.Any(model => string.Equals(model.Model, options.Model,
                             StringComparison.OrdinalIgnoreCase)))
                         throw new InvalidOperationException(
-                            "Model đã nhập không có trong Flash Survey Pool. Chọn Flash 3.6/3.7/3.8 hoặc điều chỉnh QTSTUDIO_GEMINI_SURVEY_MODELS.");
+                            "Model đã nhập không có trong Flash Survey Pool. Chọn Flash 3.8/3.6 hoặc điều chỉnh QTSTUDIO_GEMINI_SURVEY_MODELS.");
                     _summary.Text = "Flash Survey Pool: " + string.Join(", ", models.Select(model => model.Model));
                     // Google project scope, not QT Studio book ProjectId.
                     Guid quotaScope = GeminiSurveyProjectScope.Resolve(apiKey,
@@ -294,6 +300,45 @@ public sealed class BookIntelligenceReviewWindow : Window
             ApplyCommit(result); _summary.Text = "Đã lưu mục được xác nhận. Các mục khác vẫn ở hàng chờ.";
         }
         catch (Exception ex) { ShowFailure(ex); }
+    }
+
+    private static OllamaBackendProfile CreateGeminiFlashPoolProfile()
+    {
+        const string model = "gemini-3.8-flash";
+        return new OllamaBackendProfile
+        {
+            Id = GeminiFlashPoolProfileId,
+            Name = "Gemini Flash Pool",
+            Kind = OllamaBackendKind.Remote,
+            Model = model,
+            Runtime = AiRuntimeProfile.CreateDefault(model),
+            RemoteDisclosureAccepted = true
+        };
+    }
+
+    private void SelectSurveyBackend()
+    {
+        if (_loading || _profile.SelectedItem is not OllamaBackendProfile profile ||
+            profile.Id != GeminiFlashPoolProfileId) return;
+        try
+        {
+            _model.Text = GeminiSurveyPoolClient.ModelsFromSettings(
+                Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"))[0].Model;
+            ShowGeminiConfiguration();
+        }
+        catch (Exception ex) { ShowFailure(ex); }
+    }
+
+    private void ShowGeminiConfiguration()
+    {
+        IReadOnlyList<GeminiSurveyModel> models = GeminiSurveyPoolClient.ModelsFromSettings(
+            Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
+        int? maximumRequests = GeminiSurveyPoolClient.MaximumRequestsFromSettings(
+            Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS"));
+        bool hasKey = !string.IsNullOrWhiteSpace(GeminiApiKeyVault.ResolveForSurvey());
+        _summary.Text = $"Gemini Flash Pool: {string.Join(", ", models.Select(x => x.Model))} · " +
+            $"API key: {(hasKey ? "đã cấu hình" : "chưa cấu hình")} · " +
+            $"ngân sách: {(maximumRequests is int limit ? $"tối đa {limit} HTTP request/lần chạy" : "chưa đặt giới hạn")}.";
     }
 
     private async Task MergeSelectedAsync()
