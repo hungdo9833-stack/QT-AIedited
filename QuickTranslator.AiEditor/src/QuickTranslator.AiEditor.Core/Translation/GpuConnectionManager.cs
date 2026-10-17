@@ -30,7 +30,8 @@ public sealed class RemoteOllamaSetupService
     }
 
     public async Task<SshCommandResult> ExecuteConfirmedAsync(ISshSession session, RemoteSetupAction action,
-        bool confirmed, string? model = null, CancellationToken cancellationToken = default)
+        bool confirmed, string? model = null, CancellationToken cancellationToken = default,
+        string? sudoPassword = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (!confirmed) throw new InvalidOperationException("Thao tác provisioning cần người dùng xác nhận rõ ràng.");
@@ -42,10 +43,24 @@ public sealed class RemoteOllamaSetupService
             _ => throw new ArgumentOutOfRangeException(nameof(action))
         };
         SshCommandResult result = await session.ExecuteAsync(operation, model, cancellationToken).ConfigureAwait(false);
-        if (!result.Success && action == RemoteSetupAction.StartOllamaService &&
-            result.Error.Contains("password", StringComparison.OrdinalIgnoreCase))
-            return result with { Error = "Cần quyền sudo không tương tác. QT Studio không truyền password qua shell." };
-        return result;
+        if (result.Success || action == RemoteSetupAction.PullModel || !NeedsSudoPassword(result))
+            return result;
+        if (string.IsNullOrEmpty(sudoPassword))
+            return result with { Error = "SUDO_PASSWORD_REQUIRED: Ubuntu yêu cầu mật khẩu sudo để cài/khởi động Ollama." };
+        // The retry sends the secret via SSH stdin, not in the remote command or its arguments.
+        SshCommandResult retried = await session.ExecuteWithSudoPasswordAsync(operation, sudoPassword, cancellationToken)
+            .ConfigureAwait(false);
+        return retried.Success ? retried : retried with
+        {
+            Error = retried.Error.Contains("incorrect password", StringComparison.OrdinalIgnoreCase)
+                ? "Mật khẩu sudo không đúng hoặc tài khoản không đủ quyền."
+                : retried.Error
+        };
+    }
+
+    private static bool NeedsSudoPassword(SshCommandResult result) =>
+        !result.Success && (result.Error.Contains("password is required", StringComparison.OrdinalIgnoreCase) ||
+                            result.Error.Contains("a password is required", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string? Value(string text, string key)
