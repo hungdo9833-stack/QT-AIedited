@@ -122,6 +122,11 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
     {
         IntelligenceRelationshipSuggestion suggestion = state.Relationships.Single(x => x.Id == suggestionId);
         EnsureReviewable(suggestion.Status);
+        RelationshipLabelNormalizer.Kind classification =
+            RelationshipLabelNormalizer.Normalize(suggestion.Relationship).Classification;
+        if (classification is RelationshipLabelNormalizer.Kind.Event or RelationshipLabelNormalizer.Kind.Uncertain)
+            throw new InvalidOperationException(
+                "Đây là sự kiện/cảm xúc chưa xác nhận, không phải quan hệ ổn định. Hãy đối chiếu nguyên tác và sửa quan hệ trước khi duyệt.");
         await EnsureEvidenceCurrentAsync(state, suggestion.EvidenceIds, cancellationToken).ConfigureAwait(false);
         ProjectResources resources = await LoadExpectedAsync(expectedResourceRevision, cancellationToken).ConfigureAwait(false);
         KnowledgeRelationship? knowledge = suggestion.KnowledgeRelationshipId is Guid knowledgeId
