@@ -60,11 +60,10 @@ public sealed class OllamaBackendTests : IDisposable
 
         Assert.Equal(["translategemma:12b"], models);
         Assert.Equal("Bản dịch remote.", result.Text);
-        Assert.Equal(["/api/tags", "/api/tags", "/api/chat"], requests.Select(request => request.Path));
+        Assert.Equal(["/api/tags", "/api/chat"], requests.Select(request => request.Path));
         Assert.All(requests, request => Assert.Equal("Bearer secret-token", request.Authorization));
         Assert.Null(requests[0].Body);
-        Assert.Null(requests[1].Body);
-        Assert.Contains("synthetic-private-prompt", requests[2].Body, StringComparison.Ordinal);
+        Assert.Contains("synthetic-private-prompt", requests[1].Body, StringComparison.Ordinal);
     }
 
     [Fact]

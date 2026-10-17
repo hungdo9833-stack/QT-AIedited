@@ -17,6 +17,8 @@ public sealed class OllamaClient : IOllamaBackendClient, IJsonSchemaOllamaClient
     private readonly OllamaBackendKind _backendKind;
     private readonly string? _bearerToken;
     private readonly SemaphoreSlim _requestGate = new(1, 1);
+    private readonly Dictionary<string, DateTimeOffset> _verifiedModels = new(StringComparer.Ordinal);
+    private static readonly TimeSpan ModelPreflightLifetime = TimeSpan.FromMinutes(10);
 
     public OllamaClient(HttpClient httpClient, Uri? endpoint = null, bool ownsHttpClient = false)
         : this(httpClient, endpoint ?? DefaultEndpoint, OllamaBackendKind.Local, null, ownsHttpClient) { }
@@ -167,6 +169,7 @@ public sealed class OllamaClient : IOllamaBackendClient, IJsonSchemaOllamaClient
                 using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
+                    if (response.StatusCode == HttpStatusCode.NotFound) _verifiedModels.Remove(options.Model);
                     string detail = response.StatusCode == HttpStatusCode.NotFound
                         ? "Không tìm thấy model hoặc API. Kiểm tra tên model bằng ollama list."
                         : "Ollama không xử lý được yêu cầu. Kiểm tra Ollama và mức sử dụng bộ nhớ.";
@@ -215,7 +218,7 @@ public sealed class OllamaClient : IOllamaBackendClient, IJsonSchemaOllamaClient
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linked.CancelAfter(timeout);
-            try { await VerifyInstalledLocalModelAsync(model.Trim(), linked.Token).ConfigureAwait(false); }
+            try { await VerifyInstalledLocalModelAsync(model.Trim(), linked.Token, forceRefresh: true).ConfigureAwait(false); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (OperationCanceledException ex)
             {
@@ -240,8 +243,11 @@ public sealed class OllamaClient : IOllamaBackendClient, IJsonSchemaOllamaClient
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linked.CancelAfter(timeout);
             ModelList list = await ReadModelsAsync(linked.Token).ConfigureAwait(false);
-            return list.Models!.Where(IsInstalledModel).Select(model => model.Name ?? model.Model!)
+            string[] installed = list.Models!.Where(IsInstalledModel).Select(model => model.Name ?? model.Model!)
                 .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            foreach (string model in installed) _verifiedModels[model] = now;
+            return installed;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { throw new OllamaRequestException(OllamaErrorKind.Timeout, "Ollama không trả danh sách model đúng thời hạn."); }
@@ -250,13 +256,21 @@ public sealed class OllamaClient : IOllamaBackendClient, IJsonSchemaOllamaClient
         finally { _requestGate.Release(); }
     }
 
-    private async Task VerifyInstalledLocalModelAsync(string model, CancellationToken cancellationToken)
+    private async Task VerifyInstalledLocalModelAsync(string model, CancellationToken cancellationToken,
+        bool forceRefresh = false)
     {
+        if (!forceRefresh && _verifiedModels.TryGetValue(model, out DateTimeOffset checkedAt) &&
+            DateTimeOffset.UtcNow - checkedAt < ModelPreflightLifetime)
+            return;
         ModelList tags = await ReadModelsAsync(cancellationToken).ConfigureAwait(false);
         var installed = tags.Models!.FirstOrDefault(m => (m.Name == model || m.Model == model) && IsInstalledModel(m));
         if (installed is null)
+        {
+            _verifiedModels.Remove(model);
             throw new OllamaRequestException(OllamaErrorKind.Http,
                 "Model chưa sẵn sàng trên server đã chọn. Kiểm tra đúng tên bằng /api/tags hoặc ollama list; chưa gửi nguyên văn.");
+        }
+        _verifiedModels[model] = DateTimeOffset.UtcNow;
     }
 
     private async Task<ModelList> ReadModelsAsync(CancellationToken cancellationToken)

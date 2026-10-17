@@ -215,7 +215,7 @@ public sealed partial class TranslationService
             IBookKnowledgeContextProvider? provider;
             lock (_sync) provider = _bookKnowledgeContext;
             BookKnowledgeContextSnapshot? knowledge = provider?.GetSnapshot(context, selected);
-            string prompt = BuildPrompt(context, selected, entries, notes, preset, knowledge);
+            string prompt = BuildPrompt(context, selected, entries, notes, preset, options, knowledge);
             attempt = new()
             {
                 StartedAt = _clock.GetUtcNow(), Outcome = AttemptOutcome.InProgress,

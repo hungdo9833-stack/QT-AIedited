@@ -62,6 +62,29 @@ public sealed class OllamaClientTests
     }
 
     [Fact]
+    public async Task RepeatedSegmentsReuseSuccessfulModelPreflightWithoutSkippingCloudSafetyCheck()
+    {
+        int tagCalls = 0, chatCalls = 0;
+        using var http = new HttpClient(new FakeHandler((request, _) =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/api/tags")
+            {
+                tagCalls++;
+                return Task.FromResult(JsonResponse("{\"models\":[{\"name\":\"translategemma:12b\",\"size\":8000000000}]}"));
+            }
+            chatCalls++;
+            return Task.FromResult(JsonResponse("{\"message\":{\"content\":\"Bản dịch.\"},\"done\":true}"));
+        }, autoLocalTags: false)) { Timeout = Timeout.InfiniteTimeSpan };
+        using var client = new OllamaClient(http);
+
+        await client.TranslateAsync("đoạn một", new());
+        await client.TranslateAsync("đoạn hai", new());
+
+        Assert.Equal(1, tagCalls);
+        Assert.Equal(2, chatCalls);
+    }
+
+    [Fact]
     public async Task StructuredRequest_SendsJsonSchemaWithoutChangingNormalTranslationPayload()
     {
         using var http = new HttpClient(new FakeHandler(async (request, ct) =>

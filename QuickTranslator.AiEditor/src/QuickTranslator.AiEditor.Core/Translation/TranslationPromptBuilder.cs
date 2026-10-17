@@ -60,3 +60,11 @@ public sealed class TranslationPromptBuilder
             : characterConsistency.TrimEnd() + Environment.NewLine + Environment.NewLine + rendered;
     }
 }
+
+internal static class PromptTokenBudget
+{
+    // UTF-8 bytes / 3 is deliberately conservative for Chinese and Vietnamese prompts while
+    // avoiding a model-specific tokenizer dependency. The caller also reserves 128 tokens.
+    public static int Estimate(string value) =>
+        Math.Max(1, (Encoding.UTF8.GetByteCount(value) + 2) / 3);
+}

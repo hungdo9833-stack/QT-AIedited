@@ -98,6 +98,7 @@ public sealed record ProjectOpenResult(ProjectSession Session);
 
 public sealed class ProjectSession
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> _chapterOperationGates = new();
     internal SemaphoreSlim OperationGate { get; } = new(1, 1);
     internal SemaphoreSlim ResourceGate { get; } = new(1, 1);
     internal ProjectSession(string manifestPath, ProjectManifest manifest)
@@ -113,6 +114,8 @@ public sealed class ProjectSession
     public ProjectManifest Manifest { get; internal set; }
     public Persistence.ChapterFileStore ChapterStore { get; }
     public string Resolve(string relativePath) => ProjectPath.Resolve(RootDirectory, relativePath);
+    internal SemaphoreSlim GetChapterOperationGate(Guid chapterId) =>
+        _chapterOperationGates.GetOrAdd(chapterId, static _ => new SemaphoreSlim(1, 1));
 }
 
 internal static class ProjectPath

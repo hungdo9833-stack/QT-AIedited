@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using QuickTranslator.AiEditor.Core.Persistence;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Core.Projects;
 
@@ -134,7 +135,78 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
         return JsonSerializer.SerializeToUtf8Bytes(job,
             new JsonSerializerOptions(DocumentJson.Options) { WriteIndented = true });
     }
-    internal static ProjectTranslationJob Clone(ProjectTranslationJob job) =>
-        JsonSerializer.Deserialize<ProjectTranslationJob>(JsonSerializer.Serialize(job, DocumentJson.Options), DocumentJson.Options)!;
+    internal static ProjectTranslationJob Clone(ProjectTranslationJob job) => new()
+    {
+        SchemaVersion = job.SchemaVersion,
+        JobId = job.JobId,
+        ProjectId = job.ProjectId,
+        Revision = job.Revision,
+        Status = job.Status,
+        ModelOptions = job.ModelOptions with { },
+        Backend = job.Backend is null ? null : job.Backend with { },
+        PromptPreset = job.PromptPreset with { },
+        ProjectResourceRevision = job.ProjectResourceRevision,
+        CreatedAt = job.CreatedAt,
+        UpdatedAt = job.UpdatedAt,
+        CurrentChapterId = job.CurrentChapterId,
+        LastError = job.LastError,
+        Workers = job.Workers.Select(CloneWorker).ToList(),
+        Items = job.Items.Select(CloneItem).ToList()
+    };
+
+    private static ProjectTranslationWorkerState CloneWorker(ProjectTranslationWorkerState worker) => new()
+    {
+        WorkerId = worker.WorkerId,
+        ProfileId = worker.ProfileId,
+        Name = worker.Name,
+        Backend = worker.Backend with { },
+        ModelOptions = worker.ModelOptions with { },
+        SegmentationOptions = worker.SegmentationOptions with { },
+        BackendIdentity = worker.BackendIdentity,
+        Status = worker.Status,
+        CurrentChapterId = worker.CurrentChapterId,
+        CompletedChapters = worker.CompletedChapters,
+        FailedChapters = worker.FailedChapters,
+        CompletedHanCharacters = worker.CompletedHanCharacters,
+        ActiveSeconds = worker.ActiveSeconds,
+        InputTokens = worker.InputTokens,
+        OutputTokens = worker.OutputTokens,
+        EvaluationSeconds = worker.EvaluationSeconds,
+        ErrorSegments = worker.ErrorSegments,
+        TruncatedOutputCount = worker.TruncatedOutputCount,
+        PossibleMissingContentCount = worker.PossibleMissingContentCount,
+        TimeoutCount = worker.TimeoutCount,
+        HourlyPrice = worker.HourlyPrice,
+        LastError = worker.LastError
+    };
+
+    private static ProjectTranslationItem CloneItem(ProjectTranslationItem item) => new()
+    {
+        ChapterId = item.ChapterId,
+        Number = item.Number,
+        Order = item.Order,
+        Title = item.Title,
+        Status = item.Status,
+        SourceFingerprint = item.SourceFingerprint,
+        ProtectedFingerprint = item.ProtectedFingerprint,
+        AppliedSegmentationOptions = item.AppliedSegmentationOptions is null ? null : item.AppliedSegmentationOptions with { },
+        PreflightCompletedAt = item.PreflightCompletedAt,
+        PreflightWarning = item.PreflightWarning,
+        ChapterQueueRunId = item.ChapterQueueRunId,
+        AssignedWorkerId = item.AssignedWorkerId,
+        SourceHanCharacters = item.SourceHanCharacters,
+        TotalSegments = item.TotalSegments,
+        CompletedSegments = item.CompletedSegments,
+        ErrorSegments = item.ErrorSegments,
+        StartedAt = item.StartedAt,
+        FinishedAt = item.FinishedAt,
+        Error = item.Error,
+        WorkerMetricsRecorded = item.WorkerMetricsRecorded,
+        Disposition = item.Disposition,
+        EligibilityDiagnostics = item.EligibilityDiagnostics.Select(diagnostic => diagnostic with
+        {
+            ReasonCounts = new Dictionary<QueueEligibilityReason, int>(diagnostic.ReasonCounts)
+        }).ToList()
+    };
 
 }

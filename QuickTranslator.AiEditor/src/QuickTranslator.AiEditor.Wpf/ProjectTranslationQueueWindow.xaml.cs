@@ -89,7 +89,8 @@ public partial class ProjectTranslationQueueWindow : Window
     private void RefreshView()
     {
         if (_closed) return;
-        ProjectTranslationJob? job = _coordinator.CurrentJob ?? _plan;
+        ProjectTranslationViewSnapshot? view = _coordinator.GetViewSnapshot();
+        ProjectTranslationJob? job = view?.Job ?? _plan;
         if (job is null)
         {
             _rows.Clear();
@@ -97,7 +98,7 @@ public partial class ProjectTranslationQueueWindow : Window
             StatusText.Text = "Project chưa có translation job.";
             return;
         }
-        bool planMode = _plan?.Status == ProjectTranslationJobStatus.Draft && _coordinator.CurrentJob is null;
+        bool planMode = _plan?.Status == ProjectTranslationJobStatus.Draft && view is null;
         HeadingText.Text = planMode ? "Chuẩn bị dịch" : "Tiến độ dịch";
         BackendText.Text = job.Workers.Count > 0 ? string.Join(" + ", job.Workers.Select(worker => worker.Name)) :
             job.Backend is null ? "Local · cấu hình mặc định" : $"{job.Backend.Kind} · {job.Backend.ProfileName}";
@@ -109,7 +110,7 @@ public partial class ProjectTranslationQueueWindow : Window
         IReadOnlyList<ProjectTranslationWorkerProgress> workerProgress = planMode
             ? job.Workers.Select(worker => new ProjectTranslationWorkerProgress(worker.WorkerId,
                 worker.Name, worker.Status, null, null, 0, 0, 0, 0, 0, 0, null)).ToArray()
-            : _coordinator.GetWorkerProgress();
+            : view!.Workers;
         Dictionary<Guid, ProjectTranslationWorkerState> workerDefinitions = job.Workers
             .ToDictionary(worker => worker.WorkerId);
         WorkerCards.ItemsSource = workerProgress.Select(progress =>
@@ -119,7 +120,7 @@ public partial class ProjectTranslationQueueWindow : Window
         }).ToArray();
         ProjectTranslationProgress progress = planMode
             ? new(ProjectTranslationJobStatus.Draft, job.Items.Count, 0, 0, 0, job.Items.Count, null, null, 0, 0, null)
-            : _coordinator.GetProgress();
+            : view!.Progress;
         int needsReview = job.Items.Count(item => item.Status == ProjectTranslationItemStatus.NeedsReview);
         int skipped = job.Items.Count(item => item.Status is ProjectTranslationItemStatus.Skipped or ProjectTranslationItemStatus.Cancelled);
         int running = job.Items.Count(item => item.Status == ProjectTranslationItemStatus.Running);
@@ -137,7 +138,8 @@ public partial class ProjectTranslationQueueWindow : Window
             : $"Đang dịch: {progress.CurrentChapterTitle} · đoạn {progress.CurrentCompletedSegments}/{progress.CurrentTotalSegments}";
         if (job.Workers.Count > 0)
         {
-            ProjectTranslationAggregateMetrics metrics = _coordinator.GetAggregateMetrics();
+            ProjectTranslationAggregateMetrics metrics = planMode
+                ? new(0, null, 0) : view!.Aggregate;
             string eta = metrics.EstimatedRemaining is TimeSpan estimated
                 ? $"ETA {estimated:hh\\:mm\\:ss}" : "ETA đang học tốc độ";
             CurrentText.Text = $"Tốc độ {metrics.HanCharactersPerMinute:N0} chữ Hán/phút · {eta} · " +

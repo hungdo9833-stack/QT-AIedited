@@ -146,6 +146,39 @@ public sealed class TranslationServiceTests
     }
 
     [Fact]
+    public async Task PreviousUnapprovedDraftIsContextOnlyAndIsNeverOverwritten()
+    {
+        var (service, client, _, chapter) = Create();
+        string draft = "Bản nháp trước chưa duyệt cần dùng làm mạch văn.";
+        service.UpdateDraft(chapter.Segments[0].Id, draft);
+
+        await service.TranslateAsync(chapter.Segments[1].Id);
+
+        Assert.Contains(draft, client.Prompts.Single(), StringComparison.Ordinal);
+        Assert.Equal(draft, service.GetSnapshot().Segments[0].UserDraft);
+    }
+
+    [Fact]
+    public async Task PromptOptionalContextIsTrimmedToModelInputBudget()
+    {
+        var (service, client, _, chapter) = Create();
+        service = new TranslationService(chapter, client, new MemoryStore(), memory: new LongContextMemory());
+        var options = new ModelOptions { ContextSize = 1_024, MaximumOutputTokens = 256 };
+
+        await service.TranslateAsync(chapter.Segments[0].Id, options);
+
+        string prompt = client.Prompts.Single();
+        Assert.Contains(chapter.Segments[0].SourceText, prompt, StringComparison.Ordinal);
+        Assert.True(prompt.Length < 3_072, $"Prompt length {prompt.Length:N0} exceeded the bounded input budget.");
+    }
+
+    private sealed class LongContextMemory : IContextMemory
+    {
+        public ValueTask<string> GetNotesAsync(ChapterDocument chapter, Guid segmentId,
+            CancellationToken cancellationToken) => ValueTask.FromResult(new string('ữ', 20_000));
+    }
+
+    [Fact]
     public async Task DiskFailureAfterResponse_DoesNotLoseCompletedAiResultInMemory()
     {
         var (service, client, store, chapter) = Create();

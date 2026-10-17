@@ -68,47 +68,58 @@ public sealed partial class ProjectRepository
         Guid[] ids = chapterIds.Distinct().ToArray();
         if (ids.Length == 0) return;
         if (ids.Any(id => id == Guid.Empty)) throw new ArgumentException("ChapterId không hợp lệ.", nameof(chapterIds));
-        await session.OperationGate.WaitAsync(token).ConfigureAwait(false);
+        SemaphoreSlim[] chapterGates = ids.Order().Select(session.GetChapterOperationGate).ToArray();
+        int acquired = 0;
         try
         {
-            ProjectManifest after = Clone(session.Manifest);
-            ProjectChapterEntry[] entries = ids.Select(id => after.Chapters.SingleOrDefault(x =>
+            for (; acquired < chapterGates.Length; acquired++)
+                await chapterGates[acquired].WaitAsync(token).ConfigureAwait(false);
+            await session.OperationGate.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                ProjectManifest after = Clone(session.Manifest);
+                ProjectChapterEntry[] entries = ids.Select(id => after.Chapters.SingleOrDefault(x =>
                     x.ChapterId == id && (x.DeletedAt is not null) == restore)
-                ?? throw new FileNotFoundException($"Không tìm thấy chương {id:D} trong trạng thái cần chuyển.")).ToArray();
-            if (restore)
-            {
-                int[] collisions = after.Chapters.Where(x => x.DeletedAt is null).Select(x => x.Number)
-                    .Intersect(entries.Select(x => x.Number)).ToArray();
-                if (entries.GroupBy(x => x.Number).Any(group => group.Count() > 1) || collisions.Length > 0)
-                    throw new InvalidOperationException("Số chương đã được dùng; không thể phục hồi: " +
-                        string.Join(", ", collisions.Distinct().Order()));
+                    ?? throw new FileNotFoundException($"Không tìm thấy chương {id:D} trong trạng thái cần chuyển.")).ToArray();
+                if (restore)
+                {
+                    int[] collisions = after.Chapters.Where(x => x.DeletedAt is null).Select(x => x.Number)
+                        .Intersect(entries.Select(x => x.Number)).ToArray();
+                    if (entries.GroupBy(x => x.Number).Any(group => group.Count() > 1) || collisions.Length > 0)
+                        throw new InvalidOperationException("Số chương đã được dùng; không thể phục hồi: " +
+                            string.Join(", ", collisions.Distinct().Order()));
+                }
+                DateTimeOffset movedAt = DateTimeOffset.UtcNow;
+                foreach (ProjectChapterEntry entry in entries)
+                {
+                    token.ThrowIfCancellationRequested();
+                    string source = session.Resolve(entry.RelativePath);
+                    ChapterDocument chapter = await ChapterFileStore.ReadVerifiedFileAsync(source, token).ConfigureAwait(false);
+                    if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId)
+                        throw new InvalidDataException("File chương không thuộc liên kết manifest này.");
+                    string relative = restore ? $"Chapters/{entry.ChapterId:D}.qtaie.json"
+                        : $"Deleted/{movedAt:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}-{entry.ChapterId:D}.qtaie.json";
+                    string destination = session.Resolve(relative);
+                    await EnsureDestinationEmptyAsync(destination, token).ConfigureAwait(false);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Move(source, destination);
+                    entry.RelativePath = relative;
+                    entry.DeletedAt = restore ? null : movedAt;
+                }
+                if (restore) after.CurrentChapterId = entries[^1].ChapterId;
+                else if (after.CurrentChapterId is Guid current && ids.Contains(current))
+                    after.CurrentChapterId = after.Chapters.FirstOrDefault(x => x.DeletedAt is null)?.ChapterId;
+                NormalizeManifest(after);
+                await WriteFastManifestAsync(session.ManifestPath, after, token).ConfigureAwait(false);
+                session.Manifest = after;
+                PublishManifestCommitted(session, restore ? "RestoreDeletedChapters" : "SoftDeleteChapters");
             }
-            DateTimeOffset movedAt = DateTimeOffset.UtcNow;
-            foreach (ProjectChapterEntry entry in entries)
-            {
-                token.ThrowIfCancellationRequested();
-                string source = session.Resolve(entry.RelativePath);
-                ChapterDocument chapter = await ChapterFileStore.ReadVerifiedFileAsync(source, token).ConfigureAwait(false);
-                if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId)
-                    throw new InvalidDataException("File chương không thuộc liên kết manifest này.");
-                string relative = restore ? $"Chapters/{entry.ChapterId:D}.qtaie.json"
-                    : $"Deleted/{movedAt:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}-{entry.ChapterId:D}.qtaie.json";
-                string destination = session.Resolve(relative);
-                await EnsureDestinationEmptyAsync(destination, token).ConfigureAwait(false);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Move(source, destination);
-                entry.RelativePath = relative;
-                entry.DeletedAt = restore ? null : movedAt;
-            }
-            if (restore) after.CurrentChapterId = entries[^1].ChapterId;
-            else if (after.CurrentChapterId is Guid current && ids.Contains(current))
-                after.CurrentChapterId = after.Chapters.FirstOrDefault(x => x.DeletedAt is null)?.ChapterId;
-            NormalizeManifest(after);
-            await WriteFastManifestAsync(session.ManifestPath, after, token).ConfigureAwait(false);
-            session.Manifest = after;
-            PublishManifestCommitted(session, restore ? "RestoreDeletedChapters" : "SoftDeleteChapters");
+            finally { session.OperationGate.Release(); }
         }
-        finally { session.OperationGate.Release(); }
+        finally
+        {
+            for (int index = acquired - 1; index >= 0; index--) chapterGates[index].Release();
+        }
     }
 
     internal static ChapterDocument PrepareRegisteredChapter(ProjectSession session, ChapterDocument chapter, int number,

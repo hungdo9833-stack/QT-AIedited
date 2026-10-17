@@ -216,3 +216,7 @@ public sealed record ProjectTranslationWorkerProgress(Guid WorkerId, string Name
 
 public sealed record ProjectTranslationAggregateMetrics(double HanCharactersPerMinute,
     TimeSpan? EstimatedRemaining, decimal EstimatedCost);
+
+public sealed record ProjectTranslationViewSnapshot(ProjectTranslationJob Job,
+    ProjectTranslationProgress Progress, IReadOnlyList<ProjectTranslationWorkerProgress> Workers,
+    ProjectTranslationAggregateMetrics Aggregate);

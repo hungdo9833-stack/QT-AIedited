@@ -340,6 +340,11 @@ public sealed class ProjectTranslationCoordinator
     {
         ProjectTranslationJob? job = CurrentJob;
         if (job is null) return new(ProjectTranslationJobStatus.Draft, 0, 0, 0, 0, 0, null, null, 0, 0, null);
+        return CalculateProgress(job);
+    }
+
+    private static ProjectTranslationProgress CalculateProgress(ProjectTranslationJob job)
+    {
         ProjectTranslationItem? current = job.CurrentChapterId is Guid id
             ? job.Items.SingleOrDefault(item => item.ChapterId == id) : null;
         return new(job.Status, job.Items.Count,
@@ -355,6 +360,11 @@ public sealed class ProjectTranslationCoordinator
     {
         ProjectTranslationJob? job = CurrentJob;
         if (job is null) return [];
+        return CalculateWorkerProgress(job);
+    }
+
+    private static IReadOnlyList<ProjectTranslationWorkerProgress> CalculateWorkerProgress(ProjectTranslationJob job)
+    {
         return job.Workers.Select(worker =>
         {
             ProjectTranslationItem? current = worker.CurrentChapterId is Guid id
@@ -376,7 +386,12 @@ public sealed class ProjectTranslationCoordinator
     {
         ProjectTranslationJob? job = CurrentJob;
         if (job is null) return new(0, null, 0);
-        ProjectTranslationWorkerProgress[] workers = GetWorkerProgress().ToArray();
+        return CalculateAggregateMetrics(job, CalculateWorkerProgress(job));
+    }
+
+    private static ProjectTranslationAggregateMetrics CalculateAggregateMetrics(ProjectTranslationJob job,
+        IReadOnlyList<ProjectTranslationWorkerProgress> workers)
+    {
         double rate = workers.Sum(worker => worker.HanCharactersPerMinute);
         double remaining = job.Items.Where(item => item.Status is ProjectTranslationItemStatus.Pending or
             ProjectTranslationItemStatus.Running or ProjectTranslationItemStatus.Paused or
@@ -384,6 +399,14 @@ public sealed class ProjectTranslationCoordinator
                 item.SourceHanCharacters * Math.Max(0d, 1d - (double)item.CompletedSegments / item.TotalSegments));
         TimeSpan? eta = rate > 0 && remaining > 0 ? TimeSpan.FromMinutes(remaining / rate) : null;
         return new(rate, eta, workers.Sum(worker => worker.EstimatedCost));
+    }
+
+    public ProjectTranslationViewSnapshot? GetViewSnapshot()
+    {
+        ProjectTranslationJob? job = CurrentJob;
+        if (job is null) return null;
+        IReadOnlyList<ProjectTranslationWorkerProgress> workers = CalculateWorkerProgress(job);
+        return new(job, CalculateProgress(job), workers, CalculateAggregateMetrics(job, workers));
     }
 
     private Task LaunchAsync(ProjectTranslationJob job, bool isNew, bool retryFailed, CancellationToken cancellationToken,
@@ -1181,7 +1204,9 @@ public sealed class ProjectTranslationCoordinator
             {
                 proposed = ProjectTranslationJobStore.Clone(_job
                     ?? throw new InvalidOperationException("Translation job chưa được lưu."));
-                checkpointInterval = Math.Max(1, (proposed.Items.Count + 19) / 20);
+                // Persist roughly ten project-level progress checkpoints. Chapter files remain the
+                // authoritative per-segment checkpoints, and Pause/Stop/Finish always force a job save.
+                checkpointInterval = Math.Max(1, (proposed.Items.Count + 9) / 10);
             }
             update(proposed);
             proposed.Validate();
@@ -1214,6 +1239,9 @@ public sealed class ProjectTranslationCoordinator
             job.LastError = error;
             job.CurrentChapterId = null;
         }, CancellationToken.None).ConfigureAwait(false);
+        // Chapter files already contain every completed segment. Flush their accumulated summaries once
+        // at a durable queue boundary instead of rewriting the whole manifest for every segment/GPU.
+        await _repository.SaveManifestAsync(_session, CancellationToken.None).ConfigureAwait(false);
     }
 
     private static void UpdateItem(ProjectTranslationJob job, Guid chapterId, ChapterDocument chapter,

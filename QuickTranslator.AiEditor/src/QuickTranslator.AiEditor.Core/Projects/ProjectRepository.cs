@@ -93,19 +93,26 @@ public sealed partial class ProjectRepository
     public async Task UpdateChapterAsync(ProjectSession session, ChapterDocument chapter,
         CancellationToken cancellationToken = default)
     {
-        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        SemaphoreSlim chapterGate = session.GetChapterOperationGate(chapter.Id);
+        await chapterGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await WriteFastChapterCheckpointAsync(session, chapter, "UpdateChapter", cancellationToken)
-                .ConfigureAwait(false);
+            await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await WriteFastChapterCheckpointAsync(session, chapter, "UpdateChapter", cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally { session.OperationGate.Release(); }
         }
-        finally { session.OperationGate.Release(); }
+        finally { chapterGate.Release(); }
     }
 
     internal async Task UpdateTranslatedChapterAsync(ProjectSession session, ChapterDocument chapter,
         string expectedSource, string expectedProtected, CancellationToken cancellationToken)
     {
-        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        SemaphoreSlim chapterGate = session.GetChapterOperationGate(chapter.Id);
+        await chapterGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ProjectChapterEntry entry = session.Manifest.Chapters.SingleOrDefault(item =>
@@ -117,10 +124,27 @@ public sealed partial class ProjectRepository
                 ProjectTranslationFingerprints.Protected(current) != expectedProtected)
                 throw new InvalidOperationException(
                     "Chapter đã được sửa trong lúc AI đang xử lý; kết quả đến muộn không được ghi đè.");
-            await WriteFastChapterCheckpointAsync(session, chapter, "SaveTranslationProgress", cancellationToken)
-                .ConfigureAwait(false);
+            chapter.ProjectId = session.Manifest.ProjectId;
+            chapter.ChapterNumber = entry.Number;
+            chapter.CharacterProject.Id = session.Manifest.ProjectId;
+            byte[] chapterBytes = ChapterFileStore.SerializeDocument(chapter);
+            FaultPoint?.Invoke("BeforeTranslatedChapterWrite");
+            await session.ChapterStore.SaveSerializedAsync(chapter.Id, chapterBytes, cancellationToken).ConfigureAwait(false);
+            FaultPoint?.Invoke("AfterTranslatedChapterWrite");
+
+            // Segment results are durable in the chapter file. Keep the in-memory catalog summary fresh,
+            // but defer its single manifest write to the project-queue boundary.
+            await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                ProjectChapterEntry live = session.Manifest.Chapters.SingleOrDefault(item =>
+                    item.ChapterId == chapter.Id && item.DeletedAt is null)
+                    ?? throw new FileNotFoundException("Chapter đang dịch không còn active trong Project.");
+                CopySummary(live, chapter);
+            }
+            finally { session.OperationGate.Release(); }
         }
-        finally { session.OperationGate.Release(); }
+        finally { chapterGate.Release(); }
     }
 
     public async Task UpdateChapterSummaryAsync(ProjectSession session, ChapterDocument chapter,

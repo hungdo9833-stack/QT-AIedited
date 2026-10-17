@@ -52,7 +52,8 @@ public sealed partial class TranslationService
         var segment = chapter.Segments.Single(s => s.Id == segmentId);
         IBookKnowledgeContextProvider? provider;
         lock (_sync) provider = _bookKnowledgeContext;
-        return BuildPrompt(chapter, segment, [], "", preset, provider?.GetSnapshot(chapter, segment));
+        return BuildPrompt(chapter, segment, [], "", preset, chapter.DefaultModelOptions,
+            provider?.GetSnapshot(chapter, segment));
     }
 
     public CharacterConsistencySelection PreviewCharacterConsistency(Guid segmentId)
@@ -63,7 +64,7 @@ public sealed partial class TranslationService
     }
 
     private string BuildPrompt(ChapterDocument chapter, TranslationSegment segment, IReadOnlyList<GlossaryEntry> external,
-        string memory, PromptPreset preset, BookKnowledgeContextSnapshot? knowledge = null)
+        string memory, PromptPreset preset, ModelOptions options, BookKnowledgeContextSnapshot? knowledge = null)
     {
         CharacterConsistencySelection consistency = _characterConsistency.Select(chapter.CharacterProject, segment.SourceText);
         var confirmed = chapter.ConfirmedTerms.Where(t => segment.SourceText.Contains(t.Chinese, StringComparison.Ordinal) &&
@@ -71,18 +72,85 @@ public sealed partial class TranslationService
             .Select(t => new GlossaryEntry(t.Chinese, t.Vietnamese)).ToArray();
         // Explicitly confirmed spellings override optional provider entries. References stay short.
         var glossary = confirmed.Concat(external).DistinctBy(t => t.Chinese).Take(Math.Max(64, confirmed.Length)).ToArray();
-        string notes = chapter.ConfirmedContextNotes;
-        var previous = chapter.Segments.LastOrDefault(s => s.Order < segment.Order && s.Status == SegmentStatus.Approved);
-        if (previous is not null)
+        var contextBlocks = new List<string>();
+        var previous = chapter.Segments.LastOrDefault(s => s.Order < segment.Order &&
+            !string.IsNullOrWhiteSpace(s.EditableText));
+        if (previous is not null && !string.IsNullOrWhiteSpace(previous.EditableText))
         {
-            string approved = previous.Approvals.Last().Text;
-            var positions = System.Globalization.StringInfo.ParseCombiningCharacters(approved);
-            if (positions.Length > 200) approved = approved[..positions[200]];
-            notes += "\nPrevious human-approved excerpt (reference only): " + approved;
+            string previousText = previous.Status == SegmentStatus.Approved && previous.Approvals.Count > 0
+                ? previous.Approvals[^1].Text : previous.EditableText;
+            previousText = TakeTextElements(previousText, 200);
+            string source = previous.Status == SegmentStatus.Approved ? "human-approved" :
+                previous.UserDraft is not null ? "user draft, not approved" : "AI draft, not approved";
+            contextBlocks.Add($"Previous {source} excerpt (reference only; never overwrite user text): {previousText}");
         }
-        if (!string.IsNullOrWhiteSpace(memory)) notes += "\n" + memory;
-        if (!string.IsNullOrWhiteSpace(knowledge?.PromptBlock)) notes += "\n" + knowledge.PromptBlock;
-        return _prompts.Build(segment.SourceText, glossary, notes, preset, consistency.PromptBlock);
+        if (!string.IsNullOrWhiteSpace(chapter.ConfirmedContextNotes))
+            contextBlocks.Add(chapter.ConfirmedContextNotes);
+        if (!string.IsNullOrWhiteSpace(memory)) contextBlocks.Add(memory);
+        if (!string.IsNullOrWhiteSpace(knowledge?.PromptBlock)) contextBlocks.Add(knowledge.PromptBlock);
+        return BuildWithinTokenBudget(segment.SourceText, glossary, contextBlocks, preset,
+            consistency.PromptBlock, options);
+    }
+
+    private string BuildWithinTokenBudget(string source, IReadOnlyList<GlossaryEntry> glossary,
+        IReadOnlyList<string> contextBlocks, PromptPreset preset, string characterConsistency, ModelOptions options)
+    {
+        int budget = options.ContextSize - options.MaximumOutputTokens - 128;
+        string Build(IReadOnlyList<GlossaryEntry> terms, string context, string characters) =>
+            _prompts.Build(source, terms, context, preset, characters);
+        string minimal = Build([], "", "");
+        if (PromptTokenBudget.Estimate(minimal) > budget)
+            throw new InvalidOperationException(
+                "Đoạn nguồn và prompt vượt ngân sách context của model. Hãy tăng Context hoặc giảm kích thước segment.");
+
+        string characters = FitOptional(characterConsistency,
+            value => Build([], "", value), budget);
+        var selectedTerms = new List<GlossaryEntry>();
+        foreach (GlossaryEntry term in glossary)
+        {
+            selectedTerms.Add(term);
+            if (PromptTokenBudget.Estimate(Build(selectedTerms, "", characters)) <= budget) continue;
+            selectedTerms.RemoveAt(selectedTerms.Count - 1);
+            break;
+        }
+
+        string context = "";
+        foreach (string block in contextBlocks.Where(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            string separator = context.Length == 0 ? "" : Environment.NewLine;
+            string candidate = context + separator + block;
+            if (PromptTokenBudget.Estimate(Build(selectedTerms, candidate, characters)) <= budget)
+            {
+                context = candidate;
+                continue;
+            }
+            string fitted = FitOptional(block,
+                value => Build(selectedTerms, context + separator + value, characters), budget);
+            if (fitted.Length > 0) context += separator + fitted;
+            break;
+        }
+        return Build(selectedTerms, context, characters);
+    }
+
+    private static string FitOptional(string value, Func<string, string> build, int tokenBudget)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        if (PromptTokenBudget.Estimate(build(value)) <= tokenBudget) return value;
+        int low = 0, high = value.Length;
+        while (low < high)
+        {
+            int middle = low + (high - low + 1) / 2;
+            if (PromptTokenBudget.Estimate(build(value[..middle])) <= tokenBudget) low = middle;
+            else high = middle - 1;
+        }
+        if (low > 0 && low < value.Length && char.IsHighSurrogate(value[low - 1]) && char.IsLowSurrogate(value[low])) low--;
+        return value[..low].TrimEnd();
+    }
+
+    private static string TakeTextElements(string value, int count)
+    {
+        int[] positions = System.Globalization.StringInfo.ParseCombiningCharacters(value);
+        return positions.Length <= count ? value : value[..positions[count]];
     }
 
     public async Task RestoreDraftAsync(Guid segmentId, Guid versionId, bool approval,
