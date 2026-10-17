@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using QuickTranslator.AiEditor.Core.BookIntelligence;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
@@ -30,9 +31,9 @@ string root = Path.Combine(Path.GetTempPath(), "qtaie-book-survey-benchmark-" + 
 try
 {
     PipelineResult sequential = await RunPipelineAsync(Path.Combine(root, "sequential"), corpus,
-        concurrency: 1, simulatedLatencyMilliseconds);
+        concurrency: 1, simulatedLatencyMilliseconds, truth);
     PipelineResult parallel = await RunPipelineAsync(Path.Combine(root, "parallel"), corpus,
-        concurrency: 4, simulatedLatencyMilliseconds);
+        concurrency: 6, simulatedLatencyMilliseconds, truth);
     double speedup = parallel.WallMilliseconds <= 0 ? 0 :
         (double)sequential.WallMilliseconds / parallel.WallMilliseconds;
     var report = new
@@ -53,7 +54,7 @@ try
             outputTokenDelta = parallel.OutputTokens - sequential.OutputTokens,
             bothComplete = sequential.CompletionRatio == 1 && parallel.CompletionRatio == 1
         },
-        scannerQuality = new
+        deterministicScannerQuality = new
         {
             characterPrecision = quality.Characters.Precision,
             characterRecall = quality.Characters.Recall,
@@ -104,7 +105,7 @@ static List<CorpusChapterIndex> BuildCorpus(int chapterCount, int targetChars, s
 }
 
 static async Task<PipelineResult> RunPipelineAsync(string projectRoot, List<CorpusChapterIndex> corpus,
-    int concurrency, int latencyMilliseconds)
+    int concurrency, int latencyMilliseconds, IReadOnlySet<string> expectedCharacters)
 {
     var repository = new ProjectRepository();
     ProjectSession session = await repository.CreateAsync(projectRoot, $"Benchmark c{concurrency}");
@@ -115,7 +116,7 @@ static async Task<PipelineResult> RunPipelineAsync(string projectRoot, List<Corp
     state.Chapters = CloneCorpus(corpus);
     state = await store.SaveAsync(state);
     ProjectResources resources = await new ProjectResourceStore(session).LoadAsync();
-    var client = new BenchmarkSurveyClient(latencyMilliseconds);
+    var client = new BenchmarkSurveyClient(latencyMilliseconds, expectedCharacters);
     var watch = Stopwatch.StartNew();
     state = await new AdaptiveBookIntelligenceAnalyzer(client).AnalyzeAsync(session, state, store, resources,
         new ModelOptions { Model = "mock-gemini-survey", ContextSize = 32_768,
@@ -123,9 +124,25 @@ static async Task<PipelineResult> RunPipelineAsync(string projectRoot, List<Corp
     watch.Stop();
     long total = state.Evidence.LongCount(evidence => evidence.IsCurrent);
     long completed = state.Evidence.LongCount(evidence => evidence.IsCurrent && evidence.AiAnalyzed);
+    HashSet<string> extractedCharacters = state.Characters.Select(x => x.ChineseName)
+        .ToHashSet(StringComparer.Ordinal);
+    HashSet<string> extractedGlossary = state.Glossary.Select(x => x.Chinese)
+        .ToHashSet(StringComparer.Ordinal);
+    (double characterPrecision, double characterRecall) = PrecisionRecall(expectedCharacters, extractedCharacters);
+    (double glossaryPrecision, double glossaryRecall) = PrecisionRecall(
+        new HashSet<string>(["青云宗"], StringComparer.Ordinal), extractedGlossary);
     return new PipelineResult(concurrency, watch.ElapsedMilliseconds, state.Metrics.Requests,
         state.Metrics.InputTokens, state.Metrics.OutputTokens, completed, total,
-        total == 0 ? 1 : (double)completed / total, client.MaximumConcurrency, state.Revision);
+        total == 0 ? 1 : (double)completed / total, client.MaximumConcurrency, state.Revision,
+        extractedCharacters.Count, expectedCharacters.Count, characterPrecision, characterRecall,
+        extractedGlossary.Count, glossaryPrecision, glossaryRecall);
+}
+
+static (double Precision, double Recall) PrecisionRecall(IReadOnlySet<string> expected, IReadOnlySet<string> actual)
+{
+    int truePositive = actual.Count(expected.Contains);
+    return (actual.Count == 0 ? (expected.Count == 0 ? 1 : 0) : (double)truePositive / actual.Count,
+        expected.Count == 0 ? 1 : (double)truePositive / expected.Count);
 }
 
 static List<CorpusChapterIndex> CloneCorpus(List<CorpusChapterIndex> corpus) =>
@@ -139,12 +156,17 @@ static Guid DeterministicGuid(int value)
 
 internal sealed record PipelineResult(int Concurrency, long WallMilliseconds, long Requests,
     long InputTokens, long OutputTokens, long CompletedEvidence, long TotalEvidence,
-    double CompletionRatio, int MaximumObservedConcurrency, long FinalStateRevision);
+    double CompletionRatio, int MaximumObservedConcurrency, long FinalStateRevision,
+    int ExtractedCharacters, int ExpectedCharacters, double CharacterPrecision, double CharacterRecall,
+    int ExtractedGlossary, double GlossaryPrecision, double GlossaryRecall);
 
-internal sealed class BenchmarkSurveyClient(int latencyMilliseconds) : IOllamaClient
+internal sealed class BenchmarkSurveyClient(int latencyMilliseconds, IReadOnlySet<string> knownNames)
+    : IOllamaClient, IAdaptiveSurveyBatchClient
 {
     private int _active;
     private int _maximum;
+    public string CacheSignature => "mock-gemini-adaptive-v1";
+    public int TargetInputTokens => 40_000;
     public int MaximumConcurrency => Volatile.Read(ref _maximum);
 
     public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
@@ -158,11 +180,40 @@ internal sealed class BenchmarkSurveyClient(int latencyMilliseconds) : IOllamaCl
         try
         {
             if (latencyMilliseconds > 0) await Task.Delay(latencyMilliseconds, cancellationToken);
-            return new OllamaCompletion("{\"characters\":[],\"relationships\":[],\"glossary\":[]}", true, "stop",
+            var characters = new List<object>();
+            var glossary = new List<object>();
+            foreach (Match match in Regex.Matches(prompt,
+                @"EVIDENCE ([0-9a-f-]{36})[^\r\n]*\r?\n(.*?)(?=\r?\n\r?\nEVIDENCE |\z)",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline))
+            {
+                string evidenceId = match.Groups[1].Value;
+                string excerpt = match.Groups[2].Value;
+                foreach (string name in knownNames.Where(name => excerpt.Contains(name, StringComparison.Ordinal)))
+                    characters.Add(new
+                    {
+                        chinese_name = name, vietnamese_name = name, aliases = Array.Empty<string>(),
+                        gender = "unknown", primary_pronoun = "", secondary_pronoun = "",
+                        confidence = "proposed", evidence_ids = new[] { evidenceId }, reason = "benchmark truth"
+                    });
+                if (excerpt.Contains("青云宗", StringComparison.Ordinal))
+                    glossary.Add(new
+                    {
+                        chinese = "青云宗", vietnamese = "Thanh Vân Tông", category = "organization",
+                        context_dependent = false, confidence = "proposed",
+                        evidence_ids = new[] { evidenceId }, reason = "benchmark truth"
+                    });
+            }
+            string response = JsonSerializer.Serialize(new
+            {
+                characters,
+                relationships = Array.Empty<object>(),
+                glossary
+            });
+            return new OllamaCompletion(response, true, "stop",
                 new GenerationMetrics
                 {
                     InputTokens = Math.Max(1, (Encoding.UTF8.GetByteCount(prompt) + 2) / 3),
-                    OutputTokens = 12,
+                    OutputTokens = Math.Max(12, (Encoding.UTF8.GetByteCount(response) + 2) / 3),
                     ClientElapsed = watch.Elapsed
                 });
         }

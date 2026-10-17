@@ -52,6 +52,31 @@ public sealed class GeminiSurveyPoolTests
     }
 
     [Fact]
+    public async Task Stress_load_never_exceeds_per_model_or_pool_in_flight_limits()
+    {
+        var concurrency = new System.Collections.Concurrent.ConcurrentDictionary<string, ModelConcurrency>();
+        using var pool = new GeminiSurveyPoolClient(Models, model => new DelegateClient(async options =>
+        {
+            ModelConcurrency counter = concurrency.GetOrAdd(model.Model, _ => new());
+            counter.Enter();
+            try
+            {
+                await Task.Delay(15);
+                return Done();
+            }
+            finally { counter.Exit(); }
+        }), () => DateTimeOffset.UtcNow);
+
+        var options = new ModelOptions { Model = "gemini-3.8-flash" };
+        await Task.WhenAll(Enumerable.Range(0, 60).Select(index =>
+            pool.TranslateStructuredAsync("Đọc nguyên tác " + index, options, Schema)));
+
+        Assert.Equal(3, concurrency.Count);
+        Assert.All(concurrency.Values, counter => Assert.InRange(counter.Maximum, 1, 2));
+        Assert.InRange(concurrency.Values.Sum(counter => counter.Maximum), 3, pool.RecommendedConcurrency);
+    }
+
+    [Fact]
     public async Task Rpd_on_one_model_routes_unfinished_batch_to_another()
     {
         var seen = new List<string>();
@@ -152,5 +177,22 @@ public sealed class GeminiSurveyPoolTests
 
         public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
             JsonElement responseSchema, CancellationToken cancellationToken = default) => run(options);
+    }
+
+    private sealed class ModelConcurrency
+    {
+        private int _active;
+        private int _maximum;
+        public int Maximum => Volatile.Read(ref _maximum);
+
+        public void Enter()
+        {
+            int active = Interlocked.Increment(ref _active);
+            int observed;
+            do { observed = _maximum; }
+            while (active > observed && Interlocked.CompareExchange(ref _maximum, active, observed) != observed);
+        }
+
+        public void Exit() => Interlocked.Decrement(ref _active);
     }
 }

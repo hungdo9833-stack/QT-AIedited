@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using QuickTranslator.AiEditor.Core.BookIntelligence;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
@@ -7,7 +9,7 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
 
-public sealed class BookSurveyConcurrencyTests : IDisposable
+public sealed partial class BookSurveyConcurrencyTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(),
         "qtaie-survey-concurrency-" + Guid.NewGuid().ToString("N"));
@@ -54,6 +56,31 @@ public sealed class BookSurveyConcurrencyTests : IDisposable
         Assert.All(completed.Evidence, evidence => Assert.True(evidence.AiAnalyzed));
         Assert.Equal(2, completed.CompletedAnalysisKeys.Count);
         Assert.Empty(completed.LastError);
+    }
+
+    [Fact]
+    public async Task Adaptive_parallel_stress_preserves_every_evidence_exactly_once()
+    {
+        const int evidenceCount = 240;
+        (ProjectSession session, BookIntelligenceStore store, ProjectResources resources, BookIntelligenceState state) =
+            await ScenarioAsync(evidenceCount, concurrency: 6);
+        var client = new EvidenceEchoSurveyClient();
+
+        BookIntelligenceState completed = await new AdaptiveBookIntelligenceAnalyzer(client)
+            .AnalyzeAsync(session, state, store, resources, Options() with
+            {
+                ContextSize = 65_536,
+                MaximumOutputTokens = 8_192
+            });
+
+        Assert.Equal(6, client.MaximumConcurrency);
+        Assert.Equal(evidenceCount, completed.Evidence.Count(x => x.AiAnalyzed && x.ImportantFinding));
+        Assert.Equal(evidenceCount, completed.Characters.Count);
+        Guid[] referenced = completed.Characters.SelectMany(x => x.EvidenceIds).ToArray();
+        Assert.Equal(evidenceCount, referenced.Length);
+        Assert.Equal(evidenceCount, referenced.Distinct().Count());
+        Assert.Equal(completed.Evidence.Select(x => x.Id).Order(), referenced.Order());
+        Assert.Equal(completed.Revision, (await store.LoadAsync()).Revision);
     }
 
     private async Task<(ProjectSession, BookIntelligenceStore, ProjectResources, BookIntelligenceState)> ScenarioAsync(
@@ -131,5 +158,51 @@ public sealed class BookSurveyConcurrencyTests : IDisposable
             }
             finally { Interlocked.Decrement(ref _active); }
         }
+    }
+
+    private sealed partial class EvidenceEchoSurveyClient : IOllamaClient, IAdaptiveSurveyBatchClient
+    {
+        private int _active;
+        private int _maximum;
+        public string CacheSignature => "stress-adaptive-v1";
+        public int TargetInputTokens => 40_000;
+        public int MaximumConcurrency => Volatile.Read(ref _maximum);
+
+        public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            int active = Interlocked.Increment(ref _active);
+            int observed;
+            do { observed = _maximum; }
+            while (active > observed && Interlocked.CompareExchange(ref _maximum, active, observed) != observed);
+            try
+            {
+                await Task.Delay(10, cancellationToken);
+                var characters = EvidencePattern().Matches(prompt).Select(match => new
+                {
+                    chinese_name = match.Groups[2].Value,
+                    vietnamese_name = match.Groups[2].Value,
+                    aliases = Array.Empty<string>(),
+                    gender = "unknown",
+                    primary_pronoun = "",
+                    secondary_pronoun = "",
+                    confidence = "proposed",
+                    evidence_ids = new[] { match.Groups[1].Value },
+                    reason = "stress fixture"
+                });
+                string response = JsonSerializer.Serialize(new
+                {
+                    characters,
+                    relationships = Array.Empty<object>(),
+                    glossary = Array.Empty<object>()
+                });
+                return new OllamaCompletion(response, true, "stop",
+                    new GenerationMetrics { InputTokens = PromptTokenBudget.Estimate(prompt), OutputTokens = 100 });
+            }
+            finally { Interlocked.Decrement(ref _active); }
+        }
+
+        [GeneratedRegex(@"EVIDENCE ([0-9a-f-]{36})[^\r\n]*\r?\n(人物\d+)说道", RegexOptions.IgnoreCase)]
+        private static partial Regex EvidencePattern();
     }
 }

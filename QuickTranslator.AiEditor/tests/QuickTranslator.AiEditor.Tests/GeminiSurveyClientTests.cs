@@ -60,7 +60,7 @@ public sealed class GeminiSurveyClientTests
         }));
         using var http = new HttpClient(handler);
         using var client = new GeminiSurveyClient(http, "test-secret", new(15, 250_000, 500), Guid.NewGuid());
-        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+        var failure = await Assert.ThrowsAsync<GeminiSurveyHttpException>(
             () => client.TranslateAsync("Xin chào", new ModelOptions { Model = "gemini-3.5-flash-lite" }));
         Assert.DoesNotContain("test-secret", failure.ToString());
         Assert.Contains("HTTP 401", failure.Message);
@@ -201,7 +201,7 @@ public sealed class GeminiSurveyClientTests
             quota, () => now, static (_, _) => Task.CompletedTask);
 
         await limited.TranslateAsync("Một", Options());
-        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var failure = await Assert.ThrowsAsync<GeminiDailyQuotaExceededException>(() =>
             limited.TranslateAsync("Hai", Options()));
         await anotherModel.TranslateAsync("Ba", Options() with { Model = "gemini-3.5-flash" });
 

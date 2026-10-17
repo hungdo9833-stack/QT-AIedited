@@ -26,6 +26,7 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
 {
     private readonly List<Slot> _slots;
     private readonly object _sync = new();
+    private readonly SemaphoreSlim _availability = new(0);
     private readonly Func<DateTimeOffset> _utcNow;
     private int _next;
     private bool _disposed;
@@ -98,7 +99,7 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Slot? selected = Reserve(attempted);
+            Slot? selected = await ReserveAsync(attempted, cancellationToken).ConfigureAwait(false);
             if (selected is null)
                 throw new InvalidOperationException(
                     "Không còn model Flash khả dụng trong Pool. Giữ nguyên batch chưa hoàn thành để tiếp tục sau; kiểm tra model/quota.");
@@ -131,24 +132,33 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
             finally
             {
                 lock (_sync) selected.Active--;
+                _availability.Release();
             }
         }
     }
 
-    private Slot? Reserve(HashSet<string> attempted)
+    private async Task<Slot?> ReserveAsync(HashSet<string> attempted, CancellationToken cancellationToken)
     {
-        lock (_sync)
+        while (true)
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(GeminiSurveyPoolClient));
-            DateTimeOffset now = _utcNow();
-            Slot[] available = _slots.Where(x => !x.Disabled && x.CooldownUntil <= now &&
-                !attempted.Contains(x.Model.Model)).ToArray();
-            if (available.Length == 0) return null;
-            int fewest = available.Min(x => x.Active);
-            Slot[] candidates = available.Where(x => x.Active == fewest).ToArray();
-            Slot chosen = candidates[(_next++ & int.MaxValue) % candidates.Length];
-            chosen.Active++;
-            return chosen;
+            lock (_sync)
+            {
+                if (_disposed) throw new ObjectDisposedException(nameof(GeminiSurveyPoolClient));
+                DateTimeOffset now = _utcNow();
+                Slot[] viable = _slots.Where(x => !x.Disabled && x.CooldownUntil <= now &&
+                    !attempted.Contains(x.Model.Model)).ToArray();
+                if (viable.Length == 0) return null;
+                Slot[] available = viable.Where(x => x.Active < x.Model.Limits.MaxInFlight).ToArray();
+                if (available.Length > 0)
+                {
+                    int fewest = available.Min(x => x.Active);
+                    Slot[] candidates = available.Where(x => x.Active == fewest).ToArray();
+                    Slot chosen = candidates[(_next++ & int.MaxValue) % candidates.Length];
+                    chosen.Active++;
+                    return chosen;
+                }
+            }
+            await _availability.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -160,6 +170,7 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
             _disposed = true;
             foreach (Slot slot in _slots)
                 (slot.Client as IDisposable)?.Dispose();
+            _availability.Dispose();
         }
     }
 
