@@ -23,6 +23,11 @@ public sealed class CorpusEvidence
     public bool IsAuditSample { get; set; }
     public bool AuditExpanded { get; set; }
     public bool AiAnalyzed { get; set; }
+    // Explicit Google provider block: this excerpt was NOT analyzed or approved.
+    // Keep it distinct from AiAnalyzed; Resume skips it and a deliberate resurvey
+    // resets the flag. No sensitive response content is persisted.
+    public bool AiBlocked { get; set; }
+    public string AiBlockReason { get; set; } = "";
     public bool ImportantFinding { get; set; }
     public List<string> CandidateNames { get; set; } = [];
 }
