@@ -23,7 +23,7 @@ public sealed class GeminiSurveyClientTests
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"candidates":[{"content":{"parts":[{"text":"{\\\"characters\\\":[]}"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":25}}""",
+                    """{"candidates":[{"content":{"parts":[{"text":"{\"characters\":[]}"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":25}}""",
                     Encoding.UTF8, "application/json")
             };
         });
