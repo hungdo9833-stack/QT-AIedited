@@ -281,7 +281,21 @@ public partial class MainWindow
                 if (_gpuConnections.TryGetConnection(remote.Id, out GpuConnectionHandle? existing) &&
                     existing is { IsConnected: true })
                     continue;
-                GpuConnectionHandle connection = await _gpuConnections.ConnectAsync(remote);
+                GpuConnectionHandle connection;
+                try
+                {
+                    connection = await _gpuConnections.ConnectAsync(remote);
+                }
+                catch (SshHostKeyVerificationException)
+                {
+                    throw;
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    throw new InvalidOperationException(
+                        $"Không thể khôi phục GPU Remote “{remote.Name}”. Job vẫn được giữ nguyên để tiếp tục sau khi kết nối lại.",
+                        error);
+                }
                 await _ollamaBackends.AttachRuntimeClientAsync(remote.Id, connection.Client);
             }
         }

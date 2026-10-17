@@ -47,19 +47,25 @@ internal static class StaHost
 
 internal sealed class WorkspaceFixture : IDisposable
 {
-    public string Root { get; } = Path.Combine(Path.GetTempPath(), "qtaie-safety-wpf-" + Guid.NewGuid().ToString("N"));
+    private readonly bool _deleteRoot;
+    public string Root { get; }
     public MainWindow Window { get; }
+    public OllamaBackendManager BackendManager { get; }
     public ProjectRepository Repository { get; } = new();
     public FakeClient Client { get; } = new();
     public ProjectSession Project { get; private set; } = null!;
     public TranslationService Service => Get<TranslationService>("_service");
 
-    public WorkspaceFixture()
+    public WorkspaceFixture(string? root = null, OllamaBackendManager? backendManager = null,
+        GpuConnectionManager? gpuConnections = null, bool deleteRoot = true)
     {
+        Root = root ?? Path.Combine(Path.GetTempPath(), "qtaie-safety-wpf-" + Guid.NewGuid().ToString("N"));
+        _deleteRoot = deleteRoot;
         Directory.CreateDirectory(Root);
-        var backendManager = new OllamaBackendManager(
+        BackendManager = backendManager ?? new OllamaBackendManager(
             new OllamaProfileStore(Path.Combine(Root, "app", "ollama-profiles.json"), new TestProtector()));
-        Window = new MainWindow(null, initializeApplication: false, backendManager) { WorkspaceConfirmation = (_, _) => true };
+        Window = new MainWindow(null, initializeApplication: false, BackendManager, gpuConnections)
+            { WorkspaceConfirmation = (_, _) => true };
         Set("_store", new ChapterFileStore(Path.Combine(Root, "Standalone")));
         Set("_presetStore", new PromptPresetStore(Path.Combine(Root, "app", "presets.qtaip.json")));
         Set("_readerStore", new ReaderPreferencesStore(Path.Combine(Root, "app", "reader.json")));
@@ -74,6 +80,19 @@ internal sealed class WorkspaceFixture : IDisposable
     public async Task CreateProjectAsync()
     {
         Project = await Repository.CreateAsync(Path.Combine(Root, "Novel"), "Truyện thử tổng hợp");
+        await AttachProjectAsync();
+    }
+
+    public async Task OpenProjectAsync()
+    {
+        string manifestPath = Directory.GetFiles(Path.Combine(Root, "Novel"), "*.qtproj",
+            SearchOption.TopDirectoryOnly).Single();
+        Project = (await Repository.OpenAsync(manifestPath)).Session;
+        await AttachProjectAsync();
+    }
+
+    private async Task AttachProjectAsync()
+    {
         Set("_projectSession", Project);
         Set("_store", Project.ChapterStore);
         Set("_presetStore", new PromptPresetStore(Project.Resolve(Project.Manifest.Files.PromptPresets)));
@@ -112,6 +131,8 @@ internal sealed class WorkspaceFixture : IDisposable
         { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw(); throw; }
     }
     public Task TaskCall(string method, params object?[] arguments) => (Task)Call(method, arguments)!;
+    public async Task<T> TaskCall<T>(string method, params object?[] arguments) =>
+        await (Task<T>)Call(method, arguments)!;
 
     public void Dispose()
     {
@@ -124,7 +145,7 @@ internal sealed class WorkspaceFixture : IDisposable
         if (!resolved.StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase) ||
             !Path.GetFileName(resolved).StartsWith("qtaie-safety-wpf-", StringComparison.Ordinal))
             throw new InvalidOperationException("Refusing to clean outside the synthetic test root.");
-        Directory.Delete(resolved, recursive: true);
+        if (_deleteRoot) Directory.Delete(resolved, recursive: true);
     }
 
     private sealed class TestProtector : IOllamaSecretProtector

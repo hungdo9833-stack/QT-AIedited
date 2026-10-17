@@ -18,7 +18,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 public partial class MainWindow : Window
 {
     private readonly OllamaBackendManager _ollamaBackends;
-    private readonly GpuConnectionManager _gpuConnections = new();
+    private readonly GpuConnectionManager _gpuConnections;
     private readonly GpuTranslationPreferences _gpuPreferences = new();
     private readonly IOllamaClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
@@ -34,13 +34,15 @@ public partial class MainWindow : Window
 
     private readonly string? _startupProjectPath;
 
-    public MainWindow(string? startupProjectPath = null) : this(startupProjectPath, initializeApplication: true, null) { }
+    public MainWindow(string? startupProjectPath = null) : this(startupProjectPath, initializeApplication: true, null, null) { }
 
     // Integration tests construct controls on an STA dispatcher without loading any real user stores.
-    internal MainWindow(string? startupProjectPath, bool initializeApplication, OllamaBackendManager? ollamaBackends = null)
+    internal MainWindow(string? startupProjectPath, bool initializeApplication,
+        OllamaBackendManager? ollamaBackends = null, GpuConnectionManager? gpuConnections = null)
     {
         _startupProjectPath = startupProjectPath;
         _ollamaBackends = ollamaBackends ?? new OllamaBackendManager();
+        _gpuConnections = gpuConnections ?? new GpuConnectionManager();
         _translationClient = _ollamaBackends;
         InitializeComponent();
         ClampWindowToWorkArea(this, 1600, 950);

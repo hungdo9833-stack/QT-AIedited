@@ -719,6 +719,59 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task Paused_parallel_job_reopens_with_same_workers_segment_progress_and_models_before_resume()
+    {
+        await WithProjectAsync(6, async context =>
+        {
+            var local = new ParallelFakeClient("local", new(), 0) { BlockFirst = true };
+            var remote = new ParallelFakeClient("remote", new(), 0) { BlockFirst = true };
+            ProjectTranslationWorkerDefinition[] original = Workers(context, local, remote);
+            original[0] = original[0] with { BackendIdentity = "local:verified" };
+            ModelOptions remoteOptions = original[1].ModelOptions with { Model = "index-translate:9b" };
+            original[1] = original[1] with
+            {
+                Backend = original[1].Backend with { Model = remoteOptions.Model },
+                ModelOptions = remoteOptions,
+                BackendIdentity = "remote:ssh-verified"
+            };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, original,
+                context.LoadEnvironment);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await Task.WhenAll(local.FirstStarted.Task, remote.FirstStarted.Task).WaitAsync(TimeSpan.FromSeconds(5));
+
+            Task pause = coordinator.PauseAsync();
+            local.Release.TrySetResult();
+            remote.Release.TrySetResult();
+            await pause;
+            await run;
+            ProjectTranslationJob checkpoint = coordinator.CurrentJob!;
+            int completedSegments = checkpoint.Items.Sum(item => item.CompletedSegments);
+            Guid[] workerIds = checkpoint.Workers.Select(worker => worker.WorkerId).ToArray();
+            string[] models = checkpoint.Workers.Select(worker => worker.ModelOptions.Model).ToArray();
+
+            var reopenedLocal = new ParallelFakeClient("local reopened", new(), 0);
+            var reopenedRemote = new ParallelFakeClient("remote reopened", new(), 0);
+            ProjectTranslationWorkerDefinition[] reopenedDefinitions =
+            [original[0] with { Client = reopenedLocal }, original[1] with { Client = reopenedRemote }];
+            var reopened = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                reopenedDefinitions, context.LoadEnvironment, new ProjectTranslationJobStore(context.Session));
+            ProjectTranslationJob restored = Assert.IsType<ProjectTranslationJob>(await reopened.LoadAsync());
+
+            Assert.Equal(ProjectTranslationJobStatus.Paused, restored.Status);
+            Assert.Equal(workerIds, restored.Workers.Select(worker => worker.WorkerId));
+            Assert.Equal(models, restored.Workers.Select(worker => worker.ModelOptions.Model));
+            Assert.Equal(completedSegments, restored.Items.Sum(item => item.CompletedSegments));
+
+            await reopened.ResumeAsync();
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, reopened.CurrentJob!.Status);
+            Assert.Equal(6, reopened.CurrentJob.Items.Sum(item => item.CompletedSegments));
+            Assert.Equal(workerIds, reopened.CurrentJob.Workers.Select(worker => worker.WorkerId));
+            Assert.Equal(models, reopened.CurrentJob.Workers.Select(worker => worker.ModelOptions.Model));
+        });
+    }
+
+    [Fact]
     public async Task Paused_parallel_job_switches_to_one_confirmed_worker_without_creating_new_job()
     {
         await WithProjectAsync(4, async context =>
