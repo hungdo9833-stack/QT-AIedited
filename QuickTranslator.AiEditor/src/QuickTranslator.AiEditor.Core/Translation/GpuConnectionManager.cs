@@ -61,7 +61,6 @@ public sealed class RemoteOllamaSetupService
     private static bool NeedsSudoPassword(SshCommandResult result) =>
         !result.Success && (result.Error.Contains("password is required", StringComparison.OrdinalIgnoreCase) ||
                             result.Error.Contains("a password is required", StringComparison.OrdinalIgnoreCase));
-    }
 
     private static string? Value(string text, string key)
     {
