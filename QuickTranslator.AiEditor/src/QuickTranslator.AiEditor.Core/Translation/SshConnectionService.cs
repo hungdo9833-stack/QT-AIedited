@@ -31,6 +31,10 @@ public interface ISshSession : IAsyncDisposable
     bool IsConnected { get; }
     Task<SshCommandResult> ExecuteAsync(SshOperation operation, string? argument = null,
         CancellationToken cancellationToken = default);
+    // Only setup operations may request sudo credentials; default keeps existing test doubles compatible.
+    Task<SshCommandResult> ExecuteWithSudoPasswordAsync(SshOperation operation, string password,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<SshCommandResult>(new NotSupportedException("SSH session does not support sudo via stdin."));
     Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort, CancellationToken cancellationToken = default);
 }
 
@@ -123,6 +127,37 @@ public sealed class SshConnectionService : ISshConnectionService
             return new(command.ExitStatus ?? -1, command.Result ?? "", command.Error ?? "");
         }
 
+        public async Task<SshCommandResult> ExecuteWithSudoPasswordAsync(SshOperation operation, string password,
+            CancellationToken cancellationToken = default)
+        {
+            if (!IsConnected) throw new InvalidOperationException("SSH chưa kết nối.");
+            if (operation is not (SshOperation.InstallOllamaUbuntu or SshOperation.StartOllamaService))
+                throw new InvalidOperationException("Chỉ thao tác cài/khởi động Ollama mới được dùng sudo.");
+            if (string.IsNullOrEmpty(password) || password.Contains('\n') || password.Contains('\r'))
+                throw new ArgumentException("Mật khẩu sudo không hợp lệ.", nameof(password));
+
+            // Password is written to the SSH command stdin, never to the remote command text,
+            // process arguments, shell history, profile files or diagnostics.
+            using SshCommand command = client.CreateCommand(SshCommands.Resolve(operation, sudoStdin: true), Encoding.UTF8);
+            Task executing = command.ExecuteAsync(cancellationToken);
+            using (Stream input = command.CreateInputStream())
+            {
+                byte[] secretBytes = Encoding.UTF8.GetBytes(password + "\n");
+                try
+                {
+                    await input.WriteAsync(secretBytes, cancellationToken).ConfigureAwait(false);
+                    await input.FlushAsync(cancellationToken).ConfigureAwait(false);
+                }
+                finally { CryptographicOperations.ZeroMemory(secretBytes); }
+            }
+            await executing.ConfigureAwait(false);
+            return new(command.ExitStatus ?? -1, Redact(command.Result ?? "", password),
+                Redact(command.Error ?? "", password));
+        }
+
+        private static string Redact(string value, string secret) =>
+            value.Replace(secret, "[redacted]", StringComparison.Ordinal);
+
         public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort,
             CancellationToken cancellationToken = default)
         {
@@ -176,7 +211,7 @@ public sealed class SshConnectionService : ISshConnectionService
 
 internal static partial class SshCommands
 {
-    public static string Resolve(SshOperation operation, string? argument = null) => operation switch
+    public static string Resolve(SshOperation operation, string? argument = null, bool sudoStdin = false) => operation switch
     {
         SshOperation.ReadOperatingSystem => "cat /etc/os-release",
         SshOperation.ReadNvidiaGpu => "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits",
@@ -185,9 +220,11 @@ internal static partial class SshCommands
         SshOperation.ReadOllamaService => "systemctl is-active ollama",
         SshOperation.ListOllamaModels => "ollama list",
         SshOperation.InstallOllamaUbuntu => "curl -fsSL https://ollama.com/install.sh -o /tmp/qt-studio-ollama-install.sh && " +
-            "if [ \"$(id -u)\" -eq 0 ]; then sh /tmp/qt-studio-ollama-install.sh; else sudo -n sh /tmp/qt-studio-ollama-install.sh; fi; " +
+            "if [ \"$(id -u)\" -eq 0 ]; then sh /tmp/qt-studio-ollama-install.sh; else " +
+            (sudoStdin ? "sudo -S -p ''" : "sudo -n") + " sh /tmp/qt-studio-ollama-install.sh; fi; " +
             "code=$?; rm -f /tmp/qt-studio-ollama-install.sh; exit $code",
-        SshOperation.StartOllamaService => "sudo -n systemctl enable --now ollama",
+        SshOperation.StartOllamaService =>
+            (sudoStdin ? "sudo -S -p ''" : "sudo -n") + " systemctl enable --now ollama",
         SshOperation.PullOllamaModel => "ollama pull " + QuoteModel(argument),
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
     };
