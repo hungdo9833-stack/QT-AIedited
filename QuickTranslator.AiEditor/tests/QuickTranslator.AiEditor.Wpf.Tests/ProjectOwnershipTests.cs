@@ -1,3 +1,4 @@
+using System.IO;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
@@ -82,6 +83,8 @@ public sealed class ProjectOwnershipTests
         await fixture.TaskCall("LoadProjectAssetsAsync");
         var firstManager = fixture.Get<PromptPresetManager>("_presetManager");
         Assert.Equal(custom.Id, firstManager.Selected.Id);
+        fixture.Call("SelectChapterPreset", PromptPreset.Default);
+        Assert.Equal(custom.Id, fixture.Get<PromptPresetManager>("_presetManager").Selected.Id);
         var environment = await fixture.TaskCall<ProjectTranslationEnvironment>(
             "LoadProjectTranslationEnvironmentAsync", first, CancellationToken.None);
         Assert.Equal(custom.Id, environment.PromptPreset.Id);

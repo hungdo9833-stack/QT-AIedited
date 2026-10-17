@@ -258,6 +258,7 @@ public partial class MainWindow
             {
                 _presetManager = working;
                 await _presetStore.SaveAsync(_presetManager.Snapshot());
+                await SaveProjectPresetSelectionAsync();
                 RefreshPresetEditor();
                 SetStatus("Đã lưu thư viện preset cục bộ. Snapshot của các lần dịch cũ không đổi.");
             }

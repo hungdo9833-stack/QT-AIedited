@@ -8,7 +8,7 @@ Mã mới nằm hoàn toàn trong thư mục này, dùng **C# / .NET 10 LTS / WP
 
 ## Quản lý dự án và nhiều chương
 
-AI Editor lưu một bộ truyện trong một thư mục riêng có manifest `*.qtproj`. Các đường dẫn chương, preset, Reader, hồ sơ nhân vật, glossary và tài nguyên trong manifest đều là đường dẫn tương đối, nên có thể đóng ứng dụng rồi di chuyển **cả thư mục dự án** sang ổ khác. Không di chuyển riêng từng tệp khi ứng dụng đang mở.
+AI Editor lưu một bộ truyện trong một thư mục riêng có manifest `*.qtproj`. Các đường dẫn chương, Reader, hồ sơ nhân vật, glossary và tài nguyên trong manifest đều là đường dẫn tương đối, nên có thể đóng ứng dụng rồi di chuyển **cả thư mục dự án** sang ổ khác. Thư viện Prompt Preset nằm trong dữ liệu ứng dụng dùng chung; Project chỉ nhớ ID preset đang chọn. Không di chuyển riêng từng tệp khi ứng dụng đang mở.
 
 1. Chọn **Tệp → Dự án mới**, nhập tên truyện và chọn thư mục cha. Ứng dụng tạo layout gọn gồm `Chapters`, `Deleted`, `Settings`, `Resources`, `Queue` và `Cache`.
 2. Dùng nút **+ TXT** ở danh sách bên trái để thêm một hoặc nhiều chương UTF-8. Tìm kiếm, lọc trạng thái và sắp xếp chương ngay phía trên danh sách. Nút Trước/Sau chuyển chương theo số chương.

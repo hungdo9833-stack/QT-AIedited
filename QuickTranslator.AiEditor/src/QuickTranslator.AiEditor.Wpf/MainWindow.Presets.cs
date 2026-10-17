@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
+using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
@@ -22,7 +23,7 @@ public partial class MainWindow
             if (!ReferenceEquals(store, _presetStore)) return;
             _presetManager = new(presets);
             _presetsReady = true;
-            if (_service is not null)
+            if (_projectSession is null && _service is not null)
                 _presetManager.ImportSnapshot(_service.GetSnapshot().SelectedPreset);
             RefreshPresetEditor(); UpdateButtons();
         }
@@ -45,7 +46,9 @@ public partial class MainWindow
     }
     private void SelectChapterPreset(PromptPreset preset)
     {
-        if (!_presetsReady) return;
+        // A Project owns its current preset selection. Chapter snapshots are
+        // historical request data and must not replace that Project preference.
+        if (!_presetsReady || _projectSession is not null) return;
         _presetManager.ImportSnapshot(preset);
         RefreshPresetEditor();
     }

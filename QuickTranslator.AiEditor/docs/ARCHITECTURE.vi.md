@@ -27,7 +27,6 @@ Project/
     translation.json
     reader.json
     export.json
-    prompts/presets.qtaip.json
     ai-book-intelligence.json
   Queue/project-translation-job.json
   Cache/
@@ -35,7 +34,7 @@ Project/
 
 `ProjectManifest` là nguồn metadata có thẩm quyền. `ProjectCatalog` là read model dẫn xuất, chỉ giữ metadata và tự invalidated sau khi repository commit. Nội dung chương chỉ được nạp khi cần.
 
-`ProjectResourceStore` sở hữu một JSON thống nhất cho Character Profiles, Glossary và Context. Snapshot trong chapter chỉ phục vụ request/biên tập đang làm việc; nó không ghi ngược tài nguyên Project. Cấu hình dịch, Reader, Export, preset, queue và AI Book Intelligence có store trực tiếp riêng.
+`ProjectResourceStore` sở hữu một JSON thống nhất cho Character Profiles, Glossary và Context. Snapshot trong chapter chỉ phục vụ request/biên tập đang làm việc; nó không ghi ngược tài nguyên Project. Thư viện Prompt Preset dùng chung được lưu trong LocalAppData; mỗi Project chỉ lưu ID preset đang chọn trong `Settings/translation.json`. Cấu hình dịch, Reader, Export, queue và AI Book Intelligence có store trực tiếp riêng trong Project.
 
 ## Thao tác nhiều file
 

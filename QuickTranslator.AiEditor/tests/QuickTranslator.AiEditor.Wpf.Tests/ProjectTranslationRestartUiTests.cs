@@ -121,8 +121,7 @@ public sealed class ProjectTranslationRestartUiTests
             await profileScope.Manager.SaveProfileAsync(remote, activate: false);
 
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync();
-        PromptPresetStore presetStore = new(session.Resolve(session.Manifest.Files.PromptPresets));
-        PromptPreset preset = new PromptPresetManager(await presetStore.LoadAsync()).Selected;
+        PromptPreset preset = PromptPreset.Default;
         ModelOptions localOptions = new() { Model = localModel, ContextSize = 4096, MaximumOutputTokens = 1024 };
         ModelOptions remoteOptions = new() { Model = remoteModel, ContextSize = 8192, MaximumOutputTokens = 2048 };
         SegmenterOptions localSegments = new() { MinimumHanCharacters = 100, TargetHanCharacters = 200,
