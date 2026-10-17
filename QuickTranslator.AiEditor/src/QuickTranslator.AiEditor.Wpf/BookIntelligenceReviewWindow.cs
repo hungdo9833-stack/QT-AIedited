@@ -215,6 +215,11 @@ public sealed class BookIntelligenceReviewWindow : Window
                             "Chưa cấu hình QTSTUDIO_GEMINI_API_KEY. Không nhập API key vào Project hoặc prompt.");
                     var models = GeminiSurveyPoolClient.ModelsFromSettings(
                         Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
+                    if (!models.Any(model => string.Equals(model.Model, options.Model,
+                            StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidOperationException(
+                            "Model đã nhập không có trong Flash Survey Pool. Chọn Flash 3.6/3.7/3.8 hoặc điều chỉnh QTSTUDIO_GEMINI_SURVEY_MODELS.");
+                    _summary.Text = "Flash Survey Pool: " + string.Join(", ", models.Select(model => model.Model));
                     // Google project scope, not QT Studio book ProjectId.
                     Guid quotaScope = GeminiSurveyProjectScope.Resolve(apiKey,
                         Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_PROJECT_ID"));
