@@ -21,6 +21,17 @@ As of 2026-10-17, Google's model documentation marks 3.7 Flash as deprecated and
 
 In the existing Book Intelligence dialog, select **Gemini Flash Pool**. The preferred model is filled from the first configured pool entry (3.8 by default), while 3.6 remains available for fallback. The dialog shows whether the key and request budget are configured without displaying the key, and asks permission before uploading source excerpts.
 
+## Tiếp tục và khảo sát lại
+
+Trong cửa sổ `Khảo sát bằng AI`:
+
+- **Bắt đầu / Tiếp tục** chỉ phân tích chứng cứ mới hoặc những batch chưa hoàn thành. Khi tất cả đoạn đã đánh dấu `AiAnalyzed=true`, không gửi request mới, kể cả khi đổi dropdown model. Đây là hành vi Resume an toàn.
+- **Khảo sát lại** là hành động riêng có xác nhận, thực sự chạy lại AI cho các đoạn đủ điều kiện (FastAdaptive hoặc FullSemantic). Trước khi làm mới checkpoint, ứng dụng lưu bản sao trạng thái JSON vào `Project/Settings/ai-book-intelligence-snapshots/survey-*.json`. Không cần xóa Project.
+- Đề xuất chưa duyệt/đã loại được dọn khỏi hàng chờ hiện tại sau khi tạo bản sao; tài nguyên đã chấp nhận, mốc xưng hô đã duyệt, thông tin quan hệ confirmed/accepted vẫn được giữ nguyên. Khi đối soát commit còn dở, ứng dụng từ chối khảo sát lại để bảo vệ dữ liệu.
+- Quota API vẫn bị tiêu thụ khi khảo sát lại. Nếu hủy sau khi đã reset, `Bắt đầu / Tiếp tục` tiếp tục được lượt mới; snapshot cũ vẫn tồn tại.
+
+Không tự động gọi lại API khi đổi model hoặc mở lại Project. Dùng `Khảo sát lại` khi cần benchmark model khác trên cùng nguyên tác.
+
 ## Scheduling
 
 - Each model has its own 5 RPM / 250K input TPM / 20 RPD **initial, user-observed, configurable code defaults**. Actual Google limits depend on the AI project and model. The sum of model limits is only a theoretical ceiling if those buckets are genuinely independent and no stricter shared limits apply.
