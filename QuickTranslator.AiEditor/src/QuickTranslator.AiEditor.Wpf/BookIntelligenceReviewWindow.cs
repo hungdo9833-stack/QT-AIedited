@@ -25,7 +25,7 @@ public sealed class BookIntelligenceReviewWindow : Window
     private CancellationTokenSource? _cancellation;
 
     private readonly ComboBox _profile = new() { Width = 210, DisplayMemberPath = nameof(OllamaBackendProfile.Name) };
-    private readonly ComboBox _model = new() { Width = 240, IsEditable = true, ItemsSource = new[] { "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite" } };
+    private readonly ComboBox _model = new() { Width = 240, IsEditable = false };
     private readonly Button _run = new() { Content = "Bắt đầu khảo sát" };
     private readonly Button _cancel = new() { Content = "Tạm dừng", IsEnabled = false };
     private readonly TextBlock _summary = new() { TextWrapping = TextWrapping.Wrap };
@@ -138,6 +138,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         _evidence.MouseDoubleClick += async (_, _) => await OpenSelectedEvidenceAsync();
         _translationContext.Click += async (_, _) => await SaveContextFeatureFlagAsync();
         _profile.SelectionChanged += (_, _) => SelectSurveyBackend();
+        _model.SelectionChanged += (_, _) => { if (!_loading && _profile.SelectedItem is OllamaBackendProfile p && p.Id == GeminiFlashPoolProfileId) ShowGeminiConfiguration(); };
         _search.TextChanged += (_, _) => RefreshQueue();
         _kindFilter.SelectionChanged += (_, _) => RefreshQueue();
         _statusFilter.SelectionChanged += (_, _) => RefreshQueue();
@@ -162,7 +163,7 @@ public sealed class BookIntelligenceReviewWindow : Window
                 ?? _profiles.FirstOrDefault(p => p.Id == OllamaBackendProfile.DefaultLocalId)
                 ?? _profiles.First();
             _profile.ItemsSource = _profiles; _profile.SelectedItem = selected;
-            _model.Text = stateUsesGemini ? _state.AnalyzerModel! : selected.Model;
+            PopulateModelDropdown(selected, stateUsesGemini ? _state.AnalyzerModel! : selected.Model);
             RefreshQueue();
             if (selected.Id == GeminiFlashPoolProfileId) ShowGeminiConfiguration();
         }
@@ -322,15 +323,26 @@ public sealed class BookIntelligenceReviewWindow : Window
         };
     }
 
+    private void PopulateModelDropdown(OllamaBackendProfile profile, string? preferred)
+    {
+        string[] choices = profile.Id == GeminiFlashPoolProfileId
+            ? ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+            : [profile.Model];
+        // A saved or externally configured model is not silently replaced.
+        // Nonstandard models are only selectable via their backend's configured profile.
+        string selected = choices.FirstOrDefault(x => string.Equals(x, preferred,
+            StringComparison.OrdinalIgnoreCase)) ?? choices[0];
+        _model.ItemsSource = choices;
+        _model.SelectedItem = selected;
+    }
+
     private void SelectSurveyBackend()
     {
         if (_loading || _profile.SelectedItem is not OllamaBackendProfile profile ||
             profile.Id != GeminiFlashPoolProfileId) return;
         try
         {
-            if (!GeminiSurveyPoolClient.IsAllowedFlash(_model.Text))
-                _model.Text = GeminiSurveyPoolClient.ModelsFromSettings(
-                    Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"))[0].Model;
+            PopulateModelDropdown(profile, _model.SelectedItem as string);
             ShowGeminiConfiguration();
         }
         catch (Exception ex) { ShowFailure(ex); }
