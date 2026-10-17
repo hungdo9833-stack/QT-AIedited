@@ -298,9 +298,34 @@ public sealed class BookIntelligenceReviewWindow : Window
                 ? $"Khảo sát hoàn tất · {_state.Metrics.Requests} request trong lượt hiện tại · {_state.PendingCount} đề xuất chờ duyệt."
                 : $"Khảo sát hoàn tất · {_state.Metrics.Requests} request · {_state.PendingCount} đề xuất chờ duyệt. Ví dụ: {newest.Title}.";
         }
-        catch (OperationCanceledException) { _summary.Text = "Đã tạm dừng. Checkpoint đã hoàn thành được giữ để tiếp tục lần sau."; }
-        catch (Exception ex) { ShowFailure(ex); }
+        catch (OperationCanceledException)
+        {
+            await ReloadLatestSurveyCheckpointAsync();
+            _summary.Text = "Đã tạm dừng. Những batch hoàn thành đã được lưu; bấm Bắt đầu / Tiếp tục để chạy tiếp.";
+        }
+        catch (Exception ex)
+        {
+            await ReloadLatestSurveyCheckpointAsync();
+            ShowFailure(ex);
+        }
         finally { SetBusy(false); _cancellation?.Dispose(); _cancellation = null; }
+    }
+
+    private async Task ReloadLatestSurveyCheckpointAsync()
+    {
+        // The analyzer saves after each completed batch. If a later batch fails,
+        // the window's in-memory revision may be stale. Reload before Resume.
+        try
+        {
+            _state = await new BookIntelligenceStore(_session).LoadAsync();
+            RefreshQueue();
+            _stateChanged(_state, _translationContext.IsChecked == true);
+        }
+        catch (Exception)
+        {
+            // Preserve the original model/network error; users can reopen the dialog
+            // to recover a checkpoint if a concurrent file operation blocked reload.
+        }
     }
 
     private async Task SaveSelectedAsync()
