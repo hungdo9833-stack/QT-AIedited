@@ -277,10 +277,23 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
             generationConfig["responseMimeType"] = "application/json";
             generationConfig["responseJsonSchema"] = responseSchema;
         }
+        // Gemini 2.5+/3 generally defaults these adjustable filters to OFF.
+        // Keep the official per-request setting explicit for QT Studio surveys.
+        // This does NOT change Google's non-configurable core protections.
+        string[] adjustableCategories =
+        [
+            "HARM_CATEGORY_HARASSMENT",
+            "HARM_CATEGORY_HATE_SPEECH",
+            "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            "HARM_CATEGORY_DANGEROUS_CONTENT"
+        ];
+        var safetySettings = adjustableCategories.Select(category =>
+            new { category, threshold = "OFF" }).ToArray();
         string body = JsonSerializer.Serialize(new
         {
             contents = new[] { new { role = "user", parts = new[] { new { text = prompt } } } },
-            generationConfig
+            generationConfig,
+            safetySettings
         });
         request.Content = new StringContent(body, Encoding.UTF8, "application/json");
         return request;
