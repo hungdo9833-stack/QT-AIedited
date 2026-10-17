@@ -1,6 +1,7 @@
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Translation;
 using Xunit;
 
 namespace QuickTranslator.AiEditor.Wpf.Tests;
@@ -54,6 +55,42 @@ public sealed class ProjectOwnershipTests
         Assert.Equal("Ghi chú vừa sửa", fixture.Text("ContextNotesInput").Text);
         await fixture.TaskCall("LoadProjectAssetsAsync");
         Assert.Equal("Ghi chú vừa sửa", fixture.Text("ContextNotesInput").Text);
+    });
+
+    [Fact]
+    public Task Prompt_presets_are_shared_across_projects_but_each_project_keeps_its_selection() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        ProjectSession first = fixture.Project;
+        var manager = fixture.Get<PromptPresetManager>("_presetManager");
+        PromptPreset custom = manager.Create("Dùng chung cho mọi truyện", "Dịch đúng: {{source_text}}");
+        fixture.Call("RefreshPresetEditor");
+        await fixture.TaskCall("SavePresetEditorAsync");
+        await fixture.TaskCall("SaveProjectPresetSelectionAsync");
+
+        ProjectSession second = await fixture.Repository.CreateAsync(
+            Path.Combine(fixture.Root, "Novel-B"), "Truyện B");
+        fixture.Set("_projectSession", second);
+        await fixture.TaskCall("LoadProjectAssetsAsync");
+        var secondManager = fixture.Get<PromptPresetManager>("_presetManager");
+        Assert.Contains(secondManager.Presets, p => p.Id == custom.Id);
+        Assert.Equal(PromptPreset.Default.Id, secondManager.Selected.Id);
+        await fixture.TaskCall("SaveProjectPresetSelectionAsync");
+
+        fixture.Set("_projectSession", first);
+        await fixture.TaskCall("LoadProjectAssetsAsync");
+        var firstManager = fixture.Get<PromptPresetManager>("_presetManager");
+        Assert.Equal(custom.Id, firstManager.Selected.Id);
+        var environment = await fixture.TaskCall<ProjectTranslationEnvironment>(
+            "LoadProjectTranslationEnvironmentAsync", first, CancellationToken.None);
+        Assert.Equal(custom.Id, environment.PromptPreset.Id);
+
+        fixture.Set("_projectSession", second);
+        await fixture.TaskCall("LoadProjectAssetsAsync");
+        Assert.Equal(PromptPreset.Default.Id, fixture.Get<PromptPresetManager>("_presetManager").Selected.Id);
+        Assert.False(File.Exists(Path.Combine(first.RootDirectory, "Settings", "prompts", "presets.qtaip.json")));
+        Assert.False(File.Exists(Path.Combine(second.RootDirectory, "Settings", "prompts", "presets.qtaip.json")));
     });
 
     private static async Task SeedCurrentResources(WorkspaceFixture fixture)
