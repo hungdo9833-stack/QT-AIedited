@@ -28,6 +28,8 @@ public sealed class BookIntelligenceReviewWindow : Window
     private readonly ComboBox _model = new() { Width = 240, IsEditable = false };
     private readonly Button _run = new() { Content = "Bắt đầu / Tiếp tục" };
     private readonly Button _rerun = new() { Content = "Khảo sát lại", ToolTip = "Lưu bản sao kết quả cũ và khảo sát lại từ đầu, giữ dữ liệu đã xác nhận." };
+    private readonly Button _blocked = new() { Content = "Đoạn bị chặn", IsEnabled = false,
+        ToolTip = "Xem các đoạn Google đã từ chối; không tự gửi lại hoặc duyệt nội dung." };
     private readonly Button _cancel = new() { Content = "Tạm dừng", IsEnabled = false };
     private readonly TextBlock _summary = new() { TextWrapping = TextWrapping.Wrap };
     private readonly ProgressBar _progress = new() { Height = 5, Minimum = 0, Maximum = 1 };
@@ -91,7 +93,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         controls.Children.Add(_profile);
         controls.Children.Add(new TextBlock { Text = "Model độc lập", VerticalAlignment = VerticalAlignment.Center });
         controls.Children.Add(_model); controls.Children.Add(new TextBlock { Text = "Chế độ", VerticalAlignment = VerticalAlignment.Center });
-        controls.Children.Add(_scanMode); controls.Children.Add(_run); controls.Children.Add(_rerun); controls.Children.Add(_cancel);
+        controls.Children.Add(_scanMode); controls.Children.Add(_run); controls.Children.Add(_rerun); controls.Children.Add(_cancel); controls.Children.Add(_blocked);
         controls.Children.Add(_translationContext);
         var filters = new WrapPanel { Margin = new Thickness(0, 5, 0, 3) };
         filters.Children.Add(new TextBlock { Text = "Lọc", VerticalAlignment = VerticalAlignment.Center });
@@ -131,6 +133,7 @@ public sealed class BookIntelligenceReviewWindow : Window
 
         _run.Click += async (_, _) => await RunAsync();
         _rerun.Click += async (_, _) => await RunAsync(forceResurvey: true);
+        _blocked.Click += async (_, _) => await ShowBlockedEvidenceAsync();
         _cancel.Click += (_, _) => _cancellation?.Cancel();
         _save.Click += async (_, _) => await SaveSelectedAsync();
         _merge.Click += async (_, _) => await MergeSelectedAsync();
@@ -293,10 +296,13 @@ public sealed class BookIntelligenceReviewWindow : Window
             _state = await store.SaveAsync(_state, _cancellation.Token);
             _stateChanged(_state, _translationContext.IsChecked == true);
             RefreshQueue();
+            int blockedCount = _state.Evidence.Count(x => x.IsCurrent && x.AiBlocked);
             ReviewRow? newest = Rows().FirstOrDefault(x => x.Status == IntelligenceReviewStatus.Pending.ToString());
-            _summary.Text = newest is null
-                ? $"Khảo sát hoàn tất · {_state.Metrics.Requests} request trong lượt hiện tại · {_state.PendingCount} đề xuất chờ duyệt."
-                : $"Khảo sát hoàn tất · {_state.Metrics.Requests} request · {_state.PendingCount} đề xuất chờ duyệt. Ví dụ: {newest.Title}.";
+            _summary.Text = $"Khảo sát hoàn tất · {_state.Metrics.Requests} request · " +
+                $"{_state.PendingCount} đề xuất chờ duyệt · {blockedCount} đoạn bị Google từ chối. " +
+                (blockedCount > 0
+                    ? "Nhấn 'Đoạn bị chặn' để kiểm tra; những đoạn này chưa được AI phân tích."
+                    : newest is null ? "Không có đề xuất mới." : $"Ví dụ: {newest.Title}.");
         }
         catch (OperationCanceledException)
         {
@@ -462,9 +468,49 @@ public sealed class BookIntelligenceReviewWindow : Window
         catch (Exception ex) { _translationContext.IsChecked = false; ShowFailure(ex); }
     }
 
+    private async Task ShowBlockedEvidenceAsync()
+    {
+        if (_state is null) return;
+        List<BlockedEvidenceRow> rows = _state.Evidence.Where(x => x.IsCurrent && x.AiBlocked)
+            .Select(x => new BlockedEvidenceRow(x,
+                $"{ShortChapter(x.ChapterId)} · UTF-16 {x.StartUtf16}+{x.LengthUtf16} · " +
+                $"Google: {x.AiBlockReason} · {Preview(x.Excerpt)}"))
+            .ToList();
+        if (rows.Count == 0) return;
+        var list = new ListBox { ItemsSource = rows, DisplayMemberPath = nameof(BlockedEvidenceRow.Label),
+            MinHeight = 250, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+        var explanation = new TextBlock
+        {
+            Text = $"{rows.Count} đoạn chưa được Gemini phân tích vì phản hồi chặn rõ ràng. " +
+                "Chúng không được tính là dữ kiện đã khảo sát. Có thể mở nguyên tác để kiểm tra thủ công.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10)
+        };
+        var open = new Button { Content = "Mở đoạn nguyên tác", Margin = new Thickness(0, 10, 0, 0) };
+        var panel = new DockPanel { Margin = new Thickness(14) };
+        DockPanel.SetDock(explanation, Dock.Top);
+        DockPanel.SetDock(open, Dock.Bottom);
+        panel.Children.Add(explanation); panel.Children.Add(open); panel.Children.Add(list);
+        var dialog = new Window { Owner = this, Title = "Các đoạn Gemini không phân tích được",
+            Width = 850, Height = 520, MinWidth = 600, MinHeight = 330,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = panel };
+        open.Click += async (_, _) =>
+        {
+            if (list.SelectedItem is not BlockedEvidenceRow selected) return;
+            try
+            {
+                await _openEvidence(selected.Evidence);
+                dialog.Close();
+            }
+            catch (Exception ex) { ShowFailure(ex); }
+        };
+        dialog.ShowDialog();
+        await Task.CompletedTask;
+    }
+
     private void RefreshQueue()
     {
         _queue.ItemsSource = Rows();
+        _blocked.IsEnabled = _state?.Evidence.Any(x => x.IsCurrent && x.AiBlocked) == true;
         _mergeTarget.ItemsSource = _resources.Characters.Profiles.OrderBy(x => x.VietnameseName).ToList();
         if (_state is not null) _summary.Text = $"{_state.Evidence.Count(x => x.IsCurrent)} đoạn chứng cứ · {_state.PendingCount} đề xuất chờ duyệt · AutoApplyVerified = false.";
         ShowSelection();
@@ -638,4 +684,5 @@ public sealed class BookIntelligenceReviewWindow : Window
         };
     }
     private sealed record EvidenceRow(CorpusEvidence Evidence, string Label);
+    private sealed record BlockedEvidenceRow(CorpusEvidence Evidence, string Label);
 }
