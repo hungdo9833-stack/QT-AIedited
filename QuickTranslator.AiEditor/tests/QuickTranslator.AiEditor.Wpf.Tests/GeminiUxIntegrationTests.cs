@@ -172,6 +172,18 @@ public sealed class GeminiUxIntegrationTests
         Assert.Contains("【苏雨】", ((TextBlock)fixture.Window.FindName("InspectorLiveSelectionText")).Text);
     });
 
+    [Fact]
+    public Task Gemini_key_entry_is_available_in_main_settings_without_PowerShell() => StaHost.Run(() =>
+    {
+        using var fixture = new WorkspaceFixture();
+        var pass = (PasswordBox)fixture.Window.FindName("GeminiApiKeyInput");
+        var status = (TextBlock)fixture.Window.FindName("GeminiCredentialStatus");
+        Assert.NotNull(pass);
+        Assert.NotNull(status);
+        Assert.Equal(string.Empty, pass.Password);
+        return Task.CompletedTask;
+    });
+
     private static SourceEditPreview Preview(int protectedSegments, bool replacesMost) => new(
         1, new string('0', 64), new string('1', 64), "新正文。", new SegmenterOptions(),
         new SourceTextChange(0, 1, 0, 1, "旧", "新"), 1, 1, 0, 1, protectedSegments, replacesMost);
