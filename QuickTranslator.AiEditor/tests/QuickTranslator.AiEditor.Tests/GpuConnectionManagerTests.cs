@@ -118,6 +118,49 @@ public sealed class GpuConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task Sudo_setup_prompts_only_when_required_and_keeps_secret_out_of_command_text()
+    {
+        var session = new PasswordSshSession();
+        var service = new RemoteOllamaSetupService();
+        var missing = await service.ExecuteConfirmedAsync(session, RemoteSetupAction.InstallOllamaUbuntu, true);
+        Assert.StartsWith("SUDO_PASSWORD_REQUIRED:", missing.Error, StringComparison.Ordinal);
+        Assert.Equal(0, session.PasswordCalls);
+
+        var installed = await service.ExecuteConfirmedAsync(session, RemoteSetupAction.InstallOllamaUbuntu, true,
+            sudoPassword: "fake-sudo-secret");
+        Assert.True(installed.Success);
+        Assert.Equal(1, session.PasswordCalls);
+        Assert.Equal(SshOperation.InstallOllamaUbuntu, session.LastOperation);
+        Assert.DoesNotContain("fake-sudo-secret", SshCommands.Resolve(SshOperation.InstallOllamaUbuntu, sudoStdin: true));
+        Assert.Contains("sudo -S -p ''", SshCommands.Resolve(SshOperation.InstallOllamaUbuntu, sudoStdin: true));
+        Assert.Contains("sudo -n", SshCommands.Resolve(SshOperation.InstallOllamaUbuntu));
+        Assert.DoesNotContain("fake-sudo-secret", installed.ToString(), StringComparison.Ordinal);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            session.ExecuteWithSudoPasswordAsync(SshOperation.PullOllamaModel, "fake-sudo-secret"));
+    }
+
+    private sealed class PasswordSshSession : ISshSession
+    {
+        public bool IsConnected => true;
+        public int PasswordCalls { get; private set; }
+        public SshOperation LastOperation { get; private set; }
+        public Task<SshCommandResult> ExecuteAsync(SshOperation operation, string? argument = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new SshCommandResult(1, "", "sudo: a password is required"));
+        public Task<SshCommandResult> ExecuteWithSudoPasswordAsync(SshOperation operation, string password,
+            CancellationToken cancellationToken = default)
+        {
+            if (operation == SshOperation.PullOllamaModel) throw new InvalidOperationException("not allowed");
+            PasswordCalls++;
+            LastOperation = operation;
+            return Task.FromResult(new SshCommandResult(0, "ok", ""));
+        }
+        public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [Fact]
     public async Task Model_pull_streams_real_byte_progress_only_through_loopback()
     {
         const string body = "{\"status\":\"pulling layer\",\"completed\":524288,\"total\":1048576}\n" +
