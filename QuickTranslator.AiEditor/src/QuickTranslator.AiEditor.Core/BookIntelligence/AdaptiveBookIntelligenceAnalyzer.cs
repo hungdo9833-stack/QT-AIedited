@@ -13,7 +13,7 @@ namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
 {
     public const int MaximumEvidencePerRequest = 8;
-    public const string PromptSchemaVersion = "abi-2-json-1";
+    public const string PromptSchemaVersion = "abi-2-json-2-relations";
     internal static JsonElement ResponseSchema { get; } = JsonSerializer.Deserialize<JsonElement>("""
         {
           "type":"object",
@@ -277,7 +277,7 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
             Bạn là bộ trích xuất dữ kiện cho tiểu thuyết Trung văn. Chỉ dùng chứng cứ được cung cấp; không suy đoán.
             Trả về DUY NHẤT một JSON object đúng schema. confidence chỉ nhận unknown, ambiguous, proposed.
             Mọi mục phải dẫn ít nhất một evidence_id. Tên/thuật ngữ Trung phải xuất hiện nguyên văn trong evidence được dẫn.
-            Không biến danh xưng phụ thuộc ngữ cảnh thành glossary toàn cục. Không tự xác minh giới tính, danh tính hoặc xưng hô nếu chứng cứ chưa rõ.
+            Không biến danh xưng phụ thuộc ngữ cảnh thành glossary toàn cục. Không tự xác minh giới tính, danh tính hoặc xưng hô nếu chứng cứ chưa rõ.\n            QUAN HỆ: chỉ đưa vào relationships những quan hệ tương đối bền vững có chứng cứ trực tiếp (cha/mẹ-con, anh chị em, vợ chồng, người yêu đã xác nhận, thầy trò, cấp trên-cấp dưới).\n            Không đưa sự kiện/hành động hay cảm xúc thoáng qua như đưa tiền, nhờ vả, cãi nhau, gặp gỡ, romantic interest vào quan hệ ổn định.\n            Chỉ ghi xưng hô hai chiều khi chứng cứ xác nhận rõ. Nếu thiếu tuổi, thứ bậc hoặc chiều quan hệ, để trống đại từ chưa rõ; tuyệt đối không suy đoán.
             Schema {{PromptSchemaVersion}}:
             {"characters":[{"chinese_name":"","vietnamese_name":"","aliases":[],"gender":"unknown|male|female|other","primary_pronoun":"","secondary_pronoun":"","confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}],"relationships":[{"speaker_chinese_name":"","listener_chinese_name":"","relationship":"","self_reference":"","addressee_reference":"","reverse_self_reference":"","reverse_addressee_reference":"","confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}],"glossary":[{"chinese":"","vietnamese":"","category":"place|organization|clan|cultivation|item|realm|title|term|addressing","context_dependent":false,"confidence":"unknown|ambiguous|proposed","evidence_ids":[],"reason":""}]}
 
@@ -315,6 +315,8 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
         IReadOnlyCollection<CorpusEvidence> batch, ProjectResources resources)
     {
         Dictionary<Guid, CorpusEvidence> allowed = batch.ToDictionary(x => x.Id);
+        // Normalize older pending items as well as new AI responses.
+        RelationshipLabelNormalizer.NormalizePending(state);
         foreach (CharacterFinding finding in response.Characters)
         {
             Guid[] ids = ValidateEvidenceIds(finding.EvidenceIds, allowed);
@@ -351,28 +353,47 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
             string speaker = finding.SpeakerChineseName.Trim(), listener = finding.ListenerChineseName.Trim();
             if (ids.Length == 0 || speaker.Length == 0 || listener.Length == 0 || speaker == listener ||
                 !Appears(speaker, ids, allowed) || !Appears(listener, ids, allowed)) continue;
+
+            RelationshipLabelNormalizer.Result normalized = RelationshipLabelNormalizer.Normalize(finding.Relationship);
+            // Events and vague attraction are not relationships. The original evidence
+            // is preserved in the corpus; it is not added to the relationship graph.
+            if (normalized.Classification is RelationshipLabelNormalizer.Kind.Event or
+                RelationshipLabelNormalizer.Kind.Uncertain) continue;
+
+            string label = normalized.Display;
+            bool stable = normalized.Classification == RelationshipLabelNormalizer.Kind.Stable;
+            string original = finding.Relationship.Trim();
+            string note = original == label ? "" : "Nhãn AI ban đầu: " + original;
+            string reason = string.IsNullOrWhiteSpace(note) ? finding.Reason.Trim() :
+                finding.Reason.Trim() + "\\n" + note;
+            if (!stable) reason += "\\nNhãn chưa có trong danh mục chuẩn; cần xác minh trước khi sử dụng.";
             IntelligenceRelationshipSuggestion? existing = state.Relationships.FirstOrDefault(x =>
+                x.Status is IntelligenceReviewStatus.Pending or IntelligenceReviewStatus.ReviewLater &&
                 x.SpeakerChineseName == speaker && x.ListenerChineseName == listener &&
-                x.Relationship == finding.Relationship.Trim());
+                RelationshipLabelNormalizer.Normalize(x.Relationship).Key == normalized.Key &&
+                x.SelfReference == finding.SelfReference.Trim() &&
+                x.AddresseeReference == finding.AddresseeReference.Trim() &&
+                x.ReverseSelfReference == finding.ReverseSelfReference.Trim() &&
+                x.ReverseAddresseeReference == finding.ReverseAddresseeReference.Trim());
             if (existing is not null)
             {
-                bool newEvidence = ids.Any(id => !existing.EvidenceIds.Contains(id));
                 foreach (Guid id in ids.Where(id => !existing.EvidenceIds.Contains(id))) existing.EvidenceIds.Add(id);
-                if (existing.Status == IntelligenceReviewStatus.Rejected && newEvidence)
-                { existing.Status = IntelligenceReviewStatus.ReviewLater; existing.Reason += "\nCó bằng chứng mới sau lần từ chối trước."; }
-                RelationshipKnowledgeService.AddOrAggregateDirect(state, resources, existing);
+                if (stable) RelationshipKnowledgeService.AddOrAggregateDirect(state, resources, existing);
                 continue;
             }
             var suggestion = new IntelligenceRelationshipSuggestion
             {
                 SpeakerChineseName = speaker, ListenerChineseName = listener,
-                Relationship = finding.Relationship.Trim(), SelfReference = finding.SelfReference.Trim(),
-                AddresseeReference = finding.AddresseeReference.Trim(), ReverseSelfReference = finding.ReverseSelfReference.Trim(),
+                Relationship = label, SelfReference = finding.SelfReference.Trim(),
+                AddresseeReference = finding.AddresseeReference.Trim(),
+                ReverseSelfReference = finding.ReverseSelfReference.Trim(),
                 ReverseAddresseeReference = finding.ReverseAddresseeReference.Trim(),
-                Confidence = ParseConfidence(finding.Confidence), EvidenceIds = ids.ToList(), Reason = finding.Reason.Trim()
+                Confidence = ParseConfidence(finding.Confidence),
+                Status = stable ? IntelligenceReviewStatus.Pending : IntelligenceReviewStatus.ReviewLater,
+                EvidenceIds = ids.ToList(), Reason = reason
             };
             state.Relationships.Add(suggestion);
-            RelationshipKnowledgeService.AddOrAggregateDirect(state, resources, suggestion);
+            if (stable) RelationshipKnowledgeService.AddOrAggregateDirect(state, resources, suggestion);
         }
 
         foreach (GlossaryFinding finding in response.Glossary)
