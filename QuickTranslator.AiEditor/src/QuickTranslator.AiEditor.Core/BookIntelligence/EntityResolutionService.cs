@@ -74,7 +74,11 @@ public static class RelationshipKnowledgeService
         Guid? subject = EntityResolutionService.ResolveStableId(state, resources, suggestion.SpeakerChineseName);
         Guid? target = EntityResolutionService.ResolveStableId(state, resources, suggestion.ListenerChineseName);
         if (subject is null || target is null || subject == target) return null;
-        KnowledgeRelationType type = ParseType(suggestion.Relationship);
+        RelationshipLabelNormalizer.Result normalized = RelationshipLabelNormalizer.Normalize(suggestion.Relationship);
+        // An event, attraction, or unrecognized label must never enter the
+        // knowledge graph as a confirmed social/romantic relationship.
+        if (normalized.Classification != RelationshipLabelNormalizer.Kind.Stable) return null;
+        KnowledgeRelationType type = normalized.RelationType;
         KnowledgeRelationship? existing = state.RelationshipGraph.FirstOrDefault(x =>
             x.SubjectCharacterId == subject && x.TargetCharacterId == target && x.RelationType == type &&
             x.Status != KnowledgeRelationshipStatus.Rejected);
@@ -107,6 +111,9 @@ public static class RelationshipKnowledgeService
 
     public static KnowledgeRelationType ParseType(string value)
     {
+        RelationshipLabelNormalizer.Result normalized = RelationshipLabelNormalizer.Normalize(value);
+        if (normalized.Classification == RelationshipLabelNormalizer.Kind.Stable)
+            return normalized.RelationType;
         string v = value.Trim().ToLowerInvariant();
         if (v.Contains("亲生父") || v.Contains("生父") || v.Contains("biological father")) return KnowledgeRelationType.BiologicalFather;
         if (v.Contains("亲生母") || v.Contains("生母") || v.Contains("biological mother")) return KnowledgeRelationType.BiologicalMother;
