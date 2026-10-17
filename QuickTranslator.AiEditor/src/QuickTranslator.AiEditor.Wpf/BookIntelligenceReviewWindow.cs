@@ -111,8 +111,8 @@ public sealed class BookIntelligenceReviewWindow : Window
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
         _queue.Columns.Add(new DataGridTextColumn { Header = "Loại", Binding = new Binding(nameof(ReviewRow.Kind)), Width = 95 });
         _queue.Columns.Add(new DataGridTextColumn { Header = "Đề xuất", Binding = new Binding(nameof(ReviewRow.Title)), Width = new DataGridLength(2, DataGridLengthUnitType.Star) });
-        _queue.Columns.Add(new DataGridTextColumn { Header = "Mức tin cậy", Binding = new Binding(nameof(ReviewRow.Confidence)), Width = 105 });
-        _queue.Columns.Add(new DataGridTextColumn { Header = "Trạng thái", Binding = new Binding(nameof(ReviewRow.Status)), Width = 110 });
+        _queue.Columns.Add(new DataGridTextColumn { Header = "Mức tin cậy", Binding = new Binding(nameof(ReviewRow.ConfidenceDisplay)), Width = 105 });
+        _queue.Columns.Add(new DataGridTextColumn { Header = "Trạng thái", Binding = new Binding(nameof(ReviewRow.StatusDisplay)), Width = 110 });
         _queue.Columns.Add(new DataGridTextColumn { Header = "Nguồn", Binding = new Binding(nameof(ReviewRow.Origin)), Width = 85 });
         _queue.Columns.Add(new DataGridTextColumn { Header = "Chứng cứ", Binding = new Binding(nameof(ReviewRow.EvidenceCount)), Width = 75 });
         _queue.SelectionChanged += (_, _) => ShowSelection();
@@ -424,9 +424,9 @@ public sealed class BookIntelligenceReviewWindow : Window
         if (_state is null) return [];
         IEnumerable<ReviewRow> rows = _state.Characters.Select(x => new ReviewRow(x.Id, "Nhân vật", $"{x.ChineseName} → {x.VietnameseName}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x))
             .Concat(_state.Relationships.Select(x => new ReviewRow(x.Id, "Quan hệ", $"{x.SpeakerChineseName} → {x.ListenerChineseName}: {RelationshipLabelNormalizer.Display(x.Relationship)}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x)))
-            .Concat(_state.DerivedRelationships.Select(x => new ReviewRow(x.Id, "Suy luận", $"{CharacterName(x.SubjectCharacterId)} → {CharacterName(x.TargetCharacterId)}: {x.OutputRelation}",
+            .Concat(_state.DerivedRelationships.Select(x => new ReviewRow(x.Id, "Suy luận", $"{CharacterName(x.SubjectCharacterId)} → {CharacterName(x.TargetCharacterId)}: {RelationDisplay(x.OutputRelation)}",
                 x.ValidityStatus.ToString(), x.Status.ToString(), x.RuleId, x.SupportingEvidenceIds.Count, x)))
-            .Concat(_state.Glossary.Select(x => new ReviewRow(x.Id, "Glossary", $"{x.Chinese} → {x.Vietnamese}", x.Confidence.ToString(), x.Status.ToString(), x.Scope.ToString(), x.EvidenceIds.Count, x)));
+            .Concat(_state.Glossary.Select(x => new ReviewRow(x.Id, "Glossary", $"{x.Chinese} → {x.Vietnamese}", x.Confidence.ToString(), x.Status.ToString(), GlossaryScopeDisplay(x.Scope), x.EvidenceIds.Count, x)));
         // Keep auto-merged items available under "Đã xử lý", but avoid cluttering
         // the default review list with labels that are already represented elsewhere.
         if (_statusFilter.SelectedIndex == 0)
@@ -467,7 +467,7 @@ public sealed class BookIntelligenceReviewWindow : Window
                 reason = $"{x.Chinese} → {x.Vietnamese}\nLoại: {x.Category}\nPhụ thuộc ngữ cảnh: {(x.ContextDependent ? "Có — cần thận trọng" : "Không")}\n\n{x.Reason}";
                 ids = x.EvidenceIds; break;
             case DerivedRelationship x:
-                reason = $"Quan hệ suy luận: {CharacterName(x.SubjectCharacterId)} → {CharacterName(x.TargetCharacterId)} = {x.OutputRelation}\nQuy tắc: {x.RuleId}\nĐộ sâu: {x.InferenceDepth}\nValidity: {x.ValidityStatus}\nInput relations: {string.Join(", ", x.InputRelationIds)}\n\n{x.Explanation}\n\nQuan hệ thực tế này không tự tạo cách xưng hô.";
+                reason = $"Quan hệ suy luận: {CharacterName(x.SubjectCharacterId)} → {CharacterName(x.TargetCharacterId)} = {RelationDisplay(x.OutputRelation)}\nQuy tắc: {x.RuleId}\nĐộ sâu: {x.InferenceDepth}\nValidity: {x.ValidityStatus}\nInput relations: {string.Join(", ", x.InputRelationIds)}\n\n{x.Explanation}\n\nQuan hệ thực tế này không tự tạo cách xưng hô.";
                 ids = x.SupportingEvidenceIds; break;
             default: reason = ""; ids = Array.Empty<Guid>(); break;
         }
@@ -531,7 +531,60 @@ public sealed class BookIntelligenceReviewWindow : Window
     private string ShortChapter(Guid id) => _session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == id) is { } c ? $"Chương {c.Number}" : id.ToString("D");
     private static string Preview(string text) { string one = text.Replace('\r', ' ').Replace('\n', ' ').Trim(); return one.Length <= 90 ? one : one[..90] + "…"; }
 
+    private static string GlossaryScopeDisplay(GlossaryKnowledgeScope value) => value switch
+    {
+        GlossaryKnowledgeScope.Global => "Toàn truyện",
+        GlossaryKnowledgeScope.ContextDependent => "Theo ngữ cảnh",
+        GlossaryKnowledgeScope.CharacterName => "Tên nhân vật",
+        GlossaryKnowledgeScope.AddressingKinship => "Xưng hô/họ hàng",
+        _ => "Chưa rõ"
+    };
+
+    private static string RelationDisplay(KnowledgeRelationType type) => type switch
+    {
+        KnowledgeRelationType.UnknownSibling => "Anh/chị/em (chưa rõ vai vế)",
+        KnowledgeRelationType.FullSibling => "Anh/chị/em cùng cha mẹ",
+        KnowledgeRelationType.PaternalHalfSibling => "Anh/chị/em cùng cha khác mẹ",
+        KnowledgeRelationType.MaternalHalfSibling => "Anh/chị/em cùng mẹ khác cha",
+        KnowledgeRelationType.SwornSibling => "Anh/chị/em kết nghĩa",
+        KnowledgeRelationType.Parent => "Cha/mẹ – con",
+        KnowledgeRelationType.Child => "Con – cha/mẹ",
+        KnowledgeRelationType.BiologicalFather => "Cha ruột",
+        KnowledgeRelationType.BiologicalMother => "Mẹ ruột",
+        KnowledgeRelationType.BiologicalChild => "Con ruột",
+        KnowledgeRelationType.AdoptiveParent => "Cha/mẹ nuôi",
+        KnowledgeRelationType.AdoptiveChild => "Con nuôi",
+        KnowledgeRelationType.Grandfather => "Ông",
+        KnowledgeRelationType.Grandmother => "Bà",
+        KnowledgeRelationType.Grandchild => "Cháu",
+        KnowledgeRelationType.Spouse => "Vợ chồng",
+        KnowledgeRelationType.RomanticPartner => "Người yêu",
+        KnowledgeRelationType.Teacher => "Thầy/cô",
+        KnowledgeRelationType.Disciple => "Học trò",
+        KnowledgeRelationType.Superior => "Cấp trên",
+        KnowledgeRelationType.Subordinate => "Cấp dưới",
+        KnowledgeRelationType.Social => "Quan hệ xã hội",
+        _ => "Chưa xác định"
+    };
+
     private sealed record ReviewRow(Guid Id, string Kind, string Title, string Confidence, string Status,
-        string Origin, int EvidenceCount, object Value);
+        string Origin, int EvidenceCount, object Value)
+    {
+        public string ConfidenceDisplay => Confidence switch
+        {
+            "Unknown" => "Chưa rõ", "Ambiguous" => "Mơ hồ", "Proposed" => "Đề xuất",
+            "Valid" => "Hợp lệ", "Stale" => "Lỗi thời", "Conflict" => "Xung đột",
+            _ => Confidence
+        };
+        public string StatusDisplay => Status switch
+        {
+            "Pending" => "Chờ duyệt", "ReviewLater" => "Xem xét sau",
+            "Accepted" => "Đã duyệt", "Merged" => "Đã gộp",
+            "Rejected" => "Đã loại", "Confirmed" => "Đã xác nhận",
+            "DerivedAwaitingReview" => "Chờ duyệt suy luận",
+            "Stale" => "Lỗi thời", "Conflict" => "Xung đột",
+            _ => Status
+        };
+    }
     private sealed record EvidenceRow(CorpusEvidence Evidence, string Label);
 }
