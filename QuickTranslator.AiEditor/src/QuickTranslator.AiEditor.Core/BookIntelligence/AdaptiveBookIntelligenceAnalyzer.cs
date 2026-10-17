@@ -60,11 +60,11 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
         state.AnalyzerModel = options.Model;
         state.AnalyzerVersion = "2";
         int total = Eligible(state).Count();
-        int processed = state.Evidence.Count(x => x.IsCurrent && x.AiAnalyzed);
+        int processed = state.Evidence.Count(x => x.IsCurrent && (x.AiAnalyzed || x.AiBlocked));
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            CorpusEvidence[] pending = Eligible(state).Where(x => !x.AiAnalyzed)
+            CorpusEvidence[] pending = Eligible(state).Where(x => !x.AiAnalyzed && !x.AiBlocked)
                 .OrderByDescending(x => x.Priority).ThenBy(x => ChapterNumber(state, x.ChapterId))
                 .ThenBy(x => x.StartUtf16).ToArray();
             if (pending.Length == 0) break;
@@ -106,6 +106,23 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
             {
                 state.Metrics.Requests += result.Requests;
                 state.Metrics.Retries += result.Retries;
+                if (result.Error is GeminiSurveyBlockedException blocked)
+                {
+                    // Respect explicit provider refusal: don't retry, route elsewhere,
+                    // count as analyzed, or erase evidence. Persist and continue other batches.
+                    foreach (CorpusEvidence item in result.Work.Evidence)
+                    {
+                        CorpusEvidence source = state.Evidence.Single(x => x.Id == item.Id);
+                        source.AiBlocked = true;
+                        source.AiBlockReason = blocked.ReasonCode;
+                    }
+                    state.Metrics.Errors++;
+                    processed += result.Work.Evidence.Length;
+                    state.NextEvidenceIndex = processed;
+                    state = await store.SaveAsync(state, CancellationToken.None).ConfigureAwait(false);
+                    progress?.Report(new(processed, Math.Max(total, Eligible(state).Count()), state.PendingCount));
+                    continue;
+                }
                 if (result.Error is not null)
                 {
                     state.Metrics.Errors++;
