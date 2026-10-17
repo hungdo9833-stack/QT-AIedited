@@ -152,7 +152,13 @@ public sealed class BookIntelligenceReviewWindow : Window
                 ?? _profiles.FirstOrDefault(p => p.Id == OllamaBackendProfile.DefaultLocalId)
                 ?? _profiles.First();
             _profile.ItemsSource = _profiles; _profile.SelectedItem = selected;
-            _model.Text = string.IsNullOrWhiteSpace(_state.AnalyzerModel) ? selected.Model : _state.AnalyzerModel;
+            // Prefer Gemini on first use if the user saved a key in QT Studio.
+            // Preserve an explicitly saved Gemini survey model when reopening.
+            string preferredModel = string.IsNullOrWhiteSpace(_state.AnalyzerModel)
+                ? selected.Model : _state.AnalyzerModel;
+            _model.Text = !preferredModel.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(GeminiApiKeyVault.Read())
+                    ? "gemini-3.8-flash" : preferredModel;
             RefreshQueue();
         }
         catch (Exception ex) { ShowFailure(ex); }
@@ -209,10 +215,10 @@ public sealed class BookIntelligenceReviewWindow : Window
                 IOllamaClient backend;
                 if (isGemini)
                 {
-                    string apiKey = Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_API_KEY") ?? "";
+                    string apiKey = GeminiApiKeyVault.ResolveForSurvey();
                     if (string.IsNullOrWhiteSpace(apiKey))
                         throw new InvalidOperationException(
-                            "Chưa cấu hình QTSTUDIO_GEMINI_API_KEY. Không nhập API key vào Project hoặc prompt.");
+                            "Chưa có Gemini API key. Vào Cài đặt → AI & hiệu năng → Gemini API để nhập và lưu key.");
                     var models = GeminiSurveyPoolClient.ModelsFromSettings(
                         Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
                     if (!models.Any(model => string.Equals(model.Model, options.Model,
