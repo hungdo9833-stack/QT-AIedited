@@ -26,7 +26,8 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private readonly ComboBox _profile = new() { Width = 210, DisplayMemberPath = nameof(OllamaBackendProfile.Name) };
     private readonly ComboBox _model = new() { Width = 240, IsEditable = false };
-    private readonly Button _run = new() { Content = "Bắt đầu khảo sát" };
+    private readonly Button _run = new() { Content = "Bắt đầu / Tiếp tục" };
+    private readonly Button _rerun = new() { Content = "Khảo sát lại", ToolTip = "Lưu bản sao kết quả cũ và khảo sát lại từ đầu, giữ dữ liệu đã xác nhận." };
     private readonly Button _cancel = new() { Content = "Tạm dừng", IsEnabled = false };
     private readonly TextBlock _summary = new() { TextWrapping = TextWrapping.Wrap };
     private readonly ProgressBar _progress = new() { Height = 5, Minimum = 0, Maximum = 1 };
@@ -90,7 +91,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         controls.Children.Add(_profile);
         controls.Children.Add(new TextBlock { Text = "Model độc lập", VerticalAlignment = VerticalAlignment.Center });
         controls.Children.Add(_model); controls.Children.Add(new TextBlock { Text = "Chế độ", VerticalAlignment = VerticalAlignment.Center });
-        controls.Children.Add(_scanMode); controls.Children.Add(_run); controls.Children.Add(_cancel);
+        controls.Children.Add(_scanMode); controls.Children.Add(_run); controls.Children.Add(_rerun); controls.Children.Add(_cancel);
         controls.Children.Add(_translationContext);
         var filters = new WrapPanel { Margin = new Thickness(0, 5, 0, 3) };
         filters.Children.Add(new TextBlock { Text = "Lọc", VerticalAlignment = VerticalAlignment.Center });
@@ -129,6 +130,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         Grid.SetColumn(right, 2); grid.Children.Add(right); root.Children.Add(grid);
 
         _run.Click += async (_, _) => await RunAsync();
+        _rerun.Click += async (_, _) => await RunAsync(forceResurvey: true);
         _cancel.Click += (_, _) => _cancellation?.Cancel();
         _save.Click += async (_, _) => await SaveSelectedAsync();
         _merge.Click += async (_, _) => await MergeSelectedAsync();
@@ -175,7 +177,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         finally { _loading = false; }
     }
 
-    private async Task RunAsync()
+    private async Task RunAsync(bool forceResurvey = false)
     {
         if (_state is null || _profile.SelectedItem is not OllamaBackendProfile profile || string.IsNullOrWhiteSpace(_model.Text)) return;
         SetBusy(true); _cancellation = new CancellationTokenSource();
@@ -193,6 +195,19 @@ public sealed class BookIntelligenceReviewWindow : Window
             _state = await new ProjectCorpusIndexer(_repository).IndexAsync(_session, _state, store,
                 _resources.Characters, indexProgress, _cancellation.Token);
             _summary.Text = "Đã lập chỉ mục. Đang phân tích các đoạn có tín hiệu bằng model khảo sát…";
+            if (!forceResurvey && !BookIntelligenceResurveyService.HasUnanalyzedEvidence(_state, _state.ScanMode))
+            {
+                _summary.Text = "Không có đoạn mới chưa khảo sát. Dữ liệu cũ được giữ để tiếp tục; " +
+                    "nhấn 'Khảo sát lại' nếu muốn chạy AI lại từ đầu (có bản sao lưu).";
+                return;
+            }
+            if (forceResurvey && MessageBox.Show(this,
+                "Khảo sát lại toàn bộ các đoạn đủ điều kiện?\n" +
+                "QT Studio sẽ sao lưu kết quả cũ, làm mới đề xuất chưa xác nhận và gọi lại AI (có sử dụng quota). " +
+                "Tài nguyên đã duyệt không bị xóa.",
+                "Xác nhận khảo sát lại", MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
             bool isGemini = profile.Id == GeminiFlashPoolProfileId ||
                 _model.Text.Trim().StartsWith("gemini-", StringComparison.OrdinalIgnoreCase);
             if (!isGemini && profile.Kind == OllamaBackendKind.Remote && !profile.RemoteDisclosureAccepted)
@@ -255,6 +270,16 @@ public sealed class BookIntelligenceReviewWindow : Window
                     ollama = OllamaClient.Create(profile);
                     backend = ollama;
                 }
+                if (forceResurvey)
+                {
+                    (BookIntelligenceState restarted, string backup) =
+                        await BookIntelligenceResurveyService.BeginFreshAsync(
+                            _state, store, _cancellation.Token);
+                    _state = restarted;
+                    RefreshQueue();
+                    _summary.Text = "Đã sao lưu khảo sát cũ tại: " + backup +
+                        ". Bắt đầu khảo sát mới bằng " + options.Model + "…";
+                }
                 _state = await new AdaptiveBookIntelligenceAnalyzer(backend).AnalyzeAsync(_session, _state, store,
                     _resources, options, aiProgress, _cancellation.Token);
             }
@@ -269,8 +294,9 @@ public sealed class BookIntelligenceReviewWindow : Window
             _stateChanged(_state, _translationContext.IsChecked == true);
             RefreshQueue();
             ReviewRow? newest = Rows().FirstOrDefault(x => x.Status == IntelligenceReviewStatus.Pending.ToString());
-            _summary.Text = newest is null ? "Khảo sát hoàn tất; không có đề xuất mới có chứng cứ."
-                : $"Phát hiện {newest.Kind.ToLowerInvariant()} mới: {newest.Title}. Có {_state.PendingCount} mục chờ duyệt.";
+            _summary.Text = newest is null
+                ? $"Khảo sát hoàn tất · {_state.Metrics.Requests} request trong lượt hiện tại · {_state.PendingCount} đề xuất chờ duyệt."
+                : $"Khảo sát hoàn tất · {_state.Metrics.Requests} request · {_state.PendingCount} đề xuất chờ duyệt. Ví dụ: {newest.Title}.";
         }
         catch (OperationCanceledException) { _summary.Text = "Đã tạm dừng. Checkpoint đã hoàn thành được giữ để tiếp tục lần sau."; }
         catch (Exception ex) { ShowFailure(ex); }
@@ -526,7 +552,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         return dialog.ShowDialog() == true ? box.Text.Trim() : "";
     }
 
-    private void SetBusy(bool busy) { _run.IsEnabled = !busy; _cancel.IsEnabled = busy; _profile.IsEnabled = !busy; _model.IsEnabled = !busy; }
+    private void SetBusy(bool busy) { _run.IsEnabled = !busy; _rerun.IsEnabled = !busy; _cancel.IsEnabled = busy; _profile.IsEnabled = !busy; _model.IsEnabled = !busy; }
     private void ShowFailure(Exception ex) { _summary.Text = "Lỗi: " + ex.Message + " Dữ liệu đã xác nhận và checkpoint trước đó vẫn được giữ."; }
     private string ShortChapter(Guid id) => _session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == id) is { } c ? $"Chương {c.Number}" : id.ToString("D");
     private static string Preview(string text) { string one = text.Replace('\r', ' ').Replace('\n', ' ').Trim(); return one.Length <= 90 ? one : one[..90] + "…"; }
