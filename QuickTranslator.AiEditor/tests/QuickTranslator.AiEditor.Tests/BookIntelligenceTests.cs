@@ -426,7 +426,7 @@ public sealed class BookIntelligenceTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => BookIntelligenceResurveyService.BeginFreshAsync(state, store));
 
-        var survey = new SurveyClient(_ => "{\\\"characters\\\":[],\\\"relationships\\\":[],\\\"glossary\\\":[]}");
+        var survey = new SurveyClient(_ => "{\"characters\":[],\"relationships\":[],\"glossary\":[]}");
         BookIntelligenceState completed = await new AdaptiveBookIntelligenceAnalyzer(survey)
             .AnalyzeAsync(session, fresh, store, resources, Options);
         Assert.True(survey.Calls > 0);
