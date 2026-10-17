@@ -25,7 +25,7 @@ public sealed class BookIntelligenceReviewWindow : Window
     private CancellationTokenSource? _cancellation;
 
     private readonly ComboBox _profile = new() { Width = 210, DisplayMemberPath = nameof(OllamaBackendProfile.Name) };
-    private readonly TextBox _model = new() { Width = 240 };
+    private readonly ComboBox _model = new() { Width = 240, IsEditable = true, ItemsSource = new[] { "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite" } };
     private readonly Button _run = new() { Content = "Bắt đầu khảo sát" };
     private readonly Button _cancel = new() { Content = "Tạm dừng", IsEnabled = false };
     private readonly TextBlock _summary = new() { TextWrapping = TextWrapping.Wrap };
@@ -227,10 +227,16 @@ public sealed class BookIntelligenceReviewWindow : Window
                             "Chưa có Gemini API key. Vào Cài đặt → AI & hiệu năng → Gemini API để nhập và lưu key.");
                     var models = GeminiSurveyPoolClient.ModelsFromSettings(
                         Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
+                    // Flash Lite is opt-in from the visible model selector. Keep its
+                    // requests separate from the default Flash pool to avoid using
+                    // the translation quota unless the user explicitly chose Lite.
+                    bool selectedLite = options.Model.Contains("flash-lite", StringComparison.OrdinalIgnoreCase);
+                    if (selectedLite)
+                        models = GeminiSurveyPoolClient.ModelsFromSettings(options.Model);
                     if (!models.Any(model => string.Equals(model.Model, options.Model,
                             StringComparison.OrdinalIgnoreCase)))
                         throw new InvalidOperationException(
-                            "Model đã nhập không có trong Flash Survey Pool. Chọn Flash 3.8/3.6 hoặc điều chỉnh QTSTUDIO_GEMINI_SURVEY_MODELS.");
+                            "Model đã chọn không nằm trong Gemini Survey Pool. Chọn một model trong danh sách.");
                     _summary.Text = "Flash Survey Pool: " + string.Join(", ", models.Select(model => model.Model));
                     // Google project scope, not QT Studio book ProjectId.
                     Guid quotaScope = GeminiSurveyProjectScope.Resolve(apiKey,
@@ -322,8 +328,9 @@ public sealed class BookIntelligenceReviewWindow : Window
             profile.Id != GeminiFlashPoolProfileId) return;
         try
         {
-            _model.Text = GeminiSurveyPoolClient.ModelsFromSettings(
-                Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"))[0].Model;
+            if (!GeminiSurveyPoolClient.IsAllowedFlash(_model.Text))
+                _model.Text = GeminiSurveyPoolClient.ModelsFromSettings(
+                    Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"))[0].Model;
             ShowGeminiConfiguration();
         }
         catch (Exception ex) { ShowFailure(ex); }
@@ -331,8 +338,10 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private void ShowGeminiConfiguration()
     {
-        IReadOnlyList<GeminiSurveyModel> models = GeminiSurveyPoolClient.ModelsFromSettings(
-            Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
+        IReadOnlyList<GeminiSurveyModel> models = _model.Text.Contains("flash-lite", StringComparison.OrdinalIgnoreCase)
+            ? GeminiSurveyPoolClient.ModelsFromSettings(_model.Text)
+            : GeminiSurveyPoolClient.ModelsFromSettings(
+                Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
         int? maximumRequests = GeminiSurveyPoolClient.MaximumRequestsFromSettings(
             Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS"));
         bool hasKey = !string.IsNullOrWhiteSpace(GeminiApiKeyVault.ResolveForSurvey());
