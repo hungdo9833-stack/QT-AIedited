@@ -19,6 +19,9 @@ public sealed class GeminiSurveyHttpException(HttpStatusCode statusCode, TimeSpa
 public sealed class GeminiDailyQuotaExceededException()
     : InvalidOperationException("Đã chạm giới hạn RPD Gemini của Project/model. Chờ reset lúc 00:00 giờ Pacific.");
 
+public sealed class GeminiRequestBudgetExceededException(int maximumRequests)
+    : InvalidOperationException($"Đã dùng hết ngân sách {maximumRequests} request Gemini cho phiên khảo sát. Batch còn lại chưa được gửi và có thể Resume sau.");
+
 /// <summary>Configurable API limits. These apply to a Google AI project and model, not an API key.</summary>
 public sealed record GeminiSurveyLimits(int RequestsPerMinute, int InputTokensPerMinute, int RequestsPerDay,
     int MaxInFlight = 2)
@@ -56,6 +59,7 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
     private readonly GeminiQuotaCoordinator _quota;
     private readonly Func<DateTimeOffset> _utcNow;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly GeminiRequestBudget? _requestBudget;
 
     public int MaxConcurrency => _limits.MaxInFlight;
 
@@ -65,8 +69,14 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
             static (delay, token) => Task.Delay(delay, token), routeFailuresToPool) { }
 
     internal GeminiSurveyClient(HttpClient httpClient, string apiKey, GeminiSurveyLimits limits, Guid projectId,
+        bool routeFailuresToPool, GeminiRequestBudget? requestBudget)
+        : this(httpClient, apiKey, limits, projectId, SharedQuota, () => DateTimeOffset.UtcNow,
+            static (delay, token) => Task.Delay(delay, token), routeFailuresToPool, requestBudget) { }
+
+    internal GeminiSurveyClient(HttpClient httpClient, string apiKey, GeminiSurveyLimits limits, Guid projectId,
         GeminiQuotaCoordinator quota, Func<DateTimeOffset> utcNow,
-        Func<TimeSpan, CancellationToken, Task> delay, bool routeFailuresToPool = false)
+        Func<TimeSpan, CancellationToken, Task> delay, bool routeFailuresToPool = false,
+        GeminiRequestBudget? requestBudget = null)
     {
         _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         ArgumentNullException.ThrowIfNull(limits);
@@ -82,6 +92,7 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
         _quota = quota ?? throw new ArgumentNullException(nameof(quota));
         _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
         _delay = delay ?? throw new ArgumentNullException(nameof(delay));
+        _requestBudget = requestBudget;
         _inFlight = new SemaphoreSlim(_limits.MaxInFlight, _limits.MaxInFlight);
     }
 
@@ -117,6 +128,7 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
                 await _quota.AcquireAsync(_projectId, options.Model, estimatedInputTokens, _limits,
                     _utcNow, _delay, token).ConfigureAwait(false);
                 using var request = CreateRequest(prompt, options, schema);
+                _requestBudget?.Reserve(options.Model);
                 HttpResponseMessage response;
                 try
                 {
@@ -175,6 +187,8 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
                     {
                         if (usage.TryGetProperty("promptTokenCount", out JsonElement a) && a.TryGetInt32(out int n)) input = n;
                         if (usage.TryGetProperty("candidatesTokenCount", out JsonElement b) && b.TryGetInt32(out int m)) output = m;
+                        if (usage.TryGetProperty("thoughtsTokenCount", out JsonElement thoughts) &&
+                            thoughts.TryGetInt32(out int thinking)) output = (output ?? 0) + thinking;
                     }
                     return new OllamaCompletion(result, true, "stop",
                         new GenerationMetrics { InputTokens = input, OutputTokens = output, ClientElapsed = stopwatch.Elapsed });
@@ -197,8 +211,12 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
         request.Headers.Add("x-goog-api-key", _apiKey);
         var generationConfig = new Dictionary<string, object?>
         {
-            ["temperature"] = options.Temperature,
             ["maxOutputTokens"] = options.MaximumOutputTokens
+        };
+        if (UsesLegacySampling(options.Model)) generationConfig["temperature"] = options.Temperature;
+        else generationConfig["thinkingConfig"] = new Dictionary<string, string>
+        {
+            ["thinkingLevel"] = "low"
         };
         if (schema is JsonElement responseSchema)
         {
@@ -214,6 +232,12 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
         return request;
     }
 
+    private static bool UsesLegacySampling(string model)
+    {
+        string versionText = model["gemini-".Length..].Split('-', 2)[0];
+        return Version.TryParse(versionText, out Version? version) && version < new Version(3, 6);
+    }
+
     private static bool IsTransient(HttpStatusCode status) => status == HttpStatusCode.TooManyRequests ||
         status is HttpStatusCode.RequestTimeout or HttpStatusCode.InternalServerError or HttpStatusCode.BadGateway or
             HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout;
@@ -227,6 +251,39 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
     }
 
     public void Dispose() => _inFlight.Dispose();
+}
+
+internal sealed class GeminiRequestBudget
+{
+    private readonly int _maximumRequests;
+    private int _reserved;
+    private readonly ConcurrentDictionary<string, int> _attemptsByModel =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public int UsedRequests => Volatile.Read(ref _reserved);
+    public IReadOnlyDictionary<string, int> AttemptsByModel =>
+        new Dictionary<string, int>(_attemptsByModel, StringComparer.OrdinalIgnoreCase);
+
+    public GeminiRequestBudget(int maximumRequests)
+    {
+        if (maximumRequests < 1) throw new ArgumentOutOfRangeException(nameof(maximumRequests));
+        _maximumRequests = maximumRequests;
+    }
+
+    public void Reserve(string model)
+    {
+        while (true)
+        {
+            int current = Volatile.Read(ref _reserved);
+            if (current >= _maximumRequests)
+                throw new GeminiRequestBudgetExceededException(_maximumRequests);
+            if (Interlocked.CompareExchange(ref _reserved, current + 1, current) == current)
+            {
+                _attemptsByModel.AddOrUpdate(model, 1, static (_, count) => count + 1);
+                return;
+            }
+        }
+    }
 }
 
 internal sealed class GeminiQuotaCoordinator

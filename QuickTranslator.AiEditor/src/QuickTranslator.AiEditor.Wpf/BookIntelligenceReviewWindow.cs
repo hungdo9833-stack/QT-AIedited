@@ -223,7 +223,9 @@ public sealed class BookIntelligenceReviewWindow : Window
                     // Google project scope, not QT Studio book ProjectId.
                     Guid quotaScope = GeminiSurveyProjectScope.Resolve(apiKey,
                         Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_PROJECT_ID"));
-                    gemini = new GeminiSurveyPoolClient(http, apiKey, quotaScope, models);
+                    int? maximumRequests = GeminiSurveyPoolClient.MaximumRequestsFromSettings(
+                        Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS"));
+                    gemini = new GeminiSurveyPoolClient(http, apiKey, quotaScope, models, maximumRequests);
                     backend = gemini;
                     _state.AnalyzerProfileId = null;
                     _state.AnalysisConcurrency = gemini.RecommendedConcurrency;

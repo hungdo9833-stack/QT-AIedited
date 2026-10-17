@@ -7,6 +7,7 @@ This is an experimental survey backend, not a new translation backend. Do not ru
 - `QTSTUDIO_GEMINI_API_KEY`: Google AI Studio key. Required to invoke Gemini. Never save in a project, log or prompt.
 - `QTSTUDIO_GEMINI_PROJECT_ID`: actual Google AI project ID. Recommended to share rate limits across novels and multiple keys in the same project. If absent, a one-way fingerprint of the key is used to share limits across novels within the running process, but it cannot identify multiple keys from the same Google project.
 - `QTSTUDIO_GEMINI_SURVEY_MODELS`: comma-separated Flash-only model IDs. Default: `gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash`. Flash Lite is rejected deliberately and reserved for a future translation API workflow.
+- `QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS`: optional hard per-run HTTP request budget. It counts initial calls, retries and model fallbacks; when exhausted, the current batch remains uncommitted for Resume. Use `5` for the first live preflight.
 
 As of 2026-10-17, Google's model documentation marks 3.7 Flash as deprecated and automatically routes its API ID to 3.8 Flash. Keep it configurable for compatibility, but do not assume 3.7 and 3.8 provide independent provider capacity or independent effective quota. Confirm active limits in AI Studio before enabling live use.
 

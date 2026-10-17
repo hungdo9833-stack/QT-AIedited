@@ -33,6 +33,15 @@ public sealed class GeminiSurveyPoolTests
     }
 
     [Fact]
+    public void Optional_live_request_budget_is_strictly_validated()
+    {
+        Assert.Null(GeminiSurveyPoolClient.MaximumRequestsFromSettings(null));
+        Assert.Equal(5, GeminiSurveyPoolClient.MaximumRequestsFromSettings("5"));
+        Assert.Throws<ArgumentException>(() => GeminiSurveyPoolClient.MaximumRequestsFromSettings("0"));
+        Assert.Throws<ArgumentException>(() => GeminiSurveyPoolClient.MaximumRequestsFromSettings("unlimited"));
+    }
+
+    [Fact]
     public async Task Six_concurrent_batches_are_spread_across_three_models()
     {
         var seen = new System.Collections.Concurrent.ConcurrentBag<string>();

@@ -10,4 +10,5 @@
   <Project Path="tools/QuickTranslator.AiEditor.Storage.Benchmark/QuickTranslator.AiEditor.Storage.Benchmark.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.QueueWorkflow.Benchmark/QuickTranslator.AiEditor.QueueWorkflow.Benchmark.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.BookIntelligence.Benchmark/QuickTranslator.AiEditor.BookIntelligence.Benchmark.csproj" />
+  <Project Path="tools/QuickTranslator.AiEditor.GeminiSurvey.Preflight/QuickTranslator.AiEditor.GeminiSurvey.Preflight.csproj" />
 </Solution>

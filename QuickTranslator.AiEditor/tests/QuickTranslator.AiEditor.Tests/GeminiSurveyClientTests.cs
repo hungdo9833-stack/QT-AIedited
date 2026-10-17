@@ -25,7 +25,7 @@ public sealed class GeminiSurveyClientTests
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"candidates":[{"content":{"parts":[{"text":"{\"characters\":[]}"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":25}}""",
+                    """{"candidates":[{"content":{"parts":[{"text":"{\"characters\":[]}"}]}}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":25,"thoughtsTokenCount":7}}""",
                     Encoding.UTF8, "application/json")
             };
         });
@@ -38,7 +38,7 @@ public sealed class GeminiSurveyClientTests
         }, schema.RootElement);
         Assert.Equal("""{"characters":[]}""", response.Text);
         Assert.Equal(100, response.Metrics.InputTokens);
-        Assert.Equal(25, response.Metrics.OutputTokens);
+        Assert.Equal(32, response.Metrics.OutputTokens);
         Assert.Contains("gemini-3.5-flash-lite:generateContent", requestUrl!);
         Assert.DoesNotContain("test-secret", requestUrl!);
         Assert.DoesNotContain("test-secret", requestBody!);
@@ -49,6 +49,25 @@ public sealed class GeminiSurveyClientTests
             requestJson.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema")
                 .GetProperty("type").GetString());
         Assert.False(requestJson.RootElement.GetProperty("generationConfig").TryGetProperty("responseSchema", out _));
+    }
+
+    [Fact]
+    public async Task Gemini_36_and_newer_use_low_thinking_without_deprecated_sampling_fields()
+    {
+        string? requestBody = null;
+        using var http = new HttpClient(new TestHandler(async request =>
+        {
+            requestBody = await request.Content!.ReadAsStringAsync();
+            return Success();
+        }));
+        using var client = new GeminiSurveyClient(http, "test-secret", new(15, 250_000, 500), Guid.NewGuid());
+
+        await client.TranslateAsync("Khảo sát", Options() with { Model = "gemini-3.8-flash" });
+
+        using JsonDocument requestJson = JsonDocument.Parse(requestBody!);
+        JsonElement config = requestJson.RootElement.GetProperty("generationConfig");
+        Assert.False(config.TryGetProperty("temperature", out _));
+        Assert.Equal("low", config.GetProperty("thinkingConfig").GetProperty("thinkingLevel").GetString());
     }
 
     [Fact]
@@ -101,6 +120,29 @@ public sealed class GeminiSurveyClientTests
         Assert.Equal(4, calls);
         Assert.Equal(3, delays.Count);
         Assert.Contains("Đã dừng retry", failure.Message);
+    }
+
+    [Fact]
+    public async Task Hard_request_budget_counts_retries_and_stops_before_the_next_http_attempt()
+    {
+        int calls = 0;
+        using var http = new HttpClient(new TestHandler(_ =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests));
+        }));
+        var clientRequestBudget = new GeminiRequestBudget(2);
+        using var client = new GeminiSurveyClient(http, "test-secret", new(20, 250_000, 500),
+            Guid.NewGuid(), new GeminiQuotaCoordinator(),
+            () => new DateTimeOffset(2026, 10, 17, 0, 0, 0, TimeSpan.Zero),
+            static (_, _) => Task.CompletedTask, requestBudget: clientRequestBudget);
+
+        var failure = await Assert.ThrowsAsync<GeminiRequestBudgetExceededException>(() =>
+            client.TranslateAsync("Khảo sát", Options()));
+
+        Assert.Equal(2, calls);
+        Assert.Contains("2 request", failure.Message);
+        Assert.Equal(2, clientRequestBudget.UsedRequests);
     }
 
     [Fact]

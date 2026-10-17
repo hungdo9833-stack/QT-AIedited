@@ -27,6 +27,7 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
     private readonly List<Slot> _slots;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _availability = new(0);
+    private GeminiRequestBudget? _requestBudget;
     private readonly Func<DateTimeOffset> _utcNow;
     private int _next;
     private bool _disposed;
@@ -36,11 +37,23 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
     // are capped far lower by AdaptiveBookIntelligenceAnalyzer.
     public int TargetInputTokens { get; } = 40_000;
     public int RecommendedConcurrency => Math.Min(8, _slots.Sum(s => s.Model.Limits.MaxInFlight));
+    public int RequestsUsed => _requestBudget?.UsedRequests ?? 0;
+    public IReadOnlyDictionary<string, int> RequestAttemptsByModel =>
+        _requestBudget?.AttemptsByModel ?? new Dictionary<string, int>();
 
     public GeminiSurveyPoolClient(HttpClient http, string apiKey, Guid googleProjectScope,
-        IReadOnlyList<GeminiSurveyModel> models)
+        IReadOnlyList<GeminiSurveyModel> models, int? maximumRequests = null)
+        : this(http, apiKey, googleProjectScope, models,
+            maximumRequests is int value ? new GeminiRequestBudget(value) : null) { }
+
+    private GeminiSurveyPoolClient(HttpClient http, string apiKey, Guid googleProjectScope,
+        IReadOnlyList<GeminiSurveyModel> models, GeminiRequestBudget? requestBudget)
         : this(models, model => new GeminiSurveyClient(http, apiKey, model.Limits,
-            googleProjectScope, routeFailuresToPool: true), () => DateTimeOffset.UtcNow) { }
+            googleProjectScope, routeFailuresToPool: true, requestBudget: requestBudget),
+            () => DateTimeOffset.UtcNow)
+    {
+        _requestBudget = requestBudget;
+    }
 
     internal GeminiSurveyPoolClient(IReadOnlyList<GeminiSurveyModel> models,
         Func<GeminiSurveyModel, IJsonSchemaOllamaClient> factory, Func<DateTimeOffset> utcNow)
@@ -76,6 +89,14 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
             names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Length)
             throw new ArgumentException("QTSTUDIO_GEMINI_SURVEY_MODELS phải chứa 1–8 model Flash hợp lệ, không có Flash Lite.");
         return names.Select(x => new GeminiSurveyModel(x, GeminiSurveyLimits.FromObservedFreeTier(x))).ToArray();
+    }
+
+    public static int? MaximumRequestsFromSettings(string? configuredMaximum)
+    {
+        if (string.IsNullOrWhiteSpace(configuredMaximum)) return null;
+        if (!int.TryParse(configuredMaximum, out int maximum) || maximum is < 1 or > 1_000)
+            throw new ArgumentException("QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS phải là số nguyên từ 1 đến 1000.");
+        return maximum;
     }
 
     public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
