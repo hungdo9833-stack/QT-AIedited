@@ -206,8 +206,11 @@ public partial class MainWindow
     private void ApplyProjectDefaults(ProjectTranslationSettings settings)
     {
         SelectOllamaProfileInUi(settings.OllamaProfileId);
-        if (settings.SelectedPromptPresetId is Guid preset && _presetManager.Presets.Any(x => x.Id == preset))
-        { _presetManager.Select(preset); RefreshPresetEditor(); }
+        Guid preset = settings.SelectedPromptPresetId is Guid selected &&
+            _presetManager.Presets.Any(x => x.Id == selected)
+            ? selected : PromptPreset.Default.Id;
+        _presetManager.Select(preset);
+        RefreshPresetEditor();
         UpdateOllamaBackendStatus();
     }
 
@@ -387,12 +390,12 @@ public partial class MainWindow
         {
             await RunWorkspaceTransitionAsync(async () =>
             {
-                var presets = new PromptPresetManager(await new PromptPresetStore(PromptPresetStore.DefaultPath).LoadAsync());
+                var presets = new PromptPresetManager(await _presetStore.LoadAsync());
                 var reader = await new ReaderPreferencesStore(ReaderPreferencesStore.DefaultPath).LoadAsync();
                 _chapterManagerWindow?.Close();
                 ClearProjectTranslationCoordinator();
                 DetachChapter(); _projectSession = null; _projectResources = null;
-                _store = new(ChapterFileStore.DefaultDirectory); _presetStore = new(PromptPresetStore.DefaultPath);
+                _store = new(ChapterFileStore.DefaultDirectory);
                 _readerStore = new(ReaderPreferencesStore.DefaultPath); _characterStore = new(CharacterProjectStore.DefaultDirectory);
                 _presetManager = presets; _presetsReady = true; RefreshPresetEditor();
                 _readerPreferences = reader; _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
