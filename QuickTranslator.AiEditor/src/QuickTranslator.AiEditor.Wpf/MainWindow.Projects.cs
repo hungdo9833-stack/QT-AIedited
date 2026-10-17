@@ -96,7 +96,7 @@ public partial class MainWindow
         ClearProjectTranslationCoordinator();
         DetachChapter();
         _projectSession = candidate; _projectLibrary = library; _store = candidate.ChapterStore;
-        _presetStore = new(candidate.Resolve(candidate.Manifest.Files.PromptPresets));
+        // Prompt presets belong to the application, not individual Projects.
         _readerStore = new(candidate.Resolve(candidate.Manifest.Files.ReaderSettings));
         _characterStore = new(Path.Combine(candidate.RootDirectory, "Characters"));
         InitializeProjectTranslationCoordinator(candidate);
@@ -131,15 +131,14 @@ public partial class MainWindow
         ApplyProjectAssets(await ReadProjectAssetsAsync(_projectSession));
     }
 
-    private static async Task<ProjectAssetState> ReadProjectAssetsAsync(ProjectSession session)
+    private async Task<ProjectAssetState> ReadProjectAssetsAsync(ProjectSession session)
     {
         var settings = new ProjectSettingsStore(session);
         var translation = await settings.LoadTranslationAsync();
         translation.Model.Validate(); translation.Segmentation.Validate();
-        var presets = new PromptPresetStore(session.Resolve(session.Manifest.Files.PromptPresets));
         var reader = new ReaderPreferencesStore(session.Resolve(session.Manifest.Files.ReaderSettings));
         var resources = new ProjectResourceStore(session);
-        var loadedPresets = await presets.LoadAsync(); var loadedReader = await reader.LoadAsync(); var loadedResources = await resources.LoadAsync();
+        var loadedPresets = await _presetStore.LoadAsync(); var loadedReader = await reader.LoadAsync(); var loadedResources = await resources.LoadAsync();
         BookIntelligenceState intelligence = await new BookIntelligenceStore(session).LoadAsync();
         return new(new PromptPresetManager(loadedPresets), loadedReader, loadedResources, translation, intelligence);
     }
