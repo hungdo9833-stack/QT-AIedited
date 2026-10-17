@@ -73,11 +73,15 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
             var scheduledKeys = new HashSet<string>(StringComparer.Ordinal);
             while (work.Count < state.AnalysisConcurrency && remaining.Count > 0)
             {
-                CorpusEvidence[] batch = TakeBatch(remaining.ToArray(), options.ContextSize);
+                CorpusEvidence[] batch = client is IAdaptiveSurveyBatchClient adaptive
+                    ? TakeAdaptiveBatch(remaining.ToArray(), options, adaptive.TargetInputTokens)
+                    : TakeBatch(remaining.ToArray(), options.ContextSize);
                 var batchIds = batch.Select(x => x.Id).ToHashSet();
                 remaining.RemoveAll(x => batchIds.Contains(x.Id));
                 string relevantContext = RelevantContextFingerprint(batch, resources);
-                string key = AnalysisKey(batch, options.Model, PromptSchemaVersion, relevantContext);
+                string cacheModel = client is IAdaptiveSurveyBatchClient pool
+                    ? pool.CacheSignature : options.Model;
+                string key = AnalysisKey(batch, cacheModel, PromptSchemaVersion, relevantContext);
                 if (state.CompletedAnalysisKeys.Contains(key))
                 {
                     foreach (CorpusEvidence evidence in batch) evidence.AiAnalyzed = true;
@@ -208,6 +212,43 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
             if (result.Count >= MaximumEvidencePerRequest || (result.Count > 0 && used + evidence.Excerpt.Length > characterBudget)) break;
             result.Add(evidence); used += evidence.Excerpt.Length;
         }
+        return result.ToArray();
+    }
+
+    /// <summary>
+    /// Gemini-only adaptive batching. Sensitive relationship/identity evidence receives
+    /// smaller context windows; simple terms and low-priority passages can be packed
+    /// more densely. Input budget leaves room for output and schema instructions.
+    /// Ollama and older tests retain their original 8-evidence batching.
+    /// </summary>
+    internal static CorpusEvidence[] TakeAdaptiveBatch(
+        CorpusEvidence[] pending, ModelOptions options, int targetInputTokens)
+    {
+        if (pending.Length == 0) return [];
+        bool sensitive = pending[0].Kind == IntelligenceEvidenceKind.Relationship ||
+            pending[0].SemanticGroup is "relationship" or "identity" or "dialogue";
+        bool high = pending[0].Priority == EvidencePriority.High;
+        int maximumItems = sensitive ? 12 : high ? 20 : pending[0].Priority == EvidencePriority.Medium ? 36 : 48;
+        int budget = Math.Max(1_000, Math.Min(targetInputTokens,
+            options.ContextSize - options.MaximumOutputTokens - 2_048));
+        if (sensitive) budget = Math.Min(budget, 14_000);
+        else if (high) budget = Math.Min(budget, 19_000);
+        int tokens = 900; // instruction/schema overhead; conservative estimate
+        var result = new List<CorpusEvidence>();
+        foreach (CorpusEvidence item in pending)
+        {
+            int cost = PromptTokenBudget.Estimate(item.Excerpt) + 150;
+            bool nextIsSensitive = item.Kind == IntelligenceEvidenceKind.Relationship ||
+                item.SemanticGroup is "relationship" or "identity" or "dialogue";
+            if (result.Count > 0 && (result.Count >= maximumItems || tokens + cost > budget ||
+                (!sensitive && nextIsSensitive)))
+                break;
+            result.Add(item);
+            tokens += cost;
+            if (result.Count >= maximumItems) break;
+        }
+        // A single long excerpt still has to be sent and validated. The analyzer
+        // may split it later if real API usage shows this estimate is too small.
         return result.ToArray();
     }
 
