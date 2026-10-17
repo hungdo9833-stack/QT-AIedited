@@ -191,8 +191,8 @@ public sealed class BookIntelligenceReviewWindow : Window
             {
                 Model = _model.Text.Trim(),
                 Temperature = Math.Min(0.2, baseOptions.Temperature),
-                ContextSize = isGemini ? Math.Max(32_768, baseOptions.ContextSize) : baseOptions.ContextSize,
-                MaximumOutputTokens = isGemini ? Math.Max(4096, baseOptions.MaximumOutputTokens) : baseOptions.MaximumOutputTokens
+                ContextSize = isGemini ? Math.Max(65_536, baseOptions.ContextSize) : baseOptions.ContextSize,
+                MaximumOutputTokens = isGemini ? Math.Max(8192, baseOptions.MaximumOutputTokens) : baseOptions.MaximumOutputTokens
             };
             var aiProgress = new Progress<AnalyzerProgress>(p =>
             {
@@ -203,7 +203,7 @@ public sealed class BookIntelligenceReviewWindow : Window
             using var httpHandler = new HttpClientHandler { AllowAutoRedirect = false };
             using var http = new HttpClient(httpHandler) { Timeout = Timeout.InfiniteTimeSpan };
             IOllamaBackendClient? ollama = null;
-            GeminiSurveyClient? gemini = null;
+            GeminiSurveyPoolClient? gemini = null;
             try
             {
                 IOllamaClient backend;
@@ -213,11 +213,15 @@ public sealed class BookIntelligenceReviewWindow : Window
                     if (string.IsNullOrWhiteSpace(apiKey))
                         throw new InvalidOperationException(
                             "Chưa cấu hình QTSTUDIO_GEMINI_API_KEY. Không nhập API key vào Project hoặc prompt.");
-                    GeminiSurveyLimits limits = GeminiSurveyLimits.FromObservedFreeTier(options.Model);
-                    gemini = new GeminiSurveyClient(http, apiKey, limits, _session.Manifest.ProjectId);
+                    var models = GeminiSurveyPoolClient.ModelsFromSettings(
+                        Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
+                    // Google project scope, not QT Studio book ProjectId.
+                    Guid quotaScope = GeminiSurveyProjectScope.Resolve(apiKey,
+                        Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_PROJECT_ID"));
+                    gemini = new GeminiSurveyPoolClient(http, apiKey, quotaScope, models);
                     backend = gemini;
                     _state.AnalyzerProfileId = null;
-                    _state.AnalysisConcurrency = limits.MaxInFlight;
+                    _state.AnalysisConcurrency = gemini.RecommendedConcurrency;
                 }
                 else
                 {
