@@ -82,7 +82,7 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
     public static IReadOnlyList<GeminiSurveyModel> ModelsFromSettings(string? configuredModels)
     {
         string source = string.IsNullOrWhiteSpace(configuredModels)
-            ? "gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash"
+            ? "gemini-3.8-flash,gemini-3.6-flash"
             : configuredModels;
         string[] names = source.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (names.Length is < 1 or > 8 || names.Any(x => !IsAllowedFlash(x)) ||
