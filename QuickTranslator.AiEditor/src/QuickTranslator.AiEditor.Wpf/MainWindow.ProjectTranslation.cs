@@ -55,7 +55,10 @@ public partial class MainWindow
         var presets = new PromptPresetManager(library);
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync(cancellationToken);
         OllamaBackendProfile profile = _ollamaBackends.GetProfile(translation.OllamaProfileId);
-        if (_ollamaBackends.ActiveProfile.Id != profile.Id)
+        // A persisted multi-worker queue pins each backend independently. The globally active
+        // editor profile is not required to match a particular worker after restart.
+        bool pinnedWorkers = _projectTranslationCoordinator?.CurrentJob?.Workers.Count > 0;
+        if (!pinnedWorkers && _ollamaBackends.ActiveProfile.Id != profile.Id)
             throw new InvalidOperationException("Profile Ollama của Project chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại backend.");
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         IBookKnowledgeContextProvider? knowledge = null;
@@ -256,8 +259,34 @@ public partial class MainWindow
     {
         ProjectTranslationJob? recovered = previous.CurrentJob;
         if (recovered?.Workers.Count is not > 0) return previous;
+
+        // Resume is an explicit user action. On a fresh app launch the GPU mode is not
+        // selected yet: preserve the workers saved with the job rather than defaulting
+        // to Local-only and silently dropping the Remote worker.
+        bool changedMode = _gpuPreferences.ModeExplicitlySelected;
+        if (!changedMode)
+        {
+            await ApplyTranslationModeAsync(recovered);
+            foreach (ProjectTranslationWorkerState worker in recovered.Workers
+                         .Where(value => value.Backend.Kind == OllamaBackendKind.Remote)
+                         .DistinctBy(value => value.ProfileId))
+            {
+                OllamaBackendProfile remote = _ollamaBackends.GetProfile(worker.ProfileId);
+                if (remote.Kind != OllamaBackendKind.Remote || remote.Ssh is null ||
+                    !remote.RemoteDisclosureAccepted)
+                    throw new InvalidOperationException(
+                        $"GPU Remote “{worker.Name}” cần được xác nhận và kết nối lại trong AI & hiệu năng.");
+                // Refuse changed host/fingerprint BEFORE opening a remote connection.
+                EnsureBackendIdentity(worker.BackendIdentity, SshBackendIdentity(remote), remote.Name);
+                if (_gpuConnections.TryGetConnection(remote.Id, out GpuConnectionHandle? existing) &&
+                    existing is { IsConnected: true })
+                    continue;
+                GpuConnectionHandle connection = await _gpuConnections.ConnectAsync(remote);
+                await _ollamaBackends.AttachRuntimeClientAsync(remote.Id, connection.Client);
+            }
+        }
         return await RebuildParallelCoordinatorAsync(recovered, closeWindow: false, loadExisting: true,
-            useCurrentWorkers: true);
+            useCurrentWorkers: changedMode);
     }
 
     private async Task PauseProjectTranslationForContextChangeAsync()
