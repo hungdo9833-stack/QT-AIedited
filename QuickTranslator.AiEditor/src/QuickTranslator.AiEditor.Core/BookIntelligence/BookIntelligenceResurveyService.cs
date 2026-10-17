@@ -8,7 +8,7 @@ namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 public static class BookIntelligenceResurveyService
 {
     public static bool HasUnanalyzedEvidence(BookIntelligenceState state, IntelligenceScanMode mode) =>
-        state.Evidence.Any(x => x.IsCurrent && !x.AiAnalyzed &&
+        state.Evidence.Any(x => x.IsCurrent && !x.AiAnalyzed && !x.AiBlocked &&
             (mode == IntelligenceScanMode.FullSemantic ||
              x.Priority is EvidencePriority.High or EvidencePriority.Medium ||
              x.IsAuditSample || x.AuditExpanded));
@@ -57,6 +57,8 @@ public static class BookIntelligenceResurveyService
         foreach (CorpusEvidence evidence in fresh.Evidence.Where(x => x.IsCurrent))
         {
             evidence.AiAnalyzed = false;
+            evidence.AiBlocked = false;
+            evidence.AiBlockReason = "";
             evidence.ImportantFinding = false;
             evidence.AuditExpanded = false;
         }
