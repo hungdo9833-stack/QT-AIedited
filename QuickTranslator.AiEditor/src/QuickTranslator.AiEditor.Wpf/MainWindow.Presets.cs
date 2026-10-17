@@ -60,6 +60,16 @@ public partial class MainWindow
         }
         await _presetStore.SaveAsync(_presetManager.Snapshot());
     }
+    private async Task SaveProjectPresetSelectionAsync()
+    {
+        if (_projectSession is not { } session || !_presetsReady) return;
+        var store = new ProjectSettingsStore(session);
+        ProjectTranslationSettings settings = await store.LoadTranslationAsync();
+        if (settings.SelectedPromptPresetId == _presetManager.Selected.Id) return;
+        settings.SelectedPromptPresetId = _presetManager.Selected.Id;
+        await store.SaveTranslationAsync(settings);
+    }
+
     private async Task SaveSelectedSettingsAsync()
     {
         await SavePresetEditorAsync();
@@ -90,6 +100,7 @@ public partial class MainWindow
             _presetManager.Select(incoming.Id);
             RefreshPresetEditor();
             await _presetStore.SaveAsync(_presetManager.Snapshot());
+            await SaveProjectPresetSelectionAsync();
         }
         catch (Exception ex) { ShowError(ex); RefreshPresetEditor(); }
         finally { EndUiOperation(); }
@@ -97,14 +108,14 @@ public partial class MainWindow
     private async void OnCreatePreset(object sender, RoutedEventArgs e)
     {
         if (!BeginUiOperation()) return;
-        try { await SavePresetEditorAsync(); _presetManager.Create("Preset mới"); RefreshPresetEditor(); await _presetStore.SaveAsync(_presetManager.Snapshot()); }
+        try { await SavePresetEditorAsync(); _presetManager.Create("Preset mới"); RefreshPresetEditor(); await _presetStore.SaveAsync(_presetManager.Snapshot()); await SaveProjectPresetSelectionAsync(); }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
     }
     private async void OnDuplicatePreset(object sender, RoutedEventArgs e)
     {
         if (!BeginUiOperation()) return;
-        try { await SavePresetEditorAsync(); var selected = _presetManager.Selected; _presetManager.Duplicate(selected.Id, selected.Name + " (bản sao)"); RefreshPresetEditor(); await _presetStore.SaveAsync(_presetManager.Snapshot()); }
+        try { await SavePresetEditorAsync(); var selected = _presetManager.Selected; _presetManager.Duplicate(selected.Id, selected.Name + " (bản sao)"); RefreshPresetEditor(); await _presetStore.SaveAsync(_presetManager.Snapshot()); await SaveProjectPresetSelectionAsync(); }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
     }
