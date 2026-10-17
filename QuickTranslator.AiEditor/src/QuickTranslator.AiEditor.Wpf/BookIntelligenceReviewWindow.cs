@@ -152,6 +152,10 @@ public sealed class BookIntelligenceReviewWindow : Window
             _loading = true;
             IntelligenceCommitResult reconciled = await new BookIntelligenceReviewService(_session).ReconcileAsync();
             _state = reconciled.State; _resources = reconciled.Resources;
+            // Idempotent, safe normalization of pending results from earlier survey runs.
+            // Never modify accepted or rejected user decisions.
+            if (RelationshipLabelNormalizer.NormalizePending(_state))
+                _state = await new BookIntelligenceStore(_session).SaveAsync(_state);
             ProjectTranslationSettings translation = await new ProjectSettingsStore(_session).LoadTranslationAsync();
             _translationContext.IsChecked = translation.BookKnowledgeContextEnabled;
             _scanMode.SelectedItem = _state.ScanMode;
@@ -419,10 +423,16 @@ public sealed class BookIntelligenceReviewWindow : Window
     {
         if (_state is null) return [];
         IEnumerable<ReviewRow> rows = _state.Characters.Select(x => new ReviewRow(x.Id, "Nhân vật", $"{x.ChineseName} → {x.VietnameseName}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x))
-            .Concat(_state.Relationships.Select(x => new ReviewRow(x.Id, "Quan hệ", $"{x.SpeakerChineseName} → {x.ListenerChineseName}: {x.Relationship}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x)))
+            .Concat(_state.Relationships.Select(x => new ReviewRow(x.Id, "Quan hệ", $"{x.SpeakerChineseName} → {x.ListenerChineseName}: {RelationshipLabelNormalizer.Display(x.Relationship)}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x)))
             .Concat(_state.DerivedRelationships.Select(x => new ReviewRow(x.Id, "Suy luận", $"{CharacterName(x.SubjectCharacterId)} → {CharacterName(x.TargetCharacterId)}: {x.OutputRelation}",
                 x.ValidityStatus.ToString(), x.Status.ToString(), x.RuleId, x.SupportingEvidenceIds.Count, x)))
             .Concat(_state.Glossary.Select(x => new ReviewRow(x.Id, "Glossary", $"{x.Chinese} → {x.Vietnamese}", x.Confidence.ToString(), x.Status.ToString(), x.Scope.ToString(), x.EvidenceIds.Count, x)));
+        // Keep auto-merged items available under "Đã xử lý", but avoid cluttering
+        // the default review list with labels that are already represented elsewhere.
+        if (_statusFilter.SelectedIndex == 0)
+            rows = rows.Where(x => x.Value is not IntelligenceRelationshipSuggestion r ||
+                !(r.Status == IntelligenceReviewStatus.Merged &&
+                  r.Reason.Contains("Trùng nhãn đã chuẩn hóa;", StringComparison.Ordinal)));
         string query = _search.Text.Trim();
         if (query.Length > 0) rows = rows.Where(x => x.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
             x.Value is IntelligenceCharacterSuggestion c && c.Aliases.Any(a => a.Contains(query, StringComparison.OrdinalIgnoreCase)));
@@ -451,7 +461,7 @@ public sealed class BookIntelligenceReviewWindow : Window
                 reason = $"Tên Trung: {x.ChineseName}\nTên Việt đề xuất: {x.VietnameseName}\nBí danh: {string.Join(", ", x.Aliases)}\nGiới tính: {x.Gender}\nĐại từ: {x.PrimaryNarrativePronoun} / {x.SecondaryNarrativePronoun}\n\n{x.Reason}";
                 ids = x.EvidenceIds; break;
             case IntelligenceRelationshipSuggestion x:
-                reason = $"{x.SpeakerChineseName} → {x.ListenerChineseName}\nQuan hệ: {x.Relationship}\nXưng hô: {x.SelfReference} → {x.AddresseeReference}\nChiều ngược đề xuất: {x.ReverseSelfReference} → {x.ReverseAddresseeReference}\n\n{x.Reason}";
+                reason = $"{x.SpeakerChineseName} → {x.ListenerChineseName}\nQuan hệ: {RelationshipLabelNormalizer.Display(x.Relationship)}\nXưng hô: {x.SelfReference} → {x.AddresseeReference}\nChiều ngược đề xuất: {x.ReverseSelfReference} → {x.ReverseAddresseeReference}\n\n{x.Reason}";
                 ids = x.EvidenceIds; break;
             case IntelligenceGlossarySuggestion x:
                 reason = $"{x.Chinese} → {x.Vietnamese}\nLoại: {x.Category}\nPhụ thuộc ngữ cảnh: {(x.ContextDependent ? "Có — cần thận trọng" : "Không")}\n\n{x.Reason}";
