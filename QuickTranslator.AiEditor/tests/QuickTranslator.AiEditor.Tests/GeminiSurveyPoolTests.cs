@@ -24,7 +24,7 @@ public sealed class GeminiSurveyPoolTests
     public void Only_explicit_Flash_models_can_enter_survey_pool()
     {
         var parsed = GeminiSurveyPoolClient.ModelsFromSettings(null);
-        Assert.Equal(3, parsed.Count);
+        Assert.Equal(2, parsed.Count);
         Assert.All(parsed, x => Assert.True(GeminiSurveyPoolClient.IsAllowedFlash(x.Model)));
         Assert.Throws<ArgumentException>(() =>
             GeminiSurveyPoolClient.ModelsFromSettings("gemini-3.6-flash,gemini-3.5-flash-lite"));
