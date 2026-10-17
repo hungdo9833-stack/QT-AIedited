@@ -172,8 +172,13 @@ public static class RelationshipLabelNormalizer
                         duplicate.Status = IntelligenceReviewStatus.ReviewLater;
                         changed = true;
                     }
-                    duplicate.Reason = AppendOnce(duplicate.Reason,
-                        "Cùng cặp nhân vật/loại quan hệ nhưng xưng hô hoặc thời điểm khác; cần đối chiếu, không tự gộp.");
+                    string conflictNote =
+                        "Cùng cặp nhân vật/loại quan hệ nhưng xưng hô hoặc thời điểm khác; cần đối chiếu, không tự gộp.";
+                    if (!duplicate.Reason.Contains(conflictNote, StringComparison.Ordinal))
+                    {
+                        duplicate.Reason = AppendOnce(duplicate.Reason, conflictNote);
+                        changed = true;
+                    }
                     continue;
                 }
                 foreach (Guid id in duplicate.EvidenceIds.Where(id => !first.EvidenceIds.Contains(id)))
