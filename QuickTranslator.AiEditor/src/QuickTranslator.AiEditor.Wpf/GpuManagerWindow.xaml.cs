@@ -71,6 +71,7 @@ public partial class GpuManagerWindow : Window
         if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         NameInput.Text = profile.Name; ModelInput.Text = runtime.ModelOptions.Model;
+        DownloadModelInput.Text = runtime.ModelOptions.Model;
         RuntimeTemperatureInput.Text = runtime.ModelOptions.Temperature.ToString(CultureInfo.InvariantCulture);
         RuntimeContextInput.Text = runtime.ModelOptions.ContextSize.ToString(CultureInfo.InvariantCulture);
         RuntimeOutputInput.Text = runtime.ModelOptions.MaximumOutputTokens.ToString(CultureInfo.InvariantCulture);
@@ -251,8 +252,17 @@ public partial class GpuManagerWindow : Window
         await ConfirmSetupAsync(RemoteSetupAction.StartOllamaService,
             "Bật Ollama service trên GPU thuê? Nếu cần quyền sudo, QT Studio sẽ hỏi mật khẩu ngay tại đây.");
     }
-    private async void OnPullModel(object sender, RoutedEventArgs e) => await ConfirmSetupAsync(RemoteSetupAction.PullModel,
-        $"Tải model “{ModelInput.Text}” qua SSH tunnel? QT Studio sẽ hiển thị dung lượng Ollama báo về; tính phí mạng do nhà cung cấp quyết định.", ModelInput.Text);
+    private async void OnPullModel(object sender, RoutedEventArgs e)
+    {
+        string model = DownloadModelInput.Text.Trim();
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            StatusText.Text = "Hãy nhập tên model Ollama cần tải."; return;
+        }
+        await ConfirmSetupAsync(RemoteSetupAction.PullModel,
+            $"Tải model “{model}” qua SSH tunnel? Dung lượng tải sẽ được hiển thị; nhà cung cấp có thể tính phí mạng.",
+            model);
+    }
     private void OnCancelSetup(object sender, RoutedEventArgs e)
     {
         _setupCancellation?.Cancel();
