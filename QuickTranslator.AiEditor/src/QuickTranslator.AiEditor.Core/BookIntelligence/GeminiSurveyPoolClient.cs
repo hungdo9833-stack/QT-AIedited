@@ -119,7 +119,9 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
             catch (GeminiSurveyHttpException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 lock (_sync)
-                    selected.CooldownUntil = _utcNow() + (ex.RetryAfter ?? TimeSpan.FromMinutes(1));
+                    selected.CooldownUntil = _utcNow() +
+                        (ex.RetryAfter is TimeSpan retry && retry > TimeSpan.FromMinutes(1)
+                            ? retry : TimeSpan.FromMinutes(1));
             }
             catch (GeminiSurveyHttpException ex) when (ex.StatusCode is
                 HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
