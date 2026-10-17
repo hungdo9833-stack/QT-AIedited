@@ -481,10 +481,11 @@ public partial class MainWindow : Window
     private void Refresh()
     {
         if (!_initialized) return;
+        ChapterDocument? chapter = null;
         _rendering = true;
         try
         {
-            var chapter = _service?.GetSnapshot();
+            chapter = _service?.GetSnapshot();
             string segFilter = (FindName("SegmentStateFilter") as ComboBox)?.SelectedItem is ComboBoxItem filterItem
                 ? filterItem.Tag?.ToString() ?? "All" : "All";
             var items = chapter?.Segments
@@ -543,17 +544,22 @@ public partial class MainWindow : Window
             SavePathText.Text = _service is not null ? "Lưu tại: " + _service.SavePath
                 : _projectSession is not null ? "Dự án: " + _projectSession.RootDirectory
                 : "Dữ liệu riêng tư chỉ lưu tại: " + ChapterFileStore.DefaultDirectory;
-            UpdateShellChrome();
+            UpdateShellChrome(chapter);
         }
         finally { _rendering = false; }
-        UpdateButtons();
+        UpdateButtons(chapter);
     }
 
-    private void UpdateButtons()
+    private void UpdateButtons() => UpdateButtons(_service?.GetSnapshot());
+
+    private void UpdateButtons(ChapterDocument? chapter)
     {
-        bool document = _service is not null, selected = document && _selectedId is not null;
+        bool document = chapter is not null, selected = document && _selectedId is not null;
         bool available = !_uiOperation && !_closing;
         bool active = WorkActive;
+        TranslationSegment? selectedSegment = selected
+            ? chapter!.Segments.SingleOrDefault(s => s.Id == _selectedId)
+            : null;
         NewButton.IsEnabled = OpenButton.IsEnabled = !active && available;
         SaveButton.IsEnabled = document && available;
         SplitButton.IsEnabled = !document && !active && available && _presetsReady;
@@ -564,7 +570,8 @@ public partial class MainWindow : Window
         if (FindName("QuickScanChineseToolbarButton") is Button quickChineseBtn) quickChineseBtn.IsEnabled = document && !active && available;
         if (FindName("QuickScanPronounsToolbarButton") is Button quickPronounsBtn) quickPronounsBtn.IsEnabled = document && !active && available;
         if (FindName("ApproveAndNextButton") is Button approveNextBtn)
-            approveNextBtn.IsEnabled = selected && _service?.GetSnapshot().Segments.SingleOrDefault(s => s.Id == _selectedId)?.Status != SegmentStatus.Translating && !string.IsNullOrWhiteSpace(DraftText.Text) && available;
+            approveNextBtn.IsEnabled = selectedSegment?.Status != SegmentStatus.Translating && selected &&
+                !string.IsNullOrWhiteSpace(DraftText.Text) && available;
         ChapterInput.IsReadOnly = document && !_sourceEditMode || !available;
         TitleInput.IsReadOnly = document || !available;
         EditSourceButton.IsEnabled = document && !active && available && !_sourceEditMode &&
@@ -578,7 +585,6 @@ public partial class MainWindow : Window
         SegmentList.IsEnabled = available;
         TranslateButton.IsEnabled = selected && !active && available && _presetsReady;
         CancelButton.IsEnabled = _busy && !_closing;
-        var selectedSegment = _service?.GetSnapshot().Segments.SingleOrDefault(s => s.Id == _selectedId);
         bool processingSelected = selectedSegment?.Status == SegmentStatus.Translating;
         UseAiButton.IsEnabled = selected && !processingSelected && !string.IsNullOrWhiteSpace(AiText.Text) && available;
         ApproveButton.IsEnabled = selected && !processingSelected && !string.IsNullOrWhiteSpace(DraftText.Text) && available;
@@ -589,23 +595,23 @@ public partial class MainWindow : Window
         ChapterBlocksItems.IsEnabled = document && available;
         TranslateAllButton.IsEnabled = !active && available && _presetsReady;
         RetryErrorsButton.IsEnabled = document && !active && available && _presetsReady;
-        PauseQueueButton.IsEnabled = _queue?.IsRunning == true && _service?.GetSnapshot().Queue.Status == QueueStatus.Running && available;
+        PauseQueueButton.IsEnabled = _queue?.IsRunning == true && chapter?.Queue.Status == QueueStatus.Running && available;
         CancelQueueButton.IsEnabled = _queue?.IsRunning == true && !_closing;
-        var queueStatus = _service?.GetSnapshot().Queue.Status;
+        QueueStatus? queueStatus = chapter?.Queue.Status;
         ResumeQueueButton.IsEnabled = document && !active && available && queueStatus is QueueStatus.Paused or QueueStatus.Interrupted or QueueStatus.Cancelled or QueueStatus.Faulted;
         ExportButton.IsEnabled = document && available;
         BatchReplaceButton.IsEnabled = document && !active && available;
         NormalizePronounsButton.IsEnabled = document && !active && available;
         ApplyPronounsButton.IsEnabled = document && !active && available && _pronounReport?.Safe > 0;
         UndoPronounsButton.IsEnabled = document && !active && available &&
-            _service!.GetSnapshot().Segments.SelectMany(s => s.NormalizationHistory).Any(r => !r.Reverted);
+            chapter!.Segments.SelectMany(s => s.NormalizationHistory).Any(r => !r.Reverted);
         if (FindName("InspectorScanPronounsButton") is Button inspScan) inspScan.IsEnabled = NormalizePronounsButton.IsEnabled;
         if (FindName("InspectorApplyPronounsButton") is Button inspApply) inspApply.IsEnabled = ApplyPronounsButton.IsEnabled;
         if (FindName("InspectorUndoPronounsButton") is Button inspUndo) inspUndo.IsEnabled = UndoPronounsButton.IsEnabled;
         if (FindName("InspectorPreviewRulesButton") is Button inspPreview) inspPreview.IsEnabled = document && !active && available;
         ScanChineseButton.IsEnabled = document && !active && available;
         UndoBatchReplaceButton.IsEnabled = document && !active && available &&
-            _service!.GetSnapshot().BatchReplacementHistory.Any(r => !r.Reverted && !r.Automatic);
+            chapter!.BatchReplacementHistory.Any(r => !r.Reverted && !r.Automatic);
         SettingsPanel.IsEnabled = !active && available;
         PresetPanel.IsEnabled = _presetsReady;
         NewCharacterProjectButton.IsEnabled = AddCharacterButton.IsEnabled = SaveCharactersButton.IsEnabled =
@@ -614,11 +620,11 @@ public partial class MainWindow : Window
         PreviewCharactersButton.IsEnabled = document && !active && available;
         SplitSegmentButton.IsEnabled = MergeSegmentButton.IsEnabled = MoveBoundaryButton.IsEnabled = selected && !active && available;
         ArchiveButton.IsEnabled = document && available;
-        RestoreStructureButton.IsEnabled = document && !active && available && _service!.GetSnapshot().SegmentationHistory.Count > 0;
-        if (selected)
+        RestoreStructureButton.IsEnabled = document && !active && available && chapter!.SegmentationHistory.Count > 0;
+        if (selectedSegment is not null)
         {
-            var segment = _service!.GetSnapshot().Segments.Single(s => s.Id == _selectedId);
-            TranslateButton.Content = segment.Attempts.Count == 0 ? "Dịch đoạn đang chọn" : "Dịch lại đoạn đang chọn";
+            TranslateButton.Content = selectedSegment.Attempts.Count == 0
+                ? "Dịch đoạn đang chọn" : "Dịch lại đoạn đang chọn";
         }
     }
 

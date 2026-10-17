@@ -603,9 +603,10 @@ public partial class MainWindow
         FourPaneSelectionText.Text = $"Đoạn {segment.Order} · {StatusLabel(segment.Status)}";
     }
 
-    private void UpdateShellChrome()
+    private void UpdateShellChrome() => UpdateShellChrome(_service?.GetSnapshot());
+
+    private void UpdateShellChrome(ChapterDocument? chapter)
     {
-        ChapterDocument? chapter = _service?.GetSnapshot();
         ShellChapterText.Text = chapter is null ? "Chưa mở chương" : chapter.Title;
         ApplyTwoPaneEditorModeLayout();
         RefreshTranslationInspector(chapter?.Segments.SingleOrDefault(segment => segment.Id == _selectedId));

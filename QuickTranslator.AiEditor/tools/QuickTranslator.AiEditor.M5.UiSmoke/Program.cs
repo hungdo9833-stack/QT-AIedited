@@ -41,6 +41,13 @@ internal static class Program
             application.Shutdown();
             return;
         }
+        if (string.Equals(mode, "editor-refresh-benchmark", StringComparison.OrdinalIgnoreCase))
+        {
+            int count = (int)(NumberAfter(args, "--count") ?? 500);
+            RunEditorRefreshBenchmark(root, count);
+            application.Shutdown();
+            return;
+        }
         ProjectSession session = CreateSyntheticProjectAsync(root).GetAwaiter().GetResult();
         Window window = CreateWindow(mode, session, root);
         if (requestedWidth is > 0) window.Width = requestedWidth.Value;
@@ -120,6 +127,54 @@ internal static class Program
                 $"row_objects={measured.RowObjectCreations}");
         }
         finally { window.Close(); }
+    }
+
+    private static void RunEditorRefreshBenchmark(string root, int count)
+    {
+        ProjectSession session = CreateSyntheticProjectAsync(root).GetAwaiter().GetResult();
+        MainWindow window = CreateEditor(session, root, fourPane: false);
+        try
+        {
+            string source = string.Join("\n", Enumerable.Repeat("王秀兰看见李明走进客栈。", count));
+            ChapterDocument chapter = TranslationService.CreateChapter("Refresh benchmark", source,
+                new SegmenterOptions { MinimumHanCharacters = 1, TargetHanCharacters = 8,
+                    MaximumHanCharacters = 16, MaximumTextElements = 2000 });
+            foreach (TranslationSegment segment in chapter.Segments)
+            {
+                segment.UserDraft = "Bản dịch tổng hợp cho phép đo Refresh.";
+                segment.Status = SegmentStatus.AwaitingReview;
+                segment.Attempts.Add(new TranslationAttempt
+                {
+                    StartedAt = DateTimeOffset.UtcNow,
+                    FinishedAt = DateTimeOffset.UtcNow,
+                    Outcome = AttemptOutcome.Completed,
+                    AiText = segment.UserDraft,
+                    Prompt = "Synthetic benchmark prompt " + new string('x', 256),
+                    PromptVersion = "benchmark"
+                });
+            }
+            Set(window, "_projectSession", null);
+            Set(window, "_store", new ChapterFileStore(Path.Combine(root, "RefreshBenchmark")));
+            Invoke(window, "AttachChapter", chapter);
+            Set(window, "_selectedId", chapter.Segments[0].Id);
+            Invoke(window, "ApplyInputs", chapter);
+            Invoke(window, "Refresh");
+
+            const int repetitions = 20;
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            for (int index = 0; index < repetitions; index++) Invoke(window, "Refresh");
+            stopwatch.Stop();
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Console.WriteLine($"EDITOR_REFRESH segments={chapter.Segments.Count} repetitions={repetitions} " +
+                $"avg_refresh_ms={stopwatch.Elapsed.TotalMilliseconds / repetitions:F3} " +
+                $"avg_allocated_bytes={allocated / repetitions}");
+        }
+        finally
+        {
+            Set(window, "_allowClose", true);
+            window.Close();
+        }
     }
 
     private static async Task<ProjectSession> CreateSyntheticProjectAsync(string root)

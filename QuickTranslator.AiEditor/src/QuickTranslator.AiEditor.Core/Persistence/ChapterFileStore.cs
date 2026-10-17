@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using QuickTranslator.AiEditor.Core.Models;
 
@@ -6,8 +5,6 @@ namespace QuickTranslator.AiEditor.Core.Persistence;
 
 public sealed class ChapterFileStore : IChapterStore
 {
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> WriteGates = new(StringComparer.OrdinalIgnoreCase);
-    private readonly SemaphoreSlim _writeGate;
     private readonly string _directory;
     private static readonly JsonSerializerOptions PrettyJson = new(DocumentJson.Options) { WriteIndented = true };
 
@@ -15,7 +12,6 @@ public sealed class ChapterFileStore : IChapterStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _directory = Path.GetFullPath(directory);
-        _writeGate = WriteGates.GetOrAdd(_directory, _ => new(1, 1));
     }
 
     public static string DefaultDirectory => Path.Combine(
@@ -45,26 +41,16 @@ public sealed class ChapterFileStore : IChapterStore
     public async Task SaveAsync(ChapterDocument chapter, CancellationToken cancellationToken = default)
     {
         byte[] bytes = SerializeDocument(chapter);
-        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await SimpleFileStorage.WriteAsync(GetPath(chapter.Id), bytes, DeserializeDocument, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        finally { _writeGate.Release(); }
+        await SimpleFileStorage.WriteAsync(GetPath(chapter.Id), bytes, DeserializeDocument, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     internal async Task SaveSerializedAsync(Guid chapterId, byte[] bytes,
         CancellationToken cancellationToken = default)
     {
         _ = DeserializeDocument(bytes);
-        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await SimpleFileStorage.WriteAsync(GetPath(chapterId), bytes, DeserializeDocument, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        finally { _writeGate.Release(); }
+        await SimpleFileStorage.WriteAsync(GetPath(chapterId), bytes, DeserializeDocument, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<ChapterLoadResult> LoadAsync(string path, CancellationToken cancellationToken = default)

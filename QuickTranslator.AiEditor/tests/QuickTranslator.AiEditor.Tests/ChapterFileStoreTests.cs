@@ -110,5 +110,53 @@ public sealed class ChapterFileStoreTests : IDisposable
         Assert.False(File.Exists(store.GetPath(chapter.Id)));
     }
 
+    [Fact]
+    public async Task IndependentChapterFiles_CanReachAtomicWriteConcurrently_AndRemainExact()
+    {
+        var store = new ChapterFileStore(_directory);
+        ChapterDocument first = TranslationService.CreateChapter("Một", "你好。再见。");
+        ChapterDocument second = TranslationService.CreateChapter("Hai", "天地玄黄。宇宙洪荒。");
+        first.Segments[0].UserDraft = "Nháp GPU thứ nhất.";
+        second.Segments[0].UserDraft = "Nháp GPU thứ hai.";
+        using var rendezvous = new Barrier(2);
+
+        async Task SaveWithProbe(ChapterDocument chapter)
+        {
+            SimpleFileStorage.FaultPoint.Value = point =>
+            {
+                if (point == "AfterTemporaryFlush" && !rendezvous.SignalAndWait(TimeSpan.FromSeconds(3)))
+                    throw new TimeoutException("Hai chapter độc lập đã bị khóa tuần tự theo thư mục.");
+            };
+            try { await store.SaveAsync(chapter); }
+            finally { SimpleFileStorage.FaultPoint.Value = null; }
+        }
+
+        await Task.WhenAll(SaveWithProbe(first), SaveWithProbe(second));
+
+        ChapterDocument firstSaved = (await store.LoadAsync(store.GetPath(first.Id))).Chapter;
+        ChapterDocument secondSaved = (await store.LoadAsync(store.GetPath(second.Id))).Chapter;
+        Assert.Equal("Nháp GPU thứ nhất.", firstSaved.Segments[0].UserDraft);
+        Assert.Equal("Nháp GPU thứ hai.", secondSaved.Segments[0].UserDraft);
+        Assert.Empty(Directory.GetFiles(_directory, "*.tmp-*"));
+    }
+
+    [Fact]
+    public async Task ConcurrentWritesToSameChapter_AlwaysLeaveOneCompleteValidSnapshot()
+    {
+        var firstStore = new ChapterFileStore(_directory);
+        var secondStore = new ChapterFileStore(_directory);
+        ChapterDocument original = TranslationService.CreateChapter("Một chapter", "你好。再见。");
+        ChapterDocument first = DocumentJson.Clone(original);
+        ChapterDocument second = DocumentJson.Clone(original);
+        first.Segments[0].UserDraft = "Toàn bộ snapshot A.";
+        second.Segments[0].UserDraft = "Toàn bộ snapshot B.";
+
+        await Task.WhenAll(firstStore.SaveAsync(first), secondStore.SaveAsync(second));
+
+        ChapterDocument saved = (await firstStore.LoadAsync(firstStore.GetPath(original.Id))).Chapter;
+        Assert.Contains(saved.Segments[0].UserDraft, new[] { "Toàn bộ snapshot A.", "Toàn bộ snapshot B." });
+        Assert.Empty(Directory.GetFiles(_directory, "*.tmp-*"));
+    }
+
     public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }
 }
