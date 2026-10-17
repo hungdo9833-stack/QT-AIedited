@@ -63,7 +63,7 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
         _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
         if (models.Count is < 1 or > 8 || models.Any(x => !IsAllowedFlash(x.Model)) ||
             models.Select(x => x.Model).Distinct(StringComparer.OrdinalIgnoreCase).Count() != models.Count)
-            throw new ArgumentException("Pool chỉ chấp nhận 1–8 model Gemini Flash khác nhau; không dùng Flash Lite.");
+            throw new ArgumentException("Pool chỉ chấp nhận 1–8 model Gemini Flash/Flash Lite hợp lệ.");
         foreach (GeminiSurveyModel model in models) model.Limits.Validate();
         _slots = models.Select(m => new Slot(m, factory(m))).ToList();
         // Logical cache identity: independent of assignment order and the model that
@@ -76,7 +76,6 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
         !string.IsNullOrWhiteSpace(model) &&
         model.StartsWith("gemini-", StringComparison.OrdinalIgnoreCase) &&
         model.Contains("flash", StringComparison.OrdinalIgnoreCase) &&
-        !model.Contains("lite", StringComparison.OrdinalIgnoreCase) &&
         model.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
 
     public static IReadOnlyList<GeminiSurveyModel> ModelsFromSettings(string? configuredModels)
@@ -87,7 +86,7 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
         string[] names = source.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (names.Length is < 1 or > 8 || names.Any(x => !IsAllowedFlash(x)) ||
             names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Length)
-            throw new ArgumentException("QTSTUDIO_GEMINI_SURVEY_MODELS phải chứa 1–8 model Flash hợp lệ, không có Flash Lite.");
+            throw new ArgumentException("QTSTUDIO_GEMINI_SURVEY_MODELS phải chứa 1–8 model Flash/Flash Lite hợp lệ.");
         return names.Select(x => new GeminiSurveyModel(x, GeminiSurveyLimits.FromObservedFreeTier(x))).ToArray();
     }
 
