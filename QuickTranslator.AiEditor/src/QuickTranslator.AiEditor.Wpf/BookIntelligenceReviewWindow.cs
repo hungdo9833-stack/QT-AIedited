@@ -228,12 +228,9 @@ public sealed class BookIntelligenceReviewWindow : Window
                             "Chưa có Gemini API key. Vào Cài đặt → AI & hiệu năng → Gemini API để nhập và lưu key.");
                     var models = GeminiSurveyPoolClient.ModelsFromSettings(
                         Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
-                    // Flash Lite is opt-in from the visible model selector. Keep its
-                    // requests separate from the default Flash pool to avoid using
-                    // the translation quota unless the user explicitly chose Lite.
-                    bool selectedLite = options.Model.Contains("flash-lite", StringComparison.OrdinalIgnoreCase);
-                    if (selectedLite)
-                        models = GeminiSurveyPoolClient.ModelsFromSettings(options.Model);
+                    // A deliberate dropdown choice sends requests ONLY to that model.
+                    // In particular, Lite quota is never used without explicit selection.
+                    models = GeminiSurveyPoolClient.ModelsFromSettings(options.Model);
                     if (!models.Any(model => string.Equals(model.Model, options.Model,
                             StringComparison.OrdinalIgnoreCase)))
                         throw new InvalidOperationException(
@@ -350,14 +347,11 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private void ShowGeminiConfiguration()
     {
-        IReadOnlyList<GeminiSurveyModel> models = _model.Text.Contains("flash-lite", StringComparison.OrdinalIgnoreCase)
-            ? GeminiSurveyPoolClient.ModelsFromSettings(_model.Text)
-            : GeminiSurveyPoolClient.ModelsFromSettings(
-                Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MODELS"));
+        IReadOnlyList<GeminiSurveyModel> models = GeminiSurveyPoolClient.ModelsFromSettings(_model.Text);
         int? maximumRequests = GeminiSurveyPoolClient.MaximumRequestsFromSettings(
             Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS"));
         bool hasKey = !string.IsNullOrWhiteSpace(GeminiApiKeyVault.ResolveForSurvey());
-        _summary.Text = $"Gemini Flash Pool: {string.Join(", ", models.Select(x => x.Model))} · " +
+        _summary.Text = $"Model khảo sát: {string.Join(", ", models.Select(x => x.Model))} · " +
             $"API key: {(hasKey ? "đã cấu hình" : "chưa cấu hình")} · " +
             $"ngân sách: {(maximumRequests is int limit ? $"tối đa {limit} HTTP request/lần chạy" : "chưa đặt giới hạn")}.";
     }
