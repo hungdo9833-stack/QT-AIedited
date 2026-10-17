@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -199,7 +200,8 @@ public sealed class BookIntelligenceReviewWindow : Window
                 _summary.Text = $"AI: {p.ProcessedEvidence}/{p.TotalEvidence} đoạn · {p.PendingSuggestions} đề xuất chờ duyệt.";
             });
 
-            using var http = new HttpClient();
+            using var httpHandler = new HttpClientHandler { AllowAutoRedirect = false };
+            using var http = new HttpClient(httpHandler) { Timeout = Timeout.InfiniteTimeSpan };
             IOllamaBackendClient? ollama = null;
             GeminiSurveyClient? gemini = null;
             try
@@ -211,10 +213,11 @@ public sealed class BookIntelligenceReviewWindow : Window
                     if (string.IsNullOrWhiteSpace(apiKey))
                         throw new InvalidOperationException(
                             "Chưa cấu hình QTSTUDIO_GEMINI_API_KEY. Không nhập API key vào Project hoặc prompt.");
-                    gemini = new GeminiSurveyClient(http, apiKey,
-                        GeminiSurveyLimits.FromObservedFreeTier(options.Model));
+                    GeminiSurveyLimits limits = GeminiSurveyLimits.FromObservedFreeTier(options.Model);
+                    gemini = new GeminiSurveyClient(http, apiKey, limits, _session.Manifest.ProjectId);
                     backend = gemini;
                     _state.AnalyzerProfileId = null;
+                    _state.AnalysisConcurrency = limits.MaxInFlight;
                 }
                 else
                 {

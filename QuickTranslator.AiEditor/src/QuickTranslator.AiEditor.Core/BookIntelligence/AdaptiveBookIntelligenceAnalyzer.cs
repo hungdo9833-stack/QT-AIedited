@@ -68,24 +68,51 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
                 .OrderByDescending(x => x.Priority).ThenBy(x => ChapterNumber(state, x.ChapterId))
                 .ThenBy(x => x.StartUtf16).ToArray();
             if (pending.Length == 0) break;
-            CorpusEvidence[] batch = TakeBatch(pending, options.ContextSize);
-            string relevantContext = RelevantContextFingerprint(batch, resources);
-            string key = AnalysisKey(batch, options.Model, PromptSchemaVersion, relevantContext);
-            if (state.CompletedAnalysisKeys.Contains(key))
+            var remaining = pending.ToList();
+            var work = new List<BatchWork>();
+            var scheduledKeys = new HashSet<string>(StringComparer.Ordinal);
+            while (work.Count < state.AnalysisConcurrency && remaining.Count > 0)
             {
-                foreach (CorpusEvidence evidence in batch) evidence.AiAnalyzed = true;
-                state.Metrics.CacheHits++;
-                processed += batch.Length;
-                state = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
-                progress?.Report(new(processed, Math.Max(total, Eligible(state).Count()), state.PendingCount));
-                continue;
+                CorpusEvidence[] batch = TakeBatch(remaining.ToArray(), options.ContextSize);
+                var batchIds = batch.Select(x => x.Id).ToHashSet();
+                remaining.RemoveAll(x => batchIds.Contains(x.Id));
+                string relevantContext = RelevantContextFingerprint(batch, resources);
+                string key = AnalysisKey(batch, options.Model, PromptSchemaVersion, relevantContext);
+                if (state.CompletedAnalysisKeys.Contains(key))
+                {
+                    foreach (CorpusEvidence evidence in batch) evidence.AiAnalyzed = true;
+                    state.Metrics.CacheHits++;
+                    processed += batch.Length;
+                    state.NextEvidenceIndex = processed;
+                    state = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+                    progress?.Report(new(processed, Math.Max(total, Eligible(state).Count()), state.PendingCount));
+                    continue;
+                }
+                if (!scheduledKeys.Add(key)) continue;
+                work.Add(new(batch, key, BuildPrompt(batch, resources)));
             }
+            if (work.Count == 0) continue;
 
-            try
+            // Workers only perform remote requests and parse into detached response objects.
+            // The coordinator below is the sole writer of BookIntelligenceState and its store.
+            BatchResult[] results = await Task.WhenAll(work.Select(item =>
+                AnalyzeBatchAsync(item, options, cancellationToken))).ConfigureAwait(false);
+            Exception? failure = null;
+            foreach (BatchResult result in results)
             {
-                string prompt = BuildPrompt(batch, resources);
-                (OllamaCompletion completion, AnalyzerResponse response) =
-                    await RequestAndParseWithRetryAsync(prompt, options, state, cancellationToken).ConfigureAwait(false);
+                state.Metrics.Requests += result.Requests;
+                state.Metrics.Retries += result.Retries;
+                if (result.Error is not null)
+                {
+                    state.Metrics.Errors++;
+                    failure ??= result.Error;
+                    continue;
+                }
+
+                CorpusEvidence[] batch = result.Work.Evidence.Select(item =>
+                    state.Evidence.Single(current => current.Id == item.Id)).ToArray();
+                OllamaCompletion completion = result.Completion!;
+                AnalyzerResponse response = result.Response!;
                 HashSet<Guid> referenced = response.Characters.SelectMany(x => x.EvidenceIds)
                     .Concat(response.Relationships.SelectMany(x => x.EvidenceIds))
                     .Concat(response.Glossary.SelectMany(x => x.EvidenceIds)).ToHashSet();
@@ -106,21 +133,20 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
                 state.Metrics.OutputTokens += completion.Metrics.OutputTokens ?? 0;
                 state.Metrics.AiDurationMilliseconds += (long)completion.Metrics.ClientElapsed.TotalMilliseconds;
                 state.Metrics.EvidenceAnalyzed += batch.Length;
-                state.CompletedAnalysisKeys.Add(key);
+                state.CompletedAnalysisKeys.Add(result.Work.Key);
                 state.LastError = "";
                 processed += batch.Length;
                 state.NextEvidenceIndex = processed;
-                state = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+                // Persist successful batches one at a time, even if a sibling failed.
+                state = await store.SaveAsync(state, CancellationToken.None).ConfigureAwait(false);
                 progress?.Report(new(processed, Math.Max(total, Eligible(state).Count()), state.PendingCount));
             }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
+            if (failure is not null)
             {
-                state.Metrics.Errors++;
-                state.LastError = ex.Message;
+                state.LastError = failure.Message;
                 state.NextEvidenceIndex = processed;
-                _ = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
-                throw;
+                _ = await store.SaveAsync(state, CancellationToken.None).ConfigureAwait(false);
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
             }
         }
         state.Metrics.EvidenceSkipped = state.Evidence.LongCount(x => x.IsCurrent && !x.AiAnalyzed);
@@ -128,41 +154,46 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
         return await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<OllamaCompletion> RequestWithRetryAsync(string prompt, ModelOptions options,
-        BookIntelligenceState state, CancellationToken cancellationToken)
+    private async Task<BatchResult> AnalyzeBatchAsync(BatchWork work, ModelOptions options,
+        CancellationToken cancellationToken)
     {
-        for (int attempt = 0; ; attempt++)
+        int requests = 0, retries = 0;
+        try
         {
-            try
+            for (int parseAttempt = 0; ; parseAttempt++)
             {
-                state.Metrics.Requests++;
-                var watch = Stopwatch.StartNew();
-                OllamaCompletion result = client is IJsonSchemaOllamaClient structured
-                    ? await structured.TranslateStructuredAsync(prompt, options, ResponseSchema, cancellationToken).ConfigureAwait(false)
-                    : await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
-                watch.Stop();
-                if (result.Metrics.ClientElapsed == TimeSpan.Zero)
-                    result = result with { Metrics = result.Metrics with { ClientElapsed = watch.Elapsed } };
-                return result;
-            }
-            catch (OllamaRequestException ex) when (attempt < 2 && ex.Kind is OllamaErrorKind.Connection or OllamaErrorKind.Timeout or OllamaErrorKind.Http or OllamaErrorKind.InvalidResponse)
-            {
-                state.Metrics.Retries++;
-                await Task.Delay(TimeSpan.FromMilliseconds(100 * (attempt + 1)), cancellationToken).ConfigureAwait(false);
+                OllamaCompletion completion;
+                for (int attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        requests++;
+                        var watch = Stopwatch.StartNew();
+                        completion = client is IJsonSchemaOllamaClient structured
+                            ? await structured.TranslateStructuredAsync(work.Prompt, options, ResponseSchema, cancellationToken).ConfigureAwait(false)
+                            : await client.TranslateAsync(work.Prompt, options, cancellationToken).ConfigureAwait(false);
+                        watch.Stop();
+                        if (completion.Metrics.ClientElapsed == TimeSpan.Zero)
+                            completion = completion with { Metrics = completion.Metrics with { ClientElapsed = watch.Elapsed } };
+                        break;
+                    }
+                    catch (OllamaRequestException ex) when (attempt < 2 &&
+                        ex.Kind is OllamaErrorKind.Connection or OllamaErrorKind.Timeout or OllamaErrorKind.Http or OllamaErrorKind.InvalidResponse)
+                    {
+                        retries++;
+                        await Task.Delay(TimeSpan.FromMilliseconds(100 * (attempt + 1)), cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                try { return new(work, completion, Parse(completion.Text), requests, retries, null); }
+                catch (InvalidDataException) when (parseAttempt < 1) { retries++; }
             }
         }
+        catch (Exception ex) { return new(work, null, null, requests, retries, ex); }
     }
 
-    private async Task<(OllamaCompletion Completion, AnalyzerResponse Response)> RequestAndParseWithRetryAsync(
-        string prompt, ModelOptions options, BookIntelligenceState state, CancellationToken cancellationToken)
-    {
-        for (int parseAttempt = 0; ; parseAttempt++)
-        {
-            OllamaCompletion completion = await RequestWithRetryAsync(prompt, options, state, cancellationToken).ConfigureAwait(false);
-            try { return (completion, Parse(completion.Text)); }
-            catch (InvalidDataException) when (parseAttempt < 1) { state.Metrics.Retries++; }
-        }
-    }
+    private sealed record BatchWork(CorpusEvidence[] Evidence, string Key, string Prompt);
+    private sealed record BatchResult(BatchWork Work, OllamaCompletion? Completion, AnalyzerResponse? Response,
+        int Requests, int Retries, Exception? Error);
 
     private static IEnumerable<CorpusEvidence> Eligible(BookIntelligenceState state) =>
         state.Evidence.Where(x => x.IsCurrent && (state.ScanMode == IntelligenceScanMode.FullSemantic ||
@@ -222,9 +253,9 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
 
     internal static AnalyzerResponse Parse(string text)
     {
-        if (string.IsNullOrWhiteSpace(text)) throw new InvalidDataException("Ollama trả phản hồi khảo sát rỗng.");
+        if (string.IsNullOrWhiteSpace(text)) throw new InvalidDataException("Model trả phản hồi khảo sát rỗng.");
         int start = text.IndexOf('{'), end = text.LastIndexOf('}');
-        if (start < 0 || end <= start) throw new InvalidDataException("Ollama không trả JSON khảo sát hợp lệ.");
+        if (start < 0 || end <= start) throw new InvalidDataException("Model không trả JSON khảo sát hợp lệ.");
         try
         {
             AnalyzerResponse response = JsonSerializer.Deserialize<AnalyzerResponse>(text[start..(end + 1)],
@@ -236,7 +267,7 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
             foreach (GlossaryFinding item in response.Glossary) item.EvidenceIds ??= [];
             return response;
         }
-        catch (JsonException ex) { throw new InvalidDataException("Ollama trả JSON khảo sát không đúng schema.", ex); }
+        catch (JsonException ex) { throw new InvalidDataException("Model trả JSON khảo sát không đúng schema.", ex); }
     }
 
     internal static void ApplyValidatedResponse(BookIntelligenceState state, AnalyzerResponse response,
