@@ -45,7 +45,31 @@ public sealed partial class ProjectRepository
         string root = Path.GetDirectoryName(manifestPath)!;
         CreateLayout(root);
         var session = new ProjectSession(manifestPath, manifest);
+        await SynchronizeNewerChapterSummariesAsync(session, cancellationToken).ConfigureAwait(false);
         return new(session);
+    }
+
+    private async Task SynchronizeNewerChapterSummariesAsync(ProjectSession session, CancellationToken cancellationToken)
+    {
+        DateTime manifestWriteTime = File.GetLastWriteTimeUtc(session.ManifestPath);
+        ProjectManifest? synchronized = null;
+        foreach (ProjectChapterEntry entry in session.Manifest.Chapters.Where(x => x.DeletedAt is null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string path = session.Resolve(entry.RelativePath);
+            if (!File.Exists(path) || File.GetLastWriteTimeUtc(path) < manifestWriteTime) continue;
+            ChapterDocument chapter = await ChapterFileStore.ReadVerifiedFileAsync(path, cancellationToken).ConfigureAwait(false);
+            if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId)
+                throw new InvalidDataException("Tệp chương không khớp với manifest dự án.");
+            ProjectChapterEntry current = (synchronized ?? session.Manifest).Chapters.Single(x => x.ChapterId == entry.ChapterId);
+            if (SummaryMatches(current, chapter)) continue;
+            synchronized ??= Clone(session.Manifest);
+            CopySummary(synchronized.Chapters.Single(x => x.ChapterId == entry.ChapterId), chapter);
+        }
+        if (synchronized is null) return;
+        NormalizeManifest(synchronized);
+        await WriteFastManifestAsync(session.ManifestPath, synchronized, cancellationToken).ConfigureAwait(false);
+        session.Manifest = synchronized;
     }
 
     public async Task SaveManifestAsync(ProjectSession session, CancellationToken cancellationToken = default)
@@ -176,6 +200,12 @@ public sealed partial class ProjectRepository
         entry.CompletedSegmentCount = chapter.Segments.Count(x => x.HasCompletedTranslation || x.Status == SegmentStatus.Approved);
         entry.State = AggregateState(chapter); entry.UpdatedAt = chapter.UpdatedAt;
     }
+
+    private static bool SummaryMatches(ProjectChapterEntry entry, ChapterDocument chapter) =>
+        entry.VietnameseTitle == chapter.Title && entry.ChineseTitle == chapter.ChineseTitle &&
+        entry.SegmentCount == chapter.Segments.Count &&
+        entry.CompletedSegmentCount == chapter.Segments.Count(x => x.HasCompletedTranslation || x.Status == SegmentStatus.Approved) &&
+        entry.State == AggregateState(chapter) && entry.UpdatedAt == chapter.UpdatedAt;
 
     private async Task WriteFastChapterCheckpointAsync(ProjectSession session, ChapterDocument chapter,
         string operation, CancellationToken cancellationToken)

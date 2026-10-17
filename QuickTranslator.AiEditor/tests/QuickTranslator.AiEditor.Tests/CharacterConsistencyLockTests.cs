@@ -158,6 +158,32 @@ public sealed class CharacterConsistencyLockTests
     }
 
     [Fact]
+    public void UnregisteredCharacterNearAntecedent_PreventsAutomaticPronounReplacement()
+    {
+        CharacterProfile profile = Profile("林风", "Lâm Phong", "hắn");
+        string text = "Trương Tam nhìn Lâm Phong. Anh ấy đóng cửa.";
+
+        IReadOnlyList<PronounSuggestion> suggestions = new PronounResolutionEngine().ScanSegment(
+            Guid.NewGuid(), 1, "张三看着林风。", text, "", Project(profile), false);
+
+        Assert.DoesNotContain(suggestions, x => x.Kind == PronounSuggestionKind.SafeReplacement);
+        Assert.Equal(text, PronounResolutionEngine.Apply(text, suggestions));
+    }
+
+    [Fact]
+    public void UnpairedStandaloneSingleQuote_PreventsAutomaticPronounReplacement()
+    {
+        CharacterProfile profile = Profile("林风", "Lâm Phong", "hắn");
+        string text = "Lâm Phong' quay lại. Anh ấy đóng cửa.";
+
+        IReadOnlyList<PronounSuggestion> suggestions = new PronounResolutionEngine().ScanSegment(
+            Guid.NewGuid(), 1, "林风回头。", text, "", Project(profile), false);
+
+        Assert.DoesNotContain(suggestions, x => x.Kind == PronounSuggestionKind.SafeReplacement);
+        Assert.Equal(text, PronounResolutionEngine.Apply(text, suggestions));
+    }
+
+    [Fact]
     public async Task CurrentFieldsRoundTripAndIncompleteJsonIsRejected()
     {
         string directory = Path.Combine(Path.GetTempPath(), "qt-consistency-" + Guid.NewGuid().ToString("N"));

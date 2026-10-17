@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using QuickTranslator.AiEditor.Core.Models;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
@@ -69,6 +70,7 @@ public sealed class PronounResolutionEngine
             }
 
             string before = NarrativeOnly(translatedText[sentence.Start..occurrence.Start]);
+            string antecedentContext = before;
             var currentMentions = matching.Where(p => ContainsAnyName(before, p, glossary)).ToArray();
             CharacterProfile? resolved = currentMentions.Length == 1 ? currentMentions[0] : null;
             bool multiple = currentMentions.Length > 1;
@@ -78,10 +80,15 @@ public sealed class PronounResolutionEngine
                 var priorMentions = matching.Where(p => ContainsAnyName(priorSentence, p, glossary)).ToArray();
                 resolved = priorMentions.Length == 1 ? priorMentions[0] : null;
                 multiple = priorMentions.Length > 1;
+                antecedentContext = priorSentence;
             }
+            bool unknownCharacter = resolved is not null && ContainsUnregisteredProperName(antecedentContext, profiles, glossary);
+            if (unknownCharacter) resolved = null;
             if (resolved is null)
             {
-                string reason = multiple
+                string reason = unknownCharacter
+                    ? "Ngữ cảnh gần có tên riêng chưa đăng ký; không tự suy đoán chủ thể đại từ."
+                    : multiple
                     ? "Có nhiều nhân vật phù hợp trong ngữ cảnh gần; không tự đổi chủ thể."
                     : "Không có tên nhân vật đã xác nhận làm tiền ngữ rõ ràng; không tự thay thế.";
                 suggestions.Add(Item(protectedByUser ? PronounSuggestionKind.Protected : PronounSuggestionKind.Ambiguous, null, reason));
@@ -141,6 +148,22 @@ public sealed class PronounResolutionEngine
         {
             if (IsWordBoundary(text, start, value.Length)) return true;
             start += value.Length;
+        }
+        return false;
+    }
+
+    private static bool ContainsUnregisteredProperName(string text, IReadOnlyList<CharacterProfile> profiles,
+        IReadOnlyList<ConfirmedTerm>? glossary)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        string[] known = profiles.SelectMany(profile => new[] { profile.VietnameseName }.Concat(profile.Aliases))
+            .Concat(glossary?.Select(term => term.Vietnamese) ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        foreach (Match match in Regex.Matches(text,
+                     @"(?<![\p{L}\p{M}])\p{Lu}[\p{L}\p{M}'’.-]*(?:\s+\p{Lu}[\p{L}\p{M}'’.-]*)+",
+                     RegexOptions.CultureInvariant))
+        {
+            if (!known.Any(value => string.Equals(value, match.Value, StringComparison.OrdinalIgnoreCase))) return true;
         }
         return false;
     }

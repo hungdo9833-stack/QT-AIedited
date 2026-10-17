@@ -61,4 +61,34 @@ public sealed class ChapterDetectionGoldenTests
         Assert.Contains(plan.Candidates, x => x.RawHeading.StartsWith("第三章的内容", StringComparison.Ordinal) && x.Decision == CandidateDecision.Rejected);
         Assert.Equal(2, plan.Chapters.Count());
     }
+
+    [Fact]
+    public void Rejects_lesson_round_and_inline_prose_that_begin_with_ordinals()
+    {
+        const string source = "第一章 真标题\n正文。\n第二节课开始了。\n第一回合我们输了。\n第三章他回到了家，发现门已经开了。\n第二章 结束\n正文。";
+
+        ImmutableImportPlan plan = new ChapterDetector().Detect(source);
+
+        Assert.Equal(new int?[] { 1, 2 }, plan.Chapters.Select(x => x.ChapterNumber));
+        Assert.All(plan.Candidates.Where(x => x.RawHeading is "第二节课开始了。" or "第一回合我们输了。" or
+            "第三章他回到了家，发现门已经开了。"), candidate =>
+            Assert.Equal(CandidateDecision.Rejected, candidate.Decision));
+        Assert.Equal(source, plan.ReconstructSource());
+    }
+
+    [Fact]
+    public void Keeps_special_unnumbered_chapters_and_allows_number_reset_per_volume()
+    {
+        const string source = "第一卷 山门\n序章\n序幕正文。\n第一章 初见\n甲。\n第二卷 中州\n楔子\n过渡正文。\n第一章 重逢\n乙。\n番外 婚礼\n丙。";
+
+        ImmutableImportPlan plan = new ChapterDetector().Detect(source);
+        PlannedSourceRegion[] chapters = plan.Chapters.ToArray();
+
+        Assert.Equal(5, chapters.Length);
+        Assert.Equal(new int?[] { null, 1, null, 1, null }, chapters.Select(x => x.ChapterNumber));
+        Assert.Equal(new[] { "山门", "山门", "中州", "中州", "中州" }, chapters.Select(x => x.VolumeTitle));
+        Assert.DoesNotContain(plan.Issues, x => x.Code is DetectionIssueCode.DuplicateChapterNumber or
+            DetectionIssueCode.ReversedChapterNumber);
+        Assert.Equal(source, plan.ReconstructSource());
+    }
 }
