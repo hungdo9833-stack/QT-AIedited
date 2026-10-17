@@ -54,9 +54,10 @@ public partial class MainWindow
         // each Project independently remembers which shared preset it selected.
         PresetLibrary library = await _presetStore.LoadAsync(cancellationToken);
         var presets = new PromptPresetManager(library);
-        if (translation.SelectedPromptPresetId is Guid selectedId &&
-            presets.Presets.Any(p => p.Id == selectedId))
-            presets.Select(selectedId);
+        Guid presetId = translation.SelectedPromptPresetId is Guid selectedId &&
+            presets.Presets.Any(p => p.Id == selectedId)
+            ? selectedId : PromptPreset.Default.Id;
+        presets.Select(presetId);
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync(cancellationToken);
         OllamaBackendProfile profile = _ollamaBackends.GetProfile(translation.OllamaProfileId);
         // A persisted multi-worker queue pins each backend independently. The globally active
