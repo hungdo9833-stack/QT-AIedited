@@ -95,7 +95,7 @@ internal sealed class WorkspaceFixture : IDisposable
     {
         Set("_projectSession", Project);
         Set("_store", Project.ChapterStore);
-        Set("_presetStore", new PromptPresetStore(Project.Resolve(Project.Manifest.Files.PromptPresets)));
+        // Keep the isolated app-level preset store across project switches.
         Set("_readerStore", new ReaderPreferencesStore(Project.Resolve(Project.Manifest.Files.ReaderSettings)));
         Set("_characterStore", new CharacterProjectStore(Path.Combine(Project.RootDirectory, "Characters")));
         await TaskCall("LoadProjectAssetsAsync");
