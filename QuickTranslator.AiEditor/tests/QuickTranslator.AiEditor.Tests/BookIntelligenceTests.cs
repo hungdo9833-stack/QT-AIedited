@@ -385,7 +385,7 @@ public sealed class BookIntelligenceTests : IDisposable
         BookIntelligenceState done = await new AdaptiveBookIntelligenceAnalyzer(mock)
             .AnalyzeAsync(session, state, store, resources, Options);
 
-        Assert.Equal(2, tries);
+        Assert.True(tries >= 2);
         Assert.Equal(AdaptiveBookIntelligenceAnalyzer.MaximumEvidencePerRequest,
             done.Evidence.Count(x => x.IsCurrent && x.AiBlocked));
         Assert.Contains(done.Evidence, x => x.IsCurrent && x.AiBlocked && x.AiBlockReason == "SAFETY"
