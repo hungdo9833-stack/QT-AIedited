@@ -49,6 +49,17 @@ public sealed class GeminiSurveyClientTests
             requestJson.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema")
                 .GetProperty("type").GetString());
         Assert.False(requestJson.RootElement.GetProperty("generationConfig").TryGetProperty("responseSchema", out _));
+        JsonElement safetySettings = requestJson.RootElement.GetProperty("safetySettings");
+        Assert.Equal(4, safetySettings.GetArrayLength());
+        Assert.All(safetySettings.EnumerateArray(), item =>
+        {
+            Assert.Equal("OFF", item.GetProperty("threshold").GetString());
+            Assert.StartsWith("HARM_CATEGORY_", item.GetProperty("category").GetString());
+        });
+        Assert.Equal(
+            ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+             "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"],
+            safetySettings.EnumerateArray().Select(x => x.GetProperty("category").GetString()).ToArray());
     }
 
     [Fact]
