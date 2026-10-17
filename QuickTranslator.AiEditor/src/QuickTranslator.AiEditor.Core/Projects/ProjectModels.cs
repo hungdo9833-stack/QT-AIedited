@@ -70,11 +70,10 @@ public sealed class ProjectFileLayout
     public string TranslationSettings { get; set; } = "Settings/translation.json";
     public string ReaderSettings { get; set; } = "Settings/reader.json";
     public string ExportSettings { get; set; } = "Settings/export.json";
-    public string PromptPresets { get; set; } = "Settings/prompts/presets.qtaip.json";
     public string Resources { get; set; } = "Resources/project-resources.json";
 
     internal IEnumerable<string> AllRelativePaths() =>
-        [TranslationSettings, ReaderSettings, ExportSettings, PromptPresets, Resources];
+        [TranslationSettings, ReaderSettings, ExportSettings, Resources];
 }
 
 public sealed class ProjectTranslationSettings
