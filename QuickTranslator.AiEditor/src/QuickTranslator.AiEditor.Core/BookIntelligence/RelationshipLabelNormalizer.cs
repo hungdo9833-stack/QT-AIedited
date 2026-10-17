@@ -85,7 +85,18 @@ public static class RelationshipLabelNormalizer
         if (Stable.TryGetValue(key, out var mapped))
             return new(mapped.Display, mapped.Key, Kind.Stable, mapped.Type);
 
-        // Already-normalized labels must remain stable on subsequent app launches.\n        foreach (var mapping in Stable.Values)\n            if (string.Equals(value, mapping.Display, StringComparison.OrdinalIgnoreCase))\n                return new(mapping.Display, mapping.Key, Kind.Stable, mapping.Type);\n\n        if (key.StartsWith("sự kiện/ngữ cảnh", StringComparison.OrdinalIgnoreCase))\n            return new(value, "event:" + key, Kind.Event, KnowledgeRelationType.Unknown);\n        if (key.StartsWith("tín hiệu chưa xác nhận", StringComparison.OrdinalIgnoreCase))\n            return new(value, "uncertain:" + key, Kind.Uncertain, KnowledgeRelationType.Unknown);\n        if (key.StartsWith("cần xác minh quan hệ:", StringComparison.OrdinalIgnoreCase))\n            return new(value, "unknown:" + key, Kind.Unknown, KnowledgeRelationType.Unknown);\n        if (UncertainLabels.Contains(key))
+        // Already-normalized labels must remain stable on subsequent app launches.
+        foreach (var mapping in Stable.Values)
+            if (string.Equals(value, mapping.Display, StringComparison.OrdinalIgnoreCase))
+                return new(mapping.Display, mapping.Key, Kind.Stable, mapping.Type);
+
+        if (key.StartsWith("sự kiện/ngữ cảnh", StringComparison.OrdinalIgnoreCase))
+            return new(value, "event:" + key, Kind.Event, KnowledgeRelationType.Unknown);
+        if (key.StartsWith("tín hiệu chưa xác nhận", StringComparison.OrdinalIgnoreCase))
+            return new(value, "uncertain:" + key, Kind.Uncertain, KnowledgeRelationType.Unknown);
+        if (key.StartsWith("cần xác minh quan hệ:", StringComparison.OrdinalIgnoreCase))
+            return new(value, "unknown:" + key, Kind.Unknown, KnowledgeRelationType.Unknown);
+        if (UncertainLabels.Contains(key))
             return new("Tín hiệu chưa xác nhận: " + value, "uncertain:" + key, Kind.Uncertain, KnowledgeRelationType.Unknown);
         if (EventLabels.Contains(key) || key.Contains("request to ", StringComparison.Ordinal) ||
             key.Contains("asked to ", StringComparison.Ordinal) ||
