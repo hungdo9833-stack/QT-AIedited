@@ -32,6 +32,8 @@ public sealed class BookIntelligenceUiTests
         Assert.True(window.IsVisible);
         Assert.Equal(DataGridSelectionMode.Extended, Field<DataGrid>(window, "_queue").SelectionMode);
         Assert.NotNull(Field<TextBox>(window, "_search"));
+        Assert.Equal("Khảo sát lại", Field<Button>(window, "_rerun").Content);
+        Assert.Equal("Bắt đầu / Tiếp tục", Field<Button>(window, "_run").Content);
         Assert.NotNull(Field<ComboBox>(window, "_kindFilter"));
         Assert.Contains("Knowledge Context", Field<CheckBox>(window, "_translationContext").Content?.ToString());
         window.Close();
