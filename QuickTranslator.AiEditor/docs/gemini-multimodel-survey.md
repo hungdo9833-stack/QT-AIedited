@@ -32,6 +32,23 @@ Trong cửa sổ `Khảo sát bằng AI`:
 
 Không tự động gọi lại API khi đổi model hoặc mở lại Project. Dùng `Khảo sát lại` khi cần benchmark model khác trên cùng nguyên tác.
 
+## Mức lọc nội dung có thể cấu hình của Gemini
+
+Với endpoint `models.generateContent` mà Book Intelligence sử dụng, QT Studio gửi `safetySettings`
+gồm `HARM_CATEGORY_HARASSMENT`, `HARM_CATEGORY_HATE_SPEECH`,
+`HARM_CATEGORY_SEXUALLY_EXPLICIT`, `HARM_CATEGORY_DANGEROUS_CONTENT`, mỗi nhóm
+có `threshold: OFF`. Đây là tùy chọn chính thức của Google cho bộ lọc
+*điều chỉnh được*, không phải cách vô hiệu hóa toàn bộ kiểm soát nội dung.
+
+Theo tài liệu Google, các ngưỡng này vốn mặc định OFF trên Gemini 2.5/3.
+Google vẫn áp dụng các biện pháp bảo vệ cốt lõi không thể tắt; vì vậy
+`OFF` **không bảo đảm** tránh được `promptFeedback.blockReason` hay lỗi `no candidates`.
+
+Các batch bị chặn rõ ràng vẫn được giữ lại để xem thủ công (không tự
+retry hoặc fallback sang model khác để vượt quyết định của provider).
+Tài liệu: https://ai.google.dev/gemini-api/docs/safety-settings ;
+https://ai.google.dev/api/generate-content .
+
 ## Phản hồi không có candidates / nội dung bị Google từ chối
 
 Google HTTP 200 nhưng không có `candidates` không tự động đồng nghĩa với bị chặn. Adapter đọc `promptFeedback.blockReason` và `candidate.finishReason` theo whitelist, không in response thô hoặc API key.
