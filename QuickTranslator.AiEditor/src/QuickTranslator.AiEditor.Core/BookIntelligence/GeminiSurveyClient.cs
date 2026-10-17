@@ -9,6 +9,16 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
+public sealed class GeminiSurveyHttpException(HttpStatusCode statusCode, TimeSpan? retryAfter = null)
+    : InvalidOperationException($"Gemini API trả HTTP {(int)statusCode}.")
+{
+    public HttpStatusCode StatusCode { get; } = statusCode;
+    public TimeSpan? RetryAfter { get; } = retryAfter;
+}
+
+public sealed class GeminiDailyQuotaExceededException()
+    : InvalidOperationException("Đã chạm giới hạn RPD Gemini của Project/model. Chờ reset lúc 00:00 giờ Pacific.");
+
 /// <summary>Configurable API limits. These apply to a Google AI project and model, not an API key.</summary>
 public sealed record GeminiSurveyLimits(int RequestsPerMinute, int InputTokensPerMinute, int RequestsPerDay,
     int MaxInFlight = 2)
@@ -42,19 +52,21 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
     private readonly Guid _projectId;
     private readonly GeminiSurveyLimits _limits;
     private readonly SemaphoreSlim _inFlight;
+    private readonly bool _routeFailuresToPool;
     private readonly GeminiQuotaCoordinator _quota;
     private readonly Func<DateTimeOffset> _utcNow;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
     public int MaxConcurrency => _limits.MaxInFlight;
 
-    public GeminiSurveyClient(HttpClient httpClient, string apiKey, GeminiSurveyLimits limits, Guid projectId)
+    public GeminiSurveyClient(HttpClient httpClient, string apiKey, GeminiSurveyLimits limits, Guid projectId,
+        bool routeFailuresToPool = false)
         : this(httpClient, apiKey, limits, projectId, SharedQuota, () => DateTimeOffset.UtcNow,
-            static (delay, token) => Task.Delay(delay, token)) { }
+            static (delay, token) => Task.Delay(delay, token), routeFailuresToPool) { }
 
     internal GeminiSurveyClient(HttpClient httpClient, string apiKey, GeminiSurveyLimits limits, Guid projectId,
         GeminiQuotaCoordinator quota, Func<DateTimeOffset> utcNow,
-        Func<TimeSpan, CancellationToken, Task> delay)
+        Func<TimeSpan, CancellationToken, Task> delay, bool routeFailuresToPool = false)
     {
         _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         ArgumentNullException.ThrowIfNull(limits);
@@ -66,6 +78,7 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
         _apiKey = secret;
         _projectId = projectId;
         _limits = limits;
+        _routeFailuresToPool = routeFailuresToPool;
         _quota = quota ?? throw new ArgumentNullException(nameof(quota));
         _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
         _delay = delay ?? throw new ArgumentNullException(nameof(delay));
@@ -120,6 +133,9 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
                 }
                 using (response)
                 {
+                if (_routeFailuresToPool && response.StatusCode == HttpStatusCode.TooManyRequests)
+                    throw new GeminiSurveyHttpException(response.StatusCode,
+                        RetryDelay(response, attempt, _utcNow()));
                 if (IsTransient(response.StatusCode))
                 {
                     if (attempt == MaximumAttempts - 1)
@@ -129,8 +145,7 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
                     continue;
                 }
                 if (!response.IsSuccessStatusCode)
-                    throw new InvalidOperationException(
-                        $"Gemini API trả HTTP {(int)response.StatusCode}. Kiểm tra model, quyền API và hạn mức.");
+                    throw new GeminiSurveyHttpException(response.StatusCode);
 
                 string json = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
                 try
@@ -246,8 +261,7 @@ internal sealed class GeminiQuotaCoordinator
                     bucket.RecentTokens -= item.EstimatedTokens;
                 }
                 if (bucket.RequestsToday >= bucket.RequestsPerDay)
-                    throw new InvalidOperationException(
-                        "Đã chạm giới hạn RPD Gemini của Project/model. Chờ reset lúc 00:00 giờ Pacific.");
+                    throw new GeminiDailyQuotaExceededException();
                 if (bucket.Recent.Count < bucket.RequestsPerMinute &&
                     bucket.RecentTokens + estimatedTokens <= bucket.InputTokensPerMinute)
                 {
