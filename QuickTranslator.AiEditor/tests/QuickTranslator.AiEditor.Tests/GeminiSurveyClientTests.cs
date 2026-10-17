@@ -85,6 +85,52 @@ public sealed class GeminiSurveyClientTests
         Assert.Contains("HTTP 401", failure.Message);
     }
 
+    [Theory]
+    [InlineData("""{"promptFeedback":{"blockReason":"SAFETY"}}""", "SAFETY")]
+    [InlineData("""{"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"},"candidates":[]}""", "PROHIBITED_CONTENT")]
+    [InlineData("""{"candidates":[{"finishReason":"SAFETY"}]}""", "SAFETY")]
+    public async Task Explicit_provider_block_is_classified_without_retry_or_raw_response_leak(
+        string payload, string reason)
+    {
+        int calls = 0;
+        using var http = new HttpClient(new TestHandler(_ =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            });
+        }));
+        using var client = new GeminiSurveyClient(http, "test-secret", new(15, 250_000, 500), Guid.NewGuid());
+        var error = await Assert.ThrowsAsync<GeminiSurveyBlockedException>(
+            () => client.TranslateAsync("Trích xuất", Options()));
+        Assert.Equal(reason, error.ReasonCode);
+        Assert.Equal(1, calls);
+        Assert.DoesNotContain("test-secret", error.ToString());
+        Assert.DoesNotContain(payload, error.ToString());
+    }
+
+    [Fact]
+    public async Task Empty_candidates_without_block_reason_are_diagnosed_not_assumed_blocked()
+    {
+        int calls = 0;
+        using var http = new HttpClient(new TestHandler(_ =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"candidates":[]}""",
+                    Encoding.UTF8, "application/json")
+            });
+        }));
+        using var client = new GeminiSurveyClient(http, "test-secret", new(15, 250_000, 500), Guid.NewGuid());
+        var error = await Assert.ThrowsAsync<InvalidDataException>(
+            () => client.TranslateAsync("Trích xuất", Options()));
+        Assert.IsNotType<GeminiSurveyBlockedException>(error);
+        Assert.Contains("không xác nhận bị chặn", error.Message);
+        Assert.Equal(1, calls);
+    }
+
     [Fact]
     public async Task Invalid_model_cannot_change_api_host()
     {
