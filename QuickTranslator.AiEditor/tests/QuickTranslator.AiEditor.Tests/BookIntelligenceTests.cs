@@ -362,6 +362,89 @@ public sealed class BookIntelligenceTests : IDisposable
         Assert.Empty((await new ProjectResourceStore(session).LoadAsync()).Characters.Profiles);
     }
 
+    [Fact]
+    public async Task Resurvey_snapshots_old_queue_and_reanalyzes_completed_evidence_without_losing_approved_knowledge()
+    {
+        (ProjectRepository repository, ProjectSession session) = await ProjectAsync(
+            "林朝看着苏雨说道：苏雨是我的妹妹。", 1);
+        var store = new BookIntelligenceStore(session);
+        var resources = await new ProjectResourceStore(session).LoadAsync();
+        BookIntelligenceState state = await new ProjectCorpusIndexer(repository).IndexAsync(
+            session, await store.LoadAsync(), store, resources.Characters);
+        CorpusEvidence evidence = Assert.Single(state.Evidence, e => e.IsCurrent);
+        evidence.AiAnalyzed = true;
+        state.CompletedAnalysisKeys.Add("old-completed-batch");
+        state.Metrics.Requests = 12;
+
+        state.Relationships.Add(new IntelligenceRelationshipSuggestion
+        {
+            SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
+            Relationship = "sibling", EvidenceIds = [evidence.Id],
+            Status = IntelligenceReviewStatus.Rejected
+        });
+        state.Relationships.Add(new IntelligenceRelationshipSuggestion
+        {
+            SpeakerChineseName = "林朝", ListenerChineseName = "苏雨",
+            Relationship = "anh em", EvidenceIds = [evidence.Id],
+            Status = IntelligenceReviewStatus.Accepted
+        });
+        var confirmed = new KnowledgeRelationship
+        {
+            SubjectCharacterId = Guid.NewGuid(), TargetCharacterId = Guid.NewGuid(),
+            RelationType = KnowledgeRelationType.UnknownSibling,
+            Status = KnowledgeRelationshipStatus.Confirmed,
+            EvidenceIds = [evidence.Id], DiscoveryMethod = RelationshipDiscoveryMethod.DirectAi
+        };
+        state.RelationshipGraph.Add(confirmed);
+        state.RelationshipGraph.Add(new KnowledgeRelationship
+        {
+            SubjectCharacterId = Guid.NewGuid(), TargetCharacterId = Guid.NewGuid(),
+            RelationType = KnowledgeRelationType.Social,
+            Status = KnowledgeRelationshipStatus.Proposed,
+            EvidenceIds = [evidence.Id], DiscoveryMethod = RelationshipDiscoveryMethod.DirectAi
+        });
+        state = await store.SaveAsync(state);
+        Assert.False(BookIntelligenceResurveyService.HasUnanalyzedEvidence(state, IntelligenceScanMode.FastAdaptive));
+
+        (BookIntelligenceState fresh, string backup) = await BookIntelligenceResurveyService.BeginFreshAsync(state, store);
+        Assert.True(File.Exists(backup));
+        string oldJson = await File.ReadAllTextAsync(backup);
+        Assert.Contains("old-completed-batch", oldJson);
+        Assert.Contains("sibling", oldJson);
+
+        Assert.Empty(fresh.CompletedAnalysisKeys);
+        Assert.True(BookIntelligenceResurveyService.HasUnanalyzedEvidence(fresh, IntelligenceScanMode.FastAdaptive));
+        Assert.Equal(0, fresh.Metrics.Requests);
+        Assert.Single(fresh.Relationships);
+        Assert.Equal(IntelligenceReviewStatus.Accepted, fresh.Relationships[0].Status);
+        Assert.Single(fresh.RelationshipGraph);
+        Assert.Equal(confirmed.Id, fresh.RelationshipGraph[0].Id);
+        Assert.False(fresh.Evidence.Single(e => e.IsCurrent).AiAnalyzed);
+
+        BookIntelligenceState reloaded = await store.LoadAsync();
+        Assert.Equal(fresh.Revision, reloaded.Revision);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => BookIntelligenceResurveyService.BeginFreshAsync(state, store));
+    }
+
+    [Fact]
+    public async Task Resurvey_rejects_unreconciled_resource_commits_without_mutating_project()
+    {
+        (ProjectRepository repository, ProjectSession session) = await ProjectAsync("林朝看着苏雨。", 1);
+        var store = new BookIntelligenceStore(session);
+        var resources = await new ProjectResourceStore(session).LoadAsync();
+        BookIntelligenceState state = await new ProjectCorpusIndexer(repository).IndexAsync(
+            session, await store.LoadAsync(), store, resources.Characters);
+        state.PendingResourceCommits.Add(new IntelligenceResourceCommit
+        {
+            SuggestionId = Guid.NewGuid(), Kind = ResourceCommitKind.Relationship
+        });
+        state = await store.SaveAsync(state);
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => BookIntelligenceResurveyService.BeginFreshAsync(state, store));
+        Assert.Single((await store.LoadAsync()).PendingResourceCommits);
+    }
+
     private async Task<(ProjectRepository Repository, ProjectSession Session)> ProjectAsync(string source, int number)
     {
         var repository = new ProjectRepository();
