@@ -31,7 +31,9 @@ public sealed class GeminiSurveyPoolClient : IJsonSchemaOllamaClient, IAdaptiveS
     private bool _disposed;
 
     public string CacheSignature { get; }
-    public int TargetInputTokens { get; } = 20_000;
+    // Higher token budget applies only to simple batches; relationship/identity batches
+    // are capped far lower by AdaptiveBookIntelligenceAnalyzer.
+    public int TargetInputTokens { get; } = 40_000;
     public int RecommendedConcurrency => Math.Min(8, _slots.Sum(s => s.Model.Limits.MaxInFlight));
 
     public GeminiSurveyPoolClient(HttpClient http, string apiKey, Guid googleProjectScope,
