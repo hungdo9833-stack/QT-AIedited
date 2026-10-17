@@ -298,7 +298,8 @@ public sealed class BookIntelligenceReviewWindow : Window
             RefreshQueue();
             int blockedCount = _state.Evidence.Count(x => x.IsCurrent && x.AiBlocked);
             ReviewRow? newest = Rows().FirstOrDefault(x => x.Status == IntelligenceReviewStatus.Pending.ToString());
-            _summary.Text = $"Khảo sát hoàn tất · {_state.Metrics.Requests} request · " +
+            _summary.Text = $"{(blockedCount > 0 ? "Khảo sát kết thúc (chưa đầy đủ)" : "Khảo sát hoàn tất")} · " +
+                $"{_state.Metrics.Requests} request · " +
                 $"{_state.PendingCount} đề xuất chờ duyệt · {blockedCount} đoạn bị Google từ chối. " +
                 (blockedCount > 0
                     ? "Nhấn 'Đoạn bị chặn' để kiểm tra; những đoạn này chưa được AI phân tích."
