@@ -299,7 +299,7 @@ public sealed partial class ProjectRepository
     }
     private static void CreateLayout(string root)
     {
-        foreach (string directory in new[] { "Chapters", "Settings", "Settings/prompts", "Resources", "Deleted", "Cache", "Queue" })
+        foreach (string directory in new[] { "Chapters", "Settings", "Resources", "Deleted", "Cache", "Queue" })
             Directory.CreateDirectory(Path.Combine(root, directory.Replace('/', Path.DirectorySeparatorChar)));
     }
 
