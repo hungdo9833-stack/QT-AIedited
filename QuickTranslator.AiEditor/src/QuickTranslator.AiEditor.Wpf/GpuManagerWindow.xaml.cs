@@ -249,7 +249,7 @@ public partial class GpuManagerWindow : Window
         if (ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Local } local)
         { await RunAsync(async () => StatusText.Text = (await _local.StartAsync(local.Model)).Message); return; }
         await ConfirmSetupAsync(RemoteSetupAction.StartOllamaService,
-            "Bật Ollama service bằng sudo -n? Nếu server yêu cầu password, thao tác sẽ dừng an toàn.");
+            "Bật Ollama service trên GPU thuê? Nếu cần quyền sudo, QT Studio sẽ hỏi mật khẩu ngay tại đây.");
     }
     private async void OnPullModel(object sender, RoutedEventArgs e) => await ConfirmSetupAsync(RemoteSetupAction.PullModel,
         $"Tải model “{ModelInput.Text}” qua SSH tunnel? QT Studio sẽ hiển thị dung lượng Ollama báo về; tính phí mạng do nhà cung cấp quyết định.", ModelInput.Text);
@@ -290,6 +290,16 @@ public partial class GpuManagerWindow : Window
                 else
                 {
                     SshCommandResult result = await _setup.ExecuteConfirmedAsync(handle.Session, action, true, model, cancellation.Token);
+                    if (!result.Success && result.Error.StartsWith("SUDO_PASSWORD_REQUIRED:", StringComparison.Ordinal))
+                    {
+                        string? password = RequestSudoPassword(profile);
+                        if (password is null)
+                        {
+                            StatusText.Text = "Đã hủy nhập mật khẩu sudo."; return;
+                        }
+                        result = await _setup.ExecuteConfirmedAsync(handle.Session, action, true, model,
+                            cancellation.Token, sudoPassword: password);
+                    }
                     StatusText.Text = result.Success ? "Thao tác hoàn tất." : "Thao tác bị chặn/thất bại: " + result.Error;
                 }
             }
@@ -298,6 +308,40 @@ public partial class GpuManagerWindow : Window
         catch (OperationCanceledException) { StatusText.Text = "Đã hủy thao tác Remote theo yêu cầu."; }
         catch (Exception error) { StatusText.Text = error.Message; }
         finally { CancelSetupButton.IsEnabled = false; _busy = false; }
+    }
+
+    private string? RequestSudoPassword(OllamaBackendProfile profile)
+    {
+        // Sudo is often configured with the same password as SSH. Do not persist a separate sudo secret.
+        var window = new Window
+        {
+            Title = "Mật khẩu sudo · Ubuntu",
+            Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize,
+            MinWidth = 380
+        };
+        var stack = new StackPanel { Margin = new Thickness(16) };
+        stack.Children.Add(new TextBlock
+        {
+            Text = "Ubuntu yêu cầu xác thực để cài/khởi động Ollama.\\nDùng mật khẩu SSH hoặc nhập mật khẩu sudo riêng:",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12)
+        });
+        var input = new PasswordBox { Margin = new Thickness(0, 0, 0, 12), MinWidth = 345 };
+        // For password-based SSH login this is usually the sudo password too.
+        if (profile.Ssh?.Authentication == SshAuthenticationKind.Password)
+            input.Password = profile.Ssh.Password ?? "";
+        stack.Children.Add(input);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "Hủy", MinWidth = 76, Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
+        var confirm = new Button { Content = "Tiếp tục", MinWidth = 92, IsDefault = true };
+        cancel.Click += (_, _) => window.DialogResult = false;
+        confirm.Click += (_, _) => window.DialogResult = true;
+        buttons.Children.Add(cancel); buttons.Children.Add(confirm); stack.Children.Add(buttons);
+        window.Content = stack;
+        if (window.ShowDialog() != true) { input.Clear(); return null; }
+        string password = input.Password;
+        input.Clear();
+        return password;
     }
 
     private void UpdateModelPullProgress(OllamaModelPullProgress progress)
