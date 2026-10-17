@@ -365,8 +365,8 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
             string original = finding.Relationship.Trim();
             string note = original == label ? "" : "Nhãn AI ban đầu: " + original;
             string reason = string.IsNullOrWhiteSpace(note) ? finding.Reason.Trim() :
-                finding.Reason.Trim() + "\\n" + note;
-            if (!stable) reason += "\\nNhãn chưa có trong danh mục chuẩn; cần xác minh trước khi sử dụng.";
+                finding.Reason.Trim() + "\n" + note;
+            if (!stable) reason += "\nNhãn chưa có trong danh mục chuẩn; cần xác minh trước khi sử dụng.";
             IntelligenceRelationshipSuggestion? existing = state.Relationships.FirstOrDefault(x =>
                 x.Status is IntelligenceReviewStatus.Pending or IntelligenceReviewStatus.ReviewLater &&
                 x.SpeakerChineseName == speaker && x.ListenerChineseName == listener &&
