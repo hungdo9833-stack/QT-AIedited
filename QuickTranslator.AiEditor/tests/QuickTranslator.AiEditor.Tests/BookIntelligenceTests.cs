@@ -363,6 +363,53 @@ public sealed class BookIntelligenceTests : IDisposable
     }
 
     [Fact]
+    public async Task Provider_block_quarantines_affected_batch_and_continues_other_evidence_after_restart()
+    {
+        string source = string.Concat(Enumerable.Repeat("林朝对苏雨说道：妹妹，放心。", 800));
+        (ProjectRepository repository, ProjectSession session) = await ProjectAsync(source, 1);
+        var store = new BookIntelligenceStore(session);
+        ProjectResources resources = await new ProjectResourceStore(session).LoadAsync();
+        BookIntelligenceState state = await new ProjectCorpusIndexer(repository).IndexAsync(
+            session, await store.LoadAsync(), store, resources.Characters);
+        state.ScanMode = IntelligenceScanMode.FullSemantic;
+        state.AnalysisConcurrency = 1;
+        Assert.True(state.Evidence.Count(x => x.IsCurrent) > AdaptiveBookIntelligenceAnalyzer.MaximumEvidencePerRequest);
+
+        int tries = 0;
+        var mock = new SurveyClient(_ =>
+        {
+            tries++;
+            if (tries == 1) throw new GeminiSurveyBlockedException("SAFETY");
+            return "{\"characters\":[],\"relationships\":[],\"glossary\":[]}";
+        });
+        BookIntelligenceState done = await new AdaptiveBookIntelligenceAnalyzer(mock)
+            .AnalyzeAsync(session, state, store, resources, Options);
+
+        Assert.Equal(2, tries);
+        Assert.Equal(AdaptiveBookIntelligenceAnalyzer.MaximumEvidencePerRequest,
+            done.Evidence.Count(x => x.IsCurrent && x.AiBlocked));
+        Assert.Contains(done.Evidence, x => x.IsCurrent && x.AiBlocked && x.AiBlockReason == "SAFETY"
+            && !x.AiAnalyzed);
+        Assert.Contains(done.Evidence, x => x.IsCurrent && x.AiAnalyzed && !x.AiBlocked);
+        Assert.False(BookIntelligenceResurveyService.HasUnanalyzedEvidence(done, IntelligenceScanMode.FullSemantic));
+
+        var resumed = new SurveyClient(_ => throw new InvalidOperationException("Resume must not resend."));
+        BookIntelligenceState reopened = await store.LoadAsync();
+        await new AdaptiveBookIntelligenceAnalyzer(resumed).AnalyzeAsync(
+            session, reopened, store, resources, Options);
+        Assert.Equal(0, resumed.Calls);
+
+        (BookIntelligenceState fresh, _) =
+            await BookIntelligenceResurveyService.BeginFreshAsync(await store.LoadAsync(), store);
+        Assert.All(fresh.Evidence.Where(x => x.IsCurrent), x =>
+        {
+            Assert.False(x.AiBlocked);
+            Assert.Equal("", x.AiBlockReason);
+            Assert.False(x.AiAnalyzed);
+        });
+    }
+
+    [Fact]
     public async Task Resurvey_snapshots_old_queue_and_reanalyzes_completed_evidence_without_losing_approved_knowledge()
     {
         (ProjectRepository repository, ProjectSession session) = await ProjectAsync(
