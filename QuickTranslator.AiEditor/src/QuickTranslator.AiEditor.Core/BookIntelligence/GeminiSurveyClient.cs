@@ -16,6 +16,17 @@ public sealed class GeminiSurveyHttpException(HttpStatusCode statusCode, TimeSpa
     public TimeSpan? RetryAfter { get; } = retryAfter;
 }
 
+/// <summary>
+/// A provider-reported prompt/candidate block. Never retry the same content
+/// automatically or pass it to another model to evade the provider decision.
+/// </summary>
+public sealed class GeminiSurveyBlockedException(string reasonCode)
+    : InvalidDataException("Gemini đã từ chối batch khảo sát (" + reasonCode +
+        "). Đã giữ nguyên chứng cứ để kiểm tra thủ công; không tự gửi lại nội dung bị chặn.")
+{
+    public string ReasonCode { get; } = reasonCode;
+}
+
 public sealed class GeminiDailyQuotaExceededException()
     : InvalidOperationException("Đã chạm giới hạn RPD Gemini của Project/model. Chờ reset lúc 00:00 giờ Pacific.");
 
@@ -164,14 +175,28 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
                 {
                     using JsonDocument doc = JsonDocument.Parse(json);
                     JsonElement root = doc.RootElement;
+                    string? promptBlock = ProviderCode(root, "promptFeedback", "blockReason");
                     if (!root.TryGetProperty("candidates", out JsonElement candidates) ||
                         candidates.ValueKind != JsonValueKind.Array || candidates.GetArrayLength() == 0)
-                        throw new InvalidDataException("Gemini không trả candidate khảo sát; prompt có thể đã bị chặn.");
+                    {
+                        if (IsExplicitBlock(promptBlock))
+                            throw new GeminiSurveyBlockedException(promptBlock!);
+                        throw new InvalidDataException(
+                            "Gemini trả HTTP 200 nhưng không có candidate và không xác nhận bị chặn " +
+                            "(promptFeedback.blockReason=" + (promptBlock ?? "không có") + "). " +
+                            "Giữ checkpoint; kiểm tra log phản hồi đã ẩn dữ liệu nhạy cảm.");
+                    }
                     JsonElement candidate = candidates[0];
                     if (candidate.TryGetProperty("finishReason", out JsonElement finish) &&
                         finish.ValueKind == JsonValueKind.String &&
                         !string.Equals(finish.GetString(), "STOP", StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException($"Gemini dừng khảo sát với lý do {finish.GetString()}.");
+                    {
+                        string code = SafeProviderCode(finish.GetString());
+                        if (IsExplicitBlock(code))
+                            throw new GeminiSurveyBlockedException(code);
+                        throw new InvalidDataException("Gemini dừng khảo sát với finishReason=" +
+                            code + ". Batch chưa hoàn thành vẫn được giữ để tiếp tục.");
+                    }
                     if (!candidate.TryGetProperty("content", out JsonElement content) ||
                         !content.TryGetProperty("parts", out JsonElement parts) ||
                         parts.ValueKind != JsonValueKind.Array)
@@ -203,6 +228,35 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
         }
         finally { _inFlight.Release(); }
     }
+
+    private static string? ProviderCode(JsonElement root, string objectKey, string codeKey)
+    {
+        if (!root.TryGetProperty(objectKey, out JsonElement obj) ||
+            obj.ValueKind != JsonValueKind.Object ||
+            !obj.TryGetProperty(codeKey, out JsonElement value) ||
+            value.ValueKind != JsonValueKind.String)
+            return null;
+        return SafeProviderCode(value.GetString());
+    }
+
+    private static string SafeProviderCode(string? value) => value?.ToUpperInvariant() switch
+    {
+        "SAFETY" => "SAFETY",
+        "PROHIBITED_CONTENT" => "PROHIBITED_CONTENT",
+        "BLOCKLIST" => "BLOCKLIST",
+        "SPII" => "SPII",
+        "MODEL_ARMOR" => "MODEL_ARMOR",
+        "OTHER" => "OTHER",
+        "RECITATION" => "RECITATION",
+        "MAX_TOKENS" => "MAX_TOKENS",
+        "BLOCK_REASON_UNSPECIFIED" => "BLOCK_REASON_UNSPECIFIED",
+        "STOP" => "STOP",
+        _ => "UNKNOWN"
+    };
+
+    private static bool IsExplicitBlock(string? value) => value is
+        "SAFETY" or "PROHIBITED_CONTENT" or "BLOCKLIST" or "SPII" or
+        "MODEL_ARMOR" or "OTHER" or "RECITATION";
 
     private HttpRequestMessage CreateRequest(string prompt, ModelOptions options, JsonElement? schema)
     {
