@@ -50,9 +50,13 @@ public partial class MainWindow
     {
         var settings = new ProjectSettingsStore(session);
         ProjectTranslationSettings translation = await settings.LoadTranslationAsync(cancellationToken);
-        var presetStore = new PromptPresetStore(session.Resolve(session.Manifest.Files.PromptPresets));
-        PresetLibrary library = await presetStore.LoadAsync(cancellationToken);
+        // Queue uses the same application-wide presets as the Editor, while
+        // each Project independently remembers which shared preset it selected.
+        PresetLibrary library = await _presetStore.LoadAsync(cancellationToken);
         var presets = new PromptPresetManager(library);
+        if (translation.SelectedPromptPresetId is Guid selectedId &&
+            presets.Presets.Any(p => p.Id == selectedId))
+            presets.Select(selectedId);
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync(cancellationToken);
         OllamaBackendProfile profile = _ollamaBackends.GetProfile(translation.OllamaProfileId);
         // A persisted multi-worker queue pins each backend independently. The globally active
