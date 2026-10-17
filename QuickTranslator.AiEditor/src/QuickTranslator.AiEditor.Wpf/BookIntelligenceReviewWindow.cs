@@ -176,18 +176,55 @@ public sealed class BookIntelligenceReviewWindow : Window
             _state = await new ProjectCorpusIndexer(_repository).IndexAsync(_session, _state, store,
                 _resources.Characters, indexProgress, _cancellation.Token);
             _summary.Text = "Đã lập chỉ mục. Đang phân tích các đoạn có tín hiệu bằng model khảo sát…";
-            if (profile.Kind == OllamaBackendKind.Remote && !profile.RemoteDisclosureAccepted)
+            bool isGemini = _model.Text.Trim().StartsWith("gemini-", StringComparison.OrdinalIgnoreCase);
+            if (!isGemini && profile.Kind == OllamaBackendKind.Remote && !profile.RemoteDisclosureAccepted)
                 throw new InvalidOperationException("Profile Remote chưa xác nhận quyền gửi các đoạn nguyên tác để khảo sát.");
-            using IOllamaBackendClient backend = OllamaClient.Create(profile);
+            if (isGemini && MessageBox.Show(this,
+                "Khảo sát bằng Gemini sẽ gửi các đoạn nguyên tác và thông tin nhân vật liên quan đến Google API. Tiếp tục?",
+                "Xác nhận gửi dữ liệu khảo sát lên cloud", MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+
             ModelOptions baseOptions = (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).ModelOptions;
-            ModelOptions options = baseOptions with { Model = _model.Text.Trim(), Temperature = Math.Min(0.2, baseOptions.Temperature) };
+            ModelOptions options = baseOptions with
+            {
+                Model = _model.Text.Trim(),
+                Temperature = Math.Min(0.2, baseOptions.Temperature),
+                ContextSize = isGemini ? Math.Max(32_768, baseOptions.ContextSize) : baseOptions.ContextSize,
+                MaximumOutputTokens = isGemini ? Math.Max(4096, baseOptions.MaximumOutputTokens) : baseOptions.MaximumOutputTokens
+            };
             var aiProgress = new Progress<AnalyzerProgress>(p =>
             {
                 _progress.Maximum = Math.Max(1, p.TotalEvidence); _progress.Value = p.ProcessedEvidence;
                 _summary.Text = $"AI: {p.ProcessedEvidence}/{p.TotalEvidence} đoạn · {p.PendingSuggestions} đề xuất chờ duyệt.";
             });
-            _state = await new AdaptiveBookIntelligenceAnalyzer(backend).AnalyzeAsync(_session, _state, store,
-                _resources, options, aiProgress, _cancellation.Token);
+
+            using var http = new HttpClient();
+            IOllamaBackendClient? ollama = null;
+            GeminiSurveyClient? gemini = null;
+            try
+            {
+                IOllamaClient backend;
+                if (isGemini)
+                {
+                    string apiKey = Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_API_KEY") ?? "";
+                    if (string.IsNullOrWhiteSpace(apiKey))
+                        throw new InvalidOperationException(
+                            "Chưa cấu hình QTSTUDIO_GEMINI_API_KEY. Không nhập API key vào Project hoặc prompt.");
+                    gemini = new GeminiSurveyClient(http, apiKey,
+                        GeminiSurveyLimits.FromObservedFreeTier(options.Model));
+                    backend = gemini;
+                    _state.AnalyzerProfileId = null;
+                }
+                else
+                {
+                    ollama = OllamaClient.Create(profile);
+                    backend = ollama;
+                }
+                _state = await new AdaptiveBookIntelligenceAnalyzer(backend).AnalyzeAsync(_session, _state, store,
+                    _resources, options, aiProgress, _cancellation.Token);
+            }
+            finally { ollama?.Dispose(); gemini?.Dispose(); }
             var scenes = new SceneContextService();
             foreach (ProjectChapterEntry entry in _session.Manifest.Chapters.Where(x => x.DeletedAt is null).OrderBy(x => x.Number))
             {
