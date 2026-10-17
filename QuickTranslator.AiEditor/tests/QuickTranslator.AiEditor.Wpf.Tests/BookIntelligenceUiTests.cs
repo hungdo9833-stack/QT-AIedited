@@ -57,10 +57,14 @@ public sealed class BookIntelligenceUiTests
         profile.SelectedItem = gemini;
         await System.Windows.Threading.Dispatcher.Yield();
 
-        Assert.Equal("gemini-3.8-flash", Field<TextBox>(window, "_model").Text);
+        var modelDropdown = Field<ComboBox>(window, "_model");
+        Assert.False(modelDropdown.IsEditable);
+        Assert.Equal("gemini-3.8-flash", modelDropdown.SelectedItem);
+        Assert.Contains("gemini-3.6-flash", modelDropdown.Items.Cast<string>());
+        Assert.Contains("gemini-3.5-flash-lite", modelDropdown.Items.Cast<string>());
+        Assert.Contains("gemini-3.1-flash-lite", modelDropdown.Items.Cast<string>());
         string status = Field<TextBlock>(window, "_summary").Text;
         Assert.Contains("gemini-3.8-flash", status);
-        Assert.Contains("gemini-3.6-flash", status);
         Assert.Contains("API key:", status);
         Assert.Contains("ngân sách:", status);
         Assert.DoesNotContain(Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_API_KEY") ?? "__missing__", status);
