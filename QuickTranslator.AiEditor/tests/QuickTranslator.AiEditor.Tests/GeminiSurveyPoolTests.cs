@@ -26,8 +26,9 @@ public sealed class GeminiSurveyPoolTests
         var parsed = GeminiSurveyPoolClient.ModelsFromSettings(null);
         Assert.Equal(["gemini-3.8-flash", "gemini-3.6-flash"], parsed.Select(x => x.Model));
         Assert.All(parsed, x => Assert.True(GeminiSurveyPoolClient.IsAllowedFlash(x.Model)));
-        Assert.Throws<ArgumentException>(() =>
-            GeminiSurveyPoolClient.ModelsFromSettings("gemini-3.6-flash,gemini-3.5-flash-lite"));
+        Assert.Equal(["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"],
+            GeminiSurveyPoolClient.ModelsFromSettings("gemini-3.5-flash-lite,gemini-3.1-flash-lite")
+                .Select(x => x.Model));
         Assert.Throws<ArgumentException>(() =>
             GeminiSurveyPoolClient.ModelsFromSettings("gemini-3.7-flash,gemini-3.7-flash"));
     }
