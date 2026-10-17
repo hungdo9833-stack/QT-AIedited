@@ -128,6 +128,20 @@ public sealed class GeminiSurveyPoolTests
     }
 
     [Fact]
+    public async Task Provider_block_is_not_routed_to_another_model()
+    {
+        var seen = new List<string>();
+        using var pool = new GeminiSurveyPoolClient(Models[..2], _ => new DelegateClient(options =>
+        {
+            seen.Add(options.Model);
+            throw new GeminiSurveyBlockedException("SAFETY");
+        }), () => DateTimeOffset.UtcNow);
+        await Assert.ThrowsAsync<GeminiSurveyBlockedException>(() =>
+            pool.TranslateAsync("Khảo sát", new ModelOptions { Model = "gemini-3.6-flash" }));
+        Assert.Single(seen);
+    }
+
+    [Fact]
     public async Task All_models_exhausted_leaves_batch_uncommitted()
     {
         using var pool = new GeminiSurveyPoolClient(Models[..2], _ =>
