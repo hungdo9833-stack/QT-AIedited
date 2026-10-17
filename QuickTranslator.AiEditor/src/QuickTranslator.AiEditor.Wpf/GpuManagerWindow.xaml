@@ -86,7 +86,10 @@
     <Border Style="{StaticResource Card}"><StackPanel>
      <DockPanel><Button DockPanel.Dock="Right" Content="Kiểm tra server" Click="OnInspect"/><TextBlock Text="TRẠNG THÁI &amp; CÔNG CỤ" FontWeight="SemiBold"/></DockPanel>
      <TextBlock x:Name="InspectionText" Text="Chưa kiểm tra." TextWrapping="Wrap" Margin="3,9" Foreground="{DynamicResource MutedBrush}"/>
-     <WrapPanel><Button Content="Cài Ollama (Ubuntu)" Click="OnInstallOllama"/><Button Content="Khởi động Ollama" Click="OnStartOllama"/><Button Content="Tải model" Click="OnPullModel"/><Button x:Name="CancelSetupButton" Content="Hủy thao tác" Click="OnCancelSetup" IsEnabled="False"/></WrapPanel>
+     <TextBlock Text="Model muốn tải về GPU từ xa" Style="{StaticResource FieldLabel}" Margin="0,8,0,0"/>
+     <TextBox x:Name="DownloadModelInput" ToolTip="Nhập tên model Ollama bất kỳ, ví dụ llama3.2:3b hoặc hf.co/IndexTeam/Index-Translate-9B-GGUF:Q4_K_M."/>
+     <TextBlock Text="Nhập tên model/tag chính xác để tải; không thay đổi model đang chọn để dịch." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,3,0,7"/>
+     <WrapPanel><Button Content="Cài Ollama (Ubuntu)" Click="OnInstallOllama"/><Button Content="Khởi động Ollama" Click="OnStartOllama"/><Button Content="Tải model vừa nhập" Click="OnPullModel"/><Button x:Name="CancelSetupButton" Content="Hủy thao tác" Click="OnCancelSetup" IsEnabled="False"/></WrapPanel>
      <ProgressBar x:Name="ModelPullProgress" Height="7" Margin="3,8,3,2" Minimum="0" Maximum="100" Visibility="Collapsed"/>
      <TextBlock Text="Ready chỉ được hiển thị sau khi endpoint và model phản hồi; kiểm tra server không phải benchmark suy luận." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,6"/>
     </StackPanel></Border>
