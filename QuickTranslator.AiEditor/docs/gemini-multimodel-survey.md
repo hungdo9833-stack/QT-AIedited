@@ -2,16 +2,24 @@
 
 This is an experimental survey backend, not a new translation backend. Do not run live API calls until the Windows Release build and integration tests pass.
 
-## Configuration (Windows user environment)
+## App configuration (one API key, no PowerShell)
 
-- `QTSTUDIO_GEMINI_API_KEY`: Google AI Studio key. Required to invoke Gemini. Never save in a project, log or prompt.
+In QT Studio: **Settings → AI & Performance → Gemini API**, paste the API key in the masked field and select **Save API key**. It is stored under the signed-in Windows user in **Windows Credential Manager** (target `QTStudio.GeminiSurvey.ApiKey.v1`), not in the novel Project or repository. **Remove saved key** deletes that credential. The field does not display or reveal the saved secret.
+
+Open a Project and go to **Characters & Addressing → Survey with AI**. When a saved key exists, the survey dialog defaults to `gemini-3.8-flash` unless a Gemini model was already selected. Confirm before the first cloud survey. All other Ollama translation settings stay unchanged.
+
+For legacy scripts only, `QTSTUDIO_GEMINI_API_KEY` is an optional fallback when the Windows credential is absent; a saved app credential has priority. Remove previously stored Windows User environment keys after upgrading if they are no longer needed.
+
+## Advanced overrides (optional environment variables)
+
+- `QTSTUDIO_GEMINI_API_KEY`: optional legacy fallback for scripts; not needed in normal application use.
 - `QTSTUDIO_GEMINI_PROJECT_ID`: actual Google AI project ID. Recommended to share rate limits across novels and multiple keys in the same project. If absent, a one-way fingerprint of the key is used to share limits across novels within the running process, but it cannot identify multiple keys from the same Google project.
-- `QTSTUDIO_GEMINI_SURVEY_MODELS`: comma-separated Flash-only model IDs. Default: `gemini-3.6-flash,gemini-3.7-flash,gemini-3.8-flash`. Flash Lite is rejected deliberately and reserved for a future translation API workflow.
+- `QTSTUDIO_GEMINI_SURVEY_MODELS`: comma-separated Flash-only model IDs. Default: `gemini-3.8-flash,gemini-3.6-flash`. Flash Lite is rejected deliberately and reserved for a future translation API workflow.
 - `QTSTUDIO_GEMINI_SURVEY_MAX_REQUESTS`: optional hard per-run HTTP request budget. It counts initial calls, retries and model fallbacks; when exhausted, the current batch remains uncommitted for Resume. Use `5` for the first live preflight.
 
 As of 2026-10-17, Google's model documentation marks 3.7 Flash as deprecated and automatically routes its API ID to 3.8 Flash. Keep it configurable for compatibility, but do not assume 3.7 and 3.8 provide independent provider capacity or independent effective quota. Confirm active limits in AI Studio before enabling live use.
 
-In the existing Book Intelligence dialog, enter a model that occurs in the configured survey pool (for example `gemini-3.7-flash`). The dialog remains otherwise unchanged and asks permission before uploading source excerpts.
+In the existing Book Intelligence dialog, enter a model that occurs in the configured survey pool (for example `gemini-3.8-flash`). The dialog remains otherwise unchanged and asks permission before uploading source excerpts.
 
 ## Scheduling
 
