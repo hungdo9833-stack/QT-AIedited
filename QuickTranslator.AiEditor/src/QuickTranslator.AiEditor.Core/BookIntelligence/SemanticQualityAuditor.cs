@@ -31,8 +31,9 @@ public static class SemanticQualityAuditor
         var localDefs = response.Findings.SelectMany(Identities).Where(x => x.EntityId is null && x.LocalId.Length > 0).GroupBy(x => x.LocalId)
             .ToDictionary(x => x.Key, x => x.Select(i => (i.Name, i.Kind)).Distinct().Count());
         var processed = new HashSet<Guid>();
-        foreach (var finding in response.Findings)
+        foreach (var reported in response.Findings)
         {
+            var finding = sourceCurrent ? AnchorSpans(reported, evidence, source!.OriginalText) : reported;
             var errors = new List<string>();
             var reviewIssues = new List<string>();
             bool eligible = true;
@@ -144,5 +145,37 @@ public static class SemanticQualityAuditor
         KnowledgeRelationType.Superior or KnowledgeRelationType.Subordinate => ["上司", "下属", "主子", "主人", "部下", "老板"],
         _ => Array.Empty<string>()
     }).Any(x => quotes.Contains(x, StringComparison.Ordinal));
+    private static readonly System.Text.RegularExpressions.Regex LineBreak = new("\r\n|\n|\r",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+    /// <summary>
+    /// Models quote reliably but cannot count UTF-16 offsets. The proof is the quoted text: locate it
+    /// verbatim inside the span's declared evidence window (only CRLF/LF/CR line breaks are
+    /// interchangeable) and take the occurrence nearest the reported offset. The located range and the
+    /// exact source text replace the model's numbers. An unlocatable quote keeps the reported span and
+    /// fails the SupportSpanMismatch check; nothing is ever located outside the declared evidence.
+    /// </summary>
+    internal static SemanticFinding AnchorSpans(SemanticFinding finding, IReadOnlyDictionary<Guid, MemoryEvidence> evidence, string text) =>
+        finding with { SupportSpans = finding.SupportSpans.Select(span => AnchorSpan(span, evidence, text)).ToArray() };
+    private static SemanticSupport AnchorSpan(SemanticSupport span, IReadOnlyDictionary<Guid, MemoryEvidence> evidence, string text)
+    {
+        if (span.Text.Length == 0 || !evidence.TryGetValue(span.EvidenceId, out var proof) || proof.StartUtf16 < 0 || proof.LengthUtf16 <= 0 ||
+            (long)proof.StartUtf16 + proof.LengthUtf16 > text.Length) return span;
+        // Already exact at the reported range: keep it unchanged.
+        if (span.LengthUtf16 == span.Text.Length && span.StartUtf16 >= proof.StartUtf16 &&
+            (long)span.StartUtf16 + span.LengthUtf16 <= (long)proof.StartUtf16 + proof.LengthUtf16 &&
+            string.CompareOrdinal(text, span.StartUtf16, span.Text, 0, span.LengthUtf16) == 0) return span;
+        try
+        {
+            string pattern = string.Join("(?:\r\n|\n|\r)", LineBreak.Split(span.Text).Select(System.Text.RegularExpressions.Regex.Escape));
+            string window = text.Substring(proof.StartUtf16, proof.LengthUtf16);
+            System.Text.RegularExpressions.Match? best = null;
+            foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(window, pattern,
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200)))
+                if (match.Length > 0 && (best is null || Math.Abs(proof.StartUtf16 + (long)match.Index - span.StartUtf16) < Math.Abs(proof.StartUtf16 + (long)best.Index - span.StartUtf16)))
+                    best = match;
+            return best is null ? span : span with { StartUtf16 = proof.StartUtf16 + best.Index, LengthUtf16 = best.Length, Text = best.Value };
+        }
+        catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return span; }
+    }
     private static bool Splits(string s, int n) => n > 0 && n < s.Length && char.IsHighSurrogate(s[n - 1]) && char.IsLowSurrogate(s[n]);
 }

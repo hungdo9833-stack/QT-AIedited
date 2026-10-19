@@ -83,8 +83,13 @@ public sealed class AdaptiveSemanticTests : IDisposable
         var partial = good with { ReviewedEvidenceIds = good.ReviewedEvidenceIds.Take(3).ToArray(), Findings = good.Findings.Take(3).ToArray() };
         var checkedPartial = SemanticQualityAuditor.Audit(partial, r, s.Sources);
         Assert.False(checkedPartial.Validated); Assert.Equal(3, checkedPartial.ReviewedEvidenceIds!.Count); Assert.All(checkedPartial.Findings, x => Assert.True(x.EvidenceValid));
+        // A range pointing into another excerpt is never trusted: the verbatim quote is re-anchored
+        // inside the DECLARED evidence (here it exists there too), or the span is rejected.
         var wrongSpan = Name(units[0]) with { SupportSpans = [Name(units[1]).SupportSpans[0] with { EvidenceId = units[0].Evidence.Id }] };
-        Assert.Contains("SupportSpanMismatch", SemanticQualityAuditor.Audit(Response(r, wrongSpan), r, s.Sources).Findings.Single().Issues);
+        var reanchored = Assert.Single(SemanticQualityAuditor.Audit(Response(r, wrongSpan), r, s.Sources).Findings.Single().Finding.SupportSpans);
+        Assert.InRange(reanchored.StartUtf16, units[0].Evidence.StartUtf16, units[0].Evidence.StartUtf16 + units[0].Evidence.LengthUtf16 - 2);
+        var foreignQuote = Name(units[0]) with { SupportSpans = [new(units[0].Evidence.Id, units[1].Evidence.StartUtf16, 3, "不存在")] };
+        Assert.Contains("SupportSpanMismatch", SemanticQualityAuditor.Audit(Response(r, foreignQuote), r, s.Sources).Findings.Single().Issues);
         foreach (var ids in new[] { new[] { Guid.NewGuid() }, new[] { units[0].Evidence.Id, units[0].Evidence.Id } })
         {
             var bad = SemanticQualityAuditor.Audit(good with { ReviewedEvidenceIds = ids }, r, s.Sources);
