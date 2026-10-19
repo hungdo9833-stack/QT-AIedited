@@ -88,6 +88,20 @@ public sealed class GeminiSemanticWireProbeTests : IDisposable
     }
 
     [Fact]
+    public async Task Synthetic_smoke_reports_only_allowlisted_5xx_status_and_hints_never_the_message()
+    {
+        string body = JsonSerializer.Serialize(new { error = new { code = 503, status = "UNAVAILABLE", message = "The model is overloaded. Please try again later. " + Secret } });
+        var bad = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent(body, Encoding.UTF8, "application/json") }));
+        var report = await SyntheticSurveySmoke.RunOnceAsync(ProbeRequest.Options(), _root, Secret, SyntheticSurveySmoke.Confirmation, () => bad);
+        Assert.Equal(1, bad.Calls); Assert.Equal("Http503", report.Code); Assert.Equal("UNAVAILABLE", report.ProviderStatus);
+        Assert.Equal(["ModelOverloaded", "TryAgainLater"], report.ProviderHints);
+        Assert.DoesNotContain(Secret, JsonSerializer.Serialize(report));
+        Assert.All(Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories), f => Assert.DoesNotContain(Secret, File.ReadAllText(f)));
+        Assert.Equal(("OTHER", (IReadOnlyList<string>)[]), ProviderErrorHints.Classify(Encoding.UTF8.GetBytes("{\"error\":{\"status\":\"" + Secret + "\"}}")));
+        Assert.Equal("NotJson", ProviderErrorHints.Classify(Encoding.UTF8.GetBytes(Secret)).Status);
+    }
+
+    [Fact]
     public async Task Synthetic_smoke_requires_confirmation_and_never_retries_provider_errors()
     {
         var never = new Handler(_ => throw new InvalidOperationException("must not send"));

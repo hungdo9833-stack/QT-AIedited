@@ -8,7 +8,44 @@ namespace QuickTranslator.AiEditor.GeminiSchema.Probe;
 
 public sealed record SyntheticSurveyReport(string Model, string WireFormat, int HttpRequests, int? HttpStatus, string Code, string BatchStatus,
     int EvidenceInBatch, int ReviewedEvidence, int Proposals, int EvidenceValidProposals, int ProposalsWithIssues, int Reviews,
-    IReadOnlyDictionary<string, int> FindingTypes, IReadOnlyList<string> AuditIssues, int? InputTokens, int? OutputTokens, string ProjectDirectory);
+    IReadOnlyDictionary<string, int> FindingTypes, IReadOnlyList<string> AuditIssues, int? InputTokens, int? OutputTokens, string ProjectDirectory)
+{
+    /// <summary>Allowlisted google.rpc status of a non-2xx reply (never the message).</summary>
+    public string? ProviderStatus { get; init; }
+    /// <summary>Fixed hint codes matched in the error message; the message itself is never kept.</summary>
+    public IReadOnlyList<string> ProviderHints { get; init; } = [];
+}
+
+/// <summary>Bounded, allowlist-only reading of a Gemini error envelope.</summary>
+public static class ProviderErrorHints
+{
+    private static readonly (string Needle, string Code)[] Hints =
+    [
+        ("overloaded", "ModelOverloaded"), ("high demand", "HighDemand"), ("try again later", "TryAgainLater"),
+        ("internal error", "InternalError"), ("deadline", "DeadlineExceeded"), ("schema", "MentionsSchema"),
+        ("too many states", "SchemaTooManyStates"), ("too complex", "SchemaTooComplex"), ("quota", "MentionsQuota"),
+        ("timed out", "TimedOut"), ("unavailable", "MentionsUnavailable")
+    ];
+    public static (string? Status, IReadOnlyList<string> Hints) Classify(byte[]? body)
+    {
+        if (body is null) return ("BodyOversized", []);
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body, new() { MaxDepth = 24 });
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object || !doc.RootElement.TryGetProperty("error", out var error) ||
+                error.ValueKind != System.Text.Json.JsonValueKind.Object) return ("NotErrorEnvelope", []);
+            string? status = error.TryGetProperty("status", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.String ? s.GetString() switch
+            {
+                "UNAVAILABLE" or "INTERNAL" or "DEADLINE_EXCEEDED" or "RESOURCE_EXHAUSTED" or "INVALID_ARGUMENT" or "FAILED_PRECONDITION" or
+                    "PERMISSION_DENIED" or "UNAUTHENTICATED" or "NOT_FOUND" => s.GetString(),
+                _ => "OTHER"
+            } : null;
+            string message = error.TryGetProperty("message", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String ? m.GetString()! : "";
+            return (status, Hints.Where(h => message.Contains(h.Needle, StringComparison.OrdinalIgnoreCase)).Select(h => h.Code).ToArray());
+        }
+        catch (System.Text.Json.JsonException) { return ("NotJson", []); }
+    }
+}
 
 /// <summary>
 /// End-to-end smoke test of the real production path (SemanticSurveyRequests.Plan →
@@ -60,7 +97,8 @@ public static class SyntheticSurveySmoke
             state.EvidenceResults.Where(x => x.AttemptId == attempt.Id && x.Status is SemanticBatchStatus.Validated or SemanticBatchStatus.Analyzed).Count(),
             proposals.Length, proposals.Count(x => x.Audit.EvidenceValid), proposals.Count(x => x.Audit.Issues.Count > 0), state.Reviews.Count,
             proposals.GroupBy(x => x.Audit.Finding.FindingType.ToString()).ToDictionary(x => x.Key, x => x.Count()),
-            proposals.SelectMany(x => x.Audit.Issues).Distinct().Order().ToArray(), attempt.InputTokens, attempt.OutputTokens, root);
+            proposals.SelectMany(x => x.Audit.Issues).Distinct().Order().ToArray(), attempt.InputTokens, attempt.OutputTokens, root)
+        { ProviderStatus = guard.ProviderStatus, ProviderHints = guard.ProviderHints };
     }
 
     private sealed class OnePost(HttpMessageHandler inner) : DelegatingHandler(inner)
@@ -68,11 +106,19 @@ public static class SyntheticSurveySmoke
         private int _requests;
         public int Requests => Volatile.Read(ref _requests);
         public int? Status { get; private set; }
+        public string? ProviderStatus { get; private set; }
+        public IReadOnlyList<string> ProviderHints { get; private set; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             if (request.Method != HttpMethod.Post || request.RequestUri?.Host != "generativelanguage.googleapis.com" ||
                 Interlocked.CompareExchange(ref _requests, 1, 0) != 0) throw new InvalidOperationException("SingleHttpBudgetExceeded");
-            var response = await base.SendAsync(request, ct); Status = (int)response.StatusCode; return response;
+            var response = await base.SendAsync(request, ct); Status = (int)response.StatusCode;
+            if (response.IsSuccessStatusCode) return response;
+            // Classify in memory, then hand the same bytes on so production handling is unchanged.
+            byte[] bytes = await response.Content.ReadAsByteArrayAsync(ct);
+            (ProviderStatus, ProviderHints) = ProviderErrorHints.Classify(bytes.Length > 32_768 ? null : bytes);
+            var replacement = new ByteArrayContent(bytes); replacement.Headers.ContentType = response.Content.Headers.ContentType;
+            response.Content.Dispose(); response.Content = replacement; return response;
         }
     }
 }
