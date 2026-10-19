@@ -111,6 +111,9 @@ public sealed class SemanticSurveyPanel : UserControl
         State = state; _memory = memory; _sources = sources; _query = new(memory, sources);
         _summary.Text = "Lịch sử batch: " + string.Join(" · ", Enum.GetValues<SemanticBatchStatus>().Select(s => s + "=" + State.Batches.Count(b => State.Status(b.Id) == s))) +
             $" · {State.Proposals.Count} đề xuất AI. Validated = kiểm tra kỹ thuật, KHÔNG phải accuracy verified. Đoạn blocked/failed/pending chưa được khảo sát thành công.";
+        var latest = State.Attempts.LastOrDefault(x => x.ReservationId is not null);
+        if (latest?.Status is SemanticBatchStatus.Failed or SemanticBatchStatus.Blocked)
+            _summary.Text += "\nDiagnostic lần chạy gần nhất: " + Diagnostic(latest);
         Filter();
     }
     internal async Task DryRunAsync() => await Operate(async () =>
@@ -140,7 +143,7 @@ public sealed class SemanticSurveyPanel : UserControl
             _cancel = new(); Buttons(); var ct = _cancel.Token;
             var backend = BackendFactory(_selection, budget); using var lifetime = backend as IDisposable;
             await new SemanticSurveyEngine(backend).RunAsync(new(_session), plan, currentSources, legacy, options, budget, _plan.Fingerprint,
-                new Progress<SemanticSurveyProgress>(p => _summary.Text = $"{p.Processed}/{p.Total} · batch attempts={p.Requests} · reserve={p.ReservedTokens} · {p.Message}"), ct,
+                new Progress<SemanticSurveyProgress>(p => { if (Busy) _summary.Text = $"{p.Processed}/{p.Total} · batch attempts={p.Requests} · reserve={p.ReservedTokens} · {p.Message}"; }), ct,
                 async r =>
                 {
                     // Recheck only source chapters actually used by this request/context, not the whole corpus per window.
@@ -191,7 +194,12 @@ public sealed class SemanticSurveyPanel : UserControl
     }
     private void Details()
     {
-        if (_grid.SelectedItem is not SemanticUiRow row) { _details.Clear(); Buttons(); return; }
+        if (_grid.SelectedItem is not SemanticUiRow row)
+        {
+            _details.Text = string.Join("\n\n", State.Attempts.Where(x => x.ReservationId is not null && x.Status is SemanticBatchStatus.Failed or SemanticBatchStatus.Blocked)
+                .TakeLast(8).Select(x => $"{x.At:O} · batch={x.BatchId} · {x.Status}\n" + Diagnostic(x)));
+            Buttons(); return;
+        }
         var proposal = State.Proposals.Single(x => x.Id == row.Id); var f = proposal.Audit.Finding; var batch = State.Batches.Single(x => x.Id == proposal.BatchId); var e = State.Evidence.Single(x => x.Id == batch.EvidenceId);
         _details.Text = $"AI hypothesis · {row.Status} · {f.EventActuality}\n{f.Reason}\nUncertainties: {string.Join("; ", f.Uncertainties)}\nAudit: {string.Join(",", proposal.Audit.Issues)}\nVerifiedParticipants (đề xuất, chưa duyệt): {string.Join(", ", f.VerifiedParticipants.Select(x => x.Name))}\n" +
             string.Join("\n", SemanticQualityAuditor.Identities(f).Distinct().Select(x => $"Identity: {x.Name} · model kind={x.Kind} · {x.Status} · id={x.EntityId?.ToString() ?? "local:" + x.LocalId}")) +
@@ -202,6 +210,11 @@ public sealed class SemanticSurveyPanel : UserControl
                 return origin is null ? "[foreign evidence]" : $"evidence={origin.Id} chapter={origin.ChapterId} sha={origin.SourceSha256} UTF-16 {span.StartUtf16}+{span.LengthUtf16}\n" + Quote(origin, span);
             })) +
             "\nHistory:\n" + string.Join("\n", State.Reviews.Where(x => x.ProposalId == row.Id).Select(x => $"{x.At:O} {x.Status}: {x.Note}")); Buttons();
+    }
+    private static string Diagnostic(SemanticAttempt attempt)
+    {
+        var d = SemanticProviderDiagnostics.Describe(attempt.ErrorCode);
+        return $"{d.Code} · {(d.CanRetry ? "Có thể Resume thủ công sau khi xử lý nguyên nhân" : "Cần kiểm tra/sửa cấu hình hoặc duyệt thủ công trước")}\n{d.Guidance}";
     }
     private string Quote(MemoryEvidence e, SemanticSupport span)
     {

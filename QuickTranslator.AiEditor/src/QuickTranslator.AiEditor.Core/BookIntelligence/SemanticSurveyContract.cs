@@ -85,7 +85,7 @@ public static class SemanticSurveyContract
         try
         {
             using var document = JsonDocument.Parse(json, new() { MaxDepth = 32 });
-            if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("schema_version", out var v) || !v.TryGetInt32(out int version)) throw new InvalidDataException("Missing semantic wire version.");
+            if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("schema_version", out var v) || v.ValueKind != JsonValueKind.Number || !v.TryGetInt32(out int version)) throw new InvalidDataException("Missing semantic wire version.");
             Check(document.RootElement, SchemaFor(version), "$root");
             return document.RootElement.Deserialize<SemanticResponse>(JsonOptions) ?? throw new InvalidDataException("Empty semantic object.");
         }

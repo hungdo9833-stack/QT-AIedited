@@ -74,7 +74,8 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
             state = await store.UpdateAsync(state.Revision, s => s.Attempts.Add(new(reservation, r.Id, null, SemanticBatchStatus.Pending, DateTimeOffset.UtcNow, blocked ? 0 : r.ReservedTokens, null, null, "ReservedBeforeSend", "")), ct).ConfigureAwait(false);
             if (!blocked) { requests++; reserved += r.ReservedTokens; }
             SemanticBatchStatus status = SemanticBatchStatus.Failed; string error = ""; string responseFingerprint = "";
-            int? input = null, output = null; SemanticAudit? audit = null; bool cancelled = false, quota = false;
+            int? input = null, output = null; SemanticAudit? audit = null; bool cancelled = false, stopAfterFailure = false;
+            var failureStage = SemanticFailureStage.Context;
             try
             {
                 if (blocked) { status = SemanticBatchStatus.Blocked; error = "InheritedProviderBlock"; }
@@ -82,10 +83,15 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
                 {
                     if (r.EstimatedInputTokens + options.MaximumOutputTokens > options.ContextSize) throw new InvalidDataException("ContextBudgetExceeded");
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(options.RequestTimeout);
+                    failureStage = SemanticFailureStage.Provider;
                     var completion = await backend.TranslateStructuredAsync(r.Prompt, options, SemanticSurveyContract.SchemaFor(r.WireVersion), timeout.Token).ConfigureAwait(false);
                     input = completion.Metrics.InputTokens; output = completion.Metrics.OutputTokens; responseFingerprint = EntityMemoryIdentity.Fingerprint(completion.Text);
+                    failureStage = SemanticFailureStage.Completion;
                     if (completion.Done == false || completion.DoneReason is not (null or "stop")) throw new InvalidDataException("IncompleteProviderResponse");
-                    audit = SemanticQualityAuditor.Audit(SemanticSurveyContract.Parse(completion.Text), r, sources);
+                    failureStage = SemanticFailureStage.Parse;
+                    var parsed = SemanticSurveyContract.Parse(completion.Text);
+                    failureStage = SemanticFailureStage.Audit;
+                    audit = SemanticQualityAuditor.Audit(parsed, r, sources);
                     status = audit.Validated ? SemanticBatchStatus.Validated : SemanticBatchStatus.Analyzed;
                     error = string.Join(",", audit.Issues.Concat(audit.UnprocessedCpuIds.Count > 0 ? new[] { "UnprocessedCpuEvents" } : []).Concat(audit.Findings.SelectMany(x => x.Issues)).Distinct()).Truncate(240);
                 }
@@ -95,8 +101,8 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
             catch (Exception ex)
             {
                 // Never persist provider messages/raw JSON/prompts: they may contain secrets or corpus text.
-                quota = ex is GeminiDailyQuotaExceededException or GeminiRequestBudgetExceededException or SemanticTransportBudgetException || ex is GeminiSurveyHttpException { StatusCode: System.Net.HttpStatusCode.TooManyRequests };
-                error = quota ? "QuotaExhausted" : ex is InvalidDataException ? "InvalidSchemaOrResponse" : ex is OllamaRequestException { Kind: OllamaErrorKind.Timeout } ? "Timeout" : "ProviderFailure";
+                var diagnostic = SemanticProviderDiagnostics.Classify(ex, failureStage);
+                error = diagnostic.Code; stopAfterFailure = diagnostic.StopRun;
             }
             state = await store.UpdateAsync(state.Revision, s =>
             {
@@ -118,7 +124,7 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
                 }
             }, CancellationToken.None).ConfigureAwait(false);
             processed++; progress?.Report(new(processed, execution.Length, requests, reserved, error.Length > 0 ? error : status.ToString()));
-            if (cancelled) throw new OperationCanceledException(ct); if (quota) break;
+            if (cancelled) throw new OperationCanceledException(ct); if (stopAfterFailure) break;
         }
         return state;
     }

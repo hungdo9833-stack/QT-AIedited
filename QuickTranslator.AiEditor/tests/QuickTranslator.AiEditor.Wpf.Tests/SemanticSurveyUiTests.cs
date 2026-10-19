@@ -64,6 +64,29 @@ public sealed class SemanticSurveyUiTests
         await panel.SurveyAsync(); Assert.Null(panel.LastError); Assert.Empty(panel.State.Attempts);
     });
 
+    [Theory]
+    [InlineData(401, "Http401", "API key")]
+    [InlineData(503, "Http503", "dịch vụ")]
+    [InlineData(0, "NetworkFailure", "mạng")]
+    public Task Failed_batch_diagnostic_is_visible_without_proposals_survives_reload_and_has_safe_manual_resume(int http, string code, string hint) => StaHost.Run(async () =>
+    {
+        const string secret = "DO_NOT_DISPLAY_PRIVATE_KEY_OR_SOURCE";
+        using var fixture = new WorkspaceFixture(); await fixture.CreateProjectAsync(); await fixture.AddChapterAsync("Mock diagnostics", 1);
+        var panel = new SemanticSurveyPanel(fixture.Project, fixture.Repository, _ => Task.CompletedTask, Selection());
+        panel.ConfirmAction = _ => true; Field<TextBox>(panel, "_requests").Text = "1";
+        var failed = new Fake(_ => http == 0 ? throw new System.Net.Http.HttpRequestException(secret) : throw new GeminiSurveyHttpException((System.Net.HttpStatusCode)http));
+        panel.BackendFactory = (_, _) => failed; await panel.DryRunAsync(); await panel.SurveyAsync();
+        Assert.Equal(1, failed.Calls); Assert.Empty(panel.State.Proposals); Assert.Equal(code, panel.State.Attempts.Last().ErrorCode);
+        await panel.LoadAsync(); string summary = Field<TextBlock>(panel, "_summary").Text, details = Field<TextBox>(panel, "_details").Text;
+        Assert.Contains(code, summary); Assert.Contains(hint, summary); Assert.Contains(code, details); Assert.DoesNotContain(secret, summary + details);
+        Assert.Equal(http != 401, SemanticProviderDiagnostics.Describe(code).CanRetry);
+        await panel.DryRunAsync(); var plan = Field<SemanticDryRun>(panel, "_plan"); var r = Assert.Single(plan.ExecutionRequests);
+        var good = new Fake(_ => JsonSerializer.Serialize(new SemanticResponse(r.WireVersion, r.ProjectId, r.Evidence.ChapterId, r.Units.Select(x => x.Evidence.Id).ToArray(), []), SemanticSurveyContract.JsonOptions));
+        panel.BackendFactory = (_, _) => good; await panel.SurveyAsync(); Assert.Equal(1, good.Calls);
+        Assert.Equal(SemanticBatchStatus.Validated, panel.State.Status(r.Id)); Assert.Contains(panel.State.Attempts, x => x.ErrorCode == code);
+        Assert.DoesNotContain(code, Field<TextBlock>(panel, "_summary").Text); Assert.Equal(0, fixture.Client.Calls);
+    });
+
     [Fact]
     public Task Adaptive_dry_run_shows_evidence_distribution_and_cost_units_without_constructing_backend() => StaHost.Run(async () =>
     {

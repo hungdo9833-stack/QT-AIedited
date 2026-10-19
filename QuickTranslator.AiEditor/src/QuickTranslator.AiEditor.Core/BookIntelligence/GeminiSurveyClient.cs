@@ -222,6 +222,10 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
                 {
                     throw new InvalidDataException("Gemini trả response JSON không hợp lệ.", ex);
                 }
+                catch (InvalidOperationException ex)
+                {
+                    throw new InvalidDataException("Gemini trả envelope JSON sai cấu trúc.", ex);
+                }
                 }
             }
             throw new InvalidOperationException("Gemini API không hoàn tất khảo sát.");
