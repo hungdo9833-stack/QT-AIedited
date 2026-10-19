@@ -56,6 +56,10 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
         options.Validate();
         if (state.ProjectId != session.Manifest.ProjectId || resources.ProjectId != session.Manifest.ProjectId)
             throw new InvalidOperationException("Analyzer nhận dữ liệu của Project khác.");
+        CorpusIntegrityReport integrity = await new CorpusIntegrityAuditor(new ProjectRepository())
+            .AuditAsync(session, state, cancellationToken).ConfigureAwait(false);
+        if (integrity.NeedsReindex || integrity.ActiveChapters == 0)
+            throw new InvalidOperationException("Corpus NeedsReindex/Incomplete. Validate and reconcile active chapters before analysis. " + integrity.Summary);
 
         state.AnalyzerModel = options.Model;
         state.AnalyzerVersion = "2";
@@ -170,7 +174,7 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
             }
         }
-        state.Metrics.EvidenceSkipped = state.Evidence.LongCount(x => x.IsCurrent && !x.AiAnalyzed);
+        state.Metrics.EvidenceSkipped = state.Evidence.LongCount(x => x.IsCurrent && !x.AiAnalyzed && !x.AiBlocked && !CorpusIntegrityAuditor.Eligible(x, state.ScanMode));
         state.NextEvidenceIndex = processed; state.LastError = "";
         return await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
     }
@@ -458,7 +462,7 @@ public sealed class AdaptiveBookIntelligenceAnalyzer(IOllamaClient client)
     internal static string AnalysisKey(IEnumerable<CorpusEvidence> evidence, string model, string version, string relevantContext)
     {
         string value = model + "|" + version + "|context:" + relevantContext + "|" +
-            string.Join('|', evidence.Select(x => $"{x.SourceSha256}:{x.StartUtf16}:{x.LengthUtf16}"));
+            string.Join('|', evidence.Select(x => $"v3:{x.ChapterId:D}:{x.Id:D}:{x.SourceSha256}:{x.StartUtf16}:{x.LengthUtf16}"));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
 

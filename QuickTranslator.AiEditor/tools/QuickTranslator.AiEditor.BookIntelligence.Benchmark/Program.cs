@@ -114,6 +114,13 @@ static async Task<PipelineResult> RunPipelineAsync(string projectRoot, List<Corp
     state.ScanMode = IntelligenceScanMode.FullSemantic;
     state.AnalysisConcurrency = concurrency;
     state.Chapters = CloneCorpus(corpus);
+    foreach (CorpusChapterIndex index in state.Chapters)
+    {
+        var document = TranslationService.CreateChapter($"Chương {index.ChapterNumber}",
+            string.Concat(index.Evidence.OrderBy(x => x.StartUtf16).Select(x => x.Excerpt)));
+        document.Id = index.ChapterId;
+        await repository.AddChapterAsync(session, document, index.ChapterNumber, "Synthetic");
+    }
     state = await store.SaveAsync(state);
     ProjectResources resources = await new ProjectResourceStore(session).LoadAsync();
     var client = new BenchmarkSurveyClient(latencyMilliseconds, expectedCharacters);

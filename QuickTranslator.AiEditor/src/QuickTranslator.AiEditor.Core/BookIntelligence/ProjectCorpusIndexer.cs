@@ -8,6 +8,7 @@ namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
 public sealed class ProjectCorpusIndexer(ProjectRepository repository)
 {
+    public string? LastBackupPath { get; private set; }
     private const int WindowSize = 900;
     private static readonly Regex NameBeforeAction = new(
         @"(?<name>[\p{IsCJKUnifiedIdeographs}]{2,4})(?:说(?:道)?|问(?:道)?|答(?:道)?|喊(?:道)?|叫(?:道)?|看(?:向|着)|笑(?:道)?|皱眉|点头|摇头|走来|出现|进入)",
@@ -35,11 +36,24 @@ public sealed class ProjectCorpusIndexer(ProjectRepository repository)
         ArgumentNullException.ThrowIfNull(characters);
         if (state.ProjectId != session.Manifest.ProjectId) throw new InvalidOperationException("Chỉ mục thuộc Project khác.");
 
+        LastBackupPath = null;
+        state = BookIntelligenceStore.Clone(state);
         ProjectChapterEntry[] active = session.Manifest.Chapters.Where(x => x.DeletedAt is null)
             .OrderBy(x => x.Number).ThenBy(x => x.ChapterId).ToArray();
+        if (active.Select(x => x.ChapterId).Distinct().Count() != active.Length)
+            throw new InvalidDataException("Duplicate active ChapterId; cannot safely reconcile.");
+        async Task CheckpointAsync()
+        {
+            LastBackupPath ??= await CorpusReconciliation.BackupAsync(store, state.Revision, cancellationToken).ConfigureAwait(false);
+            CorpusReconciliation.InvalidateRetiredDependencies(state);
+            state = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+        }
         HashSet<Guid> activeIds = active.Select(x => x.ChapterId).ToHashSet();
+        bool retired = false;
         foreach (CorpusChapterIndex removed in state.Chapters.Where(x => !activeIds.Contains(x.ChapterId)))
-            foreach (CorpusEvidence evidence in removed.Evidence) evidence.IsCurrent = false;
+            foreach (CorpusEvidence evidence in removed.Evidence.Where(x => x.IsCurrent))
+            { evidence.IsCurrent = false; retired = true; }
+        if (retired) await CheckpointAsync().ConfigureAwait(false);
 
         int processed = 0, rescanned = 0;
         string[] knownNames = characters.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases))
@@ -53,27 +67,48 @@ public sealed class ProjectCorpusIndexer(ProjectRepository repository)
             string source = chapter.OriginalText ?? "";
             string hash = Hash(source);
             CorpusChapterIndex? existing = state.Chapters.SingleOrDefault(x => x.ChapterId == entry.ChapterId);
-            if (existing is null || !string.Equals(existing.SourceSha256, hash, StringComparison.Ordinal))
+            if (!CorpusIntegrityAuditor.Inspect(entry.ChapterId, entry.Number, source, existing).Indexed)
             {
                 rescanned++;
-                if (existing is not null)
-                    foreach (CorpusEvidence evidence in existing.Evidence) evidence.IsCurrent = false;
+                if (existing is not null && existing.SourceSha256 != hash)
+                    state.SceneContexts.RemoveAll(x => x.ChapterId == entry.ChapterId);
                 List<CorpusEvidence> current = ScanChapter(entry.ChapterId, source, hash, knownNames, state.LowPriorityAuditRate);
                 if (existing is null)
                 {
                     existing = new CorpusChapterIndex { ChapterId = entry.ChapterId };
                     state.Chapters.Add(existing);
                 }
+                foreach (CorpusEvidence evidence in existing.Evidence) evidence.IsCurrent = false;
+                foreach (CorpusEvidence scanned in current)
+                {
+                    CorpusEvidence? reusable = existing.Evidence.FirstOrDefault(x => x.ChapterId == entry.ChapterId &&
+                        x.SourceSha256 == hash && x.StartUtf16 == scanned.StartUtf16 &&
+                        x.LengthUtf16 == scanned.LengthUtf16 && x.Excerpt == scanned.Excerpt);
+                    if (reusable is not null)
+                    {
+                        reusable.IsCurrent = true;
+                        if (reusable.AiBlocked) reusable.AiAnalyzed = false;
+                    }
+                    else
+                    {
+                        // Preserve a provider refusal on the same source range even
+                        // if window boundaries changed. Reindex must not bypass blocks.
+                        var blocked = existing.Evidence.FirstOrDefault(x => x.AiBlocked && x.SourceSha256 == hash &&
+                            x.StartUtf16 < scanned.StartUtf16 + scanned.LengthUtf16 &&
+                            (long)x.StartUtf16 + x.LengthUtf16 > scanned.StartUtf16);
+                        if (blocked is not null) { scanned.AiBlocked = true; scanned.AiBlockReason = blocked.AiBlockReason; }
+                        existing.Evidence.Add(scanned);
+                    }
+                }
                 existing.ChapterNumber = entry.Number;
                 existing.SourceSha256 = hash;
                 existing.SourceLengthUtf16 = source.Length;
                 existing.ScannedAt = DateTimeOffset.UtcNow;
-                existing.Evidence.AddRange(current);
                 state.NextEvidenceIndex = 0;
-                state.LastError = "";
-                state = await store.SaveAsync(state, cancellationToken).ConfigureAwait(false);
+                await CheckpointAsync().ConfigureAwait(false);
             }
-            else existing.ChapterNumber = entry.Number;
+            else if (existing!.ChapterNumber != entry.Number)
+            { existing.ChapterNumber = entry.Number; await CheckpointAsync().ConfigureAwait(false); }
             processed++;
             progress?.Report(new(processed, active.Length, rescanned, state.Evidence.Count(x => x.IsCurrent)));
         }
@@ -182,6 +217,7 @@ public sealed class ProjectCorpusIndexer(ProjectRepository repository)
                     if (source[i - 1] is '\r' or '\n' or '。' or '！' or '？') { end = i; break; }
             }
             if (end <= start) end = Math.Min(source.Length, start + WindowSize);
+            if (end < source.Length && char.IsHighSurrogate(source[end - 1]) && char.IsLowSurrogate(source[end])) end++;
             yield return (start, end - start);
             start = end;
         }

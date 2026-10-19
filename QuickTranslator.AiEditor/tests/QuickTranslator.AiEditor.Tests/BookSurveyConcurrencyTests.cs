@@ -92,23 +92,26 @@ public sealed partial class BookSurveyConcurrencyTests : IDisposable
         BookIntelligenceState state = await store.LoadAsync();
         state.ScanMode = IntelligenceScanMode.FullSemantic;
         state.AnalysisConcurrency = concurrency;
-        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("synthetic")));
-        Guid chapterId = Guid.NewGuid();
-        var evidence = Enumerable.Range(0, evidenceCount).Select(index => new CorpusEvidence
+        string[] excerpts = Enumerable.Range(0, evidenceCount).Select(index => $"人物{index:00}说道。").ToArray();
+        string source = string.Concat(excerpts);
+        string hash = CorpusIntegrityAuditor.SourceHash(source);
+        var chapter = TranslationService.CreateChapter("Fixture", source);
+        await repository.AddChapterAsync(session, chapter, 1, "Fixture");
+        Guid chapterId = chapter.Id;
+        int offset = 0;
+        var evidence = new List<CorpusEvidence>();
+        foreach (string excerpt in excerpts)
         {
-            ChapterId = chapterId,
-            StartUtf16 = index * 10,
-            LengthUtf16 = 8,
-            SourceSha256 = hash,
-            Excerpt = $"人物{index:00}说道。",
-            Priority = EvidencePriority.High
-        }).ToList();
+            evidence.Add(new() { ChapterId = chapterId, StartUtf16 = offset, LengthUtf16 = excerpt.Length,
+                SourceSha256 = hash, Excerpt = excerpt, Priority = EvidencePriority.High });
+            offset += excerpt.Length;
+        }
         state.Chapters.Add(new CorpusChapterIndex
         {
             ChapterId = chapterId,
             ChapterNumber = 1,
             SourceSha256 = hash,
-            SourceLengthUtf16 = evidenceCount * 10 + 8,
+            SourceLengthUtf16 = source.Length,
             Evidence = evidence
         });
         state = await store.SaveAsync(state);
