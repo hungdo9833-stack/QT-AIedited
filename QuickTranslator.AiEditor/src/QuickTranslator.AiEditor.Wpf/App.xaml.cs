@@ -7,8 +7,18 @@ public partial class App : Application
     private Mutex? _instance;
     private bool _ownsInstance;
 
+    /// <summary>
+    /// Test and smoke hosts construct <see cref="App"/> only for its XAML resources. WPF still
+    /// dispatches OnStartup once the dispatcher pumps, which would otherwise create a real
+    /// MainWindow on the user's real stores and auto-open their most recent Project.
+    /// </summary>
+    internal static bool SuppressStartup { get; set; }
+    internal static bool RealStartupRan { get; private set; }
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        if (SuppressStartup) return;
+        RealStartupRan = true;
         _instance = new Mutex(false, @"Local\QuickTranslatorAiEditor.Phase1");
         try { _ownsInstance = _instance.WaitOne(0); }
         catch (AbandonedMutexException) { _ownsInstance = true; }

@@ -26,6 +26,7 @@ internal static class StaHost
             try
             {
                 SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+                App.SuppressStartup = true; // Never run real startup: it opens the user's real stores/Project.
                 var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
                 app.InitializeComponent(); // No Startup/Run: never opens a real project or window.
                 ready.SetResult(Dispatcher.CurrentDispatcher);

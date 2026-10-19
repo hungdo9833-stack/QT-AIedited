@@ -32,6 +32,7 @@ internal static class Program
             "qt-studio-m5-smoke-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
 
+        App.SuppressStartup = true; // Synthetic Project only; never the user's real stores/Project.
         var application = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.InitializeComponent();
         if (string.Equals(mode, "queue-benchmark", StringComparison.OrdinalIgnoreCase))
