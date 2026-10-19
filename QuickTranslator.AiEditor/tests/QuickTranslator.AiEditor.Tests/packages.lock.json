@@ -125,6 +125,12 @@
         "dependencies": {
           "SSH.NET": "[2026.0.0, )"
         }
+      },
+      "quicktranslator.aieditor.geminischema.probe": {
+        "type": "Project",
+        "dependencies": {
+          "QuickTranslator.AiEditor.Core": "[1.0.0, )"
+        }
       }
     }
   }
