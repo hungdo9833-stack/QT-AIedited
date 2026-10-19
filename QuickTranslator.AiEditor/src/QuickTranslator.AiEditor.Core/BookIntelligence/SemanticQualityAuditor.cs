@@ -1,0 +1,84 @@
+namespace QuickTranslator.AiEditor.Core.BookIntelligence;
+
+public sealed record SemanticAuditedFinding(SemanticFinding Finding, bool EvidenceValid, bool CanPromote, IReadOnlyList<string> Issues);
+public sealed record SemanticAudit(IReadOnlyList<SemanticAuditedFinding> Findings, IReadOnlyList<string> Issues, IReadOnlyList<Guid> UnprocessedCpuIds)
+{
+    public bool Validated => Issues.Count == 0 && UnprocessedCpuIds.Count == 0 && Findings.All(x => x.EvidenceValid);
+}
+
+/// <summary>Independent mechanical audit, NOT a claim that the model's semantics are true.</summary>
+public static class SemanticQualityAuditor
+{
+    public static SemanticAudit Audit(SemanticResponse response, SemanticSurveyRequest request, IReadOnlyList<CensusSource> sources)
+    {
+        var issues = new List<string>(); var output = new List<SemanticAuditedFinding>(); var e = request.Evidence;
+        var source = sources.SingleOrDefault(x => x.ChapterId == e.ChapterId);
+        bool sourceCurrent = source is not null && source.ChapterNumber == e.ChapterNumber && e.ProjectId == request.ProjectId &&
+            CorpusIntegrityAuditor.SourceHash(source.OriginalText) == e.SourceSha256;
+        if (!sourceCurrent) issues.Add("StaleOrForeignEvidence");
+        if (response.ProjectId != request.ProjectId || response.ChapterId != e.ChapterId || response.SchemaVersion != 1) issues.Add("ResponseScopeMismatch");
+        if (!response.ReviewedEvidenceIds.SequenceEqual(new[] { e.Id })) issues.Add("IncompleteEvidenceCoverage");
+        var known = request.AllowedIdentities.ToDictionary(x => x.EntityId); var cpu = request.CpuCandidates.Select(x => x.Id).ToHashSet();
+        var localDefs = response.Findings.SelectMany(Identities).Where(x => x.EntityId is null && x.LocalId.Length > 0).GroupBy(x => x.LocalId)
+            .ToDictionary(x => x.Key, x => x.Select(i => (i.Name, i.Kind)).Distinct().Count());
+        var processed = new HashSet<Guid>();
+        foreach (var finding in response.Findings)
+        {
+            var errors = new List<string>();
+            bool eligible = true;
+            if (finding.SourceEvidenceIds.Count != 1 || finding.SourceEvidenceIds[0] != e.Id || finding.SupportSpans.Count == 0) errors.Add("MissingOrForeignSupport");
+            foreach (var span in finding.SupportSpans)
+            {
+                long end = (long)span.StartUtf16 + span.LengthUtf16;
+                if (!sourceCurrent || span.EvidenceId != e.Id || span.StartUtf16 < e.StartUtf16 || end > (long)e.StartUtf16 + e.LengthUtf16 ||
+                    span.LengthUtf16 is < 1 or > 240 || end > source!.OriginalText.Length || Splits(source.OriginalText, span.StartUtf16) || Splits(source.OriginalText, (int)end) ||
+                    source.OriginalText.Substring(span.StartUtf16, span.LengthUtf16) != span.Text) errors.Add("SupportSpanMismatch");
+            }
+            string quotes = string.Join("\n", finding.SupportSpans.Select(x => x.Text));
+            foreach (var identity in Identities(finding))
+            {
+                if (identity.EntityId is Guid id)
+                {
+                    if (identity.Status != SemanticResolution.Existing || identity.LocalId.Length != 0 || !known.TryGetValue(id, out var allowed) ||
+                        !allowed.Names.Contains(identity.Name, StringComparer.Ordinal)) errors.Add("UnknownOrLabelResolvedIdentity");
+                }
+                else if (identity.Status == SemanticResolution.NewIdentity)
+                {
+                    if (identity.LocalId.Length is < 1 or > 64 || !identity.LocalId.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-') ||
+                        identity.Name.Length == 0 || !quotes.Contains(identity.Name, StringComparison.Ordinal) || localDefs.GetValueOrDefault(identity.LocalId) != 1)
+                        errors.Add("UnprovedOrConflictingLocalIdentity");
+                }
+                else { eligible = false; if (identity.Status == SemanticResolution.Existing) errors.Add("MissingExistingId"); }
+            }
+            if (finding.EffectiveChapter is <= 0 || finding.RevealedChapter is <= 0 || finding.EffectiveToChapter is <= 0 ||
+                finding.EffectiveChapter > request.ChapterNumber || finding.RevealedChapter > request.ChapterNumber ||
+                finding.EffectiveToChapter is int to && finding.EffectiveChapter > to) errors.Add("InvalidOrFutureTimeline");
+            // A historical event is allowed with an unknown effective date, never default it to today.
+            if (finding.FindingType == SemanticFindingType.EventVerification)
+            {
+                if (finding.EventType is null && finding.EventActuality != SemanticActuality.NotAnEvent) errors.Add("MissingEventType");
+                if (finding.EventActuality is not (SemanticActuality.ActualCompleted or SemanticActuality.HistoricalReference) || finding.VerifiedParticipants.Count == 0) eligible = false;
+                if (finding.CpuCandidateIds.Any(id => !cpu.Contains(id))) errors.Add("ForeignCpuCandidate");
+            }
+            else if (finding.CpuCandidateIds.Count > 0) errors.Add("EventCoverageRequiresEventFinding");
+            if (finding.AffectedFactIds.Any(id => !request.ContextFactIds.Contains(id))) errors.Add("UnknownAffectedFact");
+            if (finding.FindingType == SemanticFindingType.RelationshipExtraction && (finding.SubjectIdentity is null || finding.TargetIdentity is null ||
+                finding.RelationshipType == KnowledgeRelationType.Unknown || Same(finding.SubjectIdentity, finding.TargetIdentity))) errors.Add("InvalidDirectedRelation");
+            if (finding.FindingType == SemanticFindingType.RelationshipExtraction && finding.EventActuality is not (SemanticActuality.ActualCompleted or SemanticActuality.HistoricalReference)) eligible = false;
+            if (finding.FindingType == SemanticFindingType.DirectionalAddressing && (finding.SpeakerIdentity is null || finding.ListenerIdentity is null ||
+                Same(finding.SpeakerIdentity, finding.ListenerIdentity) || finding.SelfReference.Length == 0 || finding.AddresseeReference.Length == 0)) eligible = false;
+            if (finding.FindingType is SemanticFindingType.CharacterIdentification or SemanticFindingType.AliasAndIdentityResolution &&
+                (finding.SubjectIdentity is null || finding.Value.Length == 0 || !quotes.Contains(finding.Value, StringComparison.Ordinal))) errors.Add("UnprovedNameOrAlias");
+            if (finding.FindingType == SemanticFindingType.GapAndContradictionAudit || finding.IdentityResolutionStatus is SemanticResolution.Unresolved or SemanticResolution.Ambiguous) eligible = false;
+            if (errors.Count == 0 && issues.Count == 0) foreach (Guid id in finding.CpuCandidateIds) processed.Add(id);
+            // Persist refs/diagnostics, not repeated source quotations. Navigation rehydrates text.
+            output.Add(new(finding with { SupportSpans = finding.SupportSpans.Select(x => x with { Text = "" }).ToArray() },
+                errors.Count == 0 && issues.Count == 0, eligible && errors.Count == 0 && issues.Count == 0, errors.Distinct().ToArray()));
+        }
+        return new(output, issues, cpu.Except(processed).ToArray());
+    }
+    public static IEnumerable<SemanticIdentity> Identities(SemanticFinding f) => new[] { f.SubjectIdentity, f.TargetIdentity, f.SpeakerIdentity, f.ListenerIdentity }
+        .OfType<SemanticIdentity>().Concat(f.VerifiedParticipants);
+    private static bool Same(SemanticIdentity a, SemanticIdentity b) => a.EntityId is Guid id && b.EntityId == id || a.EntityId is null && a.LocalId.Length > 0 && a.LocalId == b.LocalId;
+    private static bool Splits(string s, int n) => n > 0 && n < s.Length && char.IsHighSurrogate(s[n - 1]) && char.IsLowSurrogate(s[n]);
+}
