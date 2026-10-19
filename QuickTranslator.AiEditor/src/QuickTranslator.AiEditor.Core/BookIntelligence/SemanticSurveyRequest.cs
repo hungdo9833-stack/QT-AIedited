@@ -32,6 +32,14 @@ public sealed record SemanticSurveyRequest(Guid Id, Guid ProjectId, int ChapterN
 public static class SemanticSurveyRequests
 {
     public const string PromptVersion = "semantic-memory-1";
+    // Instruction only; the auditor is unchanged (it already rejects new local identities whose name is in no
+    // quote). PromptVersion is part of the evidence cache keys, so it is deliberately NOT bumped: evidence
+    // already surveyed must not be re-sent because of this wording.
+    internal const string NamedQuoteRule =
+        "For EventVerification, RelationshipExtraction and DirectionalAddressing, support_spans MUST include, for EVERY identity involved " +
+        "(subject and target, speaker and listener, each VerifiedParticipant), a quote that contains that identity's exact name as written in the source. " +
+        "A pronoun such as 他/她/它/我/你 or a title alone does not prove who it is: add a separate quote naming the person from the same evidence, " +
+        "or mark that identity Unresolved instead of guessing.";
     public static IReadOnlyList<SemanticSurveyRequest> Plan(EntityMemoryState memory, IReadOnlyList<CensusSource> sources,
         BookIntelligenceState legacy, string backendSignature, ModelOptions options, CancellationToken token = default,
         SemanticBatchingOptions? batching = null)
@@ -72,6 +80,7 @@ public static class SemanticSurveyRequests
                     Every finding needs exact supporting quotes <=240 UTF-16 units and absolute UTF-16 ranges within evidence {{proof.Id}}. Never invent IDs.
                     Existing identity IDs may ONLY come from confirmed_identities, never from names/display labels. New local_id is request-local, not an identity merge. Keep body/mind/homonyms separate. Aliases do not imply identity equivalence.
                     NearbyMentions are lexical search hints, NOT VerifiedParticipants. No speaker/listener, kinship, gender or directional pronouns without explicit proof. Unresolved/Ambiguous is valid.
+                    {{NamedQuoteRule}}
                     Distinguish ActualCompleted, HistoricalReference, PlannedRequested, HypotheticalConditional, Negated, Uncertain, NotAnEvent. Historical mention chapter is NOT an effective start. Unknown timing must be null. Do not infer a completed divorce from a request, a recovered memory from a wish, or identity reveal from an explanation using 其实是.
                     Findings are unapproved hypotheses, never Confirmed. Do not infer a shared parent yourself; report direct typed facts for the existing K01 rules. Audit even low-signal evidence for CPU omissions. Classify each cpu_candidate_id or explicitly leave it unresolved; never claim coverage by echoing an ID alone.
                     CONTEXT (only confirmed chapter-safe facts; CPU hints/questions are unverified):
