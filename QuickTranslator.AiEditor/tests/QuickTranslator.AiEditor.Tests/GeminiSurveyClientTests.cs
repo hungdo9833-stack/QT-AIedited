@@ -59,7 +59,7 @@ public sealed class GeminiSurveyClientTests
         Assert.Equal(
             ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
              "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"],
-            safetySettings.EnumerateArray().Select(x => x.GetProperty("category").GetString()).ToArray());
+            safetySettings.EnumerateArray().Select(x => x.GetProperty("category").GetString()!).ToArray());
     }
 
     [Fact]

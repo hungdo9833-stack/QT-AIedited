@@ -53,6 +53,49 @@ public sealed class SemanticSurveyUiTests
         finally { window.Close(); }
     });
 
+    private sealed class GeminiHttp(Func<string, string> answer) : System.Net.Http.HttpMessageHandler
+    {
+        public int Posts { get; private set; }
+        public string LastBody { get; private set; } = "";
+        protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, CancellationToken ct)
+        {
+            Posts++; LastBody = await request.Content!.ReadAsStringAsync(ct);
+            using var body = JsonDocument.Parse(LastBody);
+            string prompt = body.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString()!;
+            string envelope = JsonSerializer.Serialize(new { candidates = new[] { new { finishReason = "STOP", content = new { parts = new[] { new { text = answer(prompt) } } } } } });
+            return new(System.Net.HttpStatusCode.OK) { Content = new System.Net.Http.StringContent(envelope, System.Text.Encoding.UTF8, "application/json") };
+        }
+    }
+
+    [Fact]
+    public Task Gemini_selection_runs_real_backend_wire_through_panel_and_proposals_survive_project_reopen() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture(); await fixture.CreateProjectAsync(); await fixture.AddChapterAsync("Synthetic", 1);
+        var selection = new SemanticSurveySelection(OllamaBackendProfile.CreateDefaultLocal(), new() { Model = "gemini-3.6-flash", ContextSize = 65536, MaximumOutputTokens = 4096 }, true);
+        var panel = new SemanticSurveyPanel(fixture.Project, fixture.Repository, _ => Task.CompletedTask, selection) { ConfirmAction = _ => true };
+        await panel.LoadAsync(); await panel.DryRunAsync(); Assert.Null(panel.LastError);
+        var r = Assert.Single(Field<SemanticDryRun>(panel, "_plan").Requests);
+        var source = (await EntityMemoryProjectInputs.LoadSourcesAsync(fixture.Project, fixture.Repository)).Single();
+        var http = new GeminiHttp(_ => GeminiSemanticWire.Encode(JsonSerializer.Serialize(new SemanticResponse(r.WireVersion, r.ProjectId, r.Evidence.ChapterId, [r.Evidence.Id], [new SemanticFinding {
+            FindingType = SemanticFindingType.CharacterIdentification, SubjectIdentity = new(null, "p", "王秀兰", MemoryEntityKind.Character, SemanticResolution.NewIdentity),
+            IdentityResolutionStatus = SemanticResolution.NewIdentity, Value = "王秀兰", SourceEvidenceIds = [r.Evidence.Id],
+            SupportSpans = [new(r.Evidence.Id, source.OriginalText.IndexOf("王秀兰", StringComparison.Ordinal), 3, "王秀兰")], Confidence = .8, Reason = "Mock wire", EffectiveChapter = 1, RevealedChapter = 1 }]),
+            SemanticSurveyContract.JsonOptions)));
+        // Same production factory shape as the panel default; only the network handler is mocked.
+        panel.BackendFactory = (selected, budget) => SemanticSurveyBackend.Gemini("FAKE-ONLY-KEY", Guid.NewGuid(), selected.Options, budget, http);
+        await panel.SurveyAsync(); Assert.Null(panel.LastError);
+        Assert.Equal(1, http.Posts); Assert.Single(panel.State.Proposals); Assert.Empty(panel.State.Reviews);
+        Assert.Contains("\"responseJsonSchema\":" + GeminiSemanticWire.Schema.GetRawText(), http.LastBody); Assert.DoesNotContain("anyOf", http.LastBody);
+        // Reopen the Project from disk: checkpoint and proposal are restored, nothing is resent.
+        await fixture.OpenProjectAsync();
+        var reopened = new SemanticSurveyPanel(fixture.Project, fixture.Repository, _ => Task.CompletedTask, selection) { ConfirmAction = _ => true };
+        reopened.BackendFactory = (selected, budget) => SemanticSurveyBackend.Gemini("FAKE-ONLY-KEY", Guid.NewGuid(), selected.Options, budget, http);
+        await reopened.LoadAsync(); Assert.Single(reopened.State.Proposals); Assert.Equal(SemanticBatchStatus.Validated, reopened.State.Status(r.Id));
+        await reopened.DryRunAsync(); Assert.Equal(0, Field<SemanticDryRun>(reopened, "_plan").PendingRequests);
+        await reopened.SurveyAsync(); Assert.Equal(1, http.Posts); Assert.Equal(0, fixture.Client.Calls);
+        Assert.False((await new ProjectSettingsStore(fixture.Project).LoadTranslationAsync()).BookKnowledgeContextEnabled);
+    });
+
     [Fact]
     public Task Changing_budget_invalidates_dry_run_and_does_not_instantiate_backend() => StaHost.Run(async () =>
     {
