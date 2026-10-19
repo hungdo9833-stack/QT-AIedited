@@ -51,6 +51,9 @@ public static class ProbeRequest
     internal static string NeutralPrompt => "Neutral JSON Schema compatibility check only. No book, source text, evidence or personal project is supplied. " +
         "Do not invent characters, relationships, events or evidence. Return exactly this object, with empty findings and reviewed_evidence_ids: " + ExpectedResponse;
 
+    // The Gemini wire mode reproduces SemanticSurveyBackend.Gemini exactly: neutral prompt + wire addendum.
+    internal static string PromptFor(ProbeSchemaMode mode) => mode == ProbeSchemaMode.GeminiSemanticWire ? NeutralPrompt + GeminiSemanticWire.PromptAddendum : NeutralPrompt;
+
     public static ModelOptions Options(string model = "gemini-3.6-flash", int maximumOutputTokens = 4096)
     {
         if (model is not ("gemini-3.6-flash" or "gemini-3.8-flash")) throw new ArgumentException("UnsupportedProbeModel");
@@ -65,7 +68,7 @@ public static class ProbeRequest
         var selection = GeminiCompatibleWireSchema.Select(SemanticSurveyContract.MultiEvidenceSchema, schemaMode);
         using var capture = new Capture(selection.Comparison); using var http = new HttpClient(capture);
         using var client = new GeminiSurveyClient(http, "offline-placeholder", new(100, 1_000_000, 100, 1), Guid.NewGuid(), routeFailuresToPool: true);
-        await client.TranslateStructuredAsync(NeutralPrompt, options, selection.Schema, ct);
+        await client.TranslateStructuredAsync(PromptFor(schemaMode), options, selection.Schema, ct);
         return capture.Inspection ?? throw new InvalidDataException("RequestNotCaptured");
     }
 
@@ -89,5 +92,5 @@ public static class ProbeRequest
         body.TryGetProperty("generationConfig", out var config) && config.GetRawText() == expected.GenerationConfig.GetRawText() &&
         body.TryGetProperty("safetySettings", out var safety) && safety.GetRawText() == expected.SafetySettings.GetRawText() &&
         body.TryGetProperty("contents", out var contents) && contents.GetRawText() ==
-            JsonSerializer.SerializeToElement(new[] { new { role = "user", parts = new[] { new { text = NeutralPrompt } } } }).GetRawText();
+            JsonSerializer.SerializeToElement(new[] { new { role = "user", parts = new[] { new { text = PromptFor(Enum.Parse<ProbeSchemaMode>(expected.Comparison.Mode)) } } } }).GetRawText();
 }

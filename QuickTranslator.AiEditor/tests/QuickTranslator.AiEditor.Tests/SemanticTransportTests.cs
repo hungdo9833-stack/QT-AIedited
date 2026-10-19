@@ -64,6 +64,8 @@ public sealed class SemanticTransportTests
         await Assert.ThrowsAsync<SemanticTransportFailureException>(() => client.TranslateStructuredAsync("Mock two-evidence prompt", options, SemanticSurveyContract.MultiEvidenceSchema));
         Assert.Single(handler.Calls); Assert.Equal(1, client.Transport.RequestsUsed);
         using var json = JsonDocument.Parse(body!);
-        Assert.Equal(2, json.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema").GetProperty("properties").GetProperty("schema_version").GetProperty("enum")[0].GetInt32());
+        var sent = json.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema");
+        Assert.Equal(GeminiSemanticWire.Schema.GetRawText(), sent.GetRawText()); Assert.DoesNotContain("anyOf", sent.GetRawText());
+        Assert.EndsWith(GeminiSemanticWire.PromptAddendum, json.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString());
     }
 }

@@ -34,10 +34,10 @@ public sealed class ProbeSession(ModelOptions options, ProbeSchemaMode schemaMod
             using var http = new HttpClient(one) { Timeout = Timeout.InfiniteTimeSpan };
             using var client = new GeminiSurveyClient(http, apiKey, new(100, 1_000_000, 100, 1), Guid.NewGuid(), routeFailuresToPool: true);
             watch.Start();
-            var completion = await client.TranslateStructuredAsync(ProbeRequest.NeutralPrompt, options, inspection.GenerationConfig.GetProperty("responseJsonSchema"), ct);
+            var completion = await client.TranslateStructuredAsync(ProbeRequest.PromptFor(schemaMode), options, inspection.GenerationConfig.GetProperty("responseJsonSchema"), ct);
             input = completion.Metrics.InputTokens; output = completion.Metrics.OutputTokens;
             stage = SemanticFailureStage.Parse; valid = false;
-            var response = SemanticSurveyContract.Parse(completion.Text);
+            var response = SemanticSurveyContract.Parse(schemaMode == ProbeSchemaMode.GeminiSemanticWire ? GeminiSemanticWire.Decode(completion.Text, 2) : completion.Text);
             if (response.SchemaVersion != 2 || response.ProjectId != ProbeRequest.SyntheticProject || response.ChapterId != ProbeRequest.SyntheticChapter ||
                 response.ReviewedEvidenceIds.Count != 0 || response.Findings.Count != 0) code = "ProbeResponseScopeMismatch";
             else { valid = true; code = "SchemaAcceptedNeutralResponseValid"; }

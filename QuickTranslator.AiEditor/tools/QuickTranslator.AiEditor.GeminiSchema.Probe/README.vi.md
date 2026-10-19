@@ -145,3 +145,29 @@ Diff duy nhất là 28 constraint `maxLength`, tổng 432 byte. Preview có danh
 3. Biến thể `maxLength` hiện có **chỉ ở probe wire** đã công khai danh sách thay đổi; mọi giới hạn string giữ trong parser strict. Không bỏ enum, required, các giới hạn số/range, không hạ maxItems để cắt findings/coverage.
 4. Mapping wire mới phải là bước tường minh, versioned và fail-closed trước `SemanticSurveyContract.Parse`/`SemanticQualityAuditor`. Thiếu trường quan trọng không được điền mặc định thành một dữ kiện; required fields phải bị reject, scope/coverage/support/timeline/identity vẫn audit riêng. Không dùng HTTP 200 để tự Confirm/Verified.
 5. Mỗi biến thể chỉ thử theo một xác nhận riêng của người dùng; không tự retry schema/model hoặc né ProviderRefusal. Hiện chỉ có **một projection bỏ maxLength trong probe**, chưa có nullable/ref variant, mapper mới hoặc thay đổi production schema. Tests so sánh toàn bộ cây, kiểm tra mode gửi thực tế, contract v1/v2 round-trip, required/giới hạn string và quality audit không bị nới.
+
+## Sửa production: Gemini wire `gemini-semantic-wire-1` (2026-10-20)
+
+Nguyên nhân gốc HTTP 400: schema nội bộ v2 được gửi nguyên văn làm `responseJsonSchema`. Nó dùng các cấu trúc nằm ngoài tập lõi mà tài liệu Structured Outputs hiện tại mô tả (`anyOf` không được liệt kê; nullable được mô tả bằng type-array): 13 union `anyOf` nullable (5 bản sao object Identity lồng nhau), numeric `enum` `schema_version=[2]`, và mảng có `maxItems=64` của object 25 trường bắt buộc. Bỏ riêng `maxLength` (thử nghiệm B) không đủ. Trình biên dịch grammar của Gemini từ chối với `INVALID_ARGUMENT` không kèm path.
+
+Sửa: `SemanticSurveyBackend.Gemini` không gửi schema nội bộ nữa mà gửi `GeminiSemanticWire.Schema` (3.327 byte, 45 node, 0 `anyOf`, chỉ `type/properties/required/items` + enum chuỗi, không bound), kèm phần hướng dẫn wire nối vào cuối prompt. Ánh xạ:
+
+- `subject/target/speaker/listener_identity` + `verified_participants` → một mảng `identities[]` có `role` (Subject/Target/Speaker/Listener tối đa 1 lần; Participant theo thứ tự). Trùng role → reject, không tự chọn.
+- `entity_id` null → `""`; chương null → `0`; `event_type` null → `"None"`.
+- Mọi giới hạn (độ dài, maxItems, min/max, GUID, enum) vẫn do `SemanticSurveyContract.Parse` kiểm tra **sau** khi `GeminiSemanticWire.Decode` dựng lại JSON nội bộ v2. Decoder strict: thiếu/thừa/trùng trường, sai version, role lạ → `SemanticSchemaViolation`, không có proposal.
+- Engine, batch ID, checkpoint/resume, `SemanticQualityAuditor` và Ollama không đổi. Proposal AI vẫn chưa được xác nhận (không có Review).
+
+## Smoke test thật (chỉ chạy sau khi người dùng xác nhận)
+
+```powershell
+# Offline, HTTP=0: xem schema/config của wire production
+dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --wire-schema gemini-semantic-wire
+
+# (1) Một POST trung tính, không dữ liệu Project — gõ: SEND ONE NEUTRAL SCHEMA PROBE
+dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --wire-schema gemini-semantic-wire --live
+
+# (2) Một POST end-to-end qua engine thật trên Project TỔNG HỢP MỚI trong %TEMP% (không mở Project của bạn) — gõ: SEND ONE SYNTHETIC SEMANTIC SURVEY
+dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --synthetic-survey --live
+```
+
+(2) chạy đúng Plan → Engine → Backend Gemini → Decode → Parse → Auditor → checkpoint, với 2 evidence (wire v2). Có 3 lớp chặn để chỉ gửi tối đa 1 request (ngân sách engine 1, transport 1, guard 1 POST); không retry/fallback. Report chỉ có mã/số đếm, không có key, prompt hay response thô. Project tạm được giữ lại để kiểm tra.

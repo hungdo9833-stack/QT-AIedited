@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace QuickTranslator.AiEditor.GeminiSchema.Probe;
 
-public enum ProbeSchemaMode { Production, GeminiCompatibleWireSchema }
+public enum ProbeSchemaMode { Production, GeminiCompatibleWireSchema, GeminiSemanticWire }
 public sealed record RemovedSchemaConstraint(string Path, string Keyword, int Value);
 public sealed record SchemaKeywordSupport(string Keyword, int Occurrences, bool ListedByGemini);
 public sealed record WireSchemaComparison(string Mode, string VariantVersion, string DocumentationCheckedOn, string DocumentationUrl,
@@ -28,7 +28,13 @@ public static class GeminiCompatibleWireSchema
     {
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
         var removed = new List<RemovedSchemaConstraint>();
-        JsonElement wire = mode == ProbeSchemaMode.Production ? production.Clone() : RemoveMaxLength(production, removed);
+        JsonElement wire = mode switch
+        {
+            ProbeSchemaMode.Production => production.Clone(),
+            // The production Gemini wire actually sent by SemanticSurveyBackend.Gemini.
+            ProbeSchemaMode.GeminiSemanticWire => Core.BookIntelligence.GeminiSemanticWire.Schema.Clone(),
+            _ => RemoveMaxLength(production, removed)
+        };
         var counts = new SortedDictionary<string, int>(StringComparer.Ordinal);
         void Count(JsonElement node)
         {
@@ -38,7 +44,7 @@ public static class GeminiCompatibleWireSchema
             if (node.TryGetProperty("anyOf", out var variants)) foreach (var v in variants.EnumerateArray()) Count(v);
         }
         Count(production);
-        return (wire, new(mode.ToString(), mode == ProbeSchemaMode.Production ? "production-v2" : "probe-gemini-maxlength-only-1",
+        return (wire, new(mode.ToString(), mode switch { ProbeSchemaMode.Production => "production-v2", ProbeSchemaMode.GeminiSemanticWire => Core.BookIntelligence.GeminiSemanticWire.Version, _ => "probe-gemini-maxlength-only-1" },
             DocumentationCheckedOn, DocumentationUrl, SchemaInventory.Inspect(production), SchemaInventory.Inspect(wire),
             counts.Select(x => new SchemaKeywordSupport(x.Key, x.Value, Supported.Contains(x.Key))).ToArray(), removed));
     }

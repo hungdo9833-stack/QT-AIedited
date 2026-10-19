@@ -89,7 +89,7 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
                     failureStage = SemanticFailureStage.Completion;
                     if (completion.Done == false || completion.DoneReason is not (null or "stop")) throw new InvalidDataException("IncompleteProviderResponse");
                     failureStage = SemanticFailureStage.Parse;
-                    var parsed = SemanticSurveyContract.Parse(completion.Text);
+                    var parsed = SemanticSurveyContract.Parse(backend is ISemanticResponseDecoder decoder ? decoder.DecodeResponse(completion.Text, r.WireVersion) : completion.Text);
                     failureStage = SemanticFailureStage.Audit;
                     audit = SemanticQualityAuditor.Audit(parsed, r, sources);
                     status = audit.Validated ? SemanticBatchStatus.Validated : SemanticBatchStatus.Analyzed;

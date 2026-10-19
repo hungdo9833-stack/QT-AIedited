@@ -68,21 +68,24 @@ public sealed class SemanticBudgetHandler(SemanticSurveyBudget budget, int maxim
     }
 }
 
-public sealed class SemanticSurveyBackend : IJsonSchemaOllamaClient, IDisposable
+public sealed class SemanticSurveyBackend : IJsonSchemaOllamaClient, ISemanticResponseDecoder, IDisposable
 {
     private readonly IJsonSchemaOllamaClient _client;
     private readonly HttpClient _http;
+    private readonly bool _geminiWire;
     public SemanticBudgetHandler Transport { get; }
     public string Model { get; }
-    private SemanticSurveyBackend(string model, IJsonSchemaOllamaClient client, HttpClient http, SemanticBudgetHandler transport)
-    { Model = model; _client = client; _http = http; Transport = transport; }
+    /// <summary>Gemini receives <see cref="GeminiSemanticWire"/>; Ollama keeps the internal schema.</summary>
+    public string WireFormat => _geminiWire ? GeminiSemanticWire.Version : "internal";
+    private SemanticSurveyBackend(string model, IJsonSchemaOllamaClient client, HttpClient http, SemanticBudgetHandler transport, bool geminiWire = false)
+    { Model = model; _client = client; _http = http; Transport = transport; _geminiWire = geminiWire; }
     public static SemanticSurveyBackend Gemini(string key, Guid googleScope, ModelOptions options, SemanticSurveyBudget budget, HttpMessageHandler? handler = null)
     {
         options.Validate(); budget.Validate();
         var transport = new SemanticBudgetHandler(budget, options.MaximumOutputTokens, handler ?? new SocketsHttpHandler { AllowAutoRedirect = false });
         var http = new HttpClient(transport) { Timeout = Timeout.InfiniteTimeSpan };
         // One selected model, no pool/fallback. Explicit refusals retain the existing adapter behavior.
-        return new(options.Model, new GeminiSurveyClient(http, key, GeminiSurveyLimits.FromObservedFreeTier(options.Model), googleScope, routeFailuresToPool: true), http, transport);
+        return new(options.Model, new GeminiSurveyClient(http, key, GeminiSurveyLimits.FromObservedFreeTier(options.Model), googleScope, routeFailuresToPool: true), http, transport, geminiWire: true);
     }
     public static SemanticSurveyBackend Ollama(OllamaBackendProfile profile, ModelOptions options, SemanticSurveyBudget budget, HttpMessageHandler? handler = null)
     {
@@ -93,7 +96,15 @@ public sealed class SemanticSurveyBackend : IJsonSchemaOllamaClient, IDisposable
         return new(options.Model, new OllamaClient(http, new(copy.Endpoint), copy.Kind, copy.Kind == OllamaBackendKind.Local ? null : copy.Token), http, transport);
     }
     public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
-    { if (options.Model != Model) throw new InvalidOperationException("Selected model changed; no automatic routing."); return _client.TranslateStructuredAsync(prompt, options, schema, ct); }
+    {
+        if (options.Model != Model) throw new InvalidOperationException("Selected model changed; no automatic routing.");
+        // Gemini rejects the internal v1/v2 schema (HTTP 400). Send the equivalent union-free
+        // wire instead; the engine decodes and strictly re-validates the reply.
+        if (_geminiWire && GeminiSemanticWire.IsInternalSchema(schema))
+            return _client.TranslateStructuredAsync(prompt + GeminiSemanticWire.PromptAddendum, options, GeminiSemanticWire.Schema, ct);
+        return _client.TranslateStructuredAsync(prompt, options, schema, ct);
+    }
+    public string DecodeResponse(string providerText, int wireVersion) => _geminiWire ? GeminiSemanticWire.Decode(providerText, wireVersion) : providerText;
     public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => TranslateStructuredAsync(prompt, options, SemanticSurveyContract.ResponseSchema, ct);
     public void Dispose() { (_client as IDisposable)?.Dispose(); _http.Dispose(); }
 }

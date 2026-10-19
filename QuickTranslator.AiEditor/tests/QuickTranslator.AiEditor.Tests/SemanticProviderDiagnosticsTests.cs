@@ -36,8 +36,8 @@ public sealed class SemanticProviderDiagnosticsTests(ITestOutputHelper output) :
     {
         using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
         string prompt = body.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString()!;
-        var r = plan.Single(x => x.Prompt == prompt); sent?.Add(r.Id);
-        string text = SemanticFixture.Json(AdaptiveSemanticTests.Response(r, findings ? r.Units.Select(x => AdaptiveSemanticTests.Name(x)).ToArray() : []));
+        var r = plan.Single(x => x.Prompt + GeminiSemanticWire.PromptAddendum == prompt); sent?.Add(r.Id);
+        string text = GeminiSemanticWire.Encode(SemanticFixture.Json(AdaptiveSemanticTests.Response(r, findings ? r.Units.Select(x => AdaptiveSemanticTests.Name(x)).ToArray() : [])));
         return Json(JsonSerializer.Serialize(new { candidates = new[] { new { finishReason = "STOP", content = new { parts = new[] { new { text } } } } },
             usageMetadata = new { promptTokenCount = 123, candidatesTokenCount = 45 } }));
     });
@@ -95,7 +95,7 @@ public sealed class SemanticProviderDiagnosticsTests(ITestOutputHelper output) :
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
             Assert.Equal(_options.Model, request.RequestUri!.AbsolutePath.Split('/').Last().Split(':')[0]);
             string prompt = body.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString()!;
-            outageSent.Add(plan.Single(x => x.Prompt == prompt).Id);
+            outageSent.Add(plan.Single(x => x.Prompt + GeminiSemanticWire.PromptAddendum == prompt).Id);
             return outageSent.Count == 1 ? Json("{\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}") : Json("{}", 503);
         });
         using var unavailable = SemanticSurveyBackend.Gemini(Secret, Guid.NewGuid(), _options, new(10, 1_000_000), outage);
@@ -160,7 +160,7 @@ public sealed class SemanticProviderDiagnosticsTests(ITestOutputHelper output) :
                 JsonSerializer.Serialize(new { error = new { message = kind == "oversized400" ? new string('x', 20_000) + "response_json_schema" : Secret } }), 400));
             if (kind is "envelope" or "shape") return Task.FromResult(Json(kind == "shape" ? "[]" : Secret));
             string text = kind == "semanticJson" ? Secret : kind == "semanticVersionType" ? "{\"schema_version\":\"2\"}" : kind == "semanticGuid" ?
-                SemanticFixture.Json(AdaptiveSemanticTests.Response(plan[0])).Replace(s.Memory.ProjectId.ToString(), "bad-guid", StringComparison.Ordinal) : "{}";
+                GeminiSemanticWire.Encode(SemanticFixture.Json(AdaptiveSemanticTests.Response(plan[0]))).Replace(s.Memory.ProjectId.ToString(), "bad-guid", StringComparison.Ordinal) : "{}";
             return Task.FromResult(Json(JsonSerializer.Serialize(new { candidates = new[] { new { finishReason = "STOP", content = new { parts = new[] { new { text } } } } } })));
         });
         using var client = SemanticSurveyBackend.Gemini(Secret, Guid.NewGuid(), _options, new(1, 1_000_000), handler);
