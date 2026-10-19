@@ -12,4 +12,5 @@
   <Project Path="tools/QuickTranslator.AiEditor.BookIntelligence.Benchmark/QuickTranslator.AiEditor.BookIntelligence.Benchmark.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.GeminiSurvey.Preflight/QuickTranslator.AiEditor.GeminiSurvey.Preflight.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.GeminiSchema.Probe/QuickTranslator.AiEditor.GeminiSchema.Probe.csproj" />
+  <Project Path="tools/QuickTranslator.AiEditor.Addressing.Probe/QuickTranslator.AiEditor.Addressing.Probe.csproj" />
 </Solution>
