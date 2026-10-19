@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using QuickTranslator.AiEditor.Core.Addressing;
 using QuickTranslator.AiEditor.Core.Importing;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
@@ -278,11 +279,59 @@ internal static class Program
                 return CreateTitleTranslationWindow(session, root);
             case "four":
                 return CreateEditor(session, root, fourPane: true);
+            case "addressing":
+                return CreateAddressingReview(session);
             case "reader":
                 return CreateReader(session, root);
             default:
                 return CreateEditor(session, root, fourPane: false);
         }
+    }
+
+    /// <summary>Addressing ledger review on synthetic chapters with MOCK proposals (labelled as such); no AI is called.</summary>
+    private static Window CreateAddressingReview(ProjectSession session)
+    {
+        const string block = "    王秀兰看着林青说道：「林青，姐姐给你做饭。」\n    林青看着王秀兰说道：「秀兰姐，我不饿。」\n" +
+            "    王秀兰点点头，她转身走了。小兰真是好人，林青心想，他笑了。\n";
+        var repository = new ProjectRepository();
+        int next = session.Manifest.Chapters.Max(c => c.Number) + 1;
+        for (int n = 0; n < 2; n++)
+            repository.AddChapterAsync(session, TranslationService.CreateChapter("Sổ xưng hô mẫu " + (n + 1), string.Concat(Enumerable.Repeat(block, 3))), next + n)
+                .GetAwaiter().GetResult();
+        var sources = QuickTranslator.AiEditor.Core.BookIntelligence.EntityMemoryProjectInputs.LoadSourcesAsync(session, repository).GetAwaiter().GetResult();
+        var resources = new ProjectResourceStore(session).LoadAsync().GetAwaiter().GetResult();
+        var tasks = AddressingAiSurvey.PlanTasks(sources, AddressingAiSurvey.CandidateNames(session.Manifest.ProjectId, sources, resources));
+        var proposals = AddressingAiSurvey.PlanRequests(tasks, "mock-demo").SelectMany(r => AddressingAiSurvey.Verify(MockReply(r), r)).ToArray();
+        new AddressingLedgerStore(session).UpdateAsync(s => s.Proposals.AddRange(proposals)).GetAwaiter().GetResult();
+        // Async UI continuations need the dispatcher context the real app (Application.Run) provides.
+        SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+        var window = new AddressingLedgerWindow(session, repository, _ => { });
+        var load = window.LoadAsync();
+        for (int i = 0; i < 200 && !load.IsCompleted; i++) PumpDispatcher(TimeSpan.FromMilliseconds(100));
+        Console.WriteLine($"ADDRESSING_REVIEW loaded={load.IsCompleted} proposals={window.State.Proposals.Count} error={window.LastError ?? "-"}");
+        if (tasks.FirstOrDefault(t => t.Kind == AddressingTaskKind.Character) is { } first) window.SelectRow(AddressingTaskKind.Character, first.Subject);
+        return window;
+    }
+
+    private static string MockReply(AddressingRequestPlan request)
+    {
+        var pairs = new System.Text.Json.Nodes.JsonArray(); var characters = new System.Text.Json.Nodes.JsonArray();
+        foreach (var t in request.Tasks)
+        {
+            var ids = new System.Text.Json.Nodes.JsonArray(t.Samples.Select(s => (System.Text.Json.Nodes.JsonNode)s.SampleId).ToArray());
+            if (t.Kind == AddressingTaskKind.Pair)
+                pairs.Add(new System.Text.Json.Nodes.JsonObject { ["task_id"] = t.TaskId, ["status"] = "Consistent", ["relationship"] = "(mock) chị em",
+                    ["phases"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 0,
+                        ["self_vi"] = "chị", ["address_vi"] = "em", ["self_zh"] = new System.Text.Json.Nodes.JsonArray(), ["address_zh"] = new System.Text.Json.Nodes.JsonArray(), ["sample_ids"] = ids }),
+                    ["reason"] = "Đề xuất MẪU để xem giao diện, không phải kết quả AI." });
+            else
+                characters.Add(new System.Text.Json.Nodes.JsonObject { ["task_id"] = t.TaskId, ["status"] = "Consistent", ["gender"] = t.SourceGender,
+                    ["name_forms"] = new System.Text.Json.Nodes.JsonArray(t.NameCandidates.Select(v => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["zh"] = v.Form, ["vi"] = "(mock)" }).ToArray()),
+                    ["phases"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 0,
+                        ["narrative_vi"] = t.SourceGender == "female" ? "nàng" : "hắn", ["secondary_vi"] = "", ["sample_ids"] = ids }),
+                    ["reason"] = "Đề xuất MẪU để xem giao diện, không phải kết quả AI." });
+        }
+        return new System.Text.Json.Nodes.JsonObject { ["pairs"] = pairs, ["characters"] = characters }.ToJsonString();
     }
 
     private static GpuManagerWindow CreateGpuManager(string root)

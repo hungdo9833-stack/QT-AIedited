@@ -124,9 +124,32 @@ Bản đếm đầu tiên cho 柳轻锋 (nam chính) ra 他 190 / 她 99. Bản 
 
 **Kế hoạch offline cho "test cpu":** 24 nhiệm vụ (13 cặp, 11 nhân vật), 4 request, khoảng 19.300 token đầu vào ước tính. Giới tính theo nguyên văn: 柳轻锋 nam (132:7), 柳月影 nữ (0:25), 秦梦岚 nữ (2:27), 沈夕颜 nữ (2:17), 柳恒 nam (8:2). Biến thể: 小锋×179 và 轻锋×24 → 柳轻锋; 小影×70, 小影姐×55, 月影×8 → 柳月影; 夕颜×93, 夕颜姐×79 → 沈夕颜; 梦岚, 阿岚, 小岚 → 秦梦岚; 陈老师 → 陈馨玉. `柳少/柳少爷/柳总` là mơ hồ (cả 柳轻锋 và 柳月影 đều có thể là chủ).
 
-### Bước 3 — Tổng hợp và duyệt theo cặp (chưa làm)
+### Bước 3 — Duyệt theo nhân vật/cặp và ghi vào hồ sơ (đang triển khai, mock)
 
-Gộp kết quả theo cặp; cặp đồng thuận trở thành một đề xuất duy nhất; cặp mâu thuẫn hoặc đổi theo thời gian được tách theo khoảng chương. Người dùng duyệt **từng cặp** (khoảng 100 cặp), không phải hàng nghìn đề xuất. Quy tắc đã duyệt ghi vào hồ sơ nhân vật.
+Cửa sổ **Sổ xưng hô** mở từ *Thiết lập dịch → Nhân vật & xưng hô*. Có hai tab: **Nhân vật** và **Cặp xưng hô**. Mỗi dòng là một đề xuất của Bước 2, kèm kết quả kiểm chứng, lỗi (nếu có) và các mẫu nguyên văn AI đã dùng. Người dùng có thể sửa trước khi chấp nhận. Chỉ đề xuất đã qua kiểm chứng mới được chấp nhận. Mỗi quyết định (Chấp nhận / Bác bỏ / Để sau) được ghi thêm vào ledger.
+
+Chấp nhận **nhân vật** ghi vào hồ sơ:
+
+- tìm hồ sơ theo tên Trung hoặc bí danh; chưa có thì tạo mới;
+- giới tính, tên Việt;
+- đại từ kể chính/phụ, rồi **khóa đại từ kể**;
+- bí danh: chỉ những cách gọi AI đã chọn trong danh sách CPU và người dùng giữ lại;
+- glossary: mỗi cách gọi kèm bản dịch tiếng Việt.
+
+Danh sách cách gọi cần tránh lấy theo giới tính; đại từ vừa chọn được loại khỏi danh sách đó.
+
+Chấp nhận **cặp** ghi một quan hệ có hướng vào hồ sơ người nói: tự xưng, gọi người, nhãn quan hệ, **Bật** và **Khóa**. Hồ sơ của cả hai người phải có sẵn, nên cần duyệt nhân vật trước.
+
+Không bao giờ ghi đè dữ liệu người dùng đã khóa hoặc đã có:
+
+- quan hệ đã **khóa** có cách gọi khác → báo xung đột, không ghi đè;
+- bí danh đã thuộc hồ sơ khác → xung đột;
+- glossary đã có bản dịch khác → xung đột;
+- tài nguyên đã đổi kể từ lúc nạp → phải nạp lại (kiểm tra revision của Project Resources).
+
+**Nhiều giai đoạn:** hồ sơ hiện chưa có mốc chương, nên người dùng chọn giai đoạn áp dụng mặc định. Các giai đoạn khác được ghi vào ghi chú của hồ sơ/quan hệ và vào ledger, để Bước 4 áp dụng theo chương.
+
+**Khóa nhất quán Project** (để trình dịch dùng hồ sơ) được bật bằng một ô chọn riêng, không tự bật khi chấp nhận.
 
 ### Bước 4 — Nối vào dịch (chưa làm)
 

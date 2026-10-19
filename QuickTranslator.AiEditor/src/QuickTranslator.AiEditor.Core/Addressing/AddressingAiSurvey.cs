@@ -57,6 +57,20 @@ public static class AddressingAiSurvey
 
     // ---------- planning ----------
 
+    /// <summary>
+    /// Candidate names shared by every caller (probe, review window): CPU census persons/aliases seen at least
+    /// <paramref name="minimumMentions"/> times plus existing profile names and aliases. Same inputs → same task ids.
+    /// </summary>
+    public static IReadOnlyList<string> CandidateNames(Guid projectId, IReadOnlyList<CensusSource> sources, Projects.ProjectResources resources, int minimumMentions = 3)
+    {
+        var census = CharacterMentionCensus.Scan(projectId, 0, sources, resources, new BookIntelligenceState { ProjectId = projectId });
+        return census.Candidates
+            .Where(c => c.Category is MentionCandidateCategory.PersonCandidate or MentionCandidateCategory.AliasCandidate && c.Frequency >= minimumMentions)
+            .Select(c => c.ChineseName)
+            .Concat(resources.Characters.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases)))
+            .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.Ordinal).ToArray();
+    }
+
     public static IReadOnlyList<AddressingTask> PlanTasks(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
         AddressingSettings? settings = null, CancellationToken cancellationToken = default)
     {

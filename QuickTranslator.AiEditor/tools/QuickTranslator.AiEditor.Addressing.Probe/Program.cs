@@ -40,13 +40,7 @@ try
     var session = (await new ProjectRepository().OpenAsync(Path.Combine(copy, Path.GetFileName(project)))).Session;
     var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(session, new ProjectRepository());
     var resources = await new ProjectResourceStore(session).LoadAsync();
-    var census = CharacterMentionCensus.Scan(session.Manifest.ProjectId, 0, sources, resources,
-        new BookIntelligenceState { ProjectId = session.Manifest.ProjectId });
-    var names = census.Candidates
-        .Where(c => c.Category is MentionCandidateCategory.PersonCandidate or MentionCandidateCategory.AliasCandidate && c.Frequency >= minimumMentions)
-        .Select(c => c.ChineseName)
-        .Concat(resources.Characters.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases)))
-        .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.Ordinal).ToArray();
+    var names = AddressingAiSurvey.CandidateNames(session.Manifest.ProjectId, sources, resources, minimumMentions);
     var report = AddressingDialogueSurvey.Analyze(sources, names, samples);
 
     Directory.CreateDirectory(outDir);

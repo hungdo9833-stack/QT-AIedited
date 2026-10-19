@@ -19,6 +19,10 @@ public sealed class AddressingLedgerState
     public long Revision { get; set; }
     public List<AddressingAttempt> Attempts { get; set; } = [];
     public List<AddressingProposal> Proposals { get; set; } = [];
+    public List<AddressingReview> Reviews { get; set; } = [];
+
+    /// <summary>The latest human decision for a proposal, or null when it is still pending.</summary>
+    public AddressingReview? LatestReview(Guid proposalId) => Reviews.LastOrDefault(r => r.ProposalId == proposalId);
 
     /// <summary>
     /// Done = a verified proposal exists, the task was answered twice without one (no endless resend), or the
@@ -44,9 +48,10 @@ public sealed class AddressingLedgerStore(ProjectSession session)
         try
         {
             var state = await LoadAsync(ct).ConfigureAwait(false);
-            int attempts = state.Attempts.Count, proposals = state.Proposals.Count;
+            int attempts = state.Attempts.Count, proposals = state.Proposals.Count, reviews = state.Reviews.Count;
             update(state);
-            if (state.Attempts.Count < attempts || state.Proposals.Count < proposals) throw new InvalidOperationException("Addressing ledger is append-only.");
+            if (state.Attempts.Count < attempts || state.Proposals.Count < proposals || state.Reviews.Count < reviews)
+                throw new InvalidOperationException("Addressing ledger is append-only.");
             state.Revision++;
             Directory.CreateDirectory(Path.GetDirectoryName(PathName)!);
             await SimpleFileStorage.WriteAsync(PathName, JsonSerializer.SerializeToUtf8Bytes(state, DocumentJson.Options), Decode, ct).ConfigureAwait(false);

@@ -15,21 +15,21 @@ public sealed class AddressingAiSurveyTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "qtaie-addressing-ai-" + Guid.NewGuid().ToString("N"));
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 
-    private static readonly string[] Names = ["王秀兰", "林青"];
+    internal static readonly string[] Names = ["王秀兰", "林青"];
     // Hard-wrapped, indented paragraphs like the real web novel; 秀兰姐/小兰 are variants of 王秀兰.
     private const string Block =
         "    王秀兰看着林青说道：「林青，姐姐给你做饭。」\n" +
         "    林青看着王秀兰说道：「秀兰姐，我不饿。」\n" +
         "    王秀兰点点头，她转身走了。小兰真是好人，林青心想，他笑了。\n";
-    private static readonly CensusSource[] Sources = [new(Guid.NewGuid(), 1, string.Concat(Enumerable.Repeat(Block, 3))), new(Guid.NewGuid(), 2, string.Concat(Enumerable.Repeat(Block, 3)))];
-    private static readonly ModelOptions Options = new() { Model = "mock-addressing", ContextSize = 32768, MaximumOutputTokens = 4096 };
+    internal static readonly CensusSource[] Sources = [new(Guid.NewGuid(), 1, string.Concat(Enumerable.Repeat(Block, 3))), new(Guid.NewGuid(), 2, string.Concat(Enumerable.Repeat(Block, 3)))];
+    internal static readonly ModelOptions Options = new() { Model = "mock-addressing", ContextSize = 32768, MaximumOutputTokens = 4096 };
 
     private static IReadOnlyList<AddressingTask> Tasks() => AddressingAiSurvey.PlanTasks(Sources, Names);
     private static AddressingTask Pair(IReadOnlyList<AddressingTask> tasks, string speaker, string listener) => tasks.Single(t => t.Kind == AddressingTaskKind.Pair && t.Subject == speaker && t.Listener == listener);
     private static AddressingTask Character(IReadOnlyList<AddressingTask> tasks, string name) => tasks.Single(t => t.Kind == AddressingTaskKind.Character && t.Subject == name);
 
     /// <summary>A well-formed reply that cites the task's own samples and quoted terms.</summary>
-    private static JsonObject Answer(AddressingRequestPlan request, Func<AddressingTask, JsonObject?>? overrideTask = null)
+    internal static JsonObject Answer(AddressingRequestPlan request, Func<AddressingTask, JsonObject?>? overrideTask = null)
     {
         var pairs = new JsonArray(); var characters = new JsonArray();
         foreach (var task in request.Tasks)
