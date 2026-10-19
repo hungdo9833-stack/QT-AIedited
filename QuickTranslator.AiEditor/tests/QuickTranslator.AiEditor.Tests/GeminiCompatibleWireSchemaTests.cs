@@ -65,6 +65,11 @@ public sealed class GeminiCompatibleWireSchemaTests
         Assert.Equal(comparison.Production.EnumSizes.ToArray(), comparison.Wire.EnumSizes.ToArray()); Assert.Equal(comparison.Production.ArrayLimits.ToArray(), comparison.Wire.ArrayLimits.ToArray());
         Assert.Equal(comparison.Production.RequiredOccurrences, comparison.Wire.RequiredOccurrences); Assert.Equal(59, comparison.Wire.RequiredOccurrences);
         Assert.Equal(25, comparison.Wire.FindingProperties); Assert.Equal(13, comparison.Wire.AnyOf); Assert.Equal(94, comparison.Wire.Nodes);
+        var root = wire.GetProperty("properties");
+        Assert.Equal(JsonValueKind.Number, root.GetProperty("schema_version").GetProperty("enum")[0].ValueKind);
+        Assert.Equal(2, root.GetProperty("schema_version").GetProperty("enum")[0].GetInt32());
+        Assert.False(wire.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal(23, comparison.Wire.EnumSizes["$.findings[].relationship_type"]);
         Assert.Equal(v1, SemanticSurveyContract.ResponseSchema.GetRawText()); Assert.Equal(v2, SemanticSurveyContract.MultiEvidenceSchema.GetRawText());
         Assert.Equal("8011DE631259296A22FEF08A211C3B82FAEA12A559D206869EB3FFBB569D93E2", comparison.Production.Sha256);
     }
@@ -154,35 +159,77 @@ public sealed class GeminiCompatibleWireSchemaTests
         Assert.False(SemanticQualityAuditor.Audit(SemanticSurveyContract.Parse(SemanticFixture.Json(wrong)), request, s.Sources).Validated);
     }
 
-    [Fact]
-    public async Task Compatible_cli_is_still_offline_by_default_and_requires_a_fresh_confirmation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Compatible_cli_is_still_offline_by_default_and_requires_a_fresh_confirmation(bool omitFlag)
     {
+        string[] schemaArgs = omitFlag ? ["--wire-omit-max-length"] : ["--wire-schema", "gemini-compatible"];
         string? Key() => throw new InvalidOperationException(Secret);
         HttpMessageHandler Transport() => throw new InvalidOperationException(Secret);
         using var offline = new StringWriter();
-        Assert.Equal(0, await ProbeCommand.RunAsync(["--wire-schema", "gemini-compatible"], new StringReader(""), offline, Key, Transport));
+        Assert.Equal(0, await ProbeCommand.RunAsync(schemaArgs, new StringReader(""), offline, Key, Transport));
         using var preview = JsonDocument.Parse(offline.ToString()); var root = preview.RootElement;
         Assert.Equal(0, root.GetProperty("httpRequests").GetInt32()); Assert.Equal(28, root.GetProperty("inspection").GetProperty("Comparison").GetProperty("RemovedConstraintCount").GetInt32());
-        using var cancelled = new StringWriter(); Assert.Equal(0, await ProbeCommand.RunAsync(["--wire-schema", "gemini-compatible", "--live"], new StringReader("NO"), cancelled, Key, Transport));
+        using var cancelled = new StringWriter(); Assert.Equal(0, await ProbeCommand.RunAsync([.. schemaArgs, "--live"], new StringReader("NO"), cancelled, Key, Transport));
         Assert.Contains("CancelledBeforeSend", cancelled.ToString()); Assert.DoesNotContain(Secret, cancelled.ToString());
         using var invalid = new StringWriter(); Assert.Equal(2, await ProbeCommand.RunAsync(["--wire-schema", Secret, "--live"], new StringReader(ProbeRequest.Confirmation), invalid, Key, Transport));
         Assert.DoesNotContain(Secret, invalid.ToString());
     }
 
-    [Fact]
-    public async Task Confirmed_compatible_cli_sends_the_selected_wire_once_and_reports_its_mode_and_hash()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Confirmed_compatible_cli_sends_the_selected_wire_once_and_reports_its_mode_and_hash(bool omitFlag)
     {
+        string[] schemaArgs = omitFlag ? ["--wire-omit-max-length"] : ["--wire-schema", "gemini-compatible"];
         var handler = new Handler(async (request, ct) =>
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
-            Assert.DoesNotContain("maxLength", body.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema").GetRawText());
+            var wire = body.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema");
+            SameExceptMaxLength(SemanticSurveyContract.MultiEvidenceSchema, wire);
+            Assert.DoesNotContain("maxLength", wire.GetRawText());
             return Json(ProbeRequest.Envelope(ProbeRequest.ExpectedResponse));
         });
         using var text = new StringWriter();
-        int exit = await ProbeCommand.RunAsync(["--model", "gemini-3.6-flash", "--wire-schema", "gemini-compatible", "--live"],
+        int exit = await ProbeCommand.RunAsync(["--model", "gemini-3.6-flash", .. schemaArgs, "--live"],
             new StringReader(ProbeRequest.Confirmation), text, () => Secret, () => handler);
         Assert.Equal(0, exit); Assert.Equal(1, handler.Calls);
         Assert.Contains("\"WireSchemaMode\": \"GeminiCompatibleWireSchema\"", text.ToString());
         Assert.Contains("SchemaAcceptedNeutralResponseValid", text.ToString()); Assert.DoesNotContain(Secret, text.ToString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Conflicting_baseline_and_omit_flag_cancel_before_key_access_or_http(bool omitFirst)
+    {
+        string[] args = omitFirst ? ["--wire-omit-max-length", "--wire-schema", "production", "--live"] :
+            ["--wire-schema", "production", "--wire-omit-max-length", "--live"];
+        using var output = new StringWriter();
+        int result = await ProbeCommand.RunAsync(args, new StringReader(ProbeRequest.Confirmation), output,
+            () => throw new InvalidOperationException(Secret), () => throw new InvalidOperationException(Secret));
+        Assert.Equal(2, result); Assert.Contains("ProbeConfigurationOrExecutionFailure", output.ToString()); Assert.DoesNotContain(Secret, output.ToString());
+    }
+
+    [Fact]
+    public async Task Omit_flag_live_mock_still_rejects_a_response_exceeding_the_internal_maxLength()
+    {
+        var invalid = System.Text.Json.Nodes.JsonNode.Parse(ProbeRequest.ExpectedResponse)!;
+        invalid["project_id"] = ProbeRequest.SyntheticProject.ToString() + "x"; // 37 UTF-16 units; internal limit is still 36.
+        var handler = new Handler(async (request, ct) =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            var projectIdSchema = body.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema").GetProperty("properties").GetProperty("project_id");
+            Assert.Equal("string", projectIdSchema.GetProperty("type").GetString()); Assert.False(projectIdSchema.TryGetProperty("maxLength", out _));
+            return Json(ProbeRequest.Envelope(invalid.ToJsonString()));
+        });
+        using var output = new StringWriter();
+        int result = await ProbeCommand.RunAsync(["--model", "gemini-3.6-flash", "--wire-omit-max-length", "--live"],
+            new StringReader(ProbeRequest.Confirmation), output, () => Secret, () => handler);
+        Assert.Equal(1, result); Assert.Equal(1, handler.Calls);
+        Assert.Contains("SemanticSchemaViolation", output.ToString()); Assert.Contains("\"ResponseContractValid\": false", output.ToString());
+        Assert.DoesNotContain("SchemaAcceptedNeutralResponseValid", output.ToString()); Assert.DoesNotContain(Secret, output.ToString());
+        Assert.Equal(36, SemanticSurveyContract.MultiEvidenceSchema.GetProperty("properties").GetProperty("project_id").GetProperty("maxLength").GetInt32());
     }
 }

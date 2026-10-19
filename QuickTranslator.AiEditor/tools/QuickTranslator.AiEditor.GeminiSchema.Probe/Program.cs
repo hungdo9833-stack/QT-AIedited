@@ -14,7 +14,12 @@ public static class ProbeCommand
         try
         {
             string model = "gemini-3.6-flash"; int maximumOutput = 4096; bool live = false;
-            var schemaMode = ProbeSchemaMode.Production;
+            var schemaMode = ProbeSchemaMode.Production; bool schemaOptionSupplied = false;
+            void SelectSchema(ProbeSchemaMode selected)
+            {
+                if (schemaOptionSupplied && schemaMode != selected) throw new ArgumentException("ConflictingWireSchemaOptions");
+                schemaMode = selected; schemaOptionSupplied = true;
+            }
             for (int i = 0; i < args.Length; i++)
             {
                 switch (args[i])
@@ -22,9 +27,10 @@ public static class ProbeCommand
                     case "--live" when !live: live = true; break;
                     case "--model" when i + 1 < args.Length: model = args[++i]; break;
                     case "--max-output-tokens" when i + 1 < args.Length && int.TryParse(args[++i], NumberStyles.None, CultureInfo.InvariantCulture, out int n): maximumOutput = n; break;
+                    case "--wire-omit-max-length": SelectSchema(ProbeSchemaMode.GeminiCompatibleWireSchema); break;
                     case "--wire-schema" when i + 1 < args.Length:
-                        schemaMode = args[++i] switch { "production" => ProbeSchemaMode.Production, "gemini-compatible" => ProbeSchemaMode.GeminiCompatibleWireSchema, _ => throw new ArgumentException("UnknownWireSchemaMode") }; break;
-                    default: await output.WriteLineAsync("InvalidArguments: --model gemini-3.6-flash|gemini-3.8-flash --max-output-tokens 4096 [--wire-schema production|gemini-compatible] [--live]"); return 2;
+                        SelectSchema(args[++i] switch { "production" => ProbeSchemaMode.Production, "gemini-compatible" => ProbeSchemaMode.GeminiCompatibleWireSchema, _ => throw new ArgumentException("UnknownWireSchemaMode") }); break;
+                    default: await output.WriteLineAsync("InvalidArguments: --model gemini-3.6-flash|gemini-3.8-flash --max-output-tokens 4096 [--wire-omit-max-length | --wire-schema production|gemini-compatible] [--live]"); return 2;
                 }
             }
             var options = ProbeRequest.Options(model, maximumOutput);

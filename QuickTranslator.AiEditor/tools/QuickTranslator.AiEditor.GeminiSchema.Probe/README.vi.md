@@ -13,15 +13,17 @@ dotnet build tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release
 dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash
 
 # Offline: thử nghiệm chỉ bỏ maxLength ở wire; vẫn HTTP=0.
-dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --wire-schema gemini-compatible
+dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --wire-omit-max-length
 
 # Chỉ khi chính bạn muốn gửi tối đa một request với wire thử nghiệm:
-dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --max-output-tokens 4096 --wire-schema gemini-compatible --live
+dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --max-output-tokens 4096 --wire-omit-max-length --live
 ```
 
 Chọn `--max-output-tokens` bằng giới hạn đầu ra bạn dùng trong QT Studio (mặc định của probe là 4096); `generationConfig` được lấy từ cùng `GeminiSurveyClient`, không tự đổi giới hạn. Probe cũng cho phép chọn tường minh `gemini-3.8-flash`, không dùng Lite hoặc tự đổi model.
 
-`--wire-schema production` (hoặc không có cờ) giữ schema v2 gốc. `--wire-schema gemini-compatible` chọn chế độ **GeminiCompatibleWireSchema**, variant `probe-gemini-maxlength-only-1`: chỉ bỏ keyword `maxLength` tại schema node, không xóa field hoặc giá trị enum tên `maxLength`. Tên chế độ không phải cam kết Gemini sẽ chấp nhận. Cả preview và report đều ghi mode/hash; CLI không tự thử lại bằng production hay biến thể khác.
+`--wire-schema production` (hoặc không có cờ) là **A**, giữ schema v2 gốc. Cờ **`--wire-omit-max-length`** là **B**, chọn projection chỉ bỏ keyword `maxLength` tại schema node, không xóa field hoặc giá trị enum tên `maxLength`. Tên chế độ trong report vẫn là `GeminiCompatibleWireSchema`, variant `probe-gemini-maxlength-only-1`; không phải cam kết Gemini sẽ chấp nhận. Cờ cũ `--wire-schema gemini-compatible` vẫn là alias tương thích, không phải phép biến đổi khác. Nếu chọn cả production và omit-max-length thì lỗi cấu hình trước khi đọc key/gửi HTTP, bất kể thứ tự cờ.
+
+Mỗi lần `--live` chỉ gửi nhánh đã chọn sau một xác nhận; **không tự chạy cả A và B**. Baseline A đã có kết quả 400 từ người dùng, không cần gửi lại A nếu chưa muốn tiêu hao thêm quota. Preview luôn so sánh hai schema hoàn toàn offline. Ngoài `maxLength`, giữ nguyên mọi property, enum (kể cả numeric enum `schema_version=[2]`), required, anyOf, additionalProperties, maxItems, minimum, maximum và các bound khác. Không loại bỏ hàng loạt keyword được Google liệt kê là hỗ trợ.
 
 `--live` **chưa gửi gì**: công cụ in model, endpoint cố định, schema/config, budget HTTP=1 rồi chờ bạn gõ chính xác:
 
@@ -40,7 +42,7 @@ $probeSecret = Read-Host 'Gemini API key (ẩn)' -AsSecureString
 $probeCredential = [System.Net.NetworkCredential]::new('', $probeSecret)
 try {
     $env:QTSTUDIO_GEMINI_API_KEY = $probeCredential.Password
-    dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --max-output-tokens 4096 --wire-schema gemini-compatible --live
+    dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --max-output-tokens 4096 --wire-omit-max-length --live
 }
 finally {
     Remove-Item Env:QTSTUDIO_GEMINI_API_KEY -ErrorAction SilentlyContinue
@@ -110,9 +112,9 @@ Nếu probe trả 200 + response hợp lệ: schema/config được chấp nhậ
 
 Không có keyword v2 nào khác. Tài liệu nói keyword không hỗ trợ có thể bị bỏ qua; bỏ `maxLength` là phép thử có kiểm soát, không phải kết luận nguyên nhân. Không tự loại những keyword khác nếu danh sách hỗ trợ thay đổi.
 
-## Diff schema offline
+## Diff schema A/B offline (chỉ khác maxLength)
 
-| Thuộc tính | Production v2 | GeminiCompatibleWireSchema |
+| Thuộc tính | A: Production v2 | B: --wire-omit-max-length |
 | --- | ---: | ---: |
 | UTF-8 bytes (không phải token) | 6.183 | 5.751 |
 | Schema node / depth | 94 / 6 | 94 / 6 |
@@ -130,6 +132,7 @@ Diff duy nhất là 28 constraint `maxLength`, tổng 432 byte. Preview có danh
 ## Nếu bỏ maxLength vẫn trả 400: thiết kế chẩn đoán tiếp theo (chưa triển khai/gửi)
 
 1. Đối chiếu report mode/hash với wire 5.751 byte và đúng model/cap/low/safety/prompt trung tính trước. Một lỗi 400 chung không đủ chứng minh compiler complexity hoặc xác định keyword gây lỗi; không tự thử lại hay tự lấy metadata.
+   Không kết luận anyOf, additionalProperties, maxItems, minimum/maximum hoặc numeric enum là unsupported: chúng vẫn được giữ nguyên và có trong tài liệu. Không có phép biến đổi bổ sung nào được triển khai trong bản vá cờ A/B này.
 2. Nếu người dùng cho phép một thử nghiệm tiếp theo, ưu tiên biến thể **nullable type-array** thay từng `anyOf` nullable tương đương. Giữ đủ field, required, enum, role identity, timeline và mọi bound khác; so sánh đầy đủ schema cùng tests local-equivalence trước một xác nhận/POST riêng. Không tự chuyển sang biến thể này sau lỗi.
 3. Một hướng khác, chỉ thử riêng sau xác nhận: **`$defs/$ref` cho Identity** thay phần cấu trúc lặp. Không hợp nhất giá trị subject/target/speaker/listener; không giảm findings=64 hay các giới hạn evidence/participants để làm schema dễ hơn. Ref có thể bị compiler unroll nên không đảm bảo giảm complexity.
 4. Giữ ma trận một biến thay đổi/lần, model và generationConfig còn lại cố định; báo hash, node/depth, union, enum cardinality và response code đã lọc. Không có vòng lặp A/B, retry, đổi model hoặc né ProviderRefusal. Nếu cần gửi thông tin cho provider, chỉ dùng inventory/hash/code an toàn sau khi người dùng đồng ý.
