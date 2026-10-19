@@ -1,6 +1,6 @@
 # Gemini Structured Outputs Compatibility Probe
 
-Công cụ độc lập; không mở Project, không đọc nguyên tác/Resources/key vault, không ghi checkpoint hoặc history. Không thay đổi schema hay pipeline ứng dụng. Mặc định **offline**. Không dùng công cụ Preflight cũ (công cụ đó có budget/pool khác).
+Công cụ độc lập; không mở Project, không đọc nguyên tác/Resources/key vault, không ghi checkpoint hoặc history. Không thay đổi internal schema hay pipeline ứng dụng. Mặc định **offline**, wire schema mặc định vẫn là **production**. Chỉ cờ tường minh mới chọn wire thử nghiệm. Không dùng công cụ Preflight cũ (công cụ đó có budget/pool khác).
 
 ## Cách chạy trên Windows
 
@@ -12,11 +12,16 @@ dotnet build tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release
 # Offline: không đọc key, không mở kết nối mạng. Xuất schema v2/config thực tế + thống kê.
 dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash
 
-# Chỉ khi chính bạn muốn tiêu hao tối đa một request:
-dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --max-output-tokens 4096 --live
+# Offline: thử nghiệm chỉ bỏ maxLength ở wire; vẫn HTTP=0.
+dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --wire-schema gemini-compatible
+
+# Chỉ khi chính bạn muốn gửi tối đa một request với wire thử nghiệm:
+dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --max-output-tokens 4096 --wire-schema gemini-compatible --live
 ```
 
 Chọn `--max-output-tokens` bằng giới hạn đầu ra bạn dùng trong QT Studio (mặc định của probe là 4096); `generationConfig` được lấy từ cùng `GeminiSurveyClient`, không tự đổi giới hạn. Probe cũng cho phép chọn tường minh `gemini-3.8-flash`, không dùng Lite hoặc tự đổi model.
+
+`--wire-schema production` (hoặc không có cờ) giữ schema v2 gốc. `--wire-schema gemini-compatible` chọn chế độ **GeminiCompatibleWireSchema**, variant `probe-gemini-maxlength-only-1`: chỉ bỏ keyword `maxLength` tại schema node, không xóa field hoặc giá trị enum tên `maxLength`. Tên chế độ không phải cam kết Gemini sẽ chấp nhận. Cả preview và report đều ghi mode/hash; CLI không tự thử lại bằng production hay biến thể khác.
 
 `--live` **chưa gửi gì**: công cụ in model, endpoint cố định, schema/config, budget HTTP=1 rồi chờ bạn gõ chính xác:
 
@@ -35,7 +40,7 @@ $probeSecret = Read-Host 'Gemini API key (ẩn)' -AsSecureString
 $probeCredential = [System.Net.NetworkCredential]::new('', $probeSecret)
 try {
     $env:QTSTUDIO_GEMINI_API_KEY = $probeCredential.Password
-    dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --max-output-tokens 4096 --live
+    dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Release --no-build -- --model gemini-3.6-flash --max-output-tokens 4096 --wire-schema gemini-compatible --live
 }
 finally {
     Remove-Item Env:QTSTUDIO_GEMINI_API_KEY -ErrorAction SilentlyContinue
@@ -48,9 +53,11 @@ Không truyền key bằng đối số, dán vào mã nguồn, dùng `setx`, ho�
 
 ## Công cụ thực sự kiểm tra gì?
 
-`InspectAsync` gọi adapter thật với handler hoàn toàn trong bộ nhớ rồi lấy **chính `generationConfig.responseJsonSchema` và safetySettings** của request. Không tự dựng bản sao schema/config, không reflection. Schema lấy từ `SemanticSurveyContract.MultiEvidenceSchema` (v2), không phải schema v1 của Preflight cũ.
+`InspectAsync` gọi adapter thật với handler hoàn toàn trong bộ nhớ rồi lấy **chính `generationConfig.responseJsonSchema` và safetySettings** của request. Không tự dựng generationConfig, không reflection. Schema gốc lấy từ `SemanticSurveyContract.MultiEvidenceSchema` (v2), không phải schema v1 của Preflight cũ. Ở chế độ thử nghiệm, tạo bản sao schema bỏ `maxLength` trước khi truyền cho adapter; không sửa body sau khi adapter tạo request và không đụng singleton schema gốc.
 
 Request thật cũng dùng adapter này, với prompt trung tính cố định, hai GUID giả lập và `reviewed_evidence_ids=[]`, `findings=[]`. Không có dữ liệu Project, corpus hay nội dung người dùng nhập. Trước khi gửi, handler đối chiếu URI, prompt, config và safety với preview. Chỉ xuất schema/config, không xuất prompt. Có guard một POST duy nhất, chặn cả lỗi mạng/5xx trước cơ chế retry của adapter, không theo 3xx. Lớp kiểm thử dùng mock; phiên Codex không gọi Gemini thật.
+
+Response vẫn phải đi qua **`SemanticSurveyContract.Parse` với internal schema gốc**, kể cả khi wire không còn `maxLength`. Text quá dài hoặc thiếu trường vẫn bị reject. Không có mapper điền mặc định, đổi evidence IDs, gộp identity/quan hệ hoặc tự Confirm. `SemanticQualityAuditor`, source provenance, timeline và checkpoint không thay đổi. `Comparison` trong preview là metadata cục bộ, không gửi sang provider; request chỉ chứa schema wire được chọn cùng cấu hình production còn lại.
 
 `ProviderAcceptedRequest=true` chỉ nghĩa là HTTP 2xx, **không** nghĩa dữ kiện đúng. `ResponseContractValid=true` chỉ khi JSON được parser strict hiện tại chấp nhận, đúng v2/GUID giả lập và không bịa findings/evidence. Không tạo proposal, không gọi promotion/confirm. 200 nhưng sai/thiếu trường vẫn báo lỗi contract. Usage chỉ là token provider trả về; `Utf8Bytes` của schema **không phải số token**.
 
@@ -77,16 +84,61 @@ SHA-256: `8011DE631259296A22FEF08A211C3B82FAEA12A559D206869EB3FFBB569D93E2`.
 - 28 `maxLength`, 6 `minimum`, 2 `maximum`, 8 `maxItems`. Findings tối đa 64, reviewed evidence tối đa 16; support/participants/source IDs tối đa 8, CPU IDs 16.
 - Request Flash 3.6/3.8 hiện dùng `responseJsonSchema`, `responseMimeType=application/json`, `thinkingLevel=low`, 4 adjustable safety filters `OFF`; không gửi thêm `responseSchema` hoặc temperature. Đây là cấu hình hiện tại được tái hiện, không phải cách tránh core safety.
 
-Mẫu schema đơn giản HTTP 200 chứng minh cấu hình mẫu đó hoạt động, không chứng minh schema v2 hay nguyên tác đã được chấp nhận. Chưa gọi API thật với probe nên chưa xác nhận nguyên nhân HTTP 400. Số lượng required/enum, identity lặp, union nullable và array bounds là các chiều cần phân tích nếu provider báo complexity; không có ngưỡng công khai để khẳng định chỉ dựa trên số byte/node.
+Theo kết quả thực tế người dùng cung cấp: Gemini 3.6 Flash với schema đơn giản trả 200, production v2 trả 400 INVALID_ARGUMENT/Http400Unclassified, không có path/hint. Phiên Codex không gọi API thật. Hiện chưa xác nhận `maxLength` là nguyên nhân 400. Số lượng required/enum, identity lặp, union nullable và array bounds là các chiều cần phân tích nếu provider báo complexity; không có ngưỡng công khai để khẳng định chỉ dựa trên số byte/node.
 
 Theo [Structured Outputs của Google](https://ai.google.dev/gemini-api/docs/generate-content/structured-output), schema lớn/lồng sâu có thể bị từ chối; vẫn cần xác minh ngữ nghĩa cục bộ. [GenerationConfig](https://ai.google.dev/api/generate-content#v1beta.GenerationConfig) mô tả subset có `anyOf`, enum, required, maxItems, minimum/maximum; `maxLength` không được liệt kê trong subset responseJsonSchema. Đây là điểm cần xem xét, **không phải bằng chứng nó đã gây 400** (keyword không hỗ trợ cũng có thể bị bỏ qua). Tài liệu REST hiện có thêm dạng responseFormat, nhưng tool giữ nguyên wire hiện tại để tránh làm sai phép so sánh; không âm thầm đổi API/field.
 
 Nếu probe trả 200 + response hợp lệ: schema/config được chấp nhận cho request trung tính này; chưa xác nhận chất lượng/coverage của khảo sát thực tế. Nếu vẫn `Http400Unclassified`: không được coi đó là xác nhận schema rejection. Chỉ chia sẻ report lọc an toàn, không chia sẻ key hoặc response thô.
 
-## Đề xuất tinh gọn wire (chưa triển khai, chưa gửi thử)
+## Kiểm kê keyword đối chiếu tài liệu (snapshot 2026-10-20)
+
+Đối chiếu subset `responseJsonSchema` trong [GenerationConfig chính thức](https://ai.google.dev/api/generate-content#v1beta.GenerationConfig). `ListedByGemini` chỉ nghĩa là được liệt kê, không chứng minh tổ hợp schema/model thực tế sẽ được chấp nhận. Snapshot được biên dịch trong tool, không tải tài liệu hoặc metadata qua HTTP lúc chạy.
+
+| Keyword v2 | Số lần | Được liệt kê | Wire thử nghiệm |
+| --- | ---: | --- | --- |
+| `additionalProperties` | 8 | Có | Giữ nguyên |
+| `anyOf` | 13 | Có | Giữ nguyên |
+| `enum` | 18 | Có | Giữ nguyên |
+| `items` | 8 | Có | Giữ nguyên |
+| `maxItems` | 8 | Có | Giữ nguyên |
+| `maxLength` | 28 | Không | Chỉ bỏ ở wire |
+| `maximum` | 2 | Có | Giữ nguyên |
+| `minimum` | 6 | Có | Giữ nguyên |
+| `properties` | 8 | Có | Giữ nguyên |
+| `required` | 8 | Có | Giữ nguyên |
+| `type` | 81 | Có | Giữ nguyên |
+
+Không có keyword v2 nào khác. Tài liệu nói keyword không hỗ trợ có thể bị bỏ qua; bỏ `maxLength` là phép thử có kiểm soát, không phải kết luận nguyên nhân. Không tự loại những keyword khác nếu danh sách hỗ trợ thay đổi.
+
+## Diff schema offline
+
+| Thuộc tính | Production v2 | GeminiCompatibleWireSchema |
+| --- | ---: | ---: |
+| UTF-8 bytes (không phải token) | 6.183 | 5.751 |
+| Schema node / depth | 94 / 6 | 94 / 6 |
+| Field mỗi finding / lượt required | 25 / 59 | 25 / 59 |
+| Keyword khác nhau | 11 | 10 |
+| `maxLength` | 28 | 0 |
+| `anyOf` / enum / maxItems | 13 / 18 / 8 | 13 / 18 / 8 |
+
+Production SHA-256: `8011DE631259296A22FEF08A211C3B82FAEA12A559D206869EB3FFBB569D93E2`.
+
+Wire thử nghiệm SHA-256: `73BB1273C63AC1911362116627851E7647E560C160BE32F9C667F6EA7039567D`.
+
+Diff duy nhất là 28 constraint `maxLength`, tổng 432 byte. Preview có danh sách từng path/giá trị bị bỏ, hai hash, kích thước, keyword inventory và các bound còn lại. Không bỏ field, enum, required entry, giới hạn mảng/số; không đổi schema_version=2 trong JSON response. Variant version/hash là metadata của probe, không migration hay fingerprint checkpoint production. Tất cả 28 giới hạn string vẫn giữ trong internal parser.
+
+## Nếu bỏ maxLength vẫn trả 400: thiết kế chẩn đoán tiếp theo (chưa triển khai/gửi)
+
+1. Đối chiếu report mode/hash với wire 5.751 byte và đúng model/cap/low/safety/prompt trung tính trước. Một lỗi 400 chung không đủ chứng minh compiler complexity hoặc xác định keyword gây lỗi; không tự thử lại hay tự lấy metadata.
+2. Nếu người dùng cho phép một thử nghiệm tiếp theo, ưu tiên biến thể **nullable type-array** thay từng `anyOf` nullable tương đương. Giữ đủ field, required, enum, role identity, timeline và mọi bound khác; so sánh đầy đủ schema cùng tests local-equivalence trước một xác nhận/POST riêng. Không tự chuyển sang biến thể này sau lỗi.
+3. Một hướng khác, chỉ thử riêng sau xác nhận: **`$defs/$ref` cho Identity** thay phần cấu trúc lặp. Không hợp nhất giá trị subject/target/speaker/listener; không giảm findings=64 hay các giới hạn evidence/participants để làm schema dễ hơn. Ref có thể bị compiler unroll nên không đảm bảo giảm complexity.
+4. Giữ ma trận một biến thay đổi/lần, model và generationConfig còn lại cố định; báo hash, node/depth, union, enum cardinality và response code đã lọc. Không có vòng lặp A/B, retry, đổi model hoặc né ProviderRefusal. Nếu cần gửi thông tin cho provider, chỉ dùng inventory/hash/code an toàn sau khi người dùng đồng ý.
+5. Không áp dụng vào production chỉ vì probe trả 200. Cần kết quả Gemini thực tế, regression evidence/coverage/identity/timeline, checkpoint compatibility và quyết định cập nhật riêng. Không nới parser/auditor, bỏ required, giảm enum hay cắt coverage trong bất kỳ bước nào.
+
+## Các nguyên tắc cho wire tương lai
 
 1. Giữ nguyên toàn bộ trường/enum/evidence ID/range/hash, identity roles, actuality và timeline. Thử biểu diễn nullable bằng `type: [T,"null"]` thay `anyOf` tương đương, dưới một wire version/fingerprint riêng; không đổi internal contract v2 hoặc checkpoint cũ. Giữ required để missing khác với null tường minh.
 2. Có thể đưa cấu trúc Identity lặp vào `$defs`/`$ref` nếu endpoint chấp nhận. Giảm byte gửi không bảo đảm giảm số trạng thái compiler (server có thể unroll); tuyệt đối không gộp giá trị identity hoặc speaker/listener.
-3. Nếu bỏ `maxLength` **chỉ ở wire**, phải công khai danh sách thay đổi và giữ mọi giới hạn string trong parser strict hiện tại. Không bỏ enum, required, các giới hạn số/range, không hạ maxItems để cắt findings/coverage.
+3. Biến thể `maxLength` hiện có **chỉ ở probe wire** đã công khai danh sách thay đổi; mọi giới hạn string giữ trong parser strict. Không bỏ enum, required, các giới hạn số/range, không hạ maxItems để cắt findings/coverage.
 4. Mapping wire mới phải là bước tường minh, versioned và fail-closed trước `SemanticSurveyContract.Parse`/`SemanticQualityAuditor`. Thiếu trường quan trọng không được điền mặc định thành một dữ kiện; required fields phải bị reject, scope/coverage/support/timeline/identity vẫn audit riêng. Không dùng HTTP 200 để tự Confirm/Verified.
-5. Mỗi biến thể chỉ thử theo một xác nhận riêng của người dùng; không tự retry schema/model hoặc né ProviderRefusal. Hiện **chưa có biến thể tinh gọn, mapper mới hay thay đổi production schema** trong patch này. Tests mapping kiểm tra contract v1/v2 hiện hữu vẫn round-trip và reject mọi finding thiếu trường.
+5. Mỗi biến thể chỉ thử theo một xác nhận riêng của người dùng; không tự retry schema/model hoặc né ProviderRefusal. Hiện chỉ có **một projection bỏ maxLength trong probe**, chưa có nullable/ref variant, mapper mới hoặc thay đổi production schema. Tests so sánh toàn bộ cây, kiểm tra mode gửi thực tế, contract v1/v2 round-trip, required/giới hạn string và quality audit không bị nới.

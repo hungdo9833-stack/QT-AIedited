@@ -5,11 +5,12 @@ namespace QuickTranslator.AiEditor.GeminiSchema.Probe;
 
 public sealed record ProviderDiagnostic(string Code, string ProviderStatus, IReadOnlyList<string> SchemaPaths, IReadOnlyList<string> SchemaHints)
 {
-    public static ProviderDiagnostic Classify400(ReadOnlyMemory<byte> bytes)
+    public static ProviderDiagnostic Classify400(ReadOnlyMemory<byte> bytes, JsonElement? sentSchema = null)
     {
         var paths = new SortedSet<string>(StringComparer.Ordinal); var hints = new SortedSet<string>(StringComparer.Ordinal);
         string status = "UNKNOWN"; bool schema = false, config = false, safety = false;
         if (bytes.Length > 32_768) return Plain();
+        var schemaSent = sentSchema ?? SemanticSurveyContract.MultiEvidenceSchema; var knownPaths = Paths(schemaSent);
         try
         {
             using var doc = JsonDocument.Parse(bytes, new() { MaxDepth = 24 });
@@ -26,7 +27,7 @@ public sealed record ProviderDiagnostic(string Code, string ProviderStatus, IRea
                 if (field == prefix || field.StartsWith(prefix + ".", StringComparison.Ordinal) || field.StartsWith(prefix + "[", StringComparison.Ordinal))
                 {
                     schema = true; string path = "$schema" + field[prefix.Length..];
-                    paths.Add(KnownSchemaPaths.Contains(path) ? path : "$schema");
+                    paths.Add(knownPaths.Contains(path) ? path : "$schema");
                     hints.Add("SchemaFieldViolation");
                 }
                 else if (field == "generation_config" || field.StartsWith("generation_config.", StringComparison.Ordinal)) config = true;
@@ -50,7 +51,7 @@ public sealed record ProviderDiagnostic(string Code, string ProviderStatus, IRea
                     else hints.Add("SchemaRejectedByMessage");
                     // Echo only schema keywords compiled from this repository, never arbitrary
                     // provider strings, violation descriptions, identifiers or response excerpts.
-                    foreach (var keyword in SchemaInventory.Inspect(SemanticSurveyContract.MultiEvidenceSchema).Keywords)
+                    foreach (var keyword in SchemaInventory.Inspect(schemaSent).Keywords)
                         if (text.Contains("\"" + keyword + "\"", StringComparison.Ordinal) || text.Contains("'" + keyword + "'", StringComparison.Ordinal)) hints.Add("Keyword:" + keyword);
                 }
             }
@@ -60,8 +61,7 @@ public sealed record ProviderDiagnostic(string Code, string ProviderStatus, IRea
         ProviderDiagnostic Plain() => new("Http400Unclassified", status, [], []);
     }
 
-    private static readonly HashSet<string> KnownSchemaPaths = Paths();
-    private static HashSet<string> Paths()
+    private static HashSet<string> Paths(JsonElement schema)
     {
         var paths = new HashSet<string>(StringComparer.Ordinal);
         void Walk(JsonElement n, string path)
@@ -70,6 +70,6 @@ public sealed record ProviderDiagnostic(string Code, string ProviderStatus, IRea
             if (n.ValueKind == JsonValueKind.Object) foreach (var p in n.EnumerateObject()) Walk(p.Value, path + "." + p.Name);
             if (n.ValueKind == JsonValueKind.Array) { int i = 0; foreach (var item in n.EnumerateArray()) Walk(item, path + "[" + i++ + "]"); }
         }
-        Walk(SemanticSurveyContract.MultiEvidenceSchema, "$schema"); return paths;
+        Walk(schema, "$schema"); return paths;
     }
 }

@@ -39,7 +39,8 @@ public sealed record SchemaInventory(string Sha256, int Utf8Bytes, int Nodes, in
     }
 }
 
-public sealed record ProbeInspection(string Model, string Endpoint, JsonElement GenerationConfig, JsonElement SafetySettings, SchemaInventory Schema);
+public sealed record ProbeInspection(string Model, string Endpoint, JsonElement GenerationConfig, JsonElement SafetySettings, SchemaInventory Schema,
+    WireSchemaComparison Comparison);
 
 public static class ProbeRequest
 {
@@ -59,15 +60,16 @@ public static class ProbeRequest
 
     // Exercise the production adapter against an in-memory handler. No copied request
     // builder, reflection, API key, metadata lookup or real network is used for inspection.
-    public static async Task<ProbeInspection> InspectAsync(ModelOptions options, CancellationToken ct = default)
+    public static async Task<ProbeInspection> InspectAsync(ModelOptions options, CancellationToken ct = default, ProbeSchemaMode schemaMode = ProbeSchemaMode.Production)
     {
-        using var capture = new Capture(); using var http = new HttpClient(capture);
+        var selection = GeminiCompatibleWireSchema.Select(SemanticSurveyContract.MultiEvidenceSchema, schemaMode);
+        using var capture = new Capture(selection.Comparison); using var http = new HttpClient(capture);
         using var client = new GeminiSurveyClient(http, "offline-placeholder", new(100, 1_000_000, 100, 1), Guid.NewGuid(), routeFailuresToPool: true);
-        await client.TranslateStructuredAsync(NeutralPrompt, options, SemanticSurveyContract.MultiEvidenceSchema, ct);
+        await client.TranslateStructuredAsync(NeutralPrompt, options, selection.Schema, ct);
         return capture.Inspection ?? throw new InvalidDataException("RequestNotCaptured");
     }
 
-    private sealed class Capture : HttpMessageHandler
+    private sealed class Capture(WireSchemaComparison comparison) : HttpMessageHandler
     {
         public ProbeInspection? Inspection { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -75,7 +77,7 @@ public static class ProbeRequest
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
             var config = body.RootElement.GetProperty("generationConfig").Clone();
             Inspection = new(request.RequestUri!.Segments.Last().Split(':')[0], request.RequestUri.AbsoluteUri, config,
-                body.RootElement.GetProperty("safetySettings").Clone(), SchemaInventory.Inspect(config.GetProperty("responseJsonSchema")));
+                body.RootElement.GetProperty("safetySettings").Clone(), SchemaInventory.Inspect(config.GetProperty("responseJsonSchema")), comparison);
             return new(System.Net.HttpStatusCode.OK) { Content = new StringContent(Envelope(ExpectedResponse), Encoding.UTF8, "application/json") };
         }
     }

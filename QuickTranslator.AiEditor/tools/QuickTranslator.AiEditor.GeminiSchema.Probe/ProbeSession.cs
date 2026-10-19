@@ -8,29 +8,33 @@ using QuickTranslator.AiEditor.Core.Models;
 namespace QuickTranslator.AiEditor.GeminiSchema.Probe;
 
 public sealed record ProbeReport(string Model, int HttpRequests, int? HttpStatus, string Code, ProviderDiagnostic? Provider,
-    bool ProviderAcceptedRequest, bool? ResponseContractValid, long ElapsedMilliseconds, int? InputTokens, int? OutputTokensIncludingThinking);
+    bool ProviderAcceptedRequest, bool? ResponseContractValid, long ElapsedMilliseconds, int? InputTokens, int? OutputTokensIncludingThinking)
+{
+    public string WireSchemaMode { get; init; } = nameof(ProbeSchemaMode.Production);
+    public string? WireSchemaSha256 { get; init; }
+}
 
 /// <summary>One explicit approval, one POST at most; never accesses a Project or writes a journal.</summary>
-public sealed class ProbeSession(ModelOptions options)
+public sealed class ProbeSession(ModelOptions options, ProbeSchemaMode schemaMode = ProbeSchemaMode.Production)
 {
     private int _approvalUsed;
     public async Task<ProbeReport> RunOnceAsync(string apiKey, string confirmation, Func<HttpMessageHandler> transportFactory, CancellationToken ct = default)
     {
-        ProbeReport Denied(string code) => new(options.Model, 0, null, code, null, false, null, 0, null, null);
+        ProbeReport Denied(string code) => new(options.Model, 0, null, code, null, false, null, 0, null, null) { WireSchemaMode = schemaMode.ToString() };
         if (confirmation != ProbeRequest.Confirmation) return Denied("ConfirmationRequired");
         if (Interlocked.Exchange(ref _approvalUsed, 1) != 0) return Denied("ApprovalAlreadyUsed");
         if (string.IsNullOrWhiteSpace(apiKey) || apiKey.Contains('\r') || apiKey.Contains('\n')) return Denied("ApiKeyMissingOrInvalid");
         var watch = new Stopwatch(); SinglePost? transport = null; bool? valid = null; int? input = null, output = null;
-        string code; var stage = SemanticFailureStage.Provider;
+        string code; string? schemaHash = null; var stage = SemanticFailureStage.Provider;
         try
         {
             ProbeRequest.Options(options.Model, options.MaximumOutputTokens).Validate(); options.Validate();
-            var inspection = await ProbeRequest.InspectAsync(options, ct);
+            var inspection = await ProbeRequest.InspectAsync(options, ct, schemaMode); schemaHash = inspection.Schema.Sha256;
             using var one = transport = new SinglePost(inspection, transportFactory());
             using var http = new HttpClient(one) { Timeout = Timeout.InfiniteTimeSpan };
             using var client = new GeminiSurveyClient(http, apiKey, new(100, 1_000_000, 100, 1), Guid.NewGuid(), routeFailuresToPool: true);
             watch.Start();
-            var completion = await client.TranslateStructuredAsync(ProbeRequest.NeutralPrompt, options, SemanticSurveyContract.MultiEvidenceSchema, ct);
+            var completion = await client.TranslateStructuredAsync(ProbeRequest.NeutralPrompt, options, inspection.GenerationConfig.GetProperty("responseJsonSchema"), ct);
             input = completion.Metrics.InputTokens; output = completion.Metrics.OutputTokens;
             stage = SemanticFailureStage.Parse; valid = false;
             var response = SemanticSurveyContract.Parse(completion.Text);
@@ -44,7 +48,7 @@ public sealed class ProbeSession(ModelOptions options)
         catch (Exception ex) { code = SemanticProviderDiagnostics.Classify(ex, stage).Code; }
         watch.Stop(); int? status = transport?.HttpStatus;
         return new(options.Model, transport?.Requests ?? 0, status, code, transport?.Diagnostic,
-            status is >= 200 and <= 299, valid, watch.ElapsedMilliseconds, input, output);
+            status is >= 200 and <= 299, valid, watch.ElapsedMilliseconds, input, output) { WireSchemaMode = schemaMode.ToString(), WireSchemaSha256 = schemaHash };
     }
 
     private sealed class ProbeAbort(ProviderDiagnostic diagnostic) : Exception("ControlledProbeAbort")
@@ -76,7 +80,7 @@ public sealed class ProbeSession(ModelOptions options)
                     if (response.StatusCode == HttpStatusCode.BadRequest)
                     {
                         byte[]? bytes = await ReadBounded(response.Content, 32_768, ct);
-                        Diagnostic = bytes is null ? new("Http400BodyOversized", "UNKNOWN", [], []) : ProviderDiagnostic.Classify400(bytes);
+                        Diagnostic = bytes is null ? new("Http400BodyOversized", "UNKNOWN", [], []) : ProviderDiagnostic.Classify400(bytes, inspection.GenerationConfig.GetProperty("responseJsonSchema"));
                         throw new ProbeAbort(Diagnostic);
                     }
                     throw Abort("Http" + (int)response.StatusCode);
