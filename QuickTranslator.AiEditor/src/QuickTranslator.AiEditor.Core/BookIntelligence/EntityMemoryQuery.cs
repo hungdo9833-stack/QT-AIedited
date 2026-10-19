@@ -74,6 +74,13 @@ public sealed class EntityMemoryQuery
             (provenance.CensusName.Length == 0 || _census.GetValueOrDefault(provenance.CensusName) == provenance.CensusFingerprint) &&
             (fact is null || fact.InputFactIds.All(input => IsFresh(input) && RecordedStatus(input) != MemoryReviewStatus.Rejected &&
                 (fact.Provenance.Origin != MemoryOrigin.Rule || RecordedStatus(input) == MemoryReviewStatus.Confirmed)));
+        if (result && fact is not null && fact.Provenance.Key.StartsWith("fact:semantic-confirmation:", StringComparison.Ordinal))
+            result = fact.Provenance.RuleId == SemanticDependencies.Fingerprint(this, fact.InputFactIds);
+        if (result && fact is null && provenance.Key.StartsWith("event:semantic-confirmation:", StringComparison.Ordinal))
+        {
+            var inputs = SemanticDependencies.EventInputs(provenance);
+            result = inputs.All(_facts.ContainsKey) && provenance.RuleId == SemanticDependencies.Fingerprint(this, inputs);
+        }
         _fresh[id] = result; return result;
     }
     internal MemoryReviewStatus SourceStatus(Guid id) => _superseded.Contains(id) || EvidenceIds(id).Count > 0 && !IsFresh(id) ? MemoryReviewStatus.Stale : RecordedStatus(id);
@@ -121,7 +128,7 @@ public sealed class EntityMemoryQuery
                 .OrderBy(x => Timeline(x.Id).EffectiveFromChapter).ThenBy(x => x.Id).LastOrDefault();
             return latest?.Effect == MemoryEventEffect.End;
         }
-        bool InputsVisible(EntityMemoryFact fact) => fact.Provenance.Origin != MemoryOrigin.Rule || fact.InputFactIds.All(id =>
+        bool InputsVisible(EntityMemoryFact fact) => fact.Provenance.Origin != MemoryOrigin.Rule && !fact.Provenance.Key.StartsWith("fact:semantic-confirmation:", StringComparison.Ordinal) || fact.InputFactIds.All(id =>
             Timeline(id).VisibleAt(chapterNumber) && !Ended(id) && InputsVisible(_facts[id]));
         var visible = State.Facts.Where(x => x.Provenance.Origin != MemoryOrigin.AuditOnly && Confirmed(x.Id) &&
             Timeline(x.Id).VisibleAt(chapterNumber) && !Ended(x.Id) && InputsVisible(x)).ToArray();

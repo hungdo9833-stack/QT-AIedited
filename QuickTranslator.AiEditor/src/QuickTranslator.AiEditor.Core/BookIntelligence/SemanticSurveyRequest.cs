@@ -10,7 +10,7 @@ public sealed record SemanticKnownIdentity(Guid EntityId, IReadOnlyList<string> 
 public sealed record SemanticCpuHint(Guid Id, TranslationImpactEventType Type);
 public sealed record SemanticNearbyMention(string Text, MentionCandidateCategory Category, int CountInRange);
 public sealed record SemanticSurveyRequest(Guid Id, Guid ProjectId, int ChapterNumber, string BackendSignature,
-    MemoryEvidence Evidence, string ContextFingerprint, string Prompt, int EstimatedInputTokens, int ReservedTokens,
+    MemoryEvidence Evidence, string ContextFingerprint, string DependencyFingerprint, string Prompt, int EstimatedInputTokens, int ReservedTokens,
     IReadOnlyList<SemanticKnownIdentity> AllowedIdentities, IReadOnlyList<Guid> ContextFactIds, IReadOnlyList<SemanticCpuHint> CpuCandidates);
 
 public static class SemanticSurveyRequests
@@ -36,7 +36,7 @@ public static class SemanticSurveyRequests
                     Count(window.Excerpt, x.ChineseName))).Take(40).ToArray();
                 var related = chapterMemory.Entities.Where(x => x.Names.Any(n => window.Excerpt.Contains(n, StringComparison.Ordinal))).Take(8).ToArray();
                 var relatedIds = related.Select(x => x.EntityId).ToHashSet();
-                var safeFacts = related.SelectMany(x => x.Facts).Where(x => x.TargetId is null || relatedIds.Contains(x.TargetId.Value)).Take(32).ToArray();
+                var safeFacts = related.SelectMany(x => x.Facts).Where(x => x.TargetId is null || relatedIds.Contains(x.TargetId.Value)).Take(16).ToArray();
                 var safeEvents = chapterMemory.Events.Where(x => x.EntityIds.All(relatedIds.Contains)).Take(12).ToArray();
                 var safeIdentities = related.Select(x => new SemanticKnownIdentity(x.EntityId, x.Names)).ToArray();
                 bool Overlaps(MemoryEvidence e) => e.ChapterId == proof.ChapterId && e.SourceSha256 == proof.SourceSha256 && e.StartUtf16 < proof.StartUtf16 + proof.LengthUtf16 && e.StartUtf16 + e.LengthUtf16 > proof.StartUtf16;
@@ -67,10 +67,28 @@ public static class SemanticSurveyRequests
                 int reserved = checked(Encoding.UTF8.GetByteCount(prompt) + Encoding.UTF8.GetByteCount(SemanticSurveyContract.ResponseSchema.GetRawText()) + 128 + options.MaximumOutputTokens);
                 string key = EntityMemoryIdentity.Fingerprint(new { proof, backendSignature, options, fingerprint, PromptVersion, schema = SemanticSurveyContract.Version });
                 requests.Add(new(EntityMemoryIdentity.StableId(memory.ProjectId, "semantic-batch:" + key), memory.ProjectId, source.ChapterNumber, backendSignature,
-                    proof, fingerprint, prompt, estimate, reserved, safeIdentities, safeFacts.Select(x => x.Id).ToArray(), cpu));
+                    proof, fingerprint, SemanticDependencies.Fingerprint(query, safeFacts.Select(x => x.Id)), prompt, estimate, reserved, safeIdentities, safeFacts.Select(x => x.Id).ToArray(), cpu));
             }
         }
         return requests;
     }
     private static int Count(string text, string name) { int count = 0; for (int i = 0; (i = text.IndexOf(name, i, StringComparison.Ordinal)) >= 0; i += name.Length) count++; return count; }
+}
+
+public static class SemanticDependencies
+{
+    public static string Fingerprint(EntityMemoryQuery query, IEnumerable<Guid> ids) => EntityMemoryIdentity.Fingerprint(ids.Order().Select(id => new
+    { id, definition = EntityMemoryIdentity.DefinitionFingerprint(query.State, id), time = query.Timeline(id), confirmed = query.RecordedStatus(id) == MemoryReviewStatus.Confirmed && query.IsFresh(id) }).ToArray());
+    public static IReadOnlyList<Guid> EventInputs(MemoryProvenance provenance)
+    {
+        int marker = provenance.LineageKey.IndexOf(":deps=", StringComparison.Ordinal);
+        return marker < 0 ? [] : provenance.LineageKey[(marker + 6)..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => Guid.ParseExact(x, "N")).ToArray();
+    }
+    public static bool Current(SemanticBatch batch, MemoryEvidence proof, EntityMemoryState memory, IReadOnlyList<CensusSource> sources)
+    {
+        var source = sources.SingleOrDefault(x => x.ChapterId == proof.ChapterId);
+        if (source is null || source.ChapterNumber != proof.ChapterNumber || CorpusIntegrityAuditor.SourceHash(source.OriginalText) != proof.SourceSha256 ||
+            (long)proof.StartUtf16 + proof.LengthUtf16 > source.OriginalText.Length || batch.ContextFactIds.Any(id => memory.Facts.All(x => x.Id != id))) return false;
+        return batch.DependencyFingerprint == Fingerprint(new(memory, sources), batch.ContextFactIds);
+    }
 }
