@@ -195,7 +195,7 @@ public sealed class AdaptiveSemanticTests : IDisposable
         state.SchemaVersion = 1; state.EvidenceResults.Clear();
         state.Reviews.Add(new(Guid.NewGuid(), state.Proposals[0].Id, MemoryReviewStatus.Accepted, DateTimeOffset.UtcNow, "Old human decision", new()));
         var node = System.Text.Json.Nodes.JsonNode.Parse(SemanticSurveyStore.Serialize(state))!.AsObject(); node.Remove("evidenceResults");
-        foreach (var b in node["batches"]!.AsArray()) b!.AsObject().Remove("evidenceKeys");
+        foreach (var b in node["batches"]!.AsArray()) { b!.AsObject().Remove("evidenceKeys"); b.AsObject().Remove("contextEventIds"); }
         byte[] original = Encoding.UTF8.GetBytes(node.ToJsonString());
         await SimpleFileStorage.WriteAsync(store.LegacyPathName, original, b => JsonSerializer.Deserialize<SemanticSurveyState>(b, DocumentJson.Options)!);
         File.Delete(store.PathName); // This synthetic v2 setup file only; the v1 file is retained.
@@ -251,6 +251,58 @@ public sealed class AdaptiveSemanticTests : IDisposable
         var a = before.SelectMany(x => x.Units).Where(x => x.ChapterNumber == 2).ToArray();
         var b = after.SelectMany(x => x.Units).Where(x => x.ChapterNumber == 2).ToArray();
         Assert.NotEqual(a[0].Id, b[0].Id); Assert.NotEqual(a[1].Id, b[1].Id); Assert.Equal(a[2].Id, b[2].Id); Assert.Equal(a[3].Id, b[3].Id);
+    }
+
+    [Fact]
+    public void Confirmed_event_context_changes_invalidate_batch_review_and_semantic_dependents_not_only_fact_context()
+    {
+        var s = new MemoryScenario(); Guid proof = s.Source(1, "林青恢复记忆了。"), person = s.Entity("person", "林青");
+        var name = s.Fact(person, MemoryFactKind.PrimaryName, "林青", proof, new(1, null, 1, 1)); s.Confirm(name.Id);
+        var builder = new EntityMemoryBuilder(s.State); var priorEvent = builder.Event(new() { Type = TranslationImpactEventType.CharacterStateChanged, EntityIds = [person],
+            EvidenceIds = [proof], Timeline = new(1, null, 1, 1), Provenance = new(MemoryOrigin.User, "confirmed-event", "Synthetic reviewed prior event") }); s.Confirm(priorEvent.Id);
+        s.Source(2, Windows(2)); var options = new ModelOptions { ContextSize = 32768 }; var legacy = new BookIntelligenceState { ProjectId = s.State.ProjectId };
+        var r = SemanticSurveyRequests.Plan(s.State, s.Sources, legacy, "mock", options).Single(x => x.ChapterNumber == 2);
+        Assert.Equal(priorEvent.Id, Assert.Single(r.ContextEventIds));
+        var batch = new SemanticBatch(r.Id, r.ProjectId, r.Evidence.Id, r.BackendSignature, options, r.ContextFingerprint, r.DependencyFingerprint, r.ContextFactIds,
+            r.AllowedIdentities, r.CpuCandidates, SemanticAdaptiveBatching.PromptVersion, SemanticSurveyContract.MultiEvidenceVersion, r.Units.Select(x => new SemanticEvidenceKey(x.Evidence.Id, x.Id)).ToArray(), r.ContextEventIds);
+        Assert.True(SemanticDependencies.Current(batch, r.Evidence, s.State, s.Sources));
+        string deps = string.Join(',', r.ContextFactIds.Concat(r.ContextEventIds).Select(x => x.ToString("N")));
+        var alias = builder.Fact(new() { SubjectId = person, Kind = MemoryFactKind.Alias, Value = "阿青", InputFactIds = r.ContextFactIds, EvidenceIds = [proof], Timeline = new(1, null, 1, 1),
+            Provenance = new(MemoryOrigin.User, "semantic-confirmation:test:deps=" + deps, "Synthetic explicit confirmation", RuleId: r.DependencyFingerprint) }); s.Confirm(alias.Id);
+        Assert.True(s.Query().IsFresh(alias.Id));
+        EntityMemoryReviewService.AppendDecision(s.State, s.Sources, priorEvent.Id, MemoryReviewStatus.Accepted, new(1, null, 1, 1), "Human demotes prior event");
+        Assert.False(SemanticDependencies.Current(batch, r.Evidence, s.State, s.Sources)); Assert.Equal(MemoryReviewStatus.Stale, s.Query().Status(alias.Id));
+        var next = SemanticSurveyRequests.Plan(s.State, s.Sources, legacy, "mock", options).Single(x => x.ChapterNumber == 2);
+        Assert.Empty(next.ContextEventIds); Assert.NotEqual(r.Id, next.Id);
+    }
+
+    [Fact]
+    public void Cpu_event_classification_cannot_borrow_proof_from_an_unrelated_member()
+    {
+        var s = new SemanticFixture(Windows(2)); var units = Plan(s, 1).ToArray(); Guid cpu = Guid.NewGuid();
+        units[0] = units[0] with { CpuCandidates = [new(cpu, TranslationImpactEventType.CharacterStateChanged)] };
+        var batch = SemanticAdaptiveBatching.Combine(units, s.Options); var e = units[1].Evidence;
+        var finding = new SemanticFinding { FindingType = SemanticFindingType.EventVerification, EventActuality = SemanticActuality.NotAnEvent,
+            CpuCandidateIds = [cpu], SourceEvidenceIds = [e.Id], SupportSpans = [new(e.Id, e.StartUtf16, 2, "林青")], Reason = "Adversarial attribution" };
+        var audited = SemanticQualityAuditor.Audit(Response(batch, finding), batch, s.Sources);
+        Assert.Contains(cpu, audited.UnprocessedCpuIds); Assert.Contains("CpuCandidateEvidenceMismatch", audited.Findings.Single().Issues); Assert.False(audited.Validated);
+    }
+
+    [Fact]
+    public async Task Invalid_proof_is_not_a_success_cache_hit_but_successful_siblings_are_not_resent()
+    {
+        var (s, store, _) = await Create(4); var units = Plan(s, 1); var plan = Plan(s); int calls = 0;
+        var fake = new SemanticFake((p, _) =>
+        {
+            var r = FromPrompt(p, units);
+            if (calls++ == 0) r = r with { Findings = r.Findings.Select((f, i) => i == 0 ? f with { SupportSpans = [f.SupportSpans[0] with { Text = "伪造" }] } : f).ToArray() };
+            return Task.FromResult(SemanticFake.Completion(r));
+        });
+        var state = await Run(store, s, plan, fake, await store.LoadAsync()); Assert.Equal(SemanticBatchStatus.Failed, state.EvidenceResults[0].Status);
+        var dry = SemanticSurveyEngine.DryRun(Plan(s, 2), state, Legacy(s)); Assert.Equal(3, dry.CompletedEvidence); Assert.Equal(1, dry.PendingEvidence);
+        state = await Run(store, s, Plan(s, 2), fake, state); Assert.Equal(2, calls); Assert.Equal(4, state.Proposals.Count(x => x.Audit.EvidenceValid));
+        Assert.Single(state.Proposals, x => !x.Audit.EvidenceValid); Assert.Equal(4, state.Evidence.Count);
+        state = await Run(store, s, plan, fake, state); Assert.Equal(2, calls);
     }
 
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }

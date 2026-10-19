@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using QuickTranslator.AiEditor.Core.BookIntelligence;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Translation;
@@ -44,5 +45,25 @@ public sealed class SemanticTransportTests
         await Assert.ThrowsAsync<SemanticTransportBudgetException>(() => client.TranslateStructuredAsync("neutral", options, SemanticSurveyContract.ResponseSchema));
         await Assert.ThrowsAsync<InvalidOperationException>(() => client.TranslateStructuredAsync("neutral", options with { Model = "other" }, SemanticSurveyContract.ResponseSchema));
         Assert.Empty(handler.Calls); Assert.Equal(0, client.Transport.RequestsUsed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Multi_evidence_schema_is_sent_once_and_transient_or_network_errors_do_not_trigger_hidden_retries(bool network)
+    {
+        string? body = null;
+        var handler = new Handler(r =>
+        {
+            body = r.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            if (network) throw new HttpRequestException("Synthetic connection reset");
+            return new(HttpStatusCode.ServiceUnavailable);
+        });
+        var options = new ModelOptions { Model = "gemini-3.8-flash", ContextSize = 65536 };
+        using var client = SemanticSurveyBackend.Gemini("FAKE-ONLY", Guid.NewGuid(), options, new(5), handler);
+        await Assert.ThrowsAsync<SemanticTransportFailureException>(() => client.TranslateStructuredAsync("Mock two-evidence prompt", options, SemanticSurveyContract.MultiEvidenceSchema));
+        Assert.Single(handler.Calls); Assert.Equal(1, client.Transport.RequestsUsed);
+        using var json = JsonDocument.Parse(body!);
+        Assert.Equal(2, json.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema").GetProperty("properties").GetProperty("schema_version").GetProperty("enum")[0].GetInt32());
     }
 }

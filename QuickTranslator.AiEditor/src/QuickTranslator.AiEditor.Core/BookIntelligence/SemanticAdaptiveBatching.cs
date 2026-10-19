@@ -52,6 +52,7 @@ public static class SemanticAdaptiveBatching
         string instructions = first.Prompt[..first.Prompt.IndexOf("CONTEXT (", StringComparison.Ordinal)];
         // Keep the proven semantic instructions, changing only the scope/coverage contract.
         instructions = instructions.Replace("schema_version=1", "schema_version=2", StringComparison.Ordinal)
+            .Replace($"{SemanticSurveyContract.Version} / {SemanticSurveyRequests.PromptVersion}", $"{SemanticSurveyContract.MultiEvidenceVersion} / {PromptVersion}", StringComparison.Ordinal)
             .Replace("together on this evidence.", "together on each evidence independently.", StringComparison.Ordinal)
             .Replace("within evidence " + first.Evidence.Id, "within the corresponding evidence_id", StringComparison.Ordinal);
         var text = new StringBuilder(instructions);

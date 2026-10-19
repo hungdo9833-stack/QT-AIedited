@@ -71,9 +71,10 @@ public sealed class SemanticMemoryReviewService(ProjectSession session, ProjectR
                     var provenance = new MemoryProvenance(MemoryOrigin.User, "semantic-confirmation:" + proposal.Id,
                         "Explicit human confirmation of a mechanically audited semantic hypothesis. " + edit.Note, proposal.Id,
                         RuleId: batch.DependencyFingerprint);
+                    if (batch.ContextEventIds?.Count > 0) provenance = provenance with { Key = provenance.Key + ":deps=" + string.Join(',', batch.ContextFactIds.Concat(batch.ContextEventIds).Select(x => x.ToString("N"))) };
                     if (f.FindingType == SemanticFindingType.EventVerification)
                     {
-                        provenance = provenance with { Key = provenance.Key + ":deps=" + string.Join(',', batch.ContextFactIds.Select(x => x.ToString("N"))) };
+                        if (batch.ContextEventIds is null or { Count: 0 }) provenance = provenance with { Key = provenance.Key + ":deps=" + string.Join(',', batch.ContextFactIds.Select(x => x.ToString("N"))) };
                         Guid[] participants = f.VerifiedParticipants.Select(Resolve).Distinct().Order().ToArray();
                         var item = builder.Event(new() { Type = f.EventType!.Value, EntityIds = participants, Timeline = timeline,
                             Effect = f.EventEffect, AffectedFactIds = f.AffectedFactIds, EvidenceIds = evidence, Confidence = f.Confidence, Provenance = provenance });

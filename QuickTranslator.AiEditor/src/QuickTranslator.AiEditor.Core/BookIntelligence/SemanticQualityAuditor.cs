@@ -93,6 +93,8 @@ public static class SemanticQualityAuditor
                 if (finding.EventType is null && finding.EventActuality != SemanticActuality.NotAnEvent) errors.Add("MissingEventType");
                 if (finding.EventActuality is not (SemanticActuality.ActualCompleted or SemanticActuality.HistoricalReference) || finding.VerifiedParticipants.Count == 0) eligible = false;
                 if (finding.CpuCandidateIds.Any(id => !cpu.Contains(id))) errors.Add("ForeignCpuCandidate");
+                if (finding.CpuCandidateIds.Any(id => !request.Units.Any(u => u.CpuCandidates.Any(c => c.Id == id) && finding.SourceEvidenceIds.Contains(u.Evidence.Id))))
+                    errors.Add("CpuCandidateEvidenceMismatch");
                 if (finding.EventActuality == SemanticActuality.ActualCompleted && NonactualCue.IsMatch(quotes)) errors.Add("ActualityContradictionNeedsReview");
                 if (finding.EventType == TranslationImpactEventType.RevealIdentity && finding.EventActuality == SemanticActuality.ActualCompleted &&
                     quotes.Contains("其实是", StringComparison.Ordinal) && !new[] { "身份", "本名", "真名", "化名" }.Any(x => quotes.Contains(x, StringComparison.Ordinal))) errors.Add("ExplanationIsNotProofOfIdentityReveal");

@@ -58,7 +58,7 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
                     r.DependencyFingerprint, r.ContextFactIds, r.AllowedIdentities, r.CpuCandidates,
                     r.WireVersion == 1 ? SemanticSurveyRequests.PromptVersion : SemanticAdaptiveBatching.PromptVersion,
                     r.WireVersion == 1 ? SemanticSurveyContract.Version : SemanticSurveyContract.MultiEvidenceVersion,
-                    r.WireVersion == 1 ? null : r.Units.Select(x => new SemanticEvidenceKey(x.Evidence.Id, x.Id)).ToArray()));
+                    r.WireVersion == 1 ? null : r.Units.Select(x => new SemanticEvidenceKey(x.Evidence.Id, x.Id)).ToArray(), r.ContextEventIds));
             }
         }, ct).ConfigureAwait(false);
         int requests = 0, reserved = 0, processed = 0;
@@ -111,12 +111,13 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
                 {
                     bool reviewed = audit?.ReviewedEvidenceIds?.Contains(unit.Evidence.Id) == true;
                     var unitStatus = status is SemanticBatchStatus.Blocked or SemanticBatchStatus.Failed ? status : !reviewed ? SemanticBatchStatus.Pending :
+                        audit!.Findings.Any(x => x.Finding.SourceEvidenceIds.Contains(unit.Evidence.Id) && !x.EvidenceValid) ? SemanticBatchStatus.Failed :
                         audit!.Findings.Where(x => x.Finding.SourceEvidenceIds.Contains(unit.Evidence.Id)).All(x => x.EvidenceValid && x.Issues.Count == 0) &&
                         !unit.CpuCandidates.Any(x => audit.UnprocessedCpuIds.Contains(x.Id)) ? SemanticBatchStatus.Validated : SemanticBatchStatus.Analyzed;
                     s.EvidenceResults.Add(new(Guid.NewGuid(), attemptId, unit.Evidence.Id, unit.Id, unitStatus));
                 }
             }, CancellationToken.None).ConfigureAwait(false);
-            processed++; progress?.Report(new(processed, plan.Count, requests, reserved, error.Length > 0 ? error : status.ToString()));
+            processed++; progress?.Report(new(processed, execution.Length, requests, reserved, error.Length > 0 ? error : status.ToString()));
             if (cancelled) throw new OperationCanceledException(ct); if (quota) break;
         }
         return state;

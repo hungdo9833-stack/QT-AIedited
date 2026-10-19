@@ -5,6 +5,7 @@ using QuickTranslator.AiEditor.Core.Translation;
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
 public sealed class SemanticTransportBudgetException : Exception;
+public sealed class SemanticTransportFailureException : Exception;
 
 /// <summary>Bounds ALL HTTP requests, including metadata/retries, without changing existing adapters.</summary>
 public sealed class SemanticBudgetHandler(SemanticSurveyBudget budget, int maximumOutputTokens, HttpMessageHandler inner) : DelegatingHandler(inner)
@@ -20,7 +21,14 @@ public sealed class SemanticBudgetHandler(SemanticSurveyBudget budget, int maxim
             if (RequestsUsed >= budget.MaximumRequests || ReservedTokens + cost > budget.MaximumReservedTokens) throw new SemanticTransportBudgetException();
             RequestsUsed++; ReservedTokens += cost;
         }
-        return await base.SendAsync(request, ct).ConfigureAwait(false);
+        HttpResponseMessage response;
+        try { response = await base.SendAsync(request, ct).ConfigureAwait(false); }
+        // The shared Gemini adapter retries HttpRequestException/5xx. Semantic survey
+        // requires an explicit Resume instead; do not modify the shared adapter.
+        catch (HttpRequestException) { throw new SemanticTransportFailureException(); }
+        if ((int)response.StatusCode >= 500 || response.StatusCode == System.Net.HttpStatusCode.RequestTimeout)
+        { response.Dispose(); throw new SemanticTransportFailureException(); }
+        return response;
     }
 }
 

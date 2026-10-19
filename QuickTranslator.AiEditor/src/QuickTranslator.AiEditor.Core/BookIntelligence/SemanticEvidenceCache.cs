@@ -10,10 +10,11 @@ internal sealed class SemanticEvidenceCache
     {
         var statuses = state.Attempts.GroupBy(x => x.BatchId).ToDictionary(x => x.Key, x => x.Last());
         var proof = state.Evidence.ToDictionary(x => x.Id);
+        var resultKeys = state.EvidenceResults.Select(x => x.CacheKey).ToHashSet();
         foreach (var result in state.EvidenceResults.Where(x => x.Status is SemanticBatchStatus.Analyzed or SemanticBatchStatus.Validated)) _done.Add(result.CacheKey);
         foreach (var batch in state.Batches)
         {
-            if (batch.EvidenceKeys is null && statuses.TryGetValue(batch.Id, out var attempt) && attempt.Status is SemanticBatchStatus.Analyzed or SemanticBatchStatus.Validated &&
+            if (batch.EvidenceKeys is null && !resultKeys.Contains(batch.Id) && statuses.TryGetValue(batch.Id, out var attempt) && attempt.Status is SemanticBatchStatus.Analyzed or SemanticBatchStatus.Validated &&
                 !new[] { "IncompleteEvidenceCoverage", "ResponseScopeMismatch", "StaleOrForeignEvidence" }.Any(x => attempt.ErrorCode.Contains(x, StringComparison.Ordinal))) _done.Add(batch.Id);
         }
         var refused = state.Attempts.Where(x => x.Status == SemanticBatchStatus.Blocked).Select(x => x.BatchId).ToHashSet();

@@ -12,7 +12,7 @@ namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 public sealed record SemanticBatch(Guid Id, Guid ProjectId, Guid EvidenceId, string BackendSignature, ModelOptions Options,
     string ContextFingerprint, string DependencyFingerprint, IReadOnlyList<Guid> ContextFactIds, IReadOnlyList<SemanticKnownIdentity> AllowedIdentities,
     IReadOnlyList<SemanticCpuHint> CpuCandidates, string PromptVersion, string SchemaVersion,
-    IReadOnlyList<SemanticEvidenceKey>? EvidenceKeys = null)
+    IReadOnlyList<SemanticEvidenceKey>? EvidenceKeys = null, IReadOnlyList<Guid>? ContextEventIds = null)
 {
     [JsonIgnore] public IReadOnlyList<SemanticEvidenceKey> Keys => EvidenceKeys ?? [new(EvidenceId, Id)];
 }
@@ -47,6 +47,7 @@ public sealed class SemanticSurveyState
             batch.AllowedIdentities is not null && batch.AllowedIdentities.Count <= 8 && batch.CpuCandidates is not null && batch.CpuCandidates.Count <= 16 && batch.PromptVersion.Length > 0 && batch.SchemaVersion.Length > 0);
             Require(batch.Keys.Count is >= 1 and <= 6 && batch.Keys[0].EvidenceId == batch.EvidenceId && batch.Keys.Select(x => x.EvidenceId).Distinct().Count() == batch.Keys.Count &&
                 batch.Keys.All(x => x.CacheKey != Guid.Empty && proof.TryGetValue(x.EvidenceId, out var member) && member.ChapterId == proof[batch.EvidenceId].ChapterId && member.SourceSha256 == proof[batch.EvidenceId].SourceSha256));
+            Require(batch.ContextEventIds is null || batch.ContextEventIds.Count <= 12 && batch.ContextEventIds.All(x => x != Guid.Empty) && batch.ContextEventIds.Distinct().Count() == batch.ContextEventIds.Count);
             batch.Options.Validate(); }
         var reserved = new HashSet<Guid>(); var completed = new HashSet<Guid>();
         var attemptsById = Attempts!.ToDictionary(x => x.Id);

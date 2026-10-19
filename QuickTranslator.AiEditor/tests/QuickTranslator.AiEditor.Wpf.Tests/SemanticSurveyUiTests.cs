@@ -63,4 +63,57 @@ public sealed class SemanticSurveyUiTests
         Field<TextBox>(panel, "_requests").Text = "2"; Assert.Null(Field<object?>(panel, "_plan"));
         await panel.SurveyAsync(); Assert.Null(panel.LastError); Assert.Empty(panel.State.Attempts);
     });
+
+    [Fact]
+    public Task Adaptive_dry_run_shows_evidence_distribution_and_cost_units_without_constructing_backend() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture(); await fixture.CreateProjectAsync();
+        var chapter = TranslationService.CreateChapter("Synthetic multi-evidence", string.Concat(Enumerable.Range(0, 8).Select(_ => "林青来了。" + new string('云', 895))));
+        await fixture.Repository.AddChapterAsync(fixture.Project, chapter, 1);
+        var panel = new SemanticSurveyPanel(fixture.Project, fixture.Repository, _ => Task.CompletedTask, Selection());
+        panel.BackendFactory = (_, _) => throw new InvalidOperationException("No API from preview");
+        await panel.DryRunAsync(); Assert.Null(panel.LastError); var plan = Field<SemanticDryRun>(panel, "_plan");
+        Assert.Equal(8, plan.TotalEvidence); Assert.Equal(2, plan.PendingRequests); Assert.Equal(2, plan.EvidencePerBatch[4]);
+        string summary = Field<TextBlock>(panel, "_summary").Text;
+        Assert.Contains("8 evidence", summary); Assert.Contains("Evidence/batch", summary); Assert.Contains("vượt context=0", summary); Assert.Contains("KHÔNG phải token thực tế", summary);
+        Field<ComboBox>(panel, "_batchSize").SelectedItem = 6; Assert.Null(Field<object?>(panel, "_plan"));
+        await panel.DryRunAsync(); Assert.Null(panel.LastError); Assert.Equal(new[] { 6, 2 }, Field<SemanticDryRun>(panel, "_plan").Requests.Select(x => x.Units.Count));
+        Assert.Empty(panel.State.Attempts); Assert.Equal(0, fixture.Client.Calls);
+    });
+
+    [Fact]
+    public Task Partial_multi_evidence_response_resumes_missing_only_and_opens_confirms_the_correct_later_evidence() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture(); await fixture.CreateProjectAsync(); string[] names = ["王秀兰", "陈海", "周宁", "林青"];
+        var chapter = TranslationService.CreateChapter("Synthetic", string.Concat(names.Select(n => n + "来了。" + new string('云', 900 - n.Length - 3))));
+        await fixture.Repository.AddChapterAsync(fixture.Project, chapter, 1);
+        CorpusEvidence? opened = null; var panel = new SemanticSurveyPanel(fixture.Project, fixture.Repository, e => { opened = e; return Task.CompletedTask; }, Selection());
+        panel.ConfirmAction = _ => true; await panel.DryRunAsync(); Assert.Null(panel.LastError);
+        var units = Field<SemanticDryRun>(panel, "_plan").Requests.SelectMany(x => x.Units).ToDictionary(x => x.Evidence.Id); int responses = 0;
+        var fake = new Fake(p =>
+        {
+            var ids = System.Text.RegularExpressions.Regex.Matches(p, @"(?m)^EVIDENCE project=.*? id=([a-fA-F0-9-]{36}) start_utf16=").Select(m => Guid.Parse(m.Groups[1].Value)).ToArray();
+            if (responses++ == 0) ids = ids.Take(3).ToArray();
+            var findings = ids.Select(id =>
+            {
+                var u = units[id]; string name = names[u.Evidence.StartUtf16 / 900];
+                return new SemanticFinding { FindingType = SemanticFindingType.CharacterIdentification, IdentityResolutionStatus = SemanticResolution.NewIdentity,
+                    SubjectIdentity = new(null, "p_" + id.ToString("N"), name, MemoryEntityKind.Character, SemanticResolution.NewIdentity), Value = name,
+                    SourceEvidenceIds = [id], SupportSpans = [new(id, u.Evidence.StartUtf16, name.Length, name)], Reason = "Mock exact source", EffectiveChapter = 1, RevealedChapter = 1 };
+            }).ToArray();
+            return JsonSerializer.Serialize(new SemanticResponse(p.Contains("MULTI-EVIDENCE", StringComparison.Ordinal) ? 2 : 1, fixture.Project.Manifest.ProjectId, chapter.Id, ids, findings), SemanticSurveyContract.JsonOptions);
+        });
+        panel.BackendFactory = (_, _) => fake;
+        await panel.SurveyAsync(); Assert.Null(panel.LastError); Assert.Equal(3, panel.State.Proposals.Count);
+        await panel.DryRunAsync(); Assert.Null(panel.LastError); var resume = Field<SemanticDryRun>(panel, "_plan");
+        Assert.Equal(3, resume.CompletedEvidence); Assert.Equal(1, resume.PendingEvidence); Assert.Equal(1, resume.PendingRequests);
+        await panel.SurveyAsync(); Assert.Null(panel.LastError); Assert.Equal(2, fake.Calls); Assert.Equal(4, panel.State.Proposals.Count);
+        var grid = Field<DataGrid>(panel, "_grid"); grid.SelectedIndex = 3;
+        await panel.OpenAsync(); Assert.Null(panel.LastError); Assert.Equal("林青", opened!.Excerpt); Assert.Equal(2700, opened.StartUtf16);
+        grid.SelectedIndex = 3; panel.EditPromotion = (_, _) => new(new(1, null, 1, 1), "Human checked later evidence", new Dictionary<string, Guid>());
+        await panel.ReviewAsync(MemoryReviewStatus.Confirmed); Assert.Null(panel.LastError);
+        var memory = await new EntityMemoryStore(fixture.Project).LoadAsync(); Assert.Equal(2700, Assert.Single(memory.Evidence).StartUtf16);
+        await panel.LoadAsync(); Assert.Equal(MemoryReviewStatus.Confirmed, panel.State.Reviews.Last().Status);
+        Assert.False((await new ProjectSettingsStore(fixture.Project).LoadTranslationAsync()).BookKnowledgeContextEnabled); Assert.Equal(0, fixture.Client.Calls);
+    });
 }

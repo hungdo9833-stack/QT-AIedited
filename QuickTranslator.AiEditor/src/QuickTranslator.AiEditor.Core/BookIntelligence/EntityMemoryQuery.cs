@@ -75,11 +75,14 @@ public sealed class EntityMemoryQuery
             (fact is null || fact.InputFactIds.All(input => IsFresh(input) && RecordedStatus(input) != MemoryReviewStatus.Rejected &&
                 (fact.Provenance.Origin != MemoryOrigin.Rule || RecordedStatus(input) == MemoryReviewStatus.Confirmed)));
         if (result && fact is not null && fact.Provenance.Key.StartsWith("fact:semantic-confirmation:", StringComparison.Ordinal))
-            result = fact.Provenance.RuleId == SemanticDependencies.Fingerprint(this, fact.InputFactIds);
+        {
+            var inputs = fact.InputFactIds.Concat(SemanticDependencies.EventInputs(provenance)).Distinct().ToArray();
+            result = inputs.All(x => _facts.ContainsKey(x) || _events.ContainsKey(x)) && fact.Provenance.RuleId == SemanticDependencies.Fingerprint(this, inputs);
+        }
         if (result && fact is null && provenance.Key.StartsWith("event:semantic-confirmation:", StringComparison.Ordinal))
         {
             var inputs = SemanticDependencies.EventInputs(provenance);
-            result = inputs.All(_facts.ContainsKey) && provenance.RuleId == SemanticDependencies.Fingerprint(this, inputs);
+            result = inputs.All(x => _facts.ContainsKey(x) || _events.ContainsKey(x)) && provenance.RuleId == SemanticDependencies.Fingerprint(this, inputs);
         }
         _fresh[id] = result; return result;
     }

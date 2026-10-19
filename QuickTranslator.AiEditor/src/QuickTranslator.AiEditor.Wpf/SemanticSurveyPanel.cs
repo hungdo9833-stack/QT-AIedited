@@ -30,7 +30,8 @@ public sealed class SemanticSurveyPanel : UserControl
     private readonly TextBox _requests = new() { Text = "5", Width = 45 }, _tokens = new() { Text = "150000", Width = 85 }, _context = new() { Width = 75 },
         _chapter = new() { Width = 55 }, _character = new() { Width = 160 };
     private readonly ComboBox _kind = new() { ItemsSource = new[] { "Tất cả" }.Concat(Enum.GetNames<SemanticFindingType>()).ToArray(), SelectedIndex = 0, Width = 200 },
-        _status = new() { ItemsSource = new[] { "Tất cả", "Proposed", "Accepted", "Confirmed", "Rejected", "Stale", "Conflict", "InvalidEvidence", "Ambiguous" }, SelectedIndex = 0, Width = 140 };
+        _status = new() { ItemsSource = new[] { "Tất cả", "Proposed", "Accepted", "Confirmed", "Rejected", "Stale", "Conflict", "InvalidEvidence", "Ambiguous" }, SelectedIndex = 0, Width = 140 },
+        _batchSize = new() { ItemsSource = new[] { 2, 3, 4, 5, 6 }, SelectedItem = 4, Width = 45 };
     private readonly TextBlock _summary = new() { TextWrapping = TextWrapping.Wrap };
     private readonly DataGrid _grid = new() { IsReadOnly = true, CanUserAddRows = false, AutoGenerateColumns = false, SelectionMode = DataGridSelectionMode.Single };
     private readonly TextBox _details = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -70,7 +71,7 @@ public sealed class SemanticSurveyPanel : UserControl
         top.Children.Add(new TextBlock { Text = "AI Semantic Survey · đề xuất chưa duyệt, tách khỏi CPU hypothesis", FontSize = 20 });
         top.Children.Add(new TextBlock { Text = $"Backend đã chọn: {_selection?.Options.Model ?? "chưa chọn — quay lại cửa sổ khảo sát"}. Không tự đổi model/kết nối cloud. Audit toàn truyện; preview theo chương không nối pipeline dịch.", TextWrapping = TextWrapping.Wrap });
         var controls = new WrapPanel();
-        foreach (UIElement item in new UIElement[] { _dry, _run, _pause, _reload, Label("Max HTTP"), _requests, Label("Token reserve"), _tokens, Label("Context"), _context }) controls.Children.Add(item);
+        foreach (UIElement item in new UIElement[] { _dry, _run, _pause, _reload, Label("Max HTTP"), _requests, Label("Token reserve"), _tokens, Label("Context"), _context, Label("Max evidence/batch"), _batchSize }) controls.Children.Add(item);
         top.Children.Add(controls); var filters = new WrapPanel();
         foreach (UIElement item in new UIElement[] { _kind, _status, Label("Nhân vật"), _character, Label("Chương"), _chapter, _preview }) filters.Children.Add(item);
         top.Children.Add(filters); top.Children.Add(_summary); root.Children.Add(top);
@@ -85,6 +86,7 @@ public sealed class SemanticSurveyPanel : UserControl
         _undo.Click += async (_, _) => await UndoAsync(); _open.Click += async (_, _) => await OpenAsync(); _preview.Click += async (_, _) => await PreviewAsync();
         _grid.SelectionChanged += (_, _) => Details(); _kind.SelectionChanged += (_, _) => Filter(); _status.SelectionChanged += (_, _) => Filter(); _character.TextChanged += (_, _) => Filter(); _chapter.TextChanged += (_, _) => Filter();
         _requests.TextChanged += (_, _) => _plan = null; _tokens.TextChanged += (_, _) => _plan = null; _context.TextChanged += (_, _) => _plan = null;
+        _batchSize.SelectionChanged += (_, _) => _plan = null;
         Buttons(); return root;
         static TextBlock Label(string text) => new() { Text = text, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(5, 0, 3, 0) };
     }
@@ -99,6 +101,7 @@ public sealed class SemanticSurveyPanel : UserControl
         if (!int.TryParse(_requests.Text, out int requests) || !int.TryParse(_tokens.Text, out int tokens)) throw new ArgumentException("Ngân sách phải là số nguyên dương.");
         var result = new SemanticSurveyBudget(requests, tokens); result.Validate(); return result;
     }
+    private SemanticBatchingOptions Batching(SemanticSurveyBudget budget) => new((int)_batchSize.SelectedItem, budget.MaximumReservedTokens);
     internal async Task LoadAsync()
     {
         int generation = ++_loadGeneration;
@@ -113,11 +116,13 @@ public sealed class SemanticSurveyPanel : UserControl
     internal async Task DryRunAsync() => await Operate(async () =>
     {
         await LoadAsync(); var options = Options(); var legacy = await new BookIntelligenceStore(_session).LoadAsync();
-        var requests = await Task.Run(() => SemanticSurveyRequests.Plan(_memory, _sources, legacy, _selection!.Signature, options));
-        _plan = SemanticSurveyEngine.DryRun(requests, State, legacy); var budget = Budget();
-        _summary.Text = $"DRY-RUN · model={options.Model} · {_plan.TotalBatches} batches · {_plan.PendingRequests} pending calls · {_plan.BlockedBatches} blocked · input estimate {_plan.EstimatedInputTokens:N0} · conservative reserve {_plan.ConservativeReservedTokens:N0}. " +
+        var budget = Budget(); var batching = Batching(budget);
+        var requests = await Task.Run(() => SemanticSurveyRequests.Plan(_memory, _sources, legacy, _selection!.Signature, options, batching: batching));
+        _plan = SemanticSurveyEngine.DryRun(requests, State, legacy);
+        _summary.Text = $"DRY-RUN · model={options.Model} · context={options.ContextSize:N0} · {_plan.TotalEvidence} evidence · {_plan.TotalBatches} batches · {_plan.PendingRequests} pending calls ({_plan.PendingEvidence} evidence) · {_plan.CompletedEvidence} completed evidence · {_plan.BlockedEvidence} blocked evidence · input estimate {_plan.EstimatedInputTokens:N0} · conservative reserve {_plan.ConservativeReservedTokens:N0}. " +
+            $"Evidence/batch (k:số batch): {string.Join(", ", _plan.EvidencePerBatch.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value}"))} · vượt context={_plan.OverContextBatches}. Estimate là heuristic, reserve dùng trần UTF-8 bytes + output, KHÔNG phải token thực tế. " +
             $"Mỗi lần chạy: tối đa {budget.MaximumRequests} HTTP (tính cả metadata/retry), reserve {budget.MaximumReservedTokens:N0} token. Chưa gửi dữ liệu. " +
-            (_plan.Requests.Any(x => x.EstimatedInputTokens + options.MaximumOutputTokens > options.ContextSize) ? "Context quá nhỏ: tăng Context trước khi chạy." : "");
+            (_plan.OverContextBatches > 0 ? "Context quá nhỏ: tăng Context trước khi chạy." : "");
     }, false);
     internal async Task SurveyAsync()
     {
@@ -129,7 +134,8 @@ public sealed class SemanticSurveyPanel : UserControl
         {
             var budget = Budget(); var options = Options(); var legacy = await new BookIntelligenceStore(_session).LoadAsync();
             var currentSources = await EntityMemoryProjectInputs.LoadSourcesAsync(_session, _repository); var currentMemory = await new EntityMemoryStore(_session).LoadAsync();
-            var plan = await Task.Run(() => SemanticSurveyRequests.Plan(currentMemory, currentSources, legacy, _selection.Signature, options));
+            var batching = Batching(budget);
+            var plan = await Task.Run(() => SemanticSurveyRequests.Plan(currentMemory, currentSources, legacy, _selection.Signature, options, batching: batching));
             if (SemanticSurveyEngine.DryRun(plan, State, legacy).Fingerprint != _plan.Fingerprint) throw new InvalidOperationException("Nguồn/context/model/context size đã đổi; Dry-run lại trước khi gửi.");
             _cancel = new(); Buttons(); var ct = _cancel.Token;
             var backend = BackendFactory(_selection, budget); using var lifetime = backend as IDisposable;
@@ -140,9 +146,11 @@ public sealed class SemanticSurveyPanel : UserControl
                     // Recheck only source chapters actually used by this request/context, not the whole corpus per window.
                     var freshSession = await EntityMemoryProjectInputs.ReloadSessionAsync(_session, ct);
                     var memory = await new EntityMemoryStore(freshSession).LoadAsync(ct); if (memory.Revision != currentMemory.Revision) return false;
-                    var ids = new HashSet<Guid> { r.Evidence.ChapterId }; var visited = new HashSet<Guid>();
+                    var ids = r.Units.Select(x => x.Evidence.ChapterId).ToHashSet(); var visited = new HashSet<Guid>();
                     void Inputs(Guid id) { if (!visited.Add(id)) return; var f = memory.Facts.Single(x => x.Id == id); foreach (var proof in f.EvidenceIds) ids.Add(memory.Evidence.Single(x => x.Id == proof).ChapterId); foreach (var input in f.InputFactIds) Inputs(input); }
                     foreach (var id in r.ContextFactIds) Inputs(id);
+                    foreach (var id in r.ContextEventIds)
+                        foreach (var proof in memory.Events.Single(x => x.Id == id).EvidenceIds) ids.Add(memory.Evidence.Single(x => x.Id == proof).ChapterId);
                     foreach (var id in ids)
                     {
                         var entry = freshSession.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == id && x.DeletedAt is null); var original = currentSources.SingleOrDefault(x => x.ChapterId == id);
@@ -169,7 +177,7 @@ public sealed class SemanticSurveyPanel : UserControl
         var review = State.Reviews.LastOrDefault(x => x.ProposalId == proposal.Id); var query = _query!;
         if (review?.Status == MemoryReviewStatus.Confirmed && review.MemoryItemId is Guid id) return query.Status(id).ToString();
         var batch = State.Batches.Single(x => x.Id == proposal.BatchId);
-        if (!SemanticDependencies.Current(batch, State.Evidence.Single(x => x.Id == batch.EvidenceId), _memory, _sources, query)) return "Stale";
+        if (batch.Keys.Any(k => !SemanticDependencies.Current(batch, State.Evidence.Single(x => x.Id == k.EvidenceId), _memory, _sources, query))) return "Stale";
         return review?.Status.ToString() ?? (!proposal.Audit.EvidenceValid ? "InvalidEvidence" : proposal.Audit.Issues.Contains("ContradictionWithConfirmedMemory") ? "Conflict" : !proposal.Audit.CanPromote ? "Ambiguous" : "Proposed");
     }
     private void Filter()
@@ -188,7 +196,11 @@ public sealed class SemanticSurveyPanel : UserControl
         _details.Text = $"AI hypothesis · {row.Status} · {f.EventActuality}\n{f.Reason}\nUncertainties: {string.Join("; ", f.Uncertainties)}\nAudit: {string.Join(",", proposal.Audit.Issues)}\nVerifiedParticipants (đề xuất, chưa duyệt): {string.Join(", ", f.VerifiedParticipants.Select(x => x.Name))}\n" +
             string.Join("\n", SemanticQualityAuditor.Identities(f).Distinct().Select(x => $"Identity: {x.Name} · model kind={x.Kind} · {x.Status} · id={x.EntityId?.ToString() ?? "local:" + x.LocalId}")) +
             $"\nSpeaker: {f.SpeakerIdentity?.EntityId?.ToString() ?? f.SpeakerIdentity?.LocalId ?? "Unresolved"}; listener: {f.ListenerIdentity?.EntityId?.ToString() ?? f.ListenerIdentity?.LocalId ?? "Unresolved"}; xưng={f.SelfReference}; gọi={f.AddresseeReference}\n" +
-            string.Join("\n", f.SupportSpans.Select(span => $"{e.ChapterId} sha={e.SourceSha256} UTF-16 {span.StartUtf16}+{span.LengthUtf16}\n" + Quote(e, span))) +
+            string.Join("\n", f.SupportSpans.Select(span =>
+            {
+                var origin = State.Evidence.SingleOrDefault(x => x.Id == span.EvidenceId);
+                return origin is null ? "[foreign evidence]" : $"evidence={origin.Id} chapter={origin.ChapterId} sha={origin.SourceSha256} UTF-16 {span.StartUtf16}+{span.LengthUtf16}\n" + Quote(origin, span);
+            })) +
             "\nHistory:\n" + string.Join("\n", State.Reviews.Where(x => x.ProposalId == row.Id).Select(x => $"{x.At:O} {x.Status}: {x.Note}")); Buttons();
     }
     private string Quote(MemoryEvidence e, SemanticSupport span)
@@ -201,6 +213,7 @@ public sealed class SemanticSurveyPanel : UserControl
     {
         var row = _grid.SelectedItem as SemanticUiRow; _dry.IsEnabled = _run.IsEnabled = _reload.IsEnabled = !Busy; _pause.IsEnabled = Busy && _cancel is not null;
         _requests.IsEnabled = _tokens.IsEnabled = _context.IsEnabled = !Busy;
+        _batchSize.IsEnabled = !Busy;
         _accept.IsEnabled = _reject.IsEnabled = _open.IsEnabled = !Busy && row is not null;
         _confirm.IsEnabled = !Busy && row?.Status is "Proposed" or "Accepted" && State.Proposals.Single(x => x.Id == row.Id).Audit.CanPromote;
         _undo.IsEnabled = !Busy && row is not null && State.Reviews.Any(x => x.ProposalId == row.Id); _preview.IsEnabled = !Busy;
@@ -218,8 +231,10 @@ public sealed class SemanticSurveyPanel : UserControl
     }
     internal async Task OpenAsync() => await Operate(async () =>
     {
-        if (_grid.SelectedItem is not SemanticUiRow row) return; var proposal = State.Proposals.Single(x => x.Id == row.Id); var batch = State.Batches.Single(x => x.Id == proposal.BatchId); var proof = State.Evidence.Single(x => x.Id == batch.EvidenceId);
+        if (_grid.SelectedItem is not SemanticUiRow row) return; var proposal = State.Proposals.Single(x => x.Id == row.Id); var batch = State.Batches.Single(x => x.Id == proposal.BatchId);
         var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(_session, _repository); var span = proposal.Audit.Finding.SupportSpans.FirstOrDefault();
+        if (span is not null && !batch.Keys.Any(x => x.EvidenceId == span.EvidenceId)) throw new InvalidOperationException("Support không thuộc batch.");
+        var proof = State.Evidence.Single(x => x.Id == (span?.EvidenceId ?? batch.EvidenceId));
         var memory = new EntityMemoryState { ProjectId = State.ProjectId, Evidence = [proof with { StartUtf16 = span?.StartUtf16 ?? proof.StartUtf16, LengthUtf16 = span?.LengthUtf16 ?? proof.LengthUtf16 }] };
         await _openEvidence(new EntityMemoryQuery(memory, sources).Navigation(proof.Id));
     });

@@ -26,6 +26,7 @@ public sealed record SemanticSurveyRequest(Guid Id, Guid ProjectId, int ChapterN
     public int MaximumEvidencePerBatch { get; init; } = 4;
     public int MaximumBatchReserve { get; init; } = int.MaxValue;
     public ModelOptions? PlanningOptions { get; init; }
+    public IReadOnlyList<Guid> ContextEventIds { get; init; } = [];
 }
 
 public static class SemanticSurveyRequests
@@ -83,12 +84,13 @@ public static class SemanticSurveyRequests
                 int reserved = checked(Encoding.UTF8.GetByteCount(prompt) + Encoding.UTF8.GetByteCount(SemanticSurveyContract.ResponseSchema.GetRawText()) + 128 + options.MaximumOutputTokens);
                 string key = EntityMemoryIdentity.Fingerprint(new { proof, backendSignature, options, fingerprint, PromptVersion, schema = SemanticSurveyContract.Version });
                 requests.Add(new(EntityMemoryIdentity.StableId(memory.ProjectId, "semantic-batch:" + key), memory.ProjectId, source.ChapterNumber, backendSignature,
-                    proof, fingerprint, SemanticDependencies.Fingerprint(query, safeFacts.Select(x => x.Id)), prompt, estimate, reserved, safeIdentities, safeFacts.Select(x => x.Id).ToArray(), cpu, safeFacts)
+                    proof, fingerprint, SemanticDependencies.Fingerprint(query, safeFacts.Select(x => x.Id).Concat(safeEvents.Select(x => x.Id))), prompt, estimate, reserved, safeIdentities, safeFacts.Select(x => x.Id).ToArray(), cpu, safeFacts)
                 {
                     SharedContextJson = JsonSerializer.Serialize(new { confirmed_identities = safeIdentities, confirmed_facts = safeFacts, confirmed_events = safeEvents }, SemanticSurveyContract.JsonOptions),
                     EvidenceContextJson = JsonSerializer.Serialize(new { nearby_mentions = hints, cpu_event_hypotheses = cpu, unresolved_questions = questions }, SemanticSurveyContract.JsonOptions),
                     EvidenceText = window.Excerpt,
                     PlanningOptions = options,
+                    ContextEventIds = safeEvents.Select(x => x.Id).ToArray(),
                     Complex = cpu.Count(x => x.Type == TranslationImpactEventType.RevealIdentity) > 0 ||
                         new[] { "灵魂", "夺舍", "肉身", "意识", "同名", "化名", "真名" }.Any(x => window.Excerpt.Contains(x, StringComparison.Ordinal))
                 });
@@ -112,7 +114,8 @@ public static class SemanticDependencies
     {
         var source = sources.SingleOrDefault(x => x.ChapterId == proof.ChapterId);
         if (source is null || source.ChapterNumber != proof.ChapterNumber || CorpusIntegrityAuditor.SourceHash(source.OriginalText) != proof.SourceSha256 ||
-            (long)proof.StartUtf16 + proof.LengthUtf16 > source.OriginalText.Length || batch.ContextFactIds.Any(id => memory.Facts.All(x => x.Id != id))) return false;
-        return batch.DependencyFingerprint == Fingerprint(query ?? new(memory, sources), batch.ContextFactIds);
+            (long)proof.StartUtf16 + proof.LengthUtf16 > source.OriginalText.Length || batch.ContextFactIds.Any(id => memory.Facts.All(x => x.Id != id)) ||
+            batch.ContextEventIds?.Any(id => memory.Events.All(x => x.Id != id)) == true) return false;
+        return batch.DependencyFingerprint == Fingerprint(query ?? new(memory, sources), batch.ContextFactIds.Concat(batch.ContextEventIds ?? []));
     }
 }
