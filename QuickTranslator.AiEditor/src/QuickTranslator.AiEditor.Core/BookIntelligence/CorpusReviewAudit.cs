@@ -5,13 +5,18 @@ using QuickTranslator.AiEditor.Core.Projects;
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
 public sealed record CorpusAuditReviewItem(string Group, string Title, string Reason,
-    Guid ChapterId, int StartUtf16, IReadOnlyList<CorpusEvidence> Evidence);
+    Guid ChapterId, int StartUtf16, IReadOnlyList<CorpusEvidence> Evidence, string? MissingIdentityName = null);
 public sealed record CorpusReviewAudit(CorpusIntegrityReport Integrity, CharacterCensusReport Census,
-    IReadOnlyList<CorpusAuditReviewItem> Items)
+    IReadOnlyList<CorpusAuditReviewItem> Items, int IdentityReviewsPending = 0)
 {
-    public bool Complete => Integrity.Complete && Census.MissingIdentities.Count == 0;
-    public string Summary => (Complete ? Integrity.Summary : Integrity.Summary.Replace("Complete / Verified", "Analyzed / NeedsReview", StringComparison.Ordinal)) +
-        $" · Missing identity {Census.MissingIdentities.Count}. CPU hypotheses are unverified; no auto-accept.";
+    public bool ManualReviewComplete => Integrity.ManualReviewComplete && IdentityReviewsPending == 0;
+    public bool Complete => Integrity.AiSurveyComplete && ManualReviewComplete;
+    public bool AccuracyVerified => false;
+    public string Summary => $"Corpus: {(Integrity.CorpusProcessed ? "xử lý xong" : Integrity.Status.ToString())} · " +
+        $"AI survey: {(Integrity.AiSurveyComplete ? "xong" : "chưa xong")} · Manual review: {(ManualReviewComplete ? "xong" : "NeedsReview")} · " +
+        $"Accuracy: chưa được kiểm chứng · active {Integrity.IndexedChapters}/{Integrity.ActiveChapters} chương · " +
+        $"current {Integrity.Current} · analyzed {Integrity.Analyzed} · blocked {Integrity.Blocked} · missing {Integrity.Missing} · " +
+        $"stale {Integrity.Stale} · skipped {Integrity.Skipped} · unverified {Integrity.Unverified} · Identity review pending {IdentityReviewsPending}. Không tự accept.";
 
     public Task SaveDiagnosticsAsync(ProjectSession session, CancellationToken cancellationToken = default)
     {
@@ -23,17 +28,43 @@ public sealed record CorpusReviewAudit(CorpusIntegrityReport Integrity, Characte
     }
     private sealed record Diagnostic(int SchemaVersion, CorpusIntegrityReport Integrity, bool Complete, string Summary);
 
-    public static CorpusReviewAudit Build(CorpusIntegrityReport integrity, CharacterCensusReport census, BookIntelligenceState state)
+    public static CorpusReviewAudit Build(CorpusIntegrityReport integrity, CharacterCensusReport census, BookIntelligenceState state,
+        MissingIdentityReviewState? identityReviews = null, ProjectResources? resources = null)
     {
         if (integrity.ProjectId != census.ProjectId || state.ProjectId != census.ProjectId ||
             integrity.StateRevision != state.Revision || census.SurveyRevision != state.Revision)
             throw new InvalidOperationException("Audit snapshots do not match current survey revision.");
         var items = new List<CorpusAuditReviewItem>();
+        if (identityReviews is not null && (identityReviews.ProjectId != state.ProjectId || resources?.ProjectId != state.ProjectId))
+            throw new InvalidOperationException("Identity decisions/resources belong to another project.");
+        var latest = identityReviews?.Latest.ToDictionary(x => x.ChineseName, StringComparer.Ordinal) ?? [];
+        int identityPending = 0;
         foreach (var missing in census.MissingIdentities)
+        {
+            if (latest.ContainsKey(missing.ChineseName)) continue; // handled with provenance below
+            identityPending++;
             items.Add(new("Missing identity", $"{missing.ChineseName} · {missing.Frequency} lượt · chương {missing.FirstChapter}–{missing.LastChapter}",
                 $"{missing.Kind}: ứng viên CPU chưa có hồ sơ/review. Không khẳng định danh tính, không tự gộp bí danh.",
                 missing.Mentions[0].ChapterId, missing.Mentions[0].StartUtf16,
-                missing.Mentions.Select(x => x.NavigationEvidence(missing.ChineseName)).ToArray()));
+                missing.Mentions.Select(x => x.NavigationEvidence(missing.ChineseName)).ToArray(), missing.ChineseName));
+        }
+        foreach (var decision in latest.Values)
+        {
+            var candidate = census.Candidates.SingleOrDefault(x => x.ChineseName == decision.ChineseName);
+            bool current = MissingIdentityReviewStore.IsCurrent(decision, census, resources!);
+            bool queued = current && decision.Kind == MissingIdentityDecisionKind.VerifyNewCharacter;
+            if (candidate is not null && (!current || queued)) identityPending++;
+            string group = !current && candidate is not null ? "Missing identity" : queued || !current ? "Unverified" : "Identity đã xử lý";
+            var mentions = candidate?.Mentions ?? decision.Mentions;
+            // Retired decision provenance is readable but never used as current navigation evidence.
+            var evidence = candidate?.Mentions.Select(x => x.NavigationEvidence(decision.ChineseName)).ToArray() ?? [];
+            string status = !current ? "Cần xác minh lại nguồn/nhân vật" : queued ? "Chờ xác minh nhân vật mới" : "Đã xử lý audit";
+            string history = string.Join("\n", identityReviews!.History.Where(x => x.ChineseName == decision.ChineseName)
+                .Select(x => $"{x.DecidedAt:O} · {x.Kind} · {x.LinkKind} · {x.TargetNameSnapshot} ({x.TargetCharacterId}) · {x.Note} · id={x.Id}"));
+            items.Add(new(group, decision.ChineseName + " · " + status,
+                status + ". Liên kết chỉ dùng cho audit, không sửa Characters/bí danh dịch.\n" + history,
+                mentions[0].ChapterId, mentions[0].StartUtf16, evidence, candidate is null ? null : decision.ChineseName));
+        }
         foreach (var chapter in integrity.Chapters.Where(x => x.Active && !x.Indexed || !x.Active && x.Current > 0))
             foreach (var issue in chapter.Issues)
                 items.Add(new("Stale index", $"Chương {chapter.ChapterNumber} · {issue.Code} · UTF-16 {issue.StartUtf16}+{issue.LengthUtf16}",
@@ -59,6 +90,6 @@ public sealed record CorpusReviewAudit(CorpusIntegrityReport Integrity, Characte
         foreach (var item in state.Characters.Where(x => x.Status is IntelligenceReviewStatus.Pending or IntelligenceReviewStatus.ReviewLater)) Pending(item.ChineseName, item.EvidenceIds);
         foreach (var item in state.Relationships.Where(x => x.Status is IntelligenceReviewStatus.Pending or IntelligenceReviewStatus.ReviewLater)) Pending(item.SpeakerChineseName + " → " + item.ListenerChineseName, item.EvidenceIds);
         foreach (var item in state.Glossary.Where(x => x.Status is IntelligenceReviewStatus.Pending or IntelligenceReviewStatus.ReviewLater)) Pending(item.Chinese, item.EvidenceIds);
-        return new(integrity, census, items);
+        return new(integrity, census, items, identityPending);
     }
 }

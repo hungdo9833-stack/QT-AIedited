@@ -52,10 +52,17 @@ public sealed class BookIntelligenceReviewWindow : Window
     private readonly ComboBox _statusFilter = new() { Width = 145, ItemsSource = new[] { "Tất cả trạng thái", "Chờ duyệt", "Đã xử lý", "Xung đột/Stale" }, SelectedIndex = 0 };
     private bool _loading;
     private CorpusReviewAudit? _corpusAudit;
+    private MissingIdentityReviewState? _identityReviews;
+    private readonly WrapPanel _identityActions = new() { Visibility = Visibility.Collapsed };
+    private readonly Button _identityNotCharacter = new() { Content = "Không phải nhân vật" };
+    private readonly Button _identityQueue = new() { Content = "Chờ xác minh nhân vật mới" };
+    private readonly Button _identityLink = new() { Content = "Xác nhận liên kết (audit)" };
+    private readonly ComboBox _identityTarget = new() { Width = 170, DisplayMemberPath = nameof(CharacterProfile.VietnameseName) };
+    private readonly ComboBox _identityLinkKind = new() { Width = 150, ItemsSource = new[] { "Cùng danh tính", "Bí danh / danh xưng" } };
     private bool _auditing;
     private readonly Button _audit = new() { Content = "Kiểm tra corpus (CPU)" };
     private readonly ComboBox _auditGroup = new() { Width = 170, ItemsSource = new[]
-        { "Đề xuất hiện có", "Missing identity", "Stale index", "Blocked excerpts", "Unverified" }, SelectedIndex = 0 };
+        { "Đề xuất hiện có", "Missing identity", "Stale index", "Blocked excerpts", "Unverified", "Identity đã xử lý" }, SelectedIndex = 0 };
     private readonly TextBlock _auditSummary = new() { Text = "Corpus chưa được kiểm chứng từ Manifest + OriginalText.", TextWrapping = TextWrapping.Wrap };
 
     public BookIntelligenceReviewWindow(ProjectSession session, ProjectRepository repository,
@@ -108,6 +115,9 @@ public sealed class BookIntelligenceReviewWindow : Window
         header.Children.Add(filters);
         header.Children.Add(controls); header.Children.Add(_progress); header.Children.Add(_summary);
         header.Children.Add(_auditSummary);
+        _identityActions.Children.Add(_identityNotCharacter); _identityActions.Children.Add(_identityQueue);
+        _identityActions.Children.Add(_identityTarget); _identityActions.Children.Add(_identityLinkKind); _identityActions.Children.Add(_identityLink);
+        header.Children.Add(_identityActions);
         root.Children.Add(header);
 
         var footer = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
@@ -144,6 +154,11 @@ public sealed class BookIntelligenceReviewWindow : Window
         _blocked.Click += async (_, _) => await ShowBlockedEvidenceAsync();
         _audit.Click += async (_, _) => await RefreshCorpusAuditAsync();
         _auditGroup.SelectionChanged += (_, _) => RefreshQueue();
+        _identityNotCharacter.Click += async (_, _) => await ReviewMissingIdentityAsync(MissingIdentityDecisionKind.NotCharacter);
+        _identityQueue.Click += async (_, _) => await ReviewMissingIdentityAsync(MissingIdentityDecisionKind.VerifyNewCharacter);
+        _identityLink.Click += async (_, _) => await ReviewMissingIdentityAsync(MissingIdentityDecisionKind.LinkExisting);
+        _identityTarget.SelectionChanged += (_, _) => ShowSelection();
+        _identityLinkKind.SelectionChanged += (_, _) => ShowSelection();
         _cancel.Click += (_, _) => _cancellation?.Cancel();
         _save.Click += async (_, _) => await SaveSelectedAsync();
         _merge.Click += async (_, _) => await MergeSelectedAsync();
@@ -313,7 +328,7 @@ public sealed class BookIntelligenceReviewWindow : Window
             await RefreshCorpusAuditAsync();
             int blockedCount = _state.Evidence.Count(x => x.IsCurrent && x.AiBlocked);
             ReviewRow? newest = Rows().FirstOrDefault(x => x.Status == IntelligenceReviewStatus.Pending.ToString());
-            _summary.Text = $"{(_corpusAudit?.Complete == true ? "Complete / Verified" : "Khảo sát kết thúc · NeedsReview")} · " +
+            _summary.Text = $"{(_corpusAudit?.Complete == true ? "Quy trình xử lý xong; độ chính xác chưa được kiểm chứng" : "Khảo sát kết thúc · NeedsReview")} · " +
                 $"{_state.Metrics.Requests} request · " +
                 $"{_state.PendingCount} đề xuất chờ duyệt · {blockedCount} đoạn thuộc batch bị Google từ chối. " +
                 (blockedCount > 0
@@ -464,6 +479,8 @@ public sealed class BookIntelligenceReviewWindow : Window
         if (_evidence.SelectedItem is EvidenceRow item) await _openEvidence(item.Evidence);
         else if (_queue.SelectedItem is ReviewRow { Value: CorpusAuditReviewItem audit })
         {
+            if (!_session.Manifest.Chapters.Any(x => x.ChapterId == audit.ChapterId && x.DeletedAt is null))
+            { _summary.Text = "Chứng cứ thuộc nguồn không còn active; chỉ xem lịch sử, không dùng làm dữ kiện hiện hành."; return; }
             if (audit.Evidence.FirstOrDefault() is CorpusEvidence first) { await _openEvidence(first); return; }
             // A broken/stale index is not navigation evidence. Re-read actual source
             // and bind the navigation marker to its current hash and safe range.
@@ -485,6 +502,43 @@ public sealed class BookIntelligenceReviewWindow : Window
         _stateChanged(_state, _translationContext.IsChecked == true); RefreshQueue();
     }
 
+    private async Task ReviewMissingIdentityAsync(MissingIdentityDecisionKind kind)
+    {
+        if (_auditing || _cancellation is not null || _corpusAudit is null || _identityReviews is null ||
+            _queue.SelectedItem is not ReviewRow { Value: CorpusAuditReviewItem { MissingIdentityName: string name } }) return;
+        var target = _identityTarget.SelectedItem as CharacterProfile;
+        if (kind == MissingIdentityDecisionKind.LinkExisting && (target is null || _identityLinkKind.SelectedIndex < 0)) return;
+        string action = kind switch
+        {
+            MissingIdentityDecisionKind.NotCharacter => "đánh dấu không phải nhân vật",
+            MissingIdentityDecisionKind.VerifyNewCharacter => "đưa vào hàng chờ xác minh nhân vật mới (chưa duyệt)",
+            _ => $"liên kết {(_identityLinkKind.SelectedIndex == 0 ? "cùng danh tính" : "bí danh/danh xưng")} với {target!.ChineseName} / {target.VietnameseName} ({target.Id})"
+        };
+        if (MessageBox.Show(this, $"Xác nhận {name}: {action}?\n" +
+            "Chỉ lưu quyết định audit cùng nguồn và lịch sử. Không sửa Project Resources, không gộp danh tính hay thêm bí danh dịch. " +
+            "Nguồn thay đổi sẽ yêu cầu xác minh lại.", "Duyệt Missing Identity", MessageBoxButton.YesNo,
+            MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        _auditing = true;
+        _run.IsEnabled = _rerun.IsEnabled = _audit.IsEnabled = false;
+        ShowSelection();
+        try
+        {
+            _identityReviews = await new MissingIdentityReviewStore(_session).DecideAsync(_corpusAudit.Census,
+                name, kind, _identityReviews.Revision, _resources.Revision,
+                kind == MissingIdentityDecisionKind.LinkExisting ? target!.Id : null,
+                kind == MissingIdentityDecisionKind.LinkExisting ? (MissingIdentityLinkKind?)_identityLinkKind.SelectedIndex : null,
+                "Người dùng xác nhận: " + action);
+            _summary.Text = "Đã lưu quyết định Missing Identity; dữ liệu Characters/Glossary không đổi.";
+        }
+        catch (Exception ex) { ShowFailure(ex); }
+        finally
+        {
+            _auditing = false;
+            InvalidateCorpusAudit();
+            await RefreshCorpusAuditAsync();
+        }
+    }
+
     private void InvalidateCorpusAudit()
     {
         _corpusAudit = null;
@@ -500,18 +554,21 @@ public sealed class BookIntelligenceReviewWindow : Window
         _auditing = true;
         _auditSummary.Text = "CPU: đối chiếu active Manifest, hash, UTF-16 coverage và census toàn bộ nguyên tác…";
         var snapshot = BookIntelligenceStore.Clone(_state);
-        var resources = _resources.Clone();
         string signature = ActiveCorpusSignature();
         _run.IsEnabled = _rerun.IsEnabled = _audit.IsEnabled = false;
         ShowSelection();
         try
         {
+            var resources = await new ProjectResourceStore(_session).LoadAsync();
+            _resources = resources;
+            _identityReviews = await new MissingIdentityReviewStore(_session).LoadAsync();
             var integrity = await new CorpusIntegrityAuditor(_repository).AuditAsync(_session, snapshot);
-            var census = await CharacterMentionCensus.ScanAsync(_session, _repository, resources, snapshot);
+            var census = await CharacterMentionCensus.ScanAsync(_session, _repository, resources, snapshot,
+                reviewNames: _identityReviews.Latest.Select(x => x.ChineseName).ToArray());
             if (_state.Revision != snapshot.Revision || _resources.Revision != resources.Revision || signature != ActiveCorpusSignature() ||
                 integrity.Chapters.Any(x => x.Active && (!census.SourceHashes.TryGetValue(x.ChapterId, out string? hash) || hash != x.SourceSha256)))
                 throw new InvalidOperationException("Corpus changed or is unreadable during audit; refresh required.");
-            _corpusAudit = CorpusReviewAudit.Build(integrity, census, snapshot);
+            _corpusAudit = CorpusReviewAudit.Build(integrity, census, snapshot, _identityReviews, resources);
             // Diagnostics only, separate versioned sidecar. No resource/schema/approval changes.
             await CharacterMentionCensus.SaveReportAsync(_session, census);
             await _corpusAudit.SaveDiagnosticsAsync(_session);
@@ -598,6 +655,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         _queue.ItemsSource = Rows();
         _blocked.IsEnabled = _state?.Evidence.Any(x => x.IsCurrent && x.AiBlocked) == true;
         _mergeTarget.ItemsSource = _resources.Characters.Profiles.OrderBy(x => x.VietnameseName).ToList();
+        _identityTarget.ItemsSource = _resources.Characters.Profiles.OrderBy(x => x.VietnameseName).ToList();
         if (_state is not null) _summary.Text = $"{_state.Evidence.Count(x => x.IsCurrent)} đoạn chứng cứ · {_state.PendingCount} đề xuất chờ duyệt · AutoApplyVerified = false.";
         ShowSelection();
     }
@@ -644,6 +702,10 @@ public sealed class BookIntelligenceReviewWindow : Window
     {
         bool readOnlyAudit = _auditGroup.SelectedIndex > 0;
         bool busy = _auditing || _cancellation is not null;
+        bool identityRow = _queue.SelectedItem is ReviewRow { Value: CorpusAuditReviewItem { MissingIdentityName: not null } };
+        _identityActions.Visibility = identityRow ? Visibility.Visible : Visibility.Collapsed;
+        _identityNotCharacter.IsEnabled = _identityQueue.IsEnabled = _identityTarget.IsEnabled = _identityLinkKind.IsEnabled = identityRow && !busy;
+        _identityLink.IsEnabled = identityRow && !busy && _identityTarget.SelectedItem is CharacterProfile && _identityLinkKind.SelectedIndex >= 0;
         _save.IsEnabled = _later.IsEnabled = _reject.IsEnabled = !readOnlyAudit && !busy;
         _merge.IsEnabled = _mergeTarget.IsEnabled = !readOnlyAudit && !busy;
         if (_state is null || _queue.SelectedItem is not ReviewRow row)

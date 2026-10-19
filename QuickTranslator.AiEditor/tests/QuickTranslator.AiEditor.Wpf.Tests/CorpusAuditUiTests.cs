@@ -60,6 +60,34 @@ public sealed class CorpusAuditUiTests
                     Assert.Equal(CorpusIntegrityAuditor.SourceHash(chapter.OriginalText), opened.SourceSha256);
                 }
             }
+            groups.SelectedItem = "Missing identity";
+            var identityQueue = Get<DataGrid>(window, "_queue");
+            identityQueue.SelectedItem = identityQueue.Items.Cast<object>().Single(x => IdentityRow(x).MissingIdentityName == "沈夕颜");
+            Assert.Equal(Visibility.Visible, Get<WrapPanel>(window, "_identityActions").Visibility);
+            Assert.True(Get<Button>(window, "_identityNotCharacter").IsEnabled);
+            Assert.True(Get<Button>(window, "_identityQueue").IsEnabled);
+            Assert.False(Get<Button>(window, "_identityLink").IsEnabled); // no implicit target/link selection
+            var identityStore = new MissingIdentityReviewStore(fixture.Project);
+            var decided = await identityStore.DecideAsync(Get<CorpusReviewAudit>(window, "_corpusAudit").Census,
+                "沈夕颜", MissingIdentityDecisionKind.NotCharacter, 0, resources.Revision);
+            window.Close();
+            window = new BookIntelligenceReviewWindow(fixture.Project, fixture.Repository, resources, [],
+                _ => throw new InvalidOperationException("No automatic Character creation"),
+                _ => resourceWrites++, _ => Task.CompletedTask, (_, _) => { });
+            window.Show();
+            for (int i = 0; i < 500 && (Get<bool>(window, "_loading") || Get<CorpusReviewAudit?>(window, "_corpusAudit") is null); i++)
+                await Task.Delay(10);
+            groups = Get<ComboBox>(window, "_auditGroup");
+            groups.SelectedItem = "Identity đã xử lý";
+            Assert.Contains(Get<DataGrid>(window, "_queue").Items.Cast<object>(), x => IdentityRow(x).MissingIdentityName == "沈夕颜");
+            await identityStore.DecideAsync(Get<CorpusReviewAudit>(window, "_corpusAudit").Census,
+                "沈夕颜", MissingIdentityDecisionKind.VerifyNewCharacter, decided.Revision, resources.Revision);
+            await Invoke(window, "RefreshCorpusAuditAsync");
+            groups.SelectedItem = "Unverified";
+            Assert.Contains(Get<DataGrid>(window, "_queue").Items.Cast<object>(), x => IdentityRow(x).Title.Contains("Chờ xác minh nhân vật mới"));
+            Assert.False(Get<CorpusReviewAudit>(window, "_corpusAudit").ManualReviewComplete);
+            Assert.Contains("Accuracy: chưa được kiểm chứng", Get<TextBlock>(window, "_auditSummary").Text);
+            Assert.DoesNotContain("/ Verified", Get<TextBlock>(window, "_auditSummary").Text);
             Assert.Equal(0, resourceWrites);
             Assert.Equal(surveyBefore, await System.IO.File.ReadAllBytesAsync(store.PathName));
             Assert.Equal(manifestBefore, await System.IO.File.ReadAllBytesAsync(fixture.Project.ManifestPath));
@@ -70,6 +98,7 @@ public sealed class CorpusAuditUiTests
 
     private static T Get<T>(object target, string field) => (T)target.GetType().GetField(field,
         BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
+    private static CorpusAuditReviewItem IdentityRow(object row) => (CorpusAuditReviewItem)row.GetType().GetProperty("Value")!.GetValue(row)!;
     private static Task Invoke(object target, string method) => (Task)target.GetType().GetMethod(method,
         BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, null)!;
 }

@@ -50,7 +50,8 @@ public static class CharacterMentionCensus
     };
 
     public static CharacterCensusReport Scan(Guid projectId, long surveyRevision, IReadOnlyList<CensusSource> sources,
-        ProjectResources resources, BookIntelligenceState state, CancellationToken cancellationToken = default)
+        ProjectResources resources, BookIntelligenceState state, CancellationToken cancellationToken = default,
+        IReadOnlyCollection<string>? reviewNames = null)
     {
         if (projectId != resources.ProjectId || projectId != state.ProjectId) throw new InvalidOperationException("Census belongs to another project.");
         if (sources.Select(x => x.ChapterId).Distinct().Count() != sources.Count) throw new InvalidDataException("Duplicate census chapter identity.");
@@ -62,6 +63,7 @@ public static class CharacterMentionCensus
             .Where(Useful).ToHashSet(StringComparer.Ordinal);
         var names = new Dictionary<string, MentionHypothesisKind>(StringComparer.Ordinal);
         foreach (string name in profiles.Concat(reviewed)) names.TryAdd(name, MentionHypothesisKind.KnownName);
+        foreach (string name in (reviewNames ?? []).Where(Useful)) names.TryAdd(name, MentionHypothesisKind.KnownName);
         // A bare candidate record is not an actionable Character review row.
         // Seed its literal form, but still report missing profile/review if orphaned.
         foreach (string name in state.CandidateIdentities.SelectMany(x => new[] { x.ChineseName }.Concat(x.Aliases)).Where(Useful))
@@ -124,7 +126,8 @@ public static class CharacterMentionCensus
     }
 
     public static async Task<CharacterCensusReport> ScanAsync(ProjectSession session, ProjectRepository repository,
-        ProjectResources resources, BookIntelligenceState state, CancellationToken cancellationToken = default)
+        ProjectResources resources, BookIntelligenceState state, CancellationToken cancellationToken = default,
+        IReadOnlyCollection<string>? reviewNames = null)
     {
         var sources = new List<CensusSource>();
         foreach (var entry in session.Manifest.Chapters.Where(x => x.DeletedAt is null).OrderBy(x => x.Number).ThenBy(x => x.ChapterId))
@@ -134,7 +137,7 @@ public static class CharacterMentionCensus
             if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId) throw new InvalidDataException("Census chapter identity mismatch.");
             sources.Add(new(entry.ChapterId, entry.Number, chapter.OriginalText ?? ""));
         }
-        return Scan(session.Manifest.ProjectId, state.Revision, sources, resources, state, cancellationToken);
+        return Scan(session.Manifest.ProjectId, state.Revision, sources, resources, state, cancellationToken, reviewNames);
     }
 
     // Optional, versioned diagnostics sidecar. Never part of Project Resources or a

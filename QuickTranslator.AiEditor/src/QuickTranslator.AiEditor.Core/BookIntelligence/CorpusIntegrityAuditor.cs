@@ -29,13 +29,20 @@ public sealed record CorpusIntegrityReport(Guid ProjectId, long StateRevision,
     public int Missing => Chapters.Where(x => x.Active).Sum(x => x.Issues.Count(i => i.Code is "Gap" or "MissingIndex" or "Unreadable"));
     public int Stale => Chapters.Sum(x => x.Stale);
     public bool NeedsReindex => Chapters.Any(x => x.Active && !x.Indexed || !x.Active && x.Current > 0);
-    public bool Verified => ActiveChapters > 0 && !NeedsReindex && Blocked == 0 && Skipped == 0 && Unverified == 0 && PendingReviews == 0;
-    public bool Complete => Verified;
+    public bool CorpusProcessed => ActiveChapters > 0 && !NeedsReindex;
+    public bool AiSurveyComplete => CorpusProcessed && Blocked == 0 && Skipped == 0 && Unverified == 0;
+    public bool ManualReviewComplete => AiSurveyComplete && PendingReviews == 0;
+    // Compatibility getter, never a claim about extraction accuracy. No quality
+    // benchmark/human-labelled corpus is recorded by this operational report.
+    public bool AccuracyVerified => false;
+    public bool Verified => AccuracyVerified;
+    public bool Complete => AiSurveyComplete && ManualReviewComplete;
     public CorpusCompletion Status => NeedsReindex ? CorpusCompletion.NeedsReindex
         : ActiveChapters == 0 ? CorpusCompletion.Incomplete : Blocked > 0 ? CorpusCompletion.Blocked
         : Skipped > 0 ? CorpusCompletion.Skipped : Unverified > 0 ? CorpusCompletion.Indexed
-        : Verified ? CorpusCompletion.Complete : CorpusCompletion.Analyzed;
-    public string Summary => $"{Status}{(Verified ? " / Verified" : " / NeedsReview")} · active {IndexedChapters}/{ActiveChapters} chương · " +
+        : Complete ? CorpusCompletion.Complete : CorpusCompletion.Analyzed;
+    public string Summary => $"{Status} · Corpus: {(CorpusProcessed ? "xử lý xong" : "chưa xong")} · AI survey: {(AiSurveyComplete ? "xong" : "chưa xong")} · " +
+        $"Manual review: {(ManualReviewComplete ? "xong" : "NeedsReview")} · Accuracy: chưa được kiểm chứng · active {IndexedChapters}/{ActiveChapters} chương · " +
         $"current {Current} · analyzed {Analyzed} · blocked {Blocked} · missing {Missing} · stale {Stale} · skipped {Skipped} · unverified {Unverified}";
 }
 
