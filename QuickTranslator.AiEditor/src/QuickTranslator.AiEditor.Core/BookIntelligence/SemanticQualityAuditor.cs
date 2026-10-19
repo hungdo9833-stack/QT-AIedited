@@ -149,8 +149,8 @@ public static class SemanticQualityAuditor
         System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
     /// <summary>
     /// Models quote reliably but cannot count UTF-16 offsets. The proof is the quoted text: locate it
-    /// verbatim inside the span's declared evidence window (only CRLF/LF/CR line breaks are
-    /// interchangeable) and take the occurrence nearest the reported offset. The located range and the
+    /// verbatim inside the span's declared evidence window and take the occurrence nearest the reported
+    /// offset. Only line breaks are tolerated (see <see cref="QuotePattern"/>). The located range and the
     /// exact source text replace the model's numbers. An unlocatable quote keeps the reported span and
     /// fails the SupportSpanMismatch check; nothing is ever located outside the declared evidence.
     /// </summary>
@@ -166,7 +166,8 @@ public static class SemanticQualityAuditor
             string.CompareOrdinal(text, span.StartUtf16, span.Text, 0, span.LengthUtf16) == 0) return span;
         try
         {
-            string pattern = string.Join("(?:\r\n|\n|\r)", LineBreak.Split(span.Text).Select(System.Text.RegularExpressions.Regex.Escape));
+            if (LineBreak.Replace(span.Text, "").Length == 0) return span;
+            string pattern = QuotePattern(span.Text);
             string window = text.Substring(proof.StartUtf16, proof.LengthUtf16);
             System.Text.RegularExpressions.Match? best = null;
             foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(window, pattern,
@@ -176,6 +177,24 @@ public static class SemanticQualityAuditor
             return best is null ? span : span with { StartUtf16 = proof.StartUtf16 + best.Index, LengthUtf16 = best.Length, Text = best.Value };
         }
         catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return span; }
+    }
+    /// <summary>
+    /// Every quoted character must match verbatim and in order. A line break written in the quote must
+    /// exist in the source (any CRLF/LF/CR style). A source line break the quote omits is allowed only
+    /// BETWEEN two quoted characters (hard-wrapped web novels). Spaces, tabs and full-width spaces are
+    /// never skipped, and a surrogate pair is never split.
+    /// </summary>
+    internal static string QuotePattern(string quote)
+    {
+        const string Break = "(?:\r\n|\n|\r)";
+        return string.Join(Break + "+", LineBreak.Split(quote).Select(segment =>
+        {
+            var units = new List<string>();
+            for (int i = 0; i < segment.Length; i++)
+                units.Add(char.IsHighSurrogate(segment[i]) && i + 1 < segment.Length && char.IsLowSurrogate(segment[i + 1])
+                    ? segment.Substring(i++, 2) : segment[i].ToString());
+            return string.Join(Break + "*", units.Select(System.Text.RegularExpressions.Regex.Escape));
+        }));
     }
     private static bool Splits(string s, int n) => n > 0 && n < s.Length && char.IsHighSurrogate(s[n - 1]) && char.IsLowSurrogate(s[n]);
 }

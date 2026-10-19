@@ -56,13 +56,41 @@ public sealed class SemanticSpanAnchoringTests
     [Theory]
     [InlineData("林清")]             // One character changed: fabricated quote.
     [InlineData("林 青")]            // Whitespace is NOT tolerated, only line breaks.
-    [InlineData("他知道自己又在做梦了")] // Missing line break entirely is a different text.
+    [InlineData("他知道自己又 在做梦了")] // A space in place of the source line break is not a line break.
+    [InlineData("林\n青")]           // A line break the quote invents must exist in the source.
+    [InlineData("他知道自己在做梦了")]  // One character dropped near the line break.
     [InlineData("王秀兰")]           // Not in the source at all.
     public void Non_verbatim_quotes_still_fail_with_support_span_mismatch(string quote)
     {
         var (s, r) = Single();
         var audited = Audit(s, r, WithSpan(s.Name(r, "林青"), r, Crlf.IndexOf("林青", StringComparison.Ordinal), quote.Length, quote));
         Assert.False(audited.EvidenceValid); Assert.Contains("SupportSpanMismatch", audited.Issues); Assert.False(audited.CanPromote);
+    }
+
+    [Theory]
+    [InlineData("他知道自己又在做梦了")]       // Real Gemini case: hard-wrapped CRLF omitted mid-sentence.
+    [InlineData("自己又在做梦")]
+    public void Quote_may_omit_a_source_line_break_between_two_quoted_characters(string quote)
+    {
+        var (s, r) = Single();
+        var finding = s.Name(r, "柳轻锋") with { SupportSpans = [new(r.Evidence.Id, 0, 3, "柳轻锋"), new(r.Evidence.Id, 30, 8, quote)] };
+        var audited = Audit(s, r, finding);
+        Assert.True(audited.EvidenceValid, string.Join(",", audited.Issues));
+        var span = audited.Finding.SupportSpans[1];
+        Assert.Equal(quote.Replace("又在", "又\r\n在", StringComparison.Ordinal), Source(s, span)); // Stored range covers the real CRLF.
+    }
+
+    [Fact]
+    public void Omitted_blank_line_paragraph_break_is_tolerated_but_not_at_quote_edges()
+    {
+        const string text = "林青说完了。\r\n\r\n周宁点头。";
+        var (s, r) = Single(text);
+        var joined = Audit(s, r, WithSpan(s.Name(r, "林青"), r, 99, 11, "林青说完了。周宁点头。"));
+        Assert.True(joined.EvidenceValid, string.Join(",", joined.Issues)); Assert.Equal(text, Source(s, joined.Finding.SupportSpans[0]));
+        // The located range never starts or ends on a line break the quote did not contain.
+        var edge = Audit(s, r, WithSpan(s.Name(r, "林青"), r, 0, 2, "林青")).Finding.SupportSpans[0];
+        Assert.Equal("林青", Source(s, edge));
+        Assert.Equal("(?:\r\n|\n|\r)*", SemanticQualityAuditor.QuotePattern("ab")[1..^1]);
     }
 
     [Fact]

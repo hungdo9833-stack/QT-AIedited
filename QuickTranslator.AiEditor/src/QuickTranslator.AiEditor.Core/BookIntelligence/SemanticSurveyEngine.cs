@@ -109,17 +109,22 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
                 if (audit is not null) foreach (var finding in audit.Findings)
                 {
                     Guid id = EntityMemoryIdentity.StableId(s.ProjectId, "semantic-proposal:" + r.Id + ":" + EntityMemoryIdentity.Fingerprint(finding));
-                    if (!s.Proposals.Any(x => x.Id == id)) s.Proposals.Add(new(id, r.Id, finding));
+                    // A Resume must not pile up copies that differ only in wording/confidence/local IDs.
+                    string key = ProposalKey(finding);
+                    if (!s.Proposals.Any(x => x.Id == id || ProposalKey(x.Audit) == key)) s.Proposals.Add(new(id, r.Id, finding));
                 }
                 Guid attemptId = Guid.NewGuid();
                 s.Attempts.Add(new(attemptId, r.Id, reservation, status, DateTimeOffset.UtcNow, blocked ? 0 : r.ReservedTokens, input, output, error, responseFingerprint));
                 foreach (var unit in r.Units)
                 {
                     bool reviewed = audit?.ReviewedEvidenceIds?.Contains(unit.Evidence.Id) == true;
+                    var unitFindings = audit?.Findings.Where(x => x.Finding.SourceEvidenceIds.Contains(unit.Evidence.Id)).ToArray() ?? [];
+                    // Invalid findings alone send the evidence back to Resume. Once at least one finding
+                    // for it passed the evidence audit it is Analyzed (needs human review), not re-sent.
                     var unitStatus = status is SemanticBatchStatus.Blocked or SemanticBatchStatus.Failed ? status : !reviewed ? SemanticBatchStatus.Pending :
-                        audit!.Findings.Any(x => x.Finding.SourceEvidenceIds.Contains(unit.Evidence.Id) && !x.EvidenceValid) ? SemanticBatchStatus.Failed :
-                        audit!.Findings.Where(x => x.Finding.SourceEvidenceIds.Contains(unit.Evidence.Id)).All(x => x.EvidenceValid && x.Issues.Count == 0) &&
-                        !unit.CpuCandidates.Any(x => audit.UnprocessedCpuIds.Contains(x.Id)) ? SemanticBatchStatus.Validated : SemanticBatchStatus.Analyzed;
+                        unitFindings.Any(x => !x.EvidenceValid) ? (unitFindings.Any(x => x.EvidenceValid) ? SemanticBatchStatus.Analyzed : SemanticBatchStatus.Failed) :
+                        unitFindings.All(x => x.Issues.Count == 0) &&
+                        !unit.CpuCandidates.Any(x => audit!.UnprocessedCpuIds.Contains(x.Id)) ? SemanticBatchStatus.Validated : SemanticBatchStatus.Analyzed;
                     s.EvidenceResults.Add(new(Guid.NewGuid(), attemptId, unit.Evidence.Id, unit.Id, unitStatus));
                 }
             }, CancellationToken.None).ConfigureAwait(false);
@@ -127,6 +132,24 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
             if (cancelled) throw new OperationCanceledException(ct); if (stopAfterFailure) break;
         }
         return state;
+    }
+
+    /// <summary>
+    /// Same claim on the same evidence with the same audit outcome. Wording (reason, confidence,
+    /// uncertainties) and request-local IDs are excluded; identities, values, timeline and span ranges are not.
+    /// </summary>
+    internal static string ProposalKey(SemanticAuditedFinding audited)
+    {
+        static SemanticIdentity? Plain(SemanticIdentity? identity) => identity is null ? null : identity with { LocalId = "" };
+        var f = audited.Finding;
+        var normalized = f with
+        {
+            Reason = "", Confidence = 0, Uncertainties = [], SubjectIdentity = Plain(f.SubjectIdentity), TargetIdentity = Plain(f.TargetIdentity),
+            SpeakerIdentity = Plain(f.SpeakerIdentity), ListenerIdentity = Plain(f.ListenerIdentity),
+            VerifiedParticipants = f.VerifiedParticipants.Select(x => Plain(x)!).ToArray(),
+            SupportSpans = f.SupportSpans.Select(x => x with { Text = "" }).ToArray()
+        };
+        return EntityMemoryIdentity.Fingerprint(new { finding = normalized, audited.EvidenceValid, audited.CanPromote, issues = audited.Issues.Order(StringComparer.Ordinal).ToArray() });
     }
 }
 
