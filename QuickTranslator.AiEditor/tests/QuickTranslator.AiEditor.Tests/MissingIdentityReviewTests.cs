@@ -172,21 +172,24 @@ public sealed class MissingIdentityReviewTests : IDisposable
         AssertPreserved(before);
     }
 
-    [Fact]
-    public async Task Added_unsampled_chapter_is_not_hidden_by_identical_navigation_samples()
+    [Theory]
+    [InlineData("沈夕颜")]
+    [InlineData("普通人")]
+    public async Task Added_unsampled_chapter_is_not_hidden_by_identical_navigation_samples(string name)
     {
-        await Scenario(string.Concat(Enumerable.Repeat("沈夕颜说道：好。", 200)));
+        await Scenario(string.Concat(Enumerable.Repeat($"自称{name}。{name}说道：好。", 100)));
         var observed = await Census();
-        var saved = await _reviews.DecideAsync(observed, "沈夕颜", MissingIdentityDecisionKind.NotCharacter, 0, _resources.Revision);
+        var saved = await _reviews.DecideAsync(observed, name, MissingIdentityDecisionKind.NotCharacter, 0, _resources.Revision);
         Assert.Equal(200, saved.History.Single().Frequency);
-        Assert.Equal(CharacterMentionCensus.MaximumStoredMentions, saved.History.Single().Mentions.Count);
+        Assert.Equal(name == "普通人" ? CharacterMentionCensus.MaximumStoredUncertainMentions : CharacterMentionCensus.MaximumStoredMentions,
+            saved.History.Single().Mentions.Count);
         Assert.Single(saved.History.Single().SourceScope!);
-        await Edit(1, "沈夕颜在这里。");
+        await Edit(1, $"{name}在这里。");
         var fresh = await Census();
-        Assert.Equal(observed.Candidates.Single(x => x.ChineseName == "沈夕颜").Mentions,
-            fresh.Candidates.Single(x => x.ChineseName == "沈夕颜").Mentions);
+        Assert.Equal(observed.Candidates.Single(x => x.ChineseName == name).Mentions,
+            fresh.Candidates.Single(x => x.ChineseName == name).Mentions);
         Assert.False(MissingIdentityReviewStore.IsCurrent(saved.History.Single(), fresh, _resources));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _reviews.DecideAsync(observed, "沈夕颜",
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _reviews.DecideAsync(observed, name,
             MissingIdentityDecisionKind.VerifyNewCharacter, saved.Revision, _resources.Revision));
         Assert.Single((await _reviews.LoadAsync()).History);
     }

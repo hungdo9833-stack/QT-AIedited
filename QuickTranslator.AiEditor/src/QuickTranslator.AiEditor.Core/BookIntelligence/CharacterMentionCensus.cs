@@ -37,6 +37,7 @@ public sealed record CharacterCensusReport(int SchemaVersion, Guid ProjectId, lo
 public static class CharacterMentionCensus
 {
     public const int MaximumStoredMentions = 128;
+    public const int MaximumStoredUncertainMentions = 8;
     public static CharacterCensusReport Scan(Guid projectId, long surveyRevision, IReadOnlyList<CensusSource> sources,
         ProjectResources resources, BookIntelligenceState state, CancellationToken cancellationToken = default,
         IReadOnlyCollection<string>? reviewNames = null)
@@ -72,7 +73,9 @@ public static class CharacterMentionCensus
             }
             node.Name = name;
         }
-        var occurrences = names.Keys.ToDictionary(x => x, _ => new MentionOccurrenceAccumulator(), StringComparer.Ordinal);
+        var occurrences = names.ToDictionary(x => x.Key, x => new MentionOccurrenceAccumulator(
+            ChineseMentionDiscovery.Classify(x.Key, x.Value, 3, primary.Contains(x.Key), profileAliases.Contains(x.Key)) == MentionCandidateCategory.NoiseOrUncertain
+                ? MaximumStoredUncertainMentions : MaximumStoredMentions), StringComparer.Ordinal);
         try
         {
             foreach (var source in sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId))
@@ -96,6 +99,15 @@ public static class CharacterMentionCensus
                 return new CharacterMentionCandidate(x.Key, kind, hits.Samples, profiles.Contains(x.Key), reviewed.Contains(x.Key),
                     category, hits.Count, hits.FirstChapter, hits.LastChapter, hits.Finish(), hits.Chapters, x.Value.ToString());
             }).ToArray();
+            // Reject grammatical expansions of a separately evidenced spelling, not identities.
+            // Keep the uncertain row/provenance; never merge it with the shorter candidate.
+            var anchored = candidates.Where(x => x.Category is MentionCandidateCategory.PersonCandidate or MentionCandidateCategory.AliasCandidate or MentionCandidateCategory.TitleCandidate)
+                .Select(x => x.ChineseName).ToHashSet(StringComparer.Ordinal);
+            candidates = candidates.Select(x => !primary.Contains(x.ChineseName) && !profileAliases.Contains(x.ChineseName) &&
+                ChineseMentionDiscovery.IsGrammaticalExtension(x.ChineseName, anchored)
+                    ? x with { Category = MentionCandidateCategory.NoiseOrUncertain, Signals = x.Signals + ", GrammaticalExtension" } : x).ToArray();
+            candidates = candidates.Select(x => x.Category == MentionCandidateCategory.NoiseOrUncertain && x.Mentions.Count > MaximumStoredUncertainMentions
+                ? x with { Mentions = x.Mentions.Take(MaximumStoredUncertainMentions).ToArray() } : x).ToArray();
             var missing = candidates.Where(x => x.Category == MentionCandidateCategory.PersonCandidate && !x.HasProfile && !x.HasReview)
                 .Select(x => new MissingIdentityAuditItem(x.ChineseName, x.Kind, x.Frequency, x.FirstChapter, x.LastChapter, x.Mentions))
                 .OrderByDescending(x => x.Frequency).ThenBy(x => x.ChineseName, StringComparer.Ordinal).ToArray();

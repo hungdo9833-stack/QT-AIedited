@@ -4,7 +4,7 @@ using System.Text;
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
 /// <summary>Counts and fingerprints every occurrence, retaining bounded navigation samples only.</summary>
-internal sealed class MentionOccurrenceAccumulator : IDisposable
+internal sealed class MentionOccurrenceAccumulator(int maximumSamples = CharacterMentionCensus.MaximumStoredMentions) : IDisposable
 {
     private readonly IncrementalHash _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
     private Guid? _chapter;
@@ -26,7 +26,7 @@ internal sealed class MentionOccurrenceAccumulator : IDisposable
         BitConverter.TryWriteBytes(data, start); BitConverter.TryWriteBytes(data[4..], length);
         _hash.AppendData(data[..8]);
         Count++; FirstChapter = Math.Min(FirstChapter, number); LastChapter = Math.Max(LastChapter, number);
-        if (Samples.Count < CharacterMentionCensus.MaximumStoredMentions)
+        if (Samples.Count < maximumSamples)
             Samples.Add(new(chapterId, number, start, length, sourceHash));
     }
     public string Finish() => Convert.ToHexString(_hash.GetHashAndReset());

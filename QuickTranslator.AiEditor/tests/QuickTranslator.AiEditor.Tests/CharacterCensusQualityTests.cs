@@ -74,6 +74,7 @@ public sealed class CharacterCensusQualityTests(ITestOutputHelper output)
         output.WriteLine(JsonSerializer.Serialize(new { fixture = "labelled-context-regression-not-production-accuracy", before, after, person, alias, title }));
         Assert.True(person.Recall >= 0.95); Assert.True(person.Precision >= 0.9);
         Assert.Equal(1, alias.Recall); Assert.Equal(1, title.Recall);
+        Assert.Empty(after.FalsePositive); Assert.Empty(after.FalseNegative);
         Assert.True(after.Recall > before.Recall); Assert.True(after.Precision > before.Precision);
         Assert.DoesNotContain(report.Candidates, x => Noise.Contains(x.ChineseName) && x.Category is not (MentionCandidateCategory.NoiseOrUncertain or MentionCandidateCategory.AddressingTerm));
         var mom = report.Candidates.Single(x => x.ChineseName == "妈妈");
@@ -87,6 +88,9 @@ public sealed class CharacterCensusQualityTests(ITestOutputHelper output)
     [InlineData("他的名字叫欧阳青川。", "欧阳青川")]
     [InlineData("我叫星河。", "星河")]
     [InlineData("她名叫温柔。", "温柔")] // a lexical homonym needs explicit identity context
+    [InlineData("我叫任我行。", "任我行")] // an introduction can override an internal grammatical character
+    [InlineData("这是他的小姨秦梦芸…", "秦梦芸")]
+    [InlineData("今天大哥刘庆峰回来了。", "刘庆峰")]
     public void Rare_two_to_four_character_names_need_not_repeat_three_times(string text, string name)
     {
         var candidate = Scan(text).Candidates.Single(x => x.ChineseName == name);
@@ -99,6 +103,27 @@ public sealed class CharacterCensusQualityTests(ITestOutputHelper output)
         var candidate = Scan(Repeat("杨过说道：好。", 3)).Candidates.Single(x => x.ChineseName == "杨过");
         Assert.Equal(MentionCandidateCategory.PersonCandidate, candidate.Category);
         Assert.Equal(3, candidate.Frequency);
+    }
+
+    [Fact]
+    public void Context_fragments_soft_wrapped_names_and_common_nouns_do_not_inflate_identity_queues()
+    {
+        string text = Repeat("姓名是沈夕颜。沈夕颜说道：好。沈夕颜轻轻走来。妹妹沈夕颜换了衣服。妹妹沈夕颜三人走过来。妹妹沈夕颜身后站着朋友。" +
+            "女儿柳月\r\n影站在门口。姓名是柳月影。柳月影说道：好。" +
+            "妈妈应该回家。妈妈安排了任务。妈妈强行叫回孩子。妈妈房间一趟。" +
+            "秦氏内部的安排。高高的房顶上的灯。白色的项链。房间里的声音。" +
+            "“何苦呢？”“卫生间！”“谢谢妈妈！”“明年等你。”" +
+            "“柳总听说你回来了。”柳总说道：好。“小锋能请你帮忙吗？”小锋的信还在。" +
+            "她把信交给小影。她让我叫自己。", 10);
+        var result = Scan(text);
+        string[] fragments = ["沈夕颜轻", "沈夕颜换", "沈夕颜三人", "沈夕颜身后", "柳月", "应该", "安排", "任务", "强行叫回", "房间一趟", "秦氏", "秦氏内部", "高高", "房顶上", "白色", "项链", "房间里", "何苦呢", "卫生间", "谢谢妈妈", "明年等", "柳总听说", "小锋能", "自己"];
+        Assert.DoesNotContain(result.Candidates, x => fragments.Contains(x.ChineseName) &&
+            x.Category is MentionCandidateCategory.PersonCandidate or MentionCandidateCategory.AliasCandidate);
+        Assert.Contains(result.Candidates, x => x.ChineseName == "沈夕颜" && x.Category == MentionCandidateCategory.PersonCandidate);
+        Assert.Contains(result.Candidates, x => x.ChineseName == "柳月影" && x.Category == MentionCandidateCategory.PersonCandidate);
+        Assert.Contains(result.Candidates, x => x.ChineseName == "小影" && x.Category == MentionCandidateCategory.AliasCandidate);
+        Assert.All(result.Candidates.Where(x => x.Category == MentionCandidateCategory.NoiseOrUncertain),
+            x => Assert.True(x.Mentions.Count <= CharacterMentionCensus.MaximumStoredUncertainMentions));
     }
 
     [Theory]

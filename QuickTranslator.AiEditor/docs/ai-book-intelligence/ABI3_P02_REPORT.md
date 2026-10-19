@@ -3,6 +3,13 @@
 Base: `codex/abi3-integrity-census` at
 `fb393c824b6c9915a65af5f078a0bef818753c1f`. No Session 2 work.
 
+The initial fixture-only commit was `2ca59d38ca9eadce08412495970a40efa84c5cc2`.
+The user subsequently supplied the actual TXT folder. The
+[real-corpus follow-up](ABI3_P02_REAL_CORPUS_REPORT.md) supersedes the initial
+source-availability limitation, adds real-source fixes and gives the latest
+test/build totals. In particular, broad weak-boundary discovery in the initial
+commit proved too permissive on real prose and must not be used without the follow-up.
+
 ## Root cause
 
 P0.1 counted literal occurrences across all active source, but only **after** a
@@ -46,13 +53,13 @@ arrays in the derived Missing Identity report.
   are compared using the same canonical fingerprint when new fields are absent.
 - Tests: `CharacterCensusQualityTests.cs` (new),
   `CharacterMentionCensusTests.cs`, `MissingIdentityReviewTests.cs`,
-  `CorpusAuditUiTests.cs`; this report is the eleventh changed file.
+  `CorpusAuditUiTests.cs`; this report and the real-corpus addendum record results.
 
 ## Before/after — explicitly synthetic, not the original 19 chapters
 
-The actual 19-chapter TXT/Project was not attached to this task. No personal
-Project was read or modified. The 38-candidate/24-Missing-Identity result therefore
-cannot be honestly recomputed here. The following fixture reproduces the supplied
+At the time of the initial commit the 19-chapter TXT was not available; it was
+later provided and tested read-only in the linked addendum. No personal Project
+was modified. The following fixture reproduces the supplied
 seven frequencies in labelled grammatical contexts, not the unseen original
 sentences. The frozen P0.1 discovery implementation is retained **only in tests**.
 
@@ -117,6 +124,8 @@ has 50,000/100,000 exact occurrences; only 128 positions are retained per spelli
 sidecar size is measured separately. This is a mention-dense bounded-sampling test,
 not a diverse thousand-chapter natural-language corpus or end-to-end app benchmark.
 
+Initial fixture-only measurements (latest source-scale measurements are in the addendum):
+
 | Chapters | UTF-16 units | Scan time | Allocated bytes | Retained delta bytes | Sidecar bytes |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 500 | 1,450,000 | 216 ms | 93,090,024 | 176,728 | 228,355 |
@@ -138,12 +147,12 @@ dotnet build QuickTranslator.AiEditor/QuickTranslator.AiEditor.slnx -c Release -
 git diff --check
 ```
 
-Final full suite: **599 Core + 97 WPF = 696 passed, 0 failed, 0 skipped**.
+Initial fixture-only full suite: **599 Core + 97 WPF = 696 passed, 0 failed, 0 skipped**.
 Core duration 1m41s; WPF duration 18s. TRX output, including labelled metrics and
 the performance measurements above, is under `artifacts/p02-final-tests-r2`.
 The existing nullable warning CS8631 at `GeminiSurveyClientTests.cs:59` appeared
 during test compilation and is not suppressed or changed by this patch.
-Release solution build succeeded: **0 errors, 0 warnings** on the final incremental
+Initial Release solution build succeeded: **0 errors, 0 warnings** on its incremental
 build (2.16s). `git diff --check` passed. The commit SHA is in the handoff response.
 
 ## Remaining limits
@@ -155,8 +164,8 @@ still be missed or misclassified. Repetition plus a surname is not proof of a
 person; remaining weak homonyms require human review. Counts are exact literal
 substrings, not disambiguated per-scene entities. Family terms inside longer
 titles can also appear in the addressing catalogue; no speaker/listener identity
-is inferred from them. The real TXT must be tested separately before claiming a
-production recall/precision improvement or a new candidate/Missing Identity count.
+is inferred from them. The real TXT follow-up confirms the supplied target/noise
+cases, but exhaustive production precision/recall still needs full human labels.
 
 Navigation exposes the first 128 positions, not every occurrence; all-source
 fingerprints/counts/chapter scope remain exact. Memory still scales with loaded
