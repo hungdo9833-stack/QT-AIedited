@@ -12,7 +12,8 @@ public enum MissingIdentityLinkKind { Identity, AliasOrTitle }
 public sealed record MissingIdentityDecision(Guid Id, string ChineseName, MissingIdentityDecisionKind Kind,
     DateTimeOffset DecidedAt, string Note, IReadOnlyList<CharacterMention> Mentions,
     Guid? TargetCharacterId, MissingIdentityLinkKind? LinkKind, string TargetNameSnapshot,
-    string TargetFingerprint, Guid? SupersedesId);
+    string TargetFingerprint, Guid? SupersedesId, string SourceFingerprint = "", int Frequency = 0,
+    IReadOnlyDictionary<Guid, string>? SourceScope = null);
 public sealed class MissingIdentityReviewState
 {
     public int SchemaVersion { get; set; } = 1;
@@ -56,7 +57,7 @@ public sealed class MissingIdentityReviewStore(ProjectSession session)
                 journal.Latest.Select(x => x.ChineseName).ToArray()).ConfigureAwait(false);
             var before = observed.Candidates.SingleOrDefault(x => x.ChineseName == chineseName);
             var candidate = current.Candidates.SingleOrDefault(x => x.ChineseName == chineseName);
-            if (before is null || candidate is null || !SameMentions(before.Mentions, candidate.Mentions))
+            if (before is null || candidate is null || CharacterMentionCensus.Fingerprint(before) != CharacterMentionCensus.Fingerprint(candidate))
                 throw new InvalidOperationException("Candidate source changed/disappeared; refresh and review again.");
             CharacterProfile? target = null;
             if (kind == MissingIdentityDecisionKind.LinkExisting)
@@ -71,7 +72,9 @@ public sealed class MissingIdentityReviewStore(ProjectSession session)
             var previous = journal.Latest.SingleOrDefault(x => x.ChineseName == chineseName);
             journal.History.Add(new(Guid.NewGuid(), chineseName, kind, DateTimeOffset.UtcNow, note.Trim(),
                 candidate.Mentions.ToArray(), targetCharacterId, linkKind, target?.VietnameseName ?? "",
-                target is null ? "" : Fingerprint(target), previous?.Id));
+                target is null ? "" : Fingerprint(target), previous?.Id, CharacterMentionCensus.Fingerprint(candidate), candidate.Frequency,
+                (candidate.MentionedChapterIds ?? candidate.Mentions.Select(x => x.ChapterId).Distinct().ToArray())
+                    .ToDictionary(id => id, id => current.SourceHashes[id])));
             journal.Revision++;
             await SimpleFileStorage.WriteAsync(PathName, JsonSerializer.SerializeToUtf8Bytes(journal, DocumentJson.Options),
                 Decode, cancellationToken).ConfigureAwait(false);
@@ -83,7 +86,9 @@ public sealed class MissingIdentityReviewStore(ProjectSession session)
     public static bool IsCurrent(MissingIdentityDecision decision, CharacterCensusReport census, ProjectResources resources)
     {
         var candidate = census.Candidates.SingleOrDefault(x => x.ChineseName == decision.ChineseName);
-        if (candidate is null || !SameMentions(decision.Mentions, candidate.Mentions)) return false;
+        string fingerprint = string.IsNullOrEmpty(decision.SourceFingerprint)
+            ? CharacterMentionCensus.Fingerprint(decision.Mentions) : decision.SourceFingerprint;
+        if (candidate is null || fingerprint != CharacterMentionCensus.Fingerprint(candidate)) return false;
         if (decision.Kind != MissingIdentityDecisionKind.LinkExisting) return true;
         var target = resources.Characters.Profiles.SingleOrDefault(x => x.Id == decision.TargetCharacterId);
         return target is not null && Fingerprint(target) == decision.TargetFingerprint;
@@ -91,9 +96,6 @@ public sealed class MissingIdentityReviewStore(ProjectSession session)
 
     private static string Fingerprint(CharacterProfile profile) => CorpusIntegrityAuditor.SourceHash(
         profile.Id.ToString("D") + "|" + profile.ChineseName + "|" + string.Join("|", profile.Aliases.Order(StringComparer.Ordinal)));
-    private static bool SameMentions(IReadOnlyList<CharacterMention> a, IReadOnlyList<CharacterMention> b) =>
-        a.Count == b.Count && a.OrderBy(x => x.ChapterId).ThenBy(x => x.StartUtf16)
-            .SequenceEqual(b.OrderBy(x => x.ChapterId).ThenBy(x => x.StartUtf16));
 
     private MissingIdentityReviewState Decode(byte[] bytes)
     {
@@ -104,6 +106,8 @@ public sealed class MissingIdentityReviewStore(ProjectSession session)
                 x.Id == Guid.Empty || string.IsNullOrWhiteSpace(x.ChineseName) || !Enum.IsDefined(x.Kind) ||
                 x.Mentions is null || x.Mentions.Count == 0 || x.Mentions.Any(m => m.ChapterId == Guid.Empty ||
                     m.StartUtf16 < 0 || m.LengthUtf16 <= 0 || string.IsNullOrWhiteSpace(m.SourceSha256)) ||
+                (!string.IsNullOrEmpty(x.SourceFingerprint) && (x.Frequency < x.Mentions.Count || x.SourceScope is null ||
+                    x.Mentions.Any(m => !x.SourceScope.TryGetValue(m.ChapterId, out string? hash) || hash != m.SourceSha256))) ||
                 (x.Kind == MissingIdentityDecisionKind.LinkExisting &&
                     (x.TargetCharacterId is null || x.TargetCharacterId == Guid.Empty || x.LinkKind is null ||
                      !Enum.IsDefined(x.LinkKind.Value) || string.IsNullOrWhiteSpace(x.TargetFingerprint)))))

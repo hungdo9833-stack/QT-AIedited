@@ -38,7 +38,7 @@ public sealed class CharacterMentionCensusTests
         var (state, resources) = Empty();
         string text = string.Concat(Enumerable.Repeat("风景如画。周围说道。王国说道。林间说道。众人说道。自己说道。一片山河。", 12));
         var report = CharacterMentionCensus.Scan(state.ProjectId, 0, [new(Guid.NewGuid(), 1, text)], resources, state);
-        Assert.Empty(report.MissingIdentities); Assert.Empty(report.Candidates);
+        Assert.Empty(report.MissingIdentities); Assert.All(report.Candidates, x => Assert.Equal(MentionCandidateCategory.NoiseOrUncertain, x.Category));
     }
 
     [Fact]
@@ -49,8 +49,9 @@ public sealed class CharacterMentionCensusTests
         var report = CharacterMentionCensus.Scan(state.ProjectId, 0, [new(Guid.NewGuid(), 3, text)], resources, state);
         Assert.Contains(report.MissingIdentities, x => x.ChineseName == "沈夕颜");
         Assert.Contains(report.MissingIdentities, x => x.ChineseName == "苏雨");
-        Assert.Contains(report.MissingIdentities, x => x.ChineseName == "阿颜" && x.Kind == MentionHypothesisKind.AliasHypothesis);
-        Assert.Contains(report.MissingIdentities, x => x.ChineseName == "沈小姐" && x.Kind == MentionHypothesisKind.TitleHypothesis);
+        Assert.Contains(report.Candidates, x => x.ChineseName == "阿颜" && x.Category == MentionCandidateCategory.AliasCandidate);
+        Assert.Contains(report.Candidates, x => x.ChineseName == "沈小姐" && x.Category == MentionCandidateCategory.TitleCandidate);
+        Assert.DoesNotContain(report.MissingIdentities, x => x.ChineseName is "阿颜" or "沈小姐");
         Assert.Empty(state.CandidateIdentities); Assert.Empty(state.Characters); Assert.Empty(resources.Characters.Profiles);
     }
 
@@ -116,9 +117,9 @@ public sealed class CharacterMentionCensusTests
             Assert.Equal(1, census.ActiveChapters);
             Assert.DoesNotContain(census.Candidates, x => x.ChineseName == "苏雨");
             await CharacterMentionCensus.SaveReportAsync(session, census);
-            var saved = JsonSerializer.Deserialize<CharacterCensusReport>(await File.ReadAllTextAsync(
-                session.Resolve("Settings/abi3-character-census.v1.json")), DocumentJson.Options)!;
-            Assert.Equal(1, saved.SchemaVersion); Assert.Equal(state.ProjectId, saved.ProjectId);
+            using var saved = JsonDocument.Parse(await File.ReadAllTextAsync(session.Resolve("Settings/abi3-character-census.v2.json")));
+            Assert.Equal(2, saved.RootElement.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal(state.ProjectId, saved.RootElement.GetProperty("projectId").GetGuid());
             Assert.Equal(stateBefore, await File.ReadAllBytesAsync(store.PathName));
             Assert.False(File.Exists(session.Resolve(session.Manifest.Files.Resources)));
         }

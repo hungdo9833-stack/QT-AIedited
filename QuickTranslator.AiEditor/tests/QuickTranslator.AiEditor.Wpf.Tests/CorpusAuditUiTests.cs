@@ -17,7 +17,7 @@ public sealed class CorpusAuditUiTests
         await fixture.CreateProjectAsync();
         for (int i = 1; i <= 4; i++)
             await fixture.Repository.AddChapterAsync(fixture.Project, TranslationService.CreateChapter("Chương " + i,
-                i == 1 ? "𠀀沈夕颜说道：好。沈夕颜走来。沈夕颜点头。" : "林哲说道：第" + i + "章。"), i, "章节");
+                i == 1 ? "𠀀沈夕颜说道：好。沈夕颜走来。沈夕颜点头。小锋的信。小锋了。小影笑了。秦老太爷不在。妈妈说：好。温柔的光。" : "林哲说道：第" + i + "章。"), i, "章节");
         var store = new BookIntelligenceStore(fixture.Project);
         var resources = await new ProjectResourceStore(fixture.Project).LoadAsync();
         var state = await new ProjectCorpusIndexer(fixture.Repository).IndexAsync(fixture.Project, await store.LoadAsync(), store, resources.Characters);
@@ -44,13 +44,18 @@ public sealed class CorpusAuditUiTests
             Assert.Contains("active 3/4", Get<TextBlock>(window, "_auditSummary").Text);
             Assert.False(Get<CheckBox>(window, "_translationContext").IsChecked);
             var groups = Get<ComboBox>(window, "_auditGroup");
-            foreach (string name in new[] { "Missing identity", "Stale index", "Blocked excerpts", "Unverified" })
+            foreach (string name in new[] { "Missing identity", "Stale index", "Blocked excerpts", "Unverified", "Alias candidates", "Title candidates", "Addressing terms", "Noise / Uncertain" })
             {
                 groups.SelectedItem = name;
                 var queue = Get<DataGrid>(window, "_queue");
                 Assert.NotEmpty(queue.Items.Cast<object>());
                 queue.SelectedIndex = 0;
                 foreach (string action in new[] { "_save", "_merge", "_later", "_reject" }) Assert.False(Get<Button>(window, action).IsEnabled);
+                if (name == "Addressing terms")
+                {
+                    Assert.Contains(queue.Items.Cast<object>(), x => IdentityRow(x).Title.StartsWith("妈妈", StringComparison.Ordinal));
+                    Assert.Equal(Visibility.Collapsed, Get<WrapPanel>(window, "_identityActions").Visibility);
+                }
                 if (name is "Missing identity" or "Stale index")
                 {
                     await Invoke(window, "OpenSelectedEvidenceAsync");

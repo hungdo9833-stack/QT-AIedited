@@ -62,7 +62,8 @@ public sealed class BookIntelligenceReviewWindow : Window
     private bool _auditing;
     private readonly Button _audit = new() { Content = "Kiểm tra corpus (CPU)" };
     private readonly ComboBox _auditGroup = new() { Width = 170, ItemsSource = new[]
-        { "Đề xuất hiện có", "Missing identity", "Stale index", "Blocked excerpts", "Unverified", "Identity đã xử lý" }, SelectedIndex = 0 };
+        { "Đề xuất hiện có", "Missing identity", "Stale index", "Blocked excerpts", "Unverified", "Identity đã xử lý",
+          "Alias candidates", "Title candidates", "Addressing terms", "Noise / Uncertain" }, SelectedIndex = 0 };
     private readonly TextBlock _auditSummary = new() { Text = "Corpus chưa được kiểm chứng từ Manifest + OriginalText.", TextWrapping = TextWrapping.Wrap };
 
     public BookIntelligenceReviewWindow(ProjectSession session, ProjectRepository repository,

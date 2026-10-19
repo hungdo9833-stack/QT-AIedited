@@ -19,7 +19,8 @@ public sealed class MissingIdentityReviewTests : IDisposable
     {
         await Scenario("自称普通人。自称普通人。自称普通人。");
         var before = Capture(); var census = await Census();
-        Assert.Equal("普通人", Assert.Single(census.MissingIdentities).ChineseName);
+        Assert.Contains(census.Candidates, x => x.ChineseName == "普通人" && x.Category == MentionCandidateCategory.NoiseOrUncertain);
+        Assert.DoesNotContain(census.MissingIdentities, x => x.ChineseName == "普通人");
         var saved = await _reviews.DecideAsync(census, "普通人", MissingIdentityDecisionKind.NotCharacter, 0, _resources.Revision, note: "Không phải tên người");
         _session = (await _repository.OpenAsync(_session.ManifestPath)).Session;
         _reviews = new(_session);
@@ -142,6 +143,52 @@ public sealed class MissingIdentityReviewTests : IDisposable
         report = report with { PendingReviews = 0 };
         Assert.True(report.Complete); Assert.False(report.Verified); Assert.False(report.AccuracyVerified);
         Assert.Contains("chưa được kiểm chứng", report.Summary);
+    }
+
+    [Fact]
+    public async Task Legacy_p01_full_provenance_remains_current_when_census_navigation_is_sampled()
+    {
+        string source = string.Concat(Enumerable.Repeat("沈夕颜说道：好。", 200));
+        await Scenario(source);
+        Guid chapter = _session.Manifest.Chapters[0].ChapterId;
+        string hash = CorpusIntegrityAuditor.SourceHash(source);
+        var mentions = new List<CharacterMention>();
+        for (int offset = 0; (offset = source.IndexOf("沈夕颜", offset, StringComparison.Ordinal)) >= 0; offset += "沈夕颜".Length)
+            mentions.Add(new(chapter, 1, offset, 3, hash));
+        var legacy = new MissingIdentityReviewState { ProjectId = _session.Manifest.ProjectId, Revision = 1,
+            History = [new(Guid.NewGuid(), "沈夕颜", MissingIdentityDecisionKind.NotCharacter, DateTimeOffset.UtcNow,
+                "P0.1 decision", mentions, null, null, "", "", null)] };
+        var json = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(legacy,
+            QuickTranslator.AiEditor.Core.Persistence.DocumentJson.Options))!;
+        foreach (string property in new[] { "sourceFingerprint", "frequency", "sourceScope" })
+            json["history"]![0]!.AsObject().Remove(property);
+        await File.WriteAllTextAsync(_reviews.PathName, json.ToJsonString());
+        var before = Capture(); var reopened = await _reviews.LoadAsync(); var census = await Census();
+        var candidate = census.Candidates.Single(x => x.ChineseName == "沈夕颜");
+        Assert.Equal(200, candidate.Frequency); Assert.Equal(CharacterMentionCensus.MaximumStoredMentions, candidate.Mentions.Count);
+        Assert.True(MissingIdentityReviewStore.IsCurrent(reopened.History.Single(), census, _resources));
+        Assert.Equal(0, (await Audit(reopened)).IdentityReviewsPending);
+        Assert.Equal(legacy.History.Single().Id, reopened.History.Single().Id);
+        AssertPreserved(before);
+    }
+
+    [Fact]
+    public async Task Added_unsampled_chapter_is_not_hidden_by_identical_navigation_samples()
+    {
+        await Scenario(string.Concat(Enumerable.Repeat("沈夕颜说道：好。", 200)));
+        var observed = await Census();
+        var saved = await _reviews.DecideAsync(observed, "沈夕颜", MissingIdentityDecisionKind.NotCharacter, 0, _resources.Revision);
+        Assert.Equal(200, saved.History.Single().Frequency);
+        Assert.Equal(CharacterMentionCensus.MaximumStoredMentions, saved.History.Single().Mentions.Count);
+        Assert.Single(saved.History.Single().SourceScope!);
+        await Edit(1, "沈夕颜在这里。");
+        var fresh = await Census();
+        Assert.Equal(observed.Candidates.Single(x => x.ChineseName == "沈夕颜").Mentions,
+            fresh.Candidates.Single(x => x.ChineseName == "沈夕颜").Mentions);
+        Assert.False(MissingIdentityReviewStore.IsCurrent(saved.History.Single(), fresh, _resources));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _reviews.DecideAsync(observed, "沈夕颜",
+            MissingIdentityDecisionKind.VerifyNewCharacter, saved.Revision, _resources.Revision));
+        Assert.Single((await _reviews.LoadAsync()).History);
     }
 
     private async Task Scenario(string source)

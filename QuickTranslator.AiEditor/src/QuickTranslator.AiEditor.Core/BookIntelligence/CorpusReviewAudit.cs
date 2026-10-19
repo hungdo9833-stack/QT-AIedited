@@ -44,9 +44,22 @@ public sealed record CorpusReviewAudit(CorpusIntegrityReport Integrity, Characte
             if (latest.ContainsKey(missing.ChineseName)) continue; // handled with provenance below
             identityPending++;
             items.Add(new("Missing identity", $"{missing.ChineseName} · {missing.Frequency} lượt · chương {missing.FirstChapter}–{missing.LastChapter}",
-                $"{missing.Kind}: ứng viên CPU chưa có hồ sơ/review. Không khẳng định danh tính, không tự gộp bí danh.",
+                $"PersonCandidate: ứng viên CPU chưa có hồ sơ/review. Không khẳng định danh tính. Hiển thị tối đa {CharacterMentionCensus.MaximumStoredMentions} vị trí; tần suất đếm toàn nguồn.",
                 missing.Mentions[0].ChapterId, missing.Mentions[0].StartUtf16,
                 missing.Mentions.Select(x => x.NavigationEvidence(missing.ChineseName)).ToArray(), missing.ChineseName));
+        }
+        foreach (var candidate in census.Candidates.Where(x => x.Category != MentionCandidateCategory.PersonCandidate))
+        {
+            bool identityLike = candidate.Category is MentionCandidateCategory.AliasCandidate or MentionCandidateCategory.TitleCandidate;
+            if (latest.ContainsKey(candidate.ChineseName) && candidate.Category != MentionCandidateCategory.AddressingTerm) continue;
+            if (identityLike && !candidate.HasProfile && !candidate.HasReview) identityPending++;
+            var first = candidate.Mentions[0];
+            items.Add(new(CandidateGroup(candidate.Category), $"{candidate.ChineseName} · {candidate.Category} · {candidate.Frequency} lượt · chương {candidate.FirstChapter}–{candidate.LastChapter}",
+                $"{candidate.Signals}. Chỉ là kiểm kê nguyên tác, không tự gộp hay đưa vào prompt dịch. " +
+                (candidate.Category == MentionCandidateCategory.AddressingTerm ? "Từ xưng hô được giữ lại để kiểm tra ngữ cảnh, không phải tên riêng. " : "") +
+                $"Hiển thị {candidate.Mentions.Count}/{candidate.Frequency} vị trí; fingerprint gắn toàn bộ lượt xuất hiện và nguồn.",
+                first.ChapterId, first.StartUtf16, candidate.Mentions.Select(x => x.NavigationEvidence(candidate.ChineseName)).ToArray(),
+                identityLike || candidate.Category == MentionCandidateCategory.NoiseOrUncertain ? candidate.ChineseName : null));
         }
         foreach (var decision in latest.Values)
         {
@@ -54,7 +67,7 @@ public sealed record CorpusReviewAudit(CorpusIntegrityReport Integrity, Characte
             bool current = MissingIdentityReviewStore.IsCurrent(decision, census, resources!);
             bool queued = current && decision.Kind == MissingIdentityDecisionKind.VerifyNewCharacter;
             if (candidate is not null && (!current || queued)) identityPending++;
-            string group = !current && candidate is not null ? "Missing identity" : queued || !current ? "Unverified" : "Identity đã xử lý";
+            string group = !current && candidate is not null ? CandidateGroup(candidate.Category) : queued || !current ? "Unverified" : "Identity đã xử lý";
             var mentions = candidate?.Mentions ?? decision.Mentions;
             // Retired decision provenance is readable but never used as current navigation evidence.
             var evidence = candidate?.Mentions.Select(x => x.NavigationEvidence(decision.ChineseName)).ToArray() ?? [];
@@ -92,4 +105,9 @@ public sealed record CorpusReviewAudit(CorpusIntegrityReport Integrity, Characte
         foreach (var item in state.Glossary.Where(x => x.Status is IntelligenceReviewStatus.Pending or IntelligenceReviewStatus.ReviewLater)) Pending(item.Chinese, item.EvidenceIds);
         return new(integrity, census, items, identityPending);
     }
+    private static string CandidateGroup(MentionCandidateCategory category) => category switch
+    {
+        MentionCandidateCategory.PersonCandidate => "Missing identity", MentionCandidateCategory.AliasCandidate => "Alias candidates",
+        MentionCandidateCategory.TitleCandidate => "Title candidates", MentionCandidateCategory.AddressingTerm => "Addressing terms", _ => "Noise / Uncertain"
+    };
 }
