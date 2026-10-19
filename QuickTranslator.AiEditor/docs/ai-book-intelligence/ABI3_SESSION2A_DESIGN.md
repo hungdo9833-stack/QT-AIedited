@@ -64,3 +64,20 @@ Checkpoint A: models/persistence implemented; focused tests cover optional-file
 backward compatibility, immutable definitions/review history, atomic rollback at
 flush fault, cancellation, process lease, revision races, invalid/partial files and
 project/facet-scoped IDs. No new compiler warnings are accepted in these files.
+
+Checkpoint B: source-backed, no-future-leakage query; idempotent legacy/census
+projection; eight CPU trigger classes; atomic batched checkpoints/resume; explicit
+review, rollback and separate audit-alias promotion; existing K01 reasoning with
+input-period intersection/latest reveal; temporal conflicts and ledger ending
+effects. Focused A+B suite: 31 passed. Context DTOs omit audit labels, provenance
+text and entity-facet metadata, not merely hidden primary-name facts. Manifest is
+re-read without OpenAsync/synchronization writes so deleted/reordered chapters are
+not trusted from an old UI session. All legacy files remain read-only.
+
+CPU scanning coalesces repeated triggers to one candidate per type/900-unit window;
+it is not a complete event extractor. A CPU candidate needs explicit participant/
+semantic refinement before human confirmation. Accepted stages review; Confirmed
+enables only the isolated future query when proof and reveal dates are valid.
+Rule proposals are never automatically accepted. No scenes/speaker/listener are
+guessed or written. Audit links remain excluded from context even if reviewed as
+associations. Source/name changes version assertions, leaving history intact.

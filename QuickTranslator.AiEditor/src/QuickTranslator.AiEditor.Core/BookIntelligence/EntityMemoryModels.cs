@@ -32,7 +32,7 @@ public sealed record MemoryEntity(Guid Id, Guid ProjectId, MemoryEntityKind Kind
 public sealed record MemoryEvidence(Guid Id, Guid ProjectId, Guid ChapterId, int ChapterNumber, string SourceSha256,
     int StartUtf16, int LengthUtf16, Guid? CorpusEvidenceId = null);
 public sealed record MemoryProvenance(MemoryOrigin Origin, string Key, string Explanation,
-    Guid? LegacyId = null, string RuleId = "", string CensusName = "", string CensusFingerprint = "");
+    Guid? LegacyId = null, string RuleId = "", string CensusName = "", string CensusFingerprint = "", string LineageKey = "");
 
 public sealed record EntityMemoryFact
 {
@@ -92,7 +92,7 @@ public sealed class EntityMemoryState
         bool Text(string? value, int limit, bool required = false) => value is not null && value.Length <= limit && (!required || !string.IsNullOrWhiteSpace(value));
         bool Hash(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
         bool Provenance(MemoryProvenance? p) => p is not null && Enum.IsDefined(p.Origin) && Text(p.Key, 1024, true) &&
-            Text(p.Explanation, 4000) && Text(p.RuleId, 200) && Text(p.CensusName, 200) && Text(p.CensusFingerprint, 64) &&
+            Text(p.Explanation, 4000) && Text(p.RuleId, 200) && Text(p.LineageKey, 1024) && Text(p.CensusName, 200) && Text(p.CensusFingerprint, 64) &&
             (p.CensusName.Length == 0 == (p.CensusFingerprint.Length == 0)) && (p.CensusFingerprint.Length == 0 || Hash(p.CensusFingerprint));
         Require(SchemaVersion == 1 && ProjectId != Guid.Empty && Revision >= 0 && Entities is not null && Evidence is not null &&
             Facts is not null && Events is not null && Reviews is not null && Checkpoints is not null);
