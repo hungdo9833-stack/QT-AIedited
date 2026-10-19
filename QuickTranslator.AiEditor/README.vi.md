@@ -1,6 +1,6 @@
 # QuickTranslator AI Editor — AI offline, Reader Mode và Editor bốn ô
 
-Kiến trúc lưu trữ hiện hành và kết quả refactor được ghi tại [FULL-LEGACY-STORAGE-REFACTOR.md](docs/FULL-LEGACY-STORAGE-REFACTOR.md).
+Kiến trúc lưu trữ hiện hành và kết quả refactor được ghi tại [FULL-LEGACY-STORAGE-REFACTOR.md](docs/FULL-LEGACY-STORAGE-REFACTOR.md). Trạng thái bàn giao, bản build và lỗi còn tồn tại: [HANDOVER-QT-STUDIO.vi.md](docs/HANDOVER-QT-STUDIO.vi.md).
 
 Ứng dụng độc lập để dịch tiểu thuyết Trung–Việt bằng **Ollama trên máy Windows**. Người dùng nhập một chương, bấm **Dịch toàn chương** một lần; ứng dụng chia đoạn, dịch tuần tự từng đoạn, lưu sau mỗi đoạn và ghép bản Việt theo đúng thứ tự. Người dùng vẫn có thể sửa, duyệt hoặc dịch lại riêng từng đoạn.
 
