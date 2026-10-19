@@ -106,7 +106,7 @@ public sealed class CorpusIntegrityTests : IDisposable
     {
         Guid id = Guid.NewGuid(); const string source = "沈夕颜说：你好。";
         string hash = CorpusIntegrityAuditor.SourceHash(source);
-        var index = new CorpusChapterIndex { ChapterId = id, SourceSha256 = hash, SourceLengthUtf16 = source.Length,
+        var index = new CorpusChapterIndex { ChapterId = id, ChapterNumber = 1, SourceSha256 = hash, SourceLengthUtf16 = source.Length,
             Evidence = ProjectCorpusIndexer.ScanChapter(id, source, hash, []) };
         var item = index.Evidence.Single();
         switch (defect)
@@ -131,7 +131,7 @@ public sealed class CorpusIntegrityTests : IDisposable
         var windows = ProjectCorpusIndexer.ScanChapter(id, source, hash, []);
         Assert.Equal(source, string.Concat(windows.Select(e => e.Excerpt)));
         Assert.True(CorpusIntegrityAuditor.Inspect(id, 1, source,
-            new() { ChapterId = id, SourceSha256 = hash, SourceLengthUtf16 = source.Length, Evidence = windows }).Indexed);
+            new() { ChapterId = id, ChapterNumber = 1, SourceSha256 = hash, SourceLengthUtf16 = source.Length, Evidence = windows }).Indexed);
     }
 
     [Fact]
@@ -181,6 +181,166 @@ public sealed class CorpusIntegrityTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => new AdaptiveBookIntelligenceAnalyzer(client).AnalyzeAsync(
             session, state, store, resources, new() { Model = "mock" }));
         Assert.Equal(0, client.Calls);
+    }
+
+    [Fact]
+    public async Task Changed_source_retires_old_provenance_and_only_invalidates_dependent_unapproved_facts()
+    {
+        var (session, store, state) = await Scenario(2);
+        var old = state.Chapters[0].Evidence.Single();
+        var unaffected = state.Chapters[1].Evidence.Single();
+        var trusted = new KnowledgeRelationship { SubjectCharacterId = Guid.NewGuid(), TargetCharacterId = Guid.NewGuid(),
+            Status = KnowledgeRelationshipStatus.Confirmed, EvidenceIds = [old.Id] };
+        var pending = new KnowledgeRelationship { SubjectCharacterId = trusted.SubjectCharacterId, TargetCharacterId = trusted.TargetCharacterId,
+            Status = KnowledgeRelationshipStatus.Proposed, EvidenceIds = [old.Id] };
+        state.RelationshipGraph.AddRange([trusted, pending]);
+        state.Characters.Add(new() { ChineseName = "沈夕颜", Status = IntelligenceReviewStatus.Accepted, EvidenceIds = [old.Id] });
+        state = await store.SaveAsync(state);
+        var chapter = (await _repository.LoadChapterAsync(session, old.ChapterId)).Chapter;
+        await _repository.UpdateChapterAsync(session, SourceEditPlanner.Apply(chapter,
+            SourceEditPlanner.Preview(chapter, "沈夕颜说道：新的原文。"), true, DateTimeOffset.UtcNow));
+        var before = await new CorpusIntegrityAuditor(_repository).AuditAsync(session, state);
+        Assert.Contains(before.Chapters[0].Issues, x => x.Code == "SourceChangedOrHashMismatch");
+        var after = await new ProjectCorpusIndexer(_repository).IndexAsync(session, state, store, new());
+        Assert.False(after.Evidence.Single(x => x.Id == old.Id).IsCurrent);
+        Assert.True(after.Evidence.Single(x => x.Id == unaffected.Id).IsCurrent);
+        Assert.Equal(KnowledgeRelationshipStatus.Confirmed, after.RelationshipGraph.Single(x => x.Id == trusted.Id).Status);
+        Assert.Equal(KnowledgeRelationshipStatus.Stale, after.RelationshipGraph.Single(x => x.Id == pending.Id).Status);
+        Assert.Equal(IntelligenceReviewStatus.Accepted, after.Characters.Single().Status);
+        Assert.False((await new CorpusIntegrityAuditor(_repository).AuditAsync(session, after)).NeedsReindex);
+    }
+
+    [Fact]
+    public async Task Empty_ai_findings_are_not_proof_of_verified_identity_coverage()
+    {
+        var (session, store, state) = await Scenario(1);
+        var chapter = (await _repository.LoadChapterAsync(session, state.Chapters[0].ChapterId)).Chapter;
+        await _repository.UpdateChapterAsync(session, SourceEditPlanner.Apply(chapter,
+            SourceEditPlanner.Preview(chapter, "沈夕颜说道：好。沈夕颜走来。沈夕颜点头。"), true, DateTimeOffset.UtcNow));
+        state = await new ProjectCorpusIndexer(_repository).IndexAsync(session, state, store, new());
+        state.ScanMode = IntelligenceScanMode.FullSemantic;
+        var resources = await new ProjectResourceStore(session).LoadAsync();
+        var client = new EmptyFindings();
+        state = await new AdaptiveBookIntelligenceAnalyzer(client).AnalyzeAsync(session, state, store, resources, new() { Model = "mock" });
+        var integrity = await new CorpusIntegrityAuditor(_repository).AuditAsync(session, state);
+        var census = await CharacterMentionCensus.ScanAsync(session, _repository, resources, state);
+        Assert.Empty(state.Characters); Assert.True(integrity.Complete);
+        Assert.False(CorpusReviewAudit.Build(integrity, census, state).Complete);
+        Assert.Contains("NeedsReview", CorpusReviewAudit.Build(integrity, census, state).Summary);
+        int requests = client.Calls;
+        await new AdaptiveBookIntelligenceAnalyzer(client).AnalyzeAsync(session, state, store, resources, new() { Model = "mock" });
+        Assert.Equal(requests, client.Calls);
+    }
+
+    [Fact]
+    public void Skipped_low_evidence_is_not_analyzed_or_complete_and_thousand_chapter_integrity_smoke()
+    {
+        string source = new string('风', 1700) + "𠀀" + new string('月', 1700);
+        for (int i = 1; i <= 1000; i++)
+        {
+            Guid id = Guid.NewGuid(); string hash = CorpusIntegrityAuditor.SourceHash(source);
+            var chapter = new CorpusChapterIndex { ChapterId = id, ChapterNumber = i,
+                SourceSha256 = hash, SourceLengthUtf16 = source.Length, Evidence = ProjectCorpusIndexer.ScanChapter(id, source, hash, [], 0) };
+            var audit = CorpusIntegrityAuditor.Inspect(id, i, source, chapter, IntelligenceScanMode.FastAdaptive);
+            Assert.True(audit.Indexed); Assert.Equal(CorpusCompletion.Skipped, audit.Status);
+            Assert.Equal(0, audit.Analyzed); Assert.True(audit.Skipped > 0);
+            Assert.False(new CorpusIntegrityReport(Guid.NewGuid(), 0, [audit], 0).Complete);
+        }
+    }
+
+    [Fact]
+    public async Task Rollback_refuses_to_remove_review_decisions_made_after_backup()
+    {
+        var (session, store, state) = await Scenario(1);
+        string backup = await CorpusReconciliation.BackupAsync(store, state.Revision);
+        state.Characters.Add(new() { ChineseName = "沈夕颜", Status = IntelligenceReviewStatus.Accepted, EvidenceIds = [state.Evidence.Single().Id] });
+        state = await store.SaveAsync(state);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => CorpusReconciliation.RollbackAsync(store, backup, state.Revision));
+        Assert.Equal(IntelligenceReviewStatus.Accepted, (await store.LoadAsync()).Characters.Single().Status);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Review_refuses_mismatched_excerpt_or_inactive_chapter_without_writing_resources(bool inactive)
+    {
+        var (session, store, state) = await Scenario(1);
+        var evidence = state.Evidence.Single();
+        if (inactive) session.Manifest.Chapters[0].DeletedAt = DateTimeOffset.UtcNow;
+        else evidence.Excerpt = "错误的证据";
+        var suggestion = new IntelligenceCharacterSuggestion { ChineseName = "沈夕颜", EvidenceIds = [evidence.Id] };
+        state.Characters.Add(suggestion); state = await store.SaveAsync(state);
+        var resources = await new ProjectResourceStore(session).LoadAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new BookIntelligenceReviewService(session).AcceptCharacterAsync(
+            state, suggestion.Id, new() { ChineseName = "沈夕颜", VietnameseName = "Thẩm Tịch Nhan" }, resources.Revision));
+        Assert.False(File.Exists(session.Resolve(session.Manifest.Files.Resources)));
+        Assert.Equal(IntelligenceReviewStatus.Pending, (await store.LoadAsync()).Characters.Single().Status);
+    }
+
+    [Fact]
+    public async Task Retire_then_reactivate_same_hash_repairs_current_coverage_and_keeps_provider_block()
+    {
+        var (session, store, state) = await Scenario(2);
+        var evidence = state.Chapters[1].Evidence.Single();
+        evidence.AiBlocked = true; evidence.AiBlockReason = "SAFETY";
+        state = await store.SaveAsync(state);
+        session.Manifest.Chapters[1].DeletedAt = DateTimeOffset.UtcNow;
+        state = await new ProjectCorpusIndexer(_repository).IndexAsync(session, state, store, new());
+        Assert.False(state.Evidence.Single(x => x.Id == evidence.Id).IsCurrent);
+        session.Manifest.Chapters[1].DeletedAt = null;
+        Assert.True((await new CorpusIntegrityAuditor(_repository).AuditAsync(session, state)).NeedsReindex);
+        state = await new ProjectCorpusIndexer(_repository).IndexAsync(session, state, store, new());
+        var repaired = state.Evidence.Single(x => x.Id == evidence.Id);
+        Assert.True(repaired.IsCurrent); Assert.True(repaired.AiBlocked); Assert.False(repaired.AiAnalyzed);
+        Assert.Equal("SAFETY", repaired.AiBlockReason);
+    }
+
+    [Fact]
+    public async Task Exact_199_evidence_fixture_repairs_eleven_active_chapters_without_reclassifying_12_blocks()
+    {
+        var (session, store, state) = await Scenario(19);
+        var corpus = new List<CorpusChapterIndex>();
+        int ordinal = 0;
+        for (int chapterIndex = 0; chapterIndex < 19; chapterIndex++)
+        {
+            var entry = session.Manifest.Chapters[chapterIndex];
+            int windows = chapterIndex < 7 ? 11 : chapterIndex == 7 ? 10 : chapterIndex == 8 ? 12 : 10;
+            string source = new('风', windows * 900);
+            var document = (await _repository.LoadChapterAsync(session, entry.ChapterId)).Chapter;
+            await _repository.UpdateChapterAsync(session, SourceEditPlanner.Apply(document,
+                SourceEditPlanner.Preview(document, source), true, DateTimeOffset.UtcNow));
+            string hash = CorpusIntegrityAuditor.SourceHash(source);
+            var chapter = new CorpusChapterIndex { ChapterId = entry.ChapterId, ChapterNumber = entry.Number,
+                SourceSha256 = hash, SourceLengthUtf16 = source.Length };
+            for (int i = 0; i < windows; i++, ordinal++)
+                chapter.Evidence.Add(new() { ChapterId = entry.ChapterId, StartUtf16 = i * 900, LengthUtf16 = 900,
+                    SourceSha256 = hash, Excerpt = source.Substring(i * 900, 900), IsCurrent = chapterIndex < 8,
+                    AiAnalyzed = ordinal < 75, AiBlocked = ordinal is >= 75 and < 87,
+                    AiBlockReason = ordinal is >= 75 and < 87 ? "SAFETY" : "" });
+            corpus.Add(chapter);
+        }
+        state.Chapters = corpus; state.ScanMode = IntelligenceScanMode.FullSemantic;
+        state.LastError = ""; state.NextEvidenceIndex = 87;
+        state = await store.SaveAsync(state);
+        Guid[] ids = state.Evidence.Select(x => x.Id).Order().ToArray();
+        var auditor = new CorpusIntegrityAuditor(_repository);
+        var before = await auditor.AuditAsync(session, state);
+        Assert.Equal(199, state.Evidence.Count()); Assert.Equal(87, before.Current);
+        Assert.Equal(75, before.Analyzed); Assert.Equal(12, before.Blocked); Assert.Equal(112, before.Stale);
+        Assert.Equal(11, before.Missing); Assert.False(before.Complete);
+        var repaired = await new ProjectCorpusIndexer(_repository).IndexAsync(session, state, store, new());
+        var after = await auditor.AuditAsync(session, repaired);
+        Assert.Equal(19, after.IndexedChapters); Assert.Equal(199, after.Current);
+        Assert.Equal(75, after.Analyzed); Assert.Equal(12, after.Blocked); Assert.Equal(112, after.Unverified);
+        Assert.Equal(0, after.Missing); Assert.Equal(0, after.Stale); Assert.False(after.Complete);
+        Assert.Equal(ids, repaired.Evidence.Select(x => x.Id).Order());
+    }
+
+    private sealed class EmptyFindings : IOllamaClient
+    {
+        public int Calls;
+        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
+        { Calls++; return Task.FromResult(new OllamaCompletion("{\"characters\":[],\"relationships\":[],\"glossary\":[]}", true, "stop", new())); }
     }
 
     private async Task<(ProjectSession, BookIntelligenceStore, BookIntelligenceState)> Scenario(int count)

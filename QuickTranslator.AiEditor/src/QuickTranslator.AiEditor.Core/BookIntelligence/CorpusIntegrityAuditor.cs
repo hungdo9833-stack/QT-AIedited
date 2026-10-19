@@ -48,6 +48,8 @@ public sealed class CorpusIntegrityAuditor(ProjectRepository repository)
         if (state.ProjectId != session.Manifest.ProjectId) throw new InvalidOperationException("Corpus belongs to another project.");
         var result = new List<ChapterIntegrityAudit>();
         var groups = session.Manifest.Chapters.Where(x => x.DeletedAt is null).GroupBy(x => x.ChapterId).ToArray();
+        var duplicateNumbers = session.Manifest.Chapters.Where(x => x.DeletedAt is null).GroupBy(x => x.Number)
+            .Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet();
         foreach (var group in groups.OrderBy(x => x.First().Number).ThenBy(x => x.Key))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -59,6 +61,7 @@ public sealed class CorpusIntegrityAuditor(ProjectRepository repository)
                 var audit = Inspect(entry.ChapterId, entry.Number, chapter.OriginalText ?? "", index.FirstOrDefault(), state.ScanMode);
                 var issues = audit.Issues.ToList();
                 if (group.Count() != 1 || index.Length > 1) issues.Add(new("DuplicateChapter", 0, 0, "Duplicate ChapterId in manifest/index."));
+                if (duplicateNumbers.Contains(entry.Number)) issues.Add(new("DuplicateChapterNumber", 0, 0, "Active chapter number is not unique in manifest."));
                 if (chapter.Id != entry.ChapterId || chapter.ProjectId != state.ProjectId)
                     issues.Add(new("ChapterIdentity", 0, 0, "ChapterDocument identity does not match manifest."));
                 result.Add(audit with { Issues = issues });
@@ -74,8 +77,9 @@ public sealed class CorpusIntegrityAuditor(ProjectRepository repository)
             result.Add(new(index.ChapterId, index.ChapterNumber, false, index.SourceSha256, index.SourceLengthUtf16,
                 [new("InactiveChapter", 0, 0, session.Manifest.Chapters.Any(x => x.ChapterId == index.ChapterId)
                     ? "Chapter deleted in manifest; retained for audit only." : "Chapter absent from manifest; retained for audit only.")],
-                index.Evidence.Count(x => x.IsCurrent), 0, 0, 0, 0, index.Evidence.Count(x => !x.IsCurrent)));
-        return new(state.ProjectId, state.Revision, result, state.PendingCount);
+                index.Evidence.Count(x => x.IsCurrent), 0, 0, 0, 0, index.Evidence.Count));
+        return new(state.ProjectId, state.Revision, result, state.PendingCount + state.DerivedRelationships.Count(x =>
+            x.Status == KnowledgeRelationshipStatus.DerivedAwaitingReview));
     }
 
     public static ChapterIntegrityAudit Inspect(Guid id, int number, string source, CorpusChapterIndex? index,
@@ -86,6 +90,7 @@ public sealed class CorpusIntegrityAuditor(ProjectRepository repository)
         if (index is null) return new(id, number, true, hash, source.Length,
             [new("MissingIndex", 0, source.Length, "Active chapter has no index; indexing interrupted or pending.")], 0, 0, 0, 0, 0, 0);
         if (index.ChapterId != id) issues.Add(new("ChapterIdentity", 0, 0, "Index belongs to another chapter."));
+        if (index.ChapterNumber != number) issues.Add(new("ChapterOrder", 0, 0, "Manifest chapter number changed; index metadata needs reconciliation."));
         if (index.SourceSha256 != hash) issues.Add(new("SourceChangedOrHashMismatch", 0, source.Length,
             "OriginalText hash differs from index; source changed or saved hash is invalid (cannot distinguish from state alone)."));
         if (index.SourceLengthUtf16 != source.Length) issues.Add(new("SourceLength", 0, source.Length, "Source length differs from index."));

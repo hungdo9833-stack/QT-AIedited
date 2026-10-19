@@ -55,12 +55,17 @@ public static class CharacterMentionCensus
         if (projectId != resources.ProjectId || projectId != state.ProjectId) throw new InvalidOperationException("Census belongs to another project.");
         if (sources.Select(x => x.ChapterId).Distinct().Count() != sources.Count) throw new InvalidDataException("Duplicate census chapter identity.");
         var profiles = resources.Characters.Profiles.SelectMany(x => new[] { x.ChineseName }.Concat(x.Aliases))
-            .Where(Useful).ToHashSet(StringComparer.Ordinal);
+            .Where(x => !string.IsNullOrWhiteSpace(x) && x.Length >= 2).ToHashSet(StringComparer.Ordinal);
         var reviewed = state.Characters.SelectMany(x => new[] { x.ChineseName }.Concat(x.Aliases))
-            .Concat(state.CandidateIdentities.SelectMany(x => new[] { x.ChineseName }.Concat(x.Aliases)))
+            .Concat(state.CandidateIdentities.Where(x => x.Status == CandidateIdentityStatus.Rejected)
+                .SelectMany(x => new[] { x.ChineseName }.Concat(x.Aliases)))
             .Where(Useful).ToHashSet(StringComparer.Ordinal);
         var names = new Dictionary<string, MentionHypothesisKind>(StringComparer.Ordinal);
         foreach (string name in profiles.Concat(reviewed)) names.TryAdd(name, MentionHypothesisKind.KnownName);
+        // A bare candidate record is not an actionable Character review row.
+        // Seed its literal form, but still report missing profile/review if orphaned.
+        foreach (string name in state.CandidateIdentities.SelectMany(x => new[] { x.ChineseName }.Concat(x.Aliases)).Where(Useful))
+            names.TryAdd(name, MentionHypothesisKind.KnownName);
         var hashes = new Dictionary<Guid, string>();
         foreach (var source in sources)
         {

@@ -404,7 +404,8 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
         Dictionary<Guid, CorpusEvidence> evidence = state.Evidence.ToDictionary(x => x.Id);
         CorpusEvidence[] selected = evidenceIds.Distinct().Select(id => evidence.TryGetValue(id, out CorpusEvidence? item)
             ? item : throw new InvalidDataException("Đề xuất tham chiếu chứng cứ không còn trong Knowledge Base.")).ToArray();
-        if (selected.Length == 0 || selected.Any(x => !x.IsCurrent))
+        if (selected.Length == 0 || selected.Any(x => !x.IsCurrent ||
+            !session.Manifest.Chapters.Any(c => c.ChapterId == x.ChapterId && c.DeletedAt is null)))
             throw new InvalidOperationException("Nguyên tác đã đổi sau khi phân tích. Hãy quét lại trước khi lưu đề xuất này.");
         var repository = new ProjectRepository();
         foreach (IGrouping<Guid, CorpusEvidence> chapterEvidence in selected.GroupBy(x => x.ChapterId))
@@ -412,7 +413,10 @@ public sealed class BookIntelligenceReviewService(ProjectSession session)
             ChapterDocument chapter = (await repository.LoadChapterAsync(session, chapterEvidence.Key, cancellationToken)
                 .ConfigureAwait(false)).Chapter;
             string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(chapter.OriginalText ?? "")));
-            if (chapterEvidence.Any(x => !string.Equals(x.SourceSha256, hash, StringComparison.Ordinal)))
+            string source = chapter.OriginalText ?? "";
+            if (chapterEvidence.Any(x => !string.Equals(x.SourceSha256, hash, StringComparison.Ordinal) ||
+                x.StartUtf16 < 0 || x.LengthUtf16 <= 0 || (long)x.StartUtf16 + x.LengthUtf16 > source.Length ||
+                !source.AsSpan(x.StartUtf16, x.LengthUtf16).SequenceEqual(x.Excerpt)))
                 throw new InvalidOperationException("Nguyên tác đã đổi sau khi phân tích. Hãy quét lại trước khi lưu đề xuất này.");
         }
     }

@@ -7,6 +7,7 @@ using QuickTranslator.AiEditor.Core.BookIntelligence;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Segmentation;
 using QuickTranslator.AiEditor.Core.Translation;
 
 int chapterCount = args.Length > 0 && int.TryParse(args[0], out int parsed) ? parsed : 50;
@@ -119,6 +120,8 @@ static async Task<PipelineResult> RunPipelineAsync(string projectRoot, List<Corp
         var document = TranslationService.CreateChapter($"Chương {index.ChapterNumber}",
             string.Concat(index.Evidence.OrderBy(x => x.StartUtf16).Select(x => x.Excerpt)));
         document.Id = index.ChapterId;
+        document.Segments = new TextSegmenter().Segment(document.OriginalText, document.Id, document.SegmentationOptions).ToList();
+        document.SelectedSegmentId = document.Segments[0].Id;
         await repository.AddChapterAsync(session, document, index.ChapterNumber, "Synthetic");
     }
     state = await store.SaveAsync(state);

@@ -40,8 +40,8 @@ public sealed class ProjectCorpusIndexer(ProjectRepository repository)
         state = BookIntelligenceStore.Clone(state);
         ProjectChapterEntry[] active = session.Manifest.Chapters.Where(x => x.DeletedAt is null)
             .OrderBy(x => x.Number).ThenBy(x => x.ChapterId).ToArray();
-        if (active.Select(x => x.ChapterId).Distinct().Count() != active.Length)
-            throw new InvalidDataException("Duplicate active ChapterId; cannot safely reconcile.");
+        if (active.Select(x => x.ChapterId).Distinct().Count() != active.Length || active.Select(x => x.Number).Distinct().Count() != active.Length)
+            throw new InvalidDataException("Duplicate active ChapterId/number; cannot safely reconcile.");
         async Task CheckpointAsync()
         {
             LastBackupPath ??= await CorpusReconciliation.BackupAsync(store, state.Revision, cancellationToken).ConfigureAwait(false);

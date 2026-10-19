@@ -51,6 +51,12 @@ public sealed class BookIntelligenceReviewWindow : Window
     private readonly ComboBox _kindFilter = new() { Width = 145, ItemsSource = new[] { "Tất cả loại", "Nhân vật", "Quan hệ", "Suy luận", "Glossary" }, SelectedIndex = 0 };
     private readonly ComboBox _statusFilter = new() { Width = 145, ItemsSource = new[] { "Tất cả trạng thái", "Chờ duyệt", "Đã xử lý", "Xung đột/Stale" }, SelectedIndex = 0 };
     private bool _loading;
+    private CorpusReviewAudit? _corpusAudit;
+    private bool _auditing;
+    private readonly Button _audit = new() { Content = "Kiểm tra corpus (CPU)" };
+    private readonly ComboBox _auditGroup = new() { Width = 170, ItemsSource = new[]
+        { "Đề xuất hiện có", "Missing identity", "Stale index", "Blocked excerpts", "Unverified" }, SelectedIndex = 0 };
+    private readonly TextBlock _auditSummary = new() { Text = "Corpus chưa được kiểm chứng từ Manifest + OriginalText.", TextWrapping = TextWrapping.Wrap };
 
     public BookIntelligenceReviewWindow(ProjectSession session, ProjectRepository repository,
         ProjectResources resources, IReadOnlyList<OllamaBackendProfile> profiles,
@@ -98,8 +104,10 @@ public sealed class BookIntelligenceReviewWindow : Window
         var filters = new WrapPanel { Margin = new Thickness(0, 5, 0, 3) };
         filters.Children.Add(new TextBlock { Text = "Lọc", VerticalAlignment = VerticalAlignment.Center });
         filters.Children.Add(_kindFilter); filters.Children.Add(_statusFilter); filters.Children.Add(_search);
+        filters.Children.Add(_auditGroup); filters.Children.Add(_audit);
         header.Children.Add(filters);
         header.Children.Add(controls); header.Children.Add(_progress); header.Children.Add(_summary);
+        header.Children.Add(_auditSummary);
         root.Children.Add(header);
 
         var footer = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
@@ -134,6 +142,8 @@ public sealed class BookIntelligenceReviewWindow : Window
         _run.Click += async (_, _) => await RunAsync();
         _rerun.Click += async (_, _) => await RunAsync(forceResurvey: true);
         _blocked.Click += async (_, _) => await ShowBlockedEvidenceAsync();
+        _audit.Click += async (_, _) => await RefreshCorpusAuditAsync();
+        _auditGroup.SelectionChanged += (_, _) => RefreshQueue();
         _cancel.Click += (_, _) => _cancellation?.Cancel();
         _save.Click += async (_, _) => await SaveSelectedAsync();
         _merge.Click += async (_, _) => await MergeSelectedAsync();
@@ -143,7 +153,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         _evidence.MouseDoubleClick += async (_, _) => await OpenSelectedEvidenceAsync();
         _translationContext.Click += async (_, _) => await SaveContextFeatureFlagAsync();
         _profile.SelectionChanged += (_, _) => SelectSurveyBackend();
-        _model.SelectionChanged += (_, _) => { if (!_loading && _profile.SelectedItem is OllamaBackendProfile p && p.Id == GeminiFlashPoolProfileId) ShowGeminiConfiguration(); };
+        _model.SelectionChanged += (_, _) => { if (!_loading && _model.SelectedItem is string && _profile.SelectedItem is OllamaBackendProfile p && p.Id == GeminiFlashPoolProfileId) ShowGeminiConfiguration(); };
         _search.TextChanged += (_, _) => RefreshQueue();
         _kindFilter.SelectionChanged += (_, _) => RefreshQueue();
         _statusFilter.SelectionChanged += (_, _) => RefreshQueue();
@@ -175,6 +185,7 @@ public sealed class BookIntelligenceReviewWindow : Window
             PopulateModelDropdown(selected, stateUsesGemini ? _state.AnalyzerModel! : selected.Model);
             RefreshQueue();
             if (selected.Id == GeminiFlashPoolProfileId) ShowGeminiConfiguration();
+            await RefreshCorpusAuditAsync();
         }
         catch (Exception ex) { ShowFailure(ex); }
         finally { _loading = false; }
@@ -182,7 +193,7 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private async Task RunAsync(bool forceResurvey = false)
     {
-        if (_state is null || _profile.SelectedItem is not OllamaBackendProfile profile || string.IsNullOrWhiteSpace(_model.Text)) return;
+        if (_loading || _auditing || _state is null || _profile.SelectedItem is not OllamaBackendProfile profile || string.IsNullOrWhiteSpace(_model.Text)) return;
         SetBusy(true); _cancellation = new CancellationTokenSource();
         try
         {
@@ -195,11 +206,14 @@ public sealed class BookIntelligenceReviewWindow : Window
                 _progress.Maximum = Math.Max(1, p.TotalChapters); _progress.Value = p.ProcessedChapters;
                 _summary.Text = $"CPU: {p.ProcessedChapters}/{p.TotalChapters} chương · quét lại {p.RescannedChapters} · {p.EvidenceCount} đoạn chứng cứ.";
             });
-            _state = await new ProjectCorpusIndexer(_repository).IndexAsync(_session, _state, store,
+            var indexer = new ProjectCorpusIndexer(_repository);
+            _state = await indexer.IndexAsync(_session, _state, store,
                 _resources.Characters, indexProgress, _cancellation.Token);
+            if (indexer.LastBackupPath is string indexBackup) _audit.ToolTip = "Index reconciliation backup: " + indexBackup;
             _summary.Text = "Đã lập chỉ mục. Đang phân tích các đoạn có tín hiệu bằng model khảo sát…";
             if (!forceResurvey && !BookIntelligenceResurveyService.HasUnanalyzedEvidence(_state, _state.ScanMode))
             {
+                await RefreshCorpusAuditAsync();
                 _summary.Text = "Không có đoạn mới chưa khảo sát. Dữ liệu cũ được giữ để tiếp tục; " +
                     "nhấn 'Khảo sát lại' nếu muốn chạy AI lại từ đầu (có bản sao lưu).";
                 return;
@@ -232,7 +246,7 @@ public sealed class BookIntelligenceReviewWindow : Window
             var aiProgress = new Progress<AnalyzerProgress>(p =>
             {
                 _progress.Maximum = Math.Max(1, p.TotalEvidence); _progress.Value = p.ProcessedEvidence;
-                _summary.Text = $"AI: {p.ProcessedEvidence}/{p.TotalEvidence} đoạn · {p.PendingSuggestions} đề xuất chờ duyệt.";
+                _summary.Text = $"AI đã xử lý {p.ProcessedEvidence}/{p.TotalEvidence} đoạn (bao gồm batch bị chặn, không có nghĩa đã phân tích) · {p.PendingSuggestions} đề xuất chờ duyệt.";
             });
 
             using var httpHandler = new HttpClientHandler { AllowAutoRedirect = false };
@@ -296,9 +310,10 @@ public sealed class BookIntelligenceReviewWindow : Window
             _state = await store.SaveAsync(_state, _cancellation.Token);
             _stateChanged(_state, _translationContext.IsChecked == true);
             RefreshQueue();
+            await RefreshCorpusAuditAsync();
             int blockedCount = _state.Evidence.Count(x => x.IsCurrent && x.AiBlocked);
             ReviewRow? newest = Rows().FirstOrDefault(x => x.Status == IntelligenceReviewStatus.Pending.ToString());
-            _summary.Text = $"{(blockedCount > 0 ? "Khảo sát kết thúc (chưa đầy đủ)" : "Khảo sát hoàn tất")} · " +
+            _summary.Text = $"{(_corpusAudit?.Complete == true ? "Complete / Verified" : "Khảo sát kết thúc · NeedsReview")} · " +
                 $"{_state.Metrics.Requests} request · " +
                 $"{_state.PendingCount} đề xuất chờ duyệt · {blockedCount} đoạn thuộc batch bị Google từ chối. " +
                 (blockedCount > 0
@@ -315,7 +330,7 @@ public sealed class BookIntelligenceReviewWindow : Window
             await ReloadLatestSurveyCheckpointAsync();
             ShowFailure(ex);
         }
-        finally { SetBusy(false); _cancellation?.Dispose(); _cancellation = null; }
+        finally { _cancellation?.Dispose(); _cancellation = null; SetBusy(false); }
     }
 
     private async Task ReloadLatestSurveyCheckpointAsync()
@@ -325,6 +340,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         try
         {
             _state = await new BookIntelligenceStore(_session).LoadAsync();
+            InvalidateCorpusAudit();
             RefreshQueue();
             _stateChanged(_state, _translationContext.IsChecked == true);
         }
@@ -337,7 +353,7 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private async Task SaveSelectedAsync()
     {
-        if (_state is null || _queue.SelectedItem is not ReviewRow row) return;
+        if (_auditing || _cancellation is not null || _state is null || _queue.SelectedItem is not ReviewRow row) return;
         try
         {
             var review = new BookIntelligenceReviewService(_session);
@@ -421,7 +437,7 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private async Task MergeSelectedAsync()
     {
-        if (_state is null || _queue.SelectedItem is not ReviewRow { Value: IntelligenceCharacterSuggestion suggestion } ||
+        if (_auditing || _cancellation is not null || _state is null || _queue.SelectedItem is not ReviewRow { Value: IntelligenceCharacterSuggestion suggestion } ||
             _mergeTarget.SelectedValue is not Guid target) return;
         try { ApplyCommit(await new BookIntelligenceReviewService(_session).MergeCharacterAsync(_state,
             suggestion.Id, target, _resources.Revision)); }
@@ -430,13 +446,14 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private async Task SetStatusAsync(IntelligenceReviewStatus status)
     {
-        if (_state is null || _queue.SelectedItems.Count == 0) return;
+        if (_auditing || _cancellation is not null || _state is null || _queue.SelectedItems.Count == 0) return;
         try
         {
-            ReviewRow[] selected = _queue.SelectedItems.Cast<ReviewRow>().Where(x => x.Value is not DerivedRelationship d ||
-                d.ValidityStatus == InferenceValidityStatus.Valid).ToArray();
+            ReviewRow[] selected = _queue.SelectedItems.Cast<ReviewRow>().Where(x => x.Value is not CorpusAuditReviewItem &&
+                (x.Value is not DerivedRelationship d || d.ValidityStatus == InferenceValidityStatus.Valid)).ToArray();
             foreach (ReviewRow row in selected)
                 _state = await new BookIntelligenceReviewService(_session).SetReviewStatusAsync(_state, row.Id, status);
+            InvalidateCorpusAudit();
             RefreshQueue();
         }
         catch (Exception ex) { ShowFailure(ex); }
@@ -445,12 +462,76 @@ public sealed class BookIntelligenceReviewWindow : Window
     private async Task OpenSelectedEvidenceAsync()
     {
         if (_evidence.SelectedItem is EvidenceRow item) await _openEvidence(item.Evidence);
+        else if (_queue.SelectedItem is ReviewRow { Value: CorpusAuditReviewItem audit })
+        {
+            if (audit.Evidence.FirstOrDefault() is CorpusEvidence first) { await _openEvidence(first); return; }
+            // A broken/stale index is not navigation evidence. Re-read actual source
+            // and bind the navigation marker to its current hash and safe range.
+            var chapter = (await _repository.LoadChapterAsync(_session, audit.ChapterId)).Chapter;
+            string source = chapter.OriginalText ?? "";
+            int start = Math.Clamp(audit.StartUtf16, 0, source.Length);
+            if (start > 0 && start < source.Length && char.IsLowSurrogate(source[start]) && char.IsHighSurrogate(source[start - 1])) start--;
+            int end = Math.Min(source.Length, start + 120);
+            if (end < source.Length && end > 0 && char.IsHighSurrogate(source[end - 1]) && char.IsLowSurrogate(source[end])) end++;
+            await _openEvidence(new() { ChapterId = audit.ChapterId, StartUtf16 = start, LengthUtf16 = end - start,
+                SourceSha256 = CorpusIntegrityAuditor.SourceHash(source), Excerpt = source[start..end] });
+        }
     }
 
     private void ApplyCommit(IntelligenceCommitResult result)
     {
+        InvalidateCorpusAudit();
         _resources = result.Resources; _state = result.State; _resourcesChanged(_resources);
         _stateChanged(_state, _translationContext.IsChecked == true); RefreshQueue();
+    }
+
+    private void InvalidateCorpusAudit()
+    {
+        _corpusAudit = null;
+        _auditSummary.Text = "Dữ liệu đã đổi; chạy Kiểm tra corpus (CPU) để kiểm chứng lại. Chưa thể kết luận Complete.";
+    }
+
+    private string ActiveCorpusSignature() => string.Join("|", _session.Manifest.Chapters.Where(x => x.DeletedAt is null)
+        .OrderBy(x => x.ChapterId).Select(x => $"{x.ChapterId:D}:{x.Number}:{x.RelativePath}"));
+
+    private async Task RefreshCorpusAuditAsync()
+    {
+        if (_state is null || _auditing) return;
+        _auditing = true;
+        _auditSummary.Text = "CPU: đối chiếu active Manifest, hash, UTF-16 coverage và census toàn bộ nguyên tác…";
+        var snapshot = BookIntelligenceStore.Clone(_state);
+        var resources = _resources.Clone();
+        string signature = ActiveCorpusSignature();
+        _run.IsEnabled = _rerun.IsEnabled = _audit.IsEnabled = false;
+        ShowSelection();
+        try
+        {
+            var integrity = await new CorpusIntegrityAuditor(_repository).AuditAsync(_session, snapshot);
+            var census = await CharacterMentionCensus.ScanAsync(_session, _repository, resources, snapshot);
+            if (_state.Revision != snapshot.Revision || _resources.Revision != resources.Revision || signature != ActiveCorpusSignature() ||
+                integrity.Chapters.Any(x => x.Active && (!census.SourceHashes.TryGetValue(x.ChapterId, out string? hash) || hash != x.SourceSha256)))
+                throw new InvalidOperationException("Corpus changed or is unreadable during audit; refresh required.");
+            _corpusAudit = CorpusReviewAudit.Build(integrity, census, snapshot);
+            // Diagnostics only, separate versioned sidecar. No resource/schema/approval changes.
+            await CharacterMentionCensus.SaveReportAsync(_session, census);
+            await _corpusAudit.SaveDiagnosticsAsync(_session);
+            _auditSummary.Text = _corpusAudit.Summary;
+            string summary = _summary.Text;
+            RefreshQueue();
+            _summary.Text = summary;
+        }
+        catch (Exception ex)
+        {
+            _corpusAudit = null;
+            _auditSummary.Text = "Incomplete / NeedsReview: " + ex.Message;
+            RefreshQueue();
+        }
+        finally
+        {
+            _auditing = false;
+            _run.IsEnabled = _rerun.IsEnabled = _audit.IsEnabled = _cancellation is null;
+            ShowSelection();
+        }
     }
 
     private async Task SaveContextFeatureFlagAsync()
@@ -511,6 +592,9 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private void RefreshQueue()
     {
+        bool auditMode = _auditGroup.SelectedIndex > 0;
+        _kindFilter.IsEnabled = !auditMode;
+        _statusFilter.IsEnabled = !auditMode;
         _queue.ItemsSource = Rows();
         _blocked.IsEnabled = _state?.Evidence.Any(x => x.IsCurrent && x.AiBlocked) == true;
         _mergeTarget.ItemsSource = _resources.Characters.Profiles.OrderBy(x => x.VietnameseName).ToList();
@@ -521,6 +605,14 @@ public sealed class BookIntelligenceReviewWindow : Window
     private List<ReviewRow> Rows()
     {
         if (_state is null) return [];
+        if (_auditGroup.SelectedIndex > 0)
+        {
+            string group = _auditGroup.SelectedItem as string ?? "";
+            string search = _search.Text.Trim();
+            return (_corpusAudit?.Items ?? []).Where(x => x.Group == group &&
+                (search.Length == 0 || x.Title.Contains(search, StringComparison.OrdinalIgnoreCase)))
+                .Select(x => new ReviewRow(Guid.Empty, x.Group, x.Title, "Unknown", "Unverified", "CPU audit", x.Evidence.Count, x)).ToList();
+        }
         IEnumerable<ReviewRow> rows = _state.Characters.Select(x => new ReviewRow(x.Id, "Nhân vật", $"{x.ChineseName} → {x.VietnameseName}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x))
             .Concat(_state.Relationships.Select(x => new ReviewRow(x.Id, "Quan hệ", $"{x.SpeakerChineseName} → {x.ListenerChineseName}: {RelationshipLabelNormalizer.Display(x.Relationship)}", x.Confidence.ToString(), x.Status.ToString(), "AI trực tiếp", x.EvidenceIds.Count, x)))
             .Concat(_state.DerivedRelationships.Select(x => new ReviewRow(x.Id, "Suy luận", $"{CharacterName(x.SubjectCharacterId)} → {CharacterName(x.TargetCharacterId)}: {RelationDisplay(x.OutputRelation)}",
@@ -550,12 +642,20 @@ public sealed class BookIntelligenceReviewWindow : Window
 
     private void ShowSelection()
     {
+        bool readOnlyAudit = _auditGroup.SelectedIndex > 0;
+        bool busy = _auditing || _cancellation is not null;
+        _save.IsEnabled = _later.IsEnabled = _reject.IsEnabled = !readOnlyAudit && !busy;
+        _merge.IsEnabled = _mergeTarget.IsEnabled = !readOnlyAudit && !busy;
         if (_state is null || _queue.SelectedItem is not ReviewRow row)
         { _details.Text = "Chọn một đề xuất để xem lý do và chứng cứ."; _evidence.ItemsSource = null; return; }
         string reason;
         IEnumerable<Guid> ids;
+        IReadOnlyList<CorpusEvidence>? directEvidence = null;
         switch (row.Value)
         {
+            case CorpusAuditReviewItem x:
+                reason = x.Group + "\n" + x.Title + "\n\n" + x.Reason;
+                ids = []; directEvidence = x.Evidence; break;
             case IntelligenceCharacterSuggestion x:
                 reason = $"Tên Trung: {x.ChineseName}\nTên Việt đề xuất: {x.VietnameseName}\nBí danh: {string.Join(", ", x.Aliases)}\nGiới tính: {x.Gender}\nĐại từ: {x.PrimaryNarrativePronoun} / {x.SecondaryNarrativePronoun}\n\n{x.Reason}";
                 ids = x.EvidenceIds; break;
@@ -572,9 +672,9 @@ public sealed class BookIntelligenceReviewWindow : Window
         }
         _details.Text = reason;
         Dictionary<Guid, CorpusEvidence> map = _state.Evidence.ToDictionary(x => x.Id);
-        _evidence.ItemsSource = ids.Where(map.ContainsKey).Select(id => new EvidenceRow(map[id],
-            $"{ShortChapter(map[id].ChapterId)} · {map[id].StartUtf16}+{map[id].LengthUtf16} · {Preview(map[id].Excerpt)}")).ToList();
-        _merge.IsEnabled = row.Value is IntelligenceCharacterSuggestion;
+        _evidence.ItemsSource = (directEvidence ?? ids.Where(map.ContainsKey).Select(id => map[id]).ToArray()).Select(e => new EvidenceRow(e,
+            $"{ShortChapter(e.ChapterId)} · {e.StartUtf16}+{e.LengthUtf16} · {Preview(e.Excerpt)}")).ToList();
+        _merge.IsEnabled = !busy && row.Value is IntelligenceCharacterSuggestion;
         _mergeTarget.IsEnabled = _merge.IsEnabled;
     }
 
@@ -625,7 +725,12 @@ public sealed class BookIntelligenceReviewWindow : Window
         return dialog.ShowDialog() == true ? box.Text.Trim() : "";
     }
 
-    private void SetBusy(bool busy) { _run.IsEnabled = !busy; _rerun.IsEnabled = !busy; _cancel.IsEnabled = busy; _profile.IsEnabled = !busy; _model.IsEnabled = !busy; }
+    private void SetBusy(bool busy)
+    {
+        _run.IsEnabled = !busy && !_auditing; _rerun.IsEnabled = !busy && !_auditing; _cancel.IsEnabled = busy;
+        _profile.IsEnabled = !busy; _model.IsEnabled = !busy; _audit.IsEnabled = !busy && !_auditing;
+        ShowSelection();
+    }
     private void ShowFailure(Exception ex) { _summary.Text = "Lỗi: " + ex.Message + " Dữ liệu đã xác nhận và checkpoint trước đó vẫn được giữ."; }
     private string ShortChapter(Guid id) => _session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == id) is { } c ? $"Chương {c.Number}" : id.ToString("D");
     private static string Preview(string text) { string one = text.Replace('\r', ' ').Replace('\n', ' ').Trim(); return one.Length <= 90 ? one : one[..90] + "…"; }

@@ -67,6 +67,17 @@ public sealed class CharacterMentionCensusTests
         Assert.True(report.Candidates.Single(x => x.ChineseName == "阿颜").HasProfile);
     }
 
+    [Fact]
+    public void Orphan_candidate_identity_without_profile_or_character_review_remains_missing()
+    {
+        var (state, resources) = Empty();
+        state.CandidateIdentities.Add(new() { ChineseName = "沈夕颜" });
+        var report = CharacterMentionCensus.Scan(state.ProjectId, 0,
+            [new(Guid.NewGuid(), 1, "沈夕颜。沈夕颜。沈夕颜。")], resources, state);
+        Assert.Equal("沈夕颜", Assert.Single(report.MissingIdentities).ChineseName);
+        Assert.False(report.Candidates.Single().HasReview);
+    }
+
     [Theory]
     [InlineData(500)]
     [InlineData(1000)]
