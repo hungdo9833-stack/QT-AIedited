@@ -10,27 +10,34 @@ public sealed record SemanticSurveyBudget(int MaximumRequests = 5, int MaximumRe
 }
 public sealed record SemanticSurveyProgress(int Processed, int Total, int Requests, int ReservedTokens, string Message);
 public sealed record SemanticDryRun(string Fingerprint, int TotalBatches, int PendingRequests, int BlockedBatches, long EstimatedInputTokens,
-    long ConservativeReservedTokens, IReadOnlyList<SemanticSurveyRequest> Requests);
+    long ConservativeReservedTokens, IReadOnlyList<SemanticSurveyRequest> Requests)
+{
+    public int TotalEvidence => Requests.Sum(x => x.Units.Count);
+    public int CompletedEvidence { get; init; }
+    public int PendingEvidence { get; init; }
+    public int BlockedEvidence { get; init; }
+    public int OverContextBatches { get; init; }
+    public IReadOnlyList<SemanticSurveyRequest> ExecutionRequests { get; init; } = [];
+    public IReadOnlyDictionary<int, int> EvidencePerBatch => Requests.GroupBy(x => x.Units.Count).ToDictionary(x => x.Key, x => x.Count());
+}
 
 public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
 {
     public static SemanticDryRun DryRun(IReadOnlyList<SemanticSurveyRequest> plan, SemanticSurveyState state, BookIntelligenceState legacy)
     {
-        var pending = plan.Where(x => state.Status(x.Id) is SemanticBatchStatus.Pending or SemanticBatchStatus.Failed).ToArray();
-        int blocked = plan.Count(x => Blocked(x, state, legacy)); var ready = pending.Where(x => !Blocked(x, state, legacy)).ToArray();
-        return new(EntityMemoryIdentity.Fingerprint(plan.Select(x => x.Id).ToArray()), plan.Count, ready.Length, blocked,
-            ready.Sum(x => (long)x.EstimatedInputTokens), ready.Sum(x => (long)x.ReservedTokens), plan);
+        var cache = new SemanticEvidenceCache(state, legacy); var ready = cache.Ready(plan); var units = plan.SelectMany(x => x.Units).ToArray();
+        return new(EntityMemoryIdentity.Fingerprint(plan.Select(x => x.Id).ToArray()), plan.Count, ready.Count, plan.Count(x => x.Units.Any(cache.Blocked)),
+            ready.Sum(x => (long)x.EstimatedInputTokens), ready.Sum(x => (long)x.ReservedTokens), plan)
+        {
+            CompletedEvidence = units.Count(x => cache.Done(x) && !cache.Blocked(x)), PendingEvidence = ready.Sum(x => x.Units.Count),
+            BlockedEvidence = units.Count(cache.Blocked), ExecutionRequests = ready,
+            OverContextBatches = ready.Count(x => x.PlanningOptions is { } o && x.EstimatedInputTokens + o.MaximumOutputTokens > o.ContextSize)
+        };
     }
     public static bool Blocked(SemanticSurveyRequest request, SemanticSurveyState state, BookIntelligenceState legacy)
     {
-        var e = request.Evidence;
-        // Conservatively retain a refusal across model/context/source changes on this range.
-        // There is deliberately no automatic "try another model" or refusal reset.
-        bool Hit(Guid chapter, string sha, int start, int length) => chapter == e.ChapterId && start < e.StartUtf16 + e.LengthUtf16 && (long)start + length > e.StartUtf16;
-        var refused = state.Attempts.Where(a => a.Status == SemanticBatchStatus.Blocked).Select(x => x.BatchId).ToHashSet();
-        return legacy.Evidence.Any(x => x.AiBlocked && Hit(x.ChapterId, x.SourceSha256, x.StartUtf16, x.LengthUtf16)) ||
-            state.Batches.Where(b => refused.Contains(b.Id))
-                .Select(b => state.Evidence.Single(x => x.Id == b.EvidenceId)).Any(x => Hit(x.ChapterId, x.SourceSha256, x.StartUtf16, x.LengthUtf16));
+        var cache = new SemanticEvidenceCache(state, legacy);
+        return request.Units.Any(cache.Blocked);
     }
     public async Task<SemanticSurveyState> RunAsync(SemanticSurveyStore store, IReadOnlyList<SemanticSurveyRequest> plan, IReadOnlyList<CensusSource> sources,
         BookIntelligenceState legacy, ModelOptions options, SemanticSurveyBudget budget, string approvedPlanFingerprint,
@@ -38,22 +45,30 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
     {
         options.Validate(); budget.Validate(); using var lease = store.AcquireRunLease(); var state = await store.LoadAsync(ct).ConfigureAwait(false);
         if (DryRun(plan, state, legacy).Fingerprint != approvedPlanFingerprint || plan.Any(x => x.ProjectId != state.ProjectId)) throw new InvalidOperationException("Dry-run plan changed; preview again before sending.");
+        if (plan.Any(x => x.PlanningOptions is not null && x.PlanningOptions != options)) throw new InvalidOperationException("Model/options changed; preview again before sending.");
+        var cache = new SemanticEvidenceCache(state, legacy);
+        var execution = cache.Ready(plan).Concat(plan.SelectMany(x => x.Units).Where(x => cache.Blocked(x) && state.Status(x.Id) != SemanticBatchStatus.Blocked))
+            .OrderBy(x => x.ChapterNumber).ThenBy(x => x.Evidence.StartUtf16).ToArray();
         state = await store.UpdateAsync(state.Revision, s =>
         {
-            foreach (var r in plan)
+            foreach (var r in execution)
             {
-                if (!s.Evidence.Any(x => x.Id == r.Evidence.Id)) s.Evidence.Add(r.Evidence);
+                foreach (var unit in r.Units) if (!s.Evidence.Any(x => x.Id == unit.Evidence.Id)) s.Evidence.Add(unit.Evidence);
                 if (!s.Batches.Any(x => x.Id == r.Id)) s.Batches.Add(new(r.Id, r.ProjectId, r.Evidence.Id, r.BackendSignature, options, r.ContextFingerprint,
-                    r.DependencyFingerprint, r.ContextFactIds, r.AllowedIdentities, r.CpuCandidates, SemanticSurveyRequests.PromptVersion, SemanticSurveyContract.Version));
+                    r.DependencyFingerprint, r.ContextFactIds, r.AllowedIdentities, r.CpuCandidates,
+                    r.WireVersion == 1 ? SemanticSurveyRequests.PromptVersion : SemanticAdaptiveBatching.PromptVersion,
+                    r.WireVersion == 1 ? SemanticSurveyContract.Version : SemanticSurveyContract.MultiEvidenceVersion,
+                    r.WireVersion == 1 ? null : r.Units.Select(x => new SemanticEvidenceKey(x.Evidence.Id, x.Id)).ToArray()));
             }
         }, ct).ConfigureAwait(false);
         int requests = 0, reserved = 0, processed = 0;
-        foreach (var r in plan.OrderBy(x => x.ChapterNumber).ThenBy(x => x.Evidence.StartUtf16))
+        foreach (var r in execution)
         {
             ct.ThrowIfCancellationRequested();
-            if (state.Status(r.Id) is SemanticBatchStatus.Analyzed or SemanticBatchStatus.Validated or SemanticBatchStatus.Blocked) { processed++; continue; }
-            bool blocked = Blocked(r, state, legacy);
+            bool blocked = r.Units.Any(cache.Blocked);
             if (!blocked && (requests >= budget.MaximumRequests || (long)reserved + r.ReservedTokens > budget.MaximumReservedTokens)) break;
+            if (!blocked && r.Units.Any(u => !sources.Any(s => s.ChapterId == u.Evidence.ChapterId && s.ChapterNumber == u.ChapterNumber && CorpusIntegrityAuditor.SourceHash(s.OriginalText) == u.Evidence.SourceSha256)))
+                throw new InvalidOperationException("Source changed; preview again before sending.");
             if (current is not null && !await current(r).ConfigureAwait(false)) throw new InvalidOperationException("Source/memory changed during survey; retained checkpoints, run dry-run again.");
             Guid reservation = Guid.NewGuid();
             state = await store.UpdateAsync(state.Revision, s => s.Attempts.Add(new(reservation, r.Id, null, SemanticBatchStatus.Pending, DateTimeOffset.UtcNow, blocked ? 0 : r.ReservedTokens, null, null, "ReservedBeforeSend", "")), ct).ConfigureAwait(false);
@@ -67,7 +82,7 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
                 {
                     if (r.EstimatedInputTokens + options.MaximumOutputTokens > options.ContextSize) throw new InvalidDataException("ContextBudgetExceeded");
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(options.RequestTimeout);
-                    var completion = await backend.TranslateStructuredAsync(r.Prompt, options, SemanticSurveyContract.ResponseSchema, timeout.Token).ConfigureAwait(false);
+                    var completion = await backend.TranslateStructuredAsync(r.Prompt, options, SemanticSurveyContract.SchemaFor(r.WireVersion), timeout.Token).ConfigureAwait(false);
                     input = completion.Metrics.InputTokens; output = completion.Metrics.OutputTokens; responseFingerprint = EntityMemoryIdentity.Fingerprint(completion.Text);
                     if (completion.Done == false || completion.DoneReason is not (null or "stop")) throw new InvalidDataException("IncompleteProviderResponse");
                     audit = SemanticQualityAuditor.Audit(SemanticSurveyContract.Parse(completion.Text), r, sources);
@@ -90,7 +105,16 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
                     Guid id = EntityMemoryIdentity.StableId(s.ProjectId, "semantic-proposal:" + r.Id + ":" + EntityMemoryIdentity.Fingerprint(finding));
                     if (!s.Proposals.Any(x => x.Id == id)) s.Proposals.Add(new(id, r.Id, finding));
                 }
-                s.Attempts.Add(new(Guid.NewGuid(), r.Id, reservation, status, DateTimeOffset.UtcNow, blocked ? 0 : r.ReservedTokens, input, output, error, responseFingerprint));
+                Guid attemptId = Guid.NewGuid();
+                s.Attempts.Add(new(attemptId, r.Id, reservation, status, DateTimeOffset.UtcNow, blocked ? 0 : r.ReservedTokens, input, output, error, responseFingerprint));
+                foreach (var unit in r.Units)
+                {
+                    bool reviewed = audit?.ReviewedEvidenceIds?.Contains(unit.Evidence.Id) == true;
+                    var unitStatus = status is SemanticBatchStatus.Blocked or SemanticBatchStatus.Failed ? status : !reviewed ? SemanticBatchStatus.Pending :
+                        audit!.Findings.Where(x => x.Finding.SourceEvidenceIds.Contains(unit.Evidence.Id)).All(x => x.EvidenceValid && x.Issues.Count == 0) &&
+                        !unit.CpuCandidates.Any(x => audit.UnprocessedCpuIds.Contains(x.Id)) ? SemanticBatchStatus.Validated : SemanticBatchStatus.Analyzed;
+                    s.EvidenceResults.Add(new(Guid.NewGuid(), attemptId, unit.Evidence.Id, unit.Id, unitStatus));
+                }
             }, CancellationToken.None).ConfigureAwait(false);
             processed++; progress?.Report(new(processed, plan.Count, requests, reserved, error.Length > 0 ? error : status.ToString()));
             if (cancelled) throw new OperationCanceledException(ct); if (quota) break;

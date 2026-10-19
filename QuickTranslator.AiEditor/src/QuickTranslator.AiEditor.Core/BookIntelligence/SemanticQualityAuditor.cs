@@ -1,7 +1,8 @@
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
 public sealed record SemanticAuditedFinding(SemanticFinding Finding, bool EvidenceValid, bool CanPromote, IReadOnlyList<string> Issues);
-public sealed record SemanticAudit(IReadOnlyList<SemanticAuditedFinding> Findings, IReadOnlyList<string> Issues, IReadOnlyList<Guid> UnprocessedCpuIds)
+public sealed record SemanticAudit(IReadOnlyList<SemanticAuditedFinding> Findings, IReadOnlyList<string> Issues, IReadOnlyList<Guid> UnprocessedCpuIds,
+    IReadOnlyList<Guid>? ReviewedEvidenceIds = null)
 {
     public bool Validated => Issues.Count == 0 && UnprocessedCpuIds.Count == 0 && Findings.All(x => x.EvidenceValid && x.Issues.Count == 0);
 }
@@ -14,12 +15,18 @@ public static class SemanticQualityAuditor
     public static SemanticAudit Audit(SemanticResponse response, SemanticSurveyRequest request, IReadOnlyList<CensusSource> sources)
     {
         var issues = new List<string>(); var output = new List<SemanticAuditedFinding>(); var e = request.Evidence;
+        var evidence = request.Units.Select(x => x.Evidence).ToDictionary(x => x.Id);
         var source = sources.SingleOrDefault(x => x.ChapterId == e.ChapterId);
         bool sourceCurrent = source is not null && source.ChapterNumber == e.ChapterNumber && e.ProjectId == request.ProjectId &&
             CorpusIntegrityAuditor.SourceHash(source.OriginalText) == e.SourceSha256;
         if (!sourceCurrent) issues.Add("StaleOrForeignEvidence");
-        if (response.ProjectId != request.ProjectId || response.ChapterId != e.ChapterId || response.SchemaVersion != 1) issues.Add("ResponseScopeMismatch");
-        if (!response.ReviewedEvidenceIds.SequenceEqual(new[] { e.Id })) issues.Add("IncompleteEvidenceCoverage");
+        if (evidence.Values.Any(x => x.ProjectId != request.ProjectId || x.ChapterId != e.ChapterId || x.ChapterNumber != request.ChapterNumber || x.SourceSha256 != e.SourceSha256 ||
+            x.StartUtf16 < 0 || x.LengthUtf16 <= 0 || (long)x.StartUtf16 + x.LengthUtf16 > (source?.OriginalText.Length ?? 0))) issues.Add("StaleOrForeignEvidence");
+        if (response.ProjectId != request.ProjectId || response.ChapterId != e.ChapterId || response.SchemaVersion != request.WireVersion) issues.Add("ResponseScopeMismatch");
+        if (response.ReviewedEvidenceIds.Distinct().Count() != response.ReviewedEvidenceIds.Count || response.ReviewedEvidenceIds.Any(x => !evidence.ContainsKey(x))) issues.Add("ForeignOrDuplicateCoverage");
+        bool scopeValid = issues.Count == 0;
+        var reviewed = scopeValid ? response.ReviewedEvidenceIds.ToHashSet() : [];
+        if (reviewed.Count != evidence.Count) issues.Add("IncompleteEvidenceCoverage");
         var known = request.AllowedIdentities.ToDictionary(x => x.EntityId); var cpu = request.CpuCandidates.Select(x => x.Id).ToHashSet();
         var localDefs = response.Findings.SelectMany(Identities).Where(x => x.EntityId is null && x.LocalId.Length > 0).GroupBy(x => x.LocalId)
             .ToDictionary(x => x.Key, x => x.Select(i => (i.Name, i.Kind)).Distinct().Count());
@@ -29,15 +36,39 @@ public static class SemanticQualityAuditor
             var errors = new List<string>();
             var reviewIssues = new List<string>();
             bool eligible = true;
-            if (finding.SourceEvidenceIds.Count != 1 || finding.SourceEvidenceIds[0] != e.Id || finding.SupportSpans.Count == 0) errors.Add("MissingOrForeignSupport");
+            if (finding.SourceEvidenceIds.Count == 0 || finding.SourceEvidenceIds.Distinct().Count() != finding.SourceEvidenceIds.Count ||
+                finding.SourceEvidenceIds.Any(id => !evidence.ContainsKey(id) || !reviewed.Contains(id)) || finding.SupportSpans.Count == 0 ||
+                !finding.SourceEvidenceIds.ToHashSet().SetEquals(finding.SupportSpans.Select(x => x.EvidenceId))) errors.Add("MissingOrForeignSupport");
             foreach (var span in finding.SupportSpans)
             {
                 long end = (long)span.StartUtf16 + span.LengthUtf16;
-                if (!sourceCurrent || span.EvidenceId != e.Id || span.StartUtf16 < e.StartUtf16 || end > (long)e.StartUtf16 + e.LengthUtf16 ||
+                if (!sourceCurrent || !evidence.TryGetValue(span.EvidenceId, out var proof) || span.StartUtf16 < proof.StartUtf16 || end > (long)proof.StartUtf16 + proof.LengthUtf16 ||
                     span.LengthUtf16 is < 1 or > 240 || end > source!.OriginalText.Length || Splits(source.OriginalText, span.StartUtf16) || Splits(source.OriginalText, (int)end) ||
                     source.OriginalText.Substring(span.StartUtf16, span.LengthUtf16) != span.Text) errors.Add("SupportSpanMismatch");
             }
             string quotes = string.Join("\n", finding.SupportSpans.Select(x => x.Text));
+            if (request.WireVersion == 2)
+            {
+                // Request-local IDs must not silently join homonyms from independent excerpts.
+                foreach (var identity in Identities(finding).Where(x => x.EntityId is null && x.LocalId.Length > 0))
+                {
+                    var occurrences = response.Findings.Where(f => Identities(f).Any(i => i.EntityId is null && i.LocalId == identity.LocalId)).ToArray();
+                    var ranges = occurrences.SelectMany(f => f.SourceEvidenceIds).Distinct().ToArray();
+                    if (ranges.Length > 1 && !occurrences.Any(f => ranges.All(f.SourceEvidenceIds.Contains))) reviewIssues.Add("CrossEvidenceIdentityNeedsReview");
+                }
+                if (finding.FindingType is SemanticFindingType.RelationshipExtraction or SemanticFindingType.DirectionalAddressing)
+                {
+                    var a = finding.FindingType == SemanticFindingType.RelationshipExtraction ? finding.SubjectIdentity : finding.SpeakerIdentity;
+                    var b = finding.FindingType == SemanticFindingType.RelationshipExtraction ? finding.TargetIdentity : finding.ListenerIdentity;
+                    if (a is not null && b is not null && !finding.SupportSpans.Any(s => s.Text.Contains(a.Name, StringComparison.Ordinal) && s.Text.Contains(b.Name, StringComparison.Ordinal)))
+                        reviewIssues.Add("NoJointParticipantProof");
+                }
+                if (finding.FindingType == SemanticFindingType.RelationshipExtraction && !HasRelationCue(finding.RelationshipType, quotes))
+                    reviewIssues.Add("CooccurrenceIsNotRelationshipProof");
+                if (finding.FindingType == SemanticFindingType.DirectionalAddressing &&
+                    (!quotes.Contains(finding.SelfReference, StringComparison.Ordinal) || !quotes.Contains(finding.AddresseeReference, StringComparison.Ordinal)))
+                    reviewIssues.Add("UnquotedDirectionalAddressing");
+            }
             foreach (var identity in Identities(finding))
             {
                 if (identity.EntityId is Guid id)
@@ -89,15 +120,27 @@ public static class SemanticQualityAuditor
                 context.Add(draft); var times = context.ToDictionary(x => x.Id, x => x.Timeline);
                 if (EntityMemoryConflicts.FindFacts(context, id => times[id]).Any(x => x.LeftId == draftId || x.RightId == draftId)) reviewIssues.Add("ContradictionWithConfirmedMemory");
             }
-            if (errors.Count == 0 && issues.Count == 0) foreach (Guid id in finding.CpuCandidateIds) processed.Add(id);
+            if (errors.Count == 0 && scopeValid) foreach (Guid id in finding.CpuCandidateIds) processed.Add(id);
             // Persist refs/diagnostics, not repeated source quotations. Navigation rehydrates text.
             output.Add(new(finding with { SupportSpans = finding.SupportSpans.Select(x => x with { Text = "" }).ToArray() },
-                errors.Count == 0 && issues.Count == 0, eligible && errors.Count == 0 && issues.Count == 0 && reviewIssues.Count == 0, errors.Concat(reviewIssues).Distinct().ToArray()));
+                errors.Count == 0 && scopeValid, eligible && errors.Count == 0 && scopeValid && reviewIssues.Count == 0, errors.Concat(reviewIssues).Distinct().ToArray()));
         }
-        return new(output, issues, cpu.Except(processed).ToArray());
+        return new(output, issues.Distinct().ToArray(), cpu.Except(processed).ToArray(), reviewed.ToArray());
     }
     public static IEnumerable<SemanticIdentity> Identities(SemanticFinding f) => new[] { f.SubjectIdentity, f.TargetIdentity, f.SpeakerIdentity, f.ListenerIdentity }
         .OfType<SemanticIdentity>().Concat(f.VerifiedParticipants);
     private static bool Same(SemanticIdentity a, SemanticIdentity b) => a.EntityId is Guid id && b.EntityId == id || a.EntityId is null && a.LocalId.Length > 0 && a.LocalId == b.LocalId;
+    private static bool HasRelationCue(KnowledgeRelationType type, string quotes) => (type switch
+    {
+        KnowledgeRelationType.Parent or KnowledgeRelationType.Child or KnowledgeRelationType.BiologicalFather or KnowledgeRelationType.BiologicalMother or KnowledgeRelationType.BiologicalChild => new[] { "父", "母", "爹", "娘", "爸", "妈", "儿子", "女儿", "亲生" },
+        KnowledgeRelationType.AdoptiveParent or KnowledgeRelationType.AdoptiveChild => ["养父", "养母", "养子", "养女", "收养"],
+        KnowledgeRelationType.FullSibling or KnowledgeRelationType.PaternalHalfSibling or KnowledgeRelationType.MaternalHalfSibling or KnowledgeRelationType.UnknownSibling or KnowledgeRelationType.SwornSibling => ["兄", "弟", "姐", "妹", "结拜", "同父", "同母"],
+        KnowledgeRelationType.Grandfather or KnowledgeRelationType.Grandmother or KnowledgeRelationType.Grandchild => ["爷", "奶", "祖", "外公", "外婆", "孙"],
+        KnowledgeRelationType.Spouse => ["夫妻", "结婚", "丈夫", "妻", "老公", "老婆", "夫人", "夫君"],
+        KnowledgeRelationType.RomanticPartner => ["恋", "爱", "男友", "女友", "情人"],
+        KnowledgeRelationType.Teacher or KnowledgeRelationType.Disciple => ["师", "徒"],
+        KnowledgeRelationType.Superior or KnowledgeRelationType.Subordinate => ["上司", "下属", "主子", "主人", "部下", "老板"],
+        _ => Array.Empty<string>()
+    }).Any(x => quotes.Contains(x, StringComparison.Ordinal));
     private static bool Splits(string s, int n) => n > 0 && n < s.Length && char.IsHighSurrogate(s[n - 1]) && char.IsLowSurrogate(s[n]);
 }

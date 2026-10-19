@@ -12,13 +12,28 @@ public sealed record SemanticNearbyMention(string Text, MentionCandidateCategory
 public sealed record SemanticSurveyRequest(Guid Id, Guid ProjectId, int ChapterNumber, string BackendSignature,
     MemoryEvidence Evidence, string ContextFingerprint, string DependencyFingerprint, string Prompt, int EstimatedInputTokens, int ReservedTokens,
     IReadOnlyList<SemanticKnownIdentity> AllowedIdentities, IReadOnlyList<Guid> ContextFactIds, IReadOnlyList<SemanticCpuHint> CpuCandidates,
-    IReadOnlyList<ChapterMemoryFact>? ContextFacts = null);
+    IReadOnlyList<ChapterMemoryFact>? ContextFacts = null)
+{
+    // Atomic cache keys deliberately retain the 2B single-evidence identity. Wire v2
+    // adds coverage, not new semantic tasks; regrouping is not a cache invalidation.
+    public IReadOnlyList<SemanticSurveyRequest>? Members { get; init; }
+    public IReadOnlyList<SemanticSurveyRequest> Units => Members ?? [this];
+    public int WireVersion => Members is null ? 1 : 2;
+    public string SharedContextJson { get; init; } = "";
+    public string EvidenceContextJson { get; init; } = "";
+    public string EvidenceText { get; init; } = "";
+    public bool Complex { get; init; }
+    public int MaximumEvidencePerBatch { get; init; } = 4;
+    public int MaximumBatchReserve { get; init; } = int.MaxValue;
+    public ModelOptions? PlanningOptions { get; init; }
+}
 
 public static class SemanticSurveyRequests
 {
     public const string PromptVersion = "semantic-memory-1";
     public static IReadOnlyList<SemanticSurveyRequest> Plan(EntityMemoryState memory, IReadOnlyList<CensusSource> sources,
-        BookIntelligenceState legacy, string backendSignature, ModelOptions options, CancellationToken token = default)
+        BookIntelligenceState legacy, string backendSignature, ModelOptions options, CancellationToken token = default,
+        SemanticBatchingOptions? batching = null)
     {
         if (legacy.ProjectId != memory.ProjectId || string.IsNullOrWhiteSpace(backendSignature) || backendSignature.Length > 200) throw new InvalidDataException("Invalid semantic planning scope.");
         options.Validate(); var query = new EntityMemoryQuery(memory, sources); var requests = new List<SemanticSurveyRequest>();
@@ -68,10 +83,18 @@ public static class SemanticSurveyRequests
                 int reserved = checked(Encoding.UTF8.GetByteCount(prompt) + Encoding.UTF8.GetByteCount(SemanticSurveyContract.ResponseSchema.GetRawText()) + 128 + options.MaximumOutputTokens);
                 string key = EntityMemoryIdentity.Fingerprint(new { proof, backendSignature, options, fingerprint, PromptVersion, schema = SemanticSurveyContract.Version });
                 requests.Add(new(EntityMemoryIdentity.StableId(memory.ProjectId, "semantic-batch:" + key), memory.ProjectId, source.ChapterNumber, backendSignature,
-                    proof, fingerprint, SemanticDependencies.Fingerprint(query, safeFacts.Select(x => x.Id)), prompt, estimate, reserved, safeIdentities, safeFacts.Select(x => x.Id).ToArray(), cpu, safeFacts));
+                    proof, fingerprint, SemanticDependencies.Fingerprint(query, safeFacts.Select(x => x.Id)), prompt, estimate, reserved, safeIdentities, safeFacts.Select(x => x.Id).ToArray(), cpu, safeFacts)
+                {
+                    SharedContextJson = JsonSerializer.Serialize(new { confirmed_identities = safeIdentities, confirmed_facts = safeFacts, confirmed_events = safeEvents }, SemanticSurveyContract.JsonOptions),
+                    EvidenceContextJson = JsonSerializer.Serialize(new { nearby_mentions = hints, cpu_event_hypotheses = cpu, unresolved_questions = questions }, SemanticSurveyContract.JsonOptions),
+                    EvidenceText = window.Excerpt,
+                    PlanningOptions = options,
+                    Complex = cpu.Count(x => x.Type == TranslationImpactEventType.RevealIdentity) > 0 ||
+                        new[] { "灵魂", "夺舍", "肉身", "意识", "同名", "化名", "真名" }.Any(x => window.Excerpt.Contains(x, StringComparison.Ordinal))
+                });
             }
         }
-        return requests;
+        return SemanticAdaptiveBatching.Pack(requests, options, batching ?? new(), token);
     }
     private static int Count(string text, string name) { int count = 0; for (int i = 0; (i = text.IndexOf(name, i, StringComparison.Ordinal)) >= 0; i += name.Length) count++; return count; }
 }

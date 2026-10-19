@@ -26,7 +26,8 @@ public sealed class SemanticMemoryReviewService(ProjectSession session, ProjectR
                 var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(session, repository, ct).ConfigureAwait(false);
                 var memoryStore = new EntityMemoryStore(session); var memory = await memoryStore.LoadAsync(ct).ConfigureAwait(false);
                 var proof = state.Evidence.Single(x => x.Id == batch.EvidenceId);
-                if (!SemanticDependencies.Current(batch, proof, memory, sources)) throw new InvalidOperationException("Semantic source/context is stale; re-survey the affected evidence.");
+                var proofs = batch.Keys.Select(k => state.Evidence.Single(e => e.Id == k.EvidenceId)).ToArray();
+                if (proofs.Any(e => !SemanticDependencies.Current(batch, e, memory, sources))) throw new InvalidOperationException("Semantic source/context is stale; re-survey the affected evidence.");
                 if (edit.Timeline.EffectiveFromChapter is null || edit.Timeline.RevealedAtChapter is null || edit.Timeline.RevealedAtChapter > proof.ChapterNumber || edit.Timeline.EffectiveFromChapter > proof.ChapterNumber)
                     throw new InvalidOperationException("Confirm source-backed effective/reveal chapters, not guessed future dates.");
                 var original = proposal.Audit.Finding; var text = sources.Single(x => x.ChapterId == proof.ChapterId).OriginalText;
@@ -35,10 +36,12 @@ public sealed class SemanticMemoryReviewService(ProjectSession session, ProjectR
                     if (x.StartUtf16 < 0 || x.LengthUtf16 is < 1 or > 240 || (long)x.StartUtf16 + x.LengthUtf16 > text.Length) throw new InvalidDataException("Invalid stored support range.");
                     return x with { Text = text.Substring(x.StartUtf16, x.LengthUtf16) };
                 }).ToArray() };
-                var response = SemanticSurveyContract.Parse(System.Text.Json.JsonSerializer.Serialize(new SemanticResponse(1, state.ProjectId, proof.ChapterId, [proof.Id], [hydrated]), SemanticSurveyContract.JsonOptions));
+                int wireVersion = batch.SchemaVersion == SemanticSurveyContract.MultiEvidenceVersion ? 2 : 1;
+                var response = SemanticSurveyContract.Parse(System.Text.Json.JsonSerializer.Serialize(new SemanticResponse(wireVersion, state.ProjectId, proof.ChapterId, proofs.Select(x => x.Id).ToArray(), [hydrated]), SemanticSurveyContract.JsonOptions));
                 var request = new SemanticSurveyRequest(batch.Id, state.ProjectId, proof.ChapterNumber, batch.BackendSignature, proof, batch.ContextFingerprint, batch.DependencyFingerprint,
                     "", 0, 0, batch.AllowedIdentities, batch.ContextFactIds, batch.CpuCandidates,
                     new EntityMemoryQuery(memory, sources).AtChapter(proof.ChapterNumber).Entities.SelectMany(x => x.Facts).Where(x => batch.ContextFactIds.Contains(x.Id)).ToArray());
+                if (wireVersion == 2) request = request with { Members = proofs.Select(e => request with { Evidence = e }).ToArray() };
                 var checkedFinding = SemanticQualityAuditor.Audit(response, request, sources).Findings.Single();
                 if (!checkedFinding.EvidenceValid || !checkedFinding.CanPromote) throw new InvalidOperationException("Stored finding failed independent revalidation.");
                 var f = checkedFinding.Finding; var identities = SemanticQualityAuditor.Identities(f).ToArray();
@@ -59,7 +62,11 @@ public sealed class SemanticMemoryReviewService(ProjectSession session, ProjectR
                         }
                         return builder.Entity($"semantic-local:{batch.Id}:{identity.LocalId}", identity.Kind, identity.Name);
                     }
-                    Guid[] evidence = f.SupportSpans.Select(span => builder.Evidence(proof.ChapterId, proof.ChapterNumber, proof.SourceSha256, span.StartUtf16, span.LengthUtf16)).Distinct().ToArray();
+                    Guid[] evidence = f.SupportSpans.Select(span =>
+                    {
+                        var origin = proofs.Single(x => x.Id == span.EvidenceId);
+                        return builder.Evidence(origin.ChapterId, origin.ChapterNumber, origin.SourceSha256, span.StartUtf16, span.LengthUtf16);
+                    }).Distinct().ToArray();
                     var timeline = edit.Timeline with { DiscoveredAtChapter = proof.ChapterNumber };
                     var provenance = new MemoryProvenance(MemoryOrigin.User, "semantic-confirmation:" + proposal.Id,
                         "Explicit human confirmation of a mechanically audited semantic hypothesis. " + edit.Note, proposal.Id,

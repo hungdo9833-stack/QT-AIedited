@@ -45,6 +45,7 @@ public sealed record SemanticResponse(int SchemaVersion, Guid ProjectId, Guid Ch
 public static class SemanticSurveyContract
 {
     public const string Version = "abi3-semantic-1";
+    public const string MultiEvidenceVersion = "abi3-semantic-2";
     public static JsonSerializerOptions JsonOptions { get; } = CreateOptions();
     private static JsonSerializerOptions CreateOptions()
     {
@@ -60,8 +61,11 @@ public static class SemanticSurveyContract
     private static object IdentityObject() => Obj(("entity_id", Nullable(Text(36))), ("local_id", Text(64)), ("name", Text(100)),
         ("kind", Choice<MemoryEntityKind>()), ("status", Choice<SemanticResolution>()));
     private static object Identity() => Nullable(IdentityObject());
-    public static JsonElement ResponseSchema { get; } = JsonSerializer.SerializeToElement(Obj(
-        ("schema_version", new { type = "integer", @enum = new[] { 1 } }), ("project_id", Text(36)), ("chapter_id", Text(36)),
+    public static JsonElement ResponseSchema { get; } = CreateSchema(1);
+    public static JsonElement MultiEvidenceSchema { get; } = CreateSchema(2);
+    public static JsonElement SchemaFor(int version) => version switch { 1 => ResponseSchema, 2 => MultiEvidenceSchema, _ => throw new InvalidDataException("Unsupported semantic wire version.") };
+    private static JsonElement CreateSchema(int version) => JsonSerializer.SerializeToElement(Obj(
+        ("schema_version", new { type = "integer", @enum = new[] { version } }), ("project_id", Text(36)), ("chapter_id", Text(36)),
         ("reviewed_evidence_ids", ArrayOf(Text(36))), ("findings", ArrayOf(Obj(
             ("finding_type", Choice<SemanticFindingType>()), ("source_evidence_ids", ArrayOf(Text(36), 8)),
             ("support_spans", ArrayOf(Obj(("evidence_id", Text(36)), ("start_utf16", new { type = "integer", minimum = 0 }),
@@ -81,7 +85,8 @@ public static class SemanticSurveyContract
         try
         {
             using var document = JsonDocument.Parse(json, new() { MaxDepth = 32 });
-            Check(document.RootElement, ResponseSchema, "$root");
+            if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("schema_version", out var v) || !v.TryGetInt32(out int version)) throw new InvalidDataException("Missing semantic wire version.");
+            Check(document.RootElement, SchemaFor(version), "$root");
             return document.RootElement.Deserialize<SemanticResponse>(JsonOptions) ?? throw new InvalidDataException("Empty semantic object.");
         }
         catch (JsonException ex) { throw new InvalidDataException("Semantic JSON does not match the strict contract.", ex); }
