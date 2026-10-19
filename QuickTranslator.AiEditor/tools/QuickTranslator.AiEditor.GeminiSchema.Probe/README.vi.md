@@ -171,3 +171,8 @@ dotnet run --project tools/QuickTranslator.AiEditor.GeminiSchema.Probe -c Releas
 ```
 
 (2) chạy đúng Plan → Engine → Backend Gemini → Decode → Parse → Auditor → checkpoint, với 2 evidence (wire v2). Có 3 lớp chặn để chỉ gửi tối đa 1 request (ngân sách engine 1, transport 1, guard 1 POST); không retry/fallback. Report chỉ có mã/số đếm, không có key, prompt hay response thô. Project tạm được giữ lại để kiểm tra.
+
+### Kết quả thực tế (người dùng chạy, 2026-10-20, gemini-3.6-flash, 4096 output)
+
+- (1) Neutral `--wire-schema gemini-semantic-wire --live`: **HTTP 200**, `SchemaAcceptedNeutralResponseValid`, `ResponseContractValid=true`, 1 request, wire SHA-256 `5AAF58AB5A36900DAB6209AC1346EB7318EADC88D2145E30AA0224422BF45272`, 492 input / 99 output token, 1,8 s. Cùng model/config/safety, schema v2 cũ trả 400 → xác nhận lỗi 400 do schema và đã được sửa.
+- (2) `--synthetic-survey --live` lần 1: **HTTP 503** (dịch vụ Gemini không khả dụng, không phải từ chối schema), 1 request, không retry; checkpoint ghi `ReservedBeforeSend` → `Http503`, batch `Failed`, 0 proposal, không có key trong file. Chưa xác minh end-to-end findings/evidence/proposal với API thật; cần chạy lại (2) một lần khi dịch vụ ổn định.
