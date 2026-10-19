@@ -66,7 +66,9 @@ public sealed class SemanticSurveyUiTests
 
     [Theory]
     [InlineData(401, "Http401", "API key")]
+    [InlineData(502, "Http502", "dừng phiên")]
     [InlineData(503, "Http503", "dịch vụ")]
+    [InlineData(504, "Http504", "dừng phiên")]
     [InlineData(0, "NetworkFailure", "mạng")]
     public Task Failed_batch_diagnostic_is_visible_without_proposals_survives_reload_and_has_safe_manual_resume(int http, string code, string hint) => StaHost.Run(async () =>
     {

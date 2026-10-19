@@ -47,7 +47,7 @@ public static class SemanticProviderDiagnostics
             "Http404" => new(code, false, true, "HTTP 404: không tìm thấy model/endpoint hoặc không có quyền truy cập model. Kiểm tra ID và API version."),
             "Http408" or "Timeout" => new(code, true, false, "Timeout: đã giữ checkpoint. Kiểm tra kết nối/timeout rồi Resume thủ công; không tự retry."),
             "Http429" or "DailyQuotaExceeded" => new(code, true, true, "Hết quota/tốc độ provider. Chờ hạn mức phục hồi rồi Resume thủ công; không tự đổi model."),
-            "TransportBudgetExceeded" => new(code, true, true, "Đã hết ngân sách HTTP hoặc byte/token reserve của phiên (kể cả metadata). Kiểm tra Max HTTP/reserve trước khi Resume."),
+            "TransportBudgetExceeded" => new(code, true, true, "Đã hết ngân sách HTTP hoặc byte/token reserve nội bộ của phiên (kể cả metadata), không phải hết quota Gemini. Kiểm tra Max HTTP/reserve trước khi Resume."),
             "RequestBudgetExceeded" => new(code, true, true, "Đã hết ngân sách request của phiên. Điều chỉnh ngân sách hoặc bắt đầu phiên Resume được xác nhận."),
             "NetworkFailure" => new(code, true, false, "Lỗi kết nối mạng/TLS/DNS. Kiểm tra mạng hoặc proxy rồi Resume thủ công; không tự retry."),
             "ProviderConfigurationError" or "ContextBudgetExceeded" => new(code, false, true, "Cấu hình model/context không hợp lệ. Sửa cấu hình và Dry-run lại trước khi gửi."),
@@ -62,7 +62,7 @@ public static class SemanticProviderDiagnostics
         };
         if (detail is not null) return detail;
         if (code.Length == 7 && code.StartsWith("Http", StringComparison.Ordinal) && int.TryParse(code.AsSpan(4), out int status) && status is >= 300 and <= 599)
-            return new(code, status >= 500, status < 500, status >= 500 ? $"HTTP {status}: lỗi dịch vụ provider. Đợi dịch vụ phục hồi rồi Resume thủ công; không tự retry." : $"HTTP {status}: yêu cầu bị từ chối. Kiểm tra endpoint/cấu hình trước khi gửi lại.");
+            return new(code, status >= 500, true, status >= 500 ? $"HTTP {status}: lỗi dịch vụ provider. Đã lưu checkpoint và dừng phiên, không gửi batch tiếp theo. Đợi dịch vụ phục hồi rồi Resume thủ công; không tự retry hoặc đổi model." : $"HTTP {status}: yêu cầu bị từ chối. Kiểm tra endpoint/cấu hình trước khi gửi lại.");
         return new("UnexpectedProviderFailure", false, true, "Lỗi chưa được phân loại. Giữ checkpoint; không suy đoán nguyên nhân hoặc hiển thị exception/raw response nhạy cảm.");
     }
 }
