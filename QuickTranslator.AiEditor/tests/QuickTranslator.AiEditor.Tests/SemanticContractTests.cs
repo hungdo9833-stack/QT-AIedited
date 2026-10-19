@@ -102,4 +102,33 @@ public sealed class SemanticContractTests
         var audit = Assert.Single(SemanticQualityAuditor.Audit(SemanticFixture.Response(request, finding), request, s.Sources).Findings);
         Assert.True(audit.EvidenceValid); Assert.False(audit.CanPromote); Assert.Empty(audit.Finding.VerifiedParticipants);
     }
+
+    [Fact]
+    public void Cpu_candidates_need_explicit_classification_not_an_empty_success_response_or_nearby_names()
+    {
+        var s = new SemanticFixture("林青说：我们离婚吧。"); var source = s.Sources.Single();
+        TranslationImpactScanner.AppendChapter(s.Memory, source, CorpusIntegrityAuditor.SourceHash(source.OriginalText), new() { ProjectId = s.Memory.ProjectId });
+        var r = s.Plan().Single(); Guid candidate = Assert.Single(r.CpuCandidates).Id;
+        var empty = SemanticQualityAuditor.Audit(SemanticFixture.Response(r), r, s.Sources); Assert.False(empty.Validated); Assert.Equal(candidate, Assert.Single(empty.UnprocessedCpuIds));
+        var classified = new SemanticFinding { FindingType = SemanticFindingType.EventVerification, EventType = TranslationImpactEventType.RelationshipEnded,
+            EventActuality = SemanticActuality.PlannedRequested, IdentityResolutionStatus = SemanticResolution.Unresolved, CpuCandidateIds = [candidate],
+            SourceEvidenceIds = [r.Evidence.Id], SupportSpans = [new(r.Evidence.Id, 0, source.OriginalText.Length, source.OriginalText)], Reason = "A request, not a completed divorce; participants unresolved" };
+        var result = SemanticQualityAuditor.Audit(SemanticFixture.Response(r, classified), r, s.Sources);
+        Assert.True(result.Validated); Assert.False(result.Findings.Single().CanPromote); Assert.Empty(result.Findings.Single().Finding.VerifiedParticipants);
+    }
+
+    [Fact]
+    public void Contradiction_with_a_confirmed_directed_parent_fact_keeps_valid_proof_but_requires_review()
+    {
+        var s = new MemoryScenario(); Guid proof = s.Source(1, "周宁是林青的养父。"), a = s.Entity("a", "周宁"), b = s.Entity("b", "林青");
+        s.Confirm(s.Fact(a, MemoryFactKind.PrimaryName, "周宁", proof, new(1, null, 1, 1)).Id);
+        s.Confirm(s.Fact(b, MemoryFactKind.PrimaryName, "林青", proof, new(1, null, 1, 1)).Id);
+        s.Confirm(s.Fact(a, MemoryFactKind.Relationship, "father", proof, new(1, null, 1, 1), b, KnowledgeRelationType.BiologicalFather).Id);
+        var r = SemanticSurveyRequests.Plan(s.State, s.Sources, new() { ProjectId = s.State.ProjectId }, "mock", new() { ContextSize = 32768 }).Single();
+        var f = new SemanticFinding { FindingType = SemanticFindingType.RelationshipExtraction, SubjectIdentity = new(a, "", "周宁", MemoryEntityKind.Character, SemanticResolution.Existing),
+            TargetIdentity = new(b, "", "林青", MemoryEntityKind.Character, SemanticResolution.Existing), RelationshipType = KnowledgeRelationType.AdoptiveParent, EventActuality = SemanticActuality.ActualCompleted,
+            SourceEvidenceIds = [r.Evidence.Id], SupportSpans = [new(r.Evidence.Id, 0, s.Sources[0].OriginalText.Length, s.Sources[0].OriginalText)], Reason = "Conflicts with an approved input", EffectiveChapter = 1, RevealedChapter = 1 };
+        var result = SemanticQualityAuditor.Audit(SemanticFixture.Response(r, f), r, s.Sources);
+        Assert.False(result.Validated); Assert.True(result.Findings.Single().EvidenceValid); Assert.False(result.Findings.Single().CanPromote); Assert.Contains("ContradictionWithConfirmedMemory", result.Findings.Single().Issues);
+    }
 }

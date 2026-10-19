@@ -27,8 +27,9 @@ public sealed class SemanticSurveyEngine(IJsonSchemaOllamaClient backend)
         // Conservatively retain a refusal across model/context/source changes on this range.
         // There is deliberately no automatic "try another model" or refusal reset.
         bool Hit(Guid chapter, string sha, int start, int length) => chapter == e.ChapterId && start < e.StartUtf16 + e.LengthUtf16 && (long)start + length > e.StartUtf16;
+        var refused = state.Attempts.Where(a => a.Status == SemanticBatchStatus.Blocked).Select(x => x.BatchId).ToHashSet();
         return legacy.Evidence.Any(x => x.AiBlocked && Hit(x.ChapterId, x.SourceSha256, x.StartUtf16, x.LengthUtf16)) ||
-            state.Batches.Where(b => state.Attempts.Any(a => a.BatchId == b.Id && a.Status == SemanticBatchStatus.Blocked))
+            state.Batches.Where(b => refused.Contains(b.Id))
                 .Select(b => state.Evidence.Single(x => x.Id == b.EvidenceId)).Any(x => Hit(x.ChapterId, x.SourceSha256, x.StartUtf16, x.LengthUtf16));
     }
     public async Task<SemanticSurveyState> RunAsync(SemanticSurveyStore store, IReadOnlyList<SemanticSurveyRequest> plan, IReadOnlyList<CensusSource> sources,

@@ -37,7 +37,8 @@ public sealed class SemanticMemoryReviewService(ProjectSession session, ProjectR
                 }).ToArray() };
                 var response = SemanticSurveyContract.Parse(System.Text.Json.JsonSerializer.Serialize(new SemanticResponse(1, state.ProjectId, proof.ChapterId, [proof.Id], [hydrated]), SemanticSurveyContract.JsonOptions));
                 var request = new SemanticSurveyRequest(batch.Id, state.ProjectId, proof.ChapterNumber, batch.BackendSignature, proof, batch.ContextFingerprint, batch.DependencyFingerprint,
-                    "", 0, 0, batch.AllowedIdentities, batch.ContextFactIds, batch.CpuCandidates);
+                    "", 0, 0, batch.AllowedIdentities, batch.ContextFactIds, batch.CpuCandidates,
+                    new EntityMemoryQuery(memory, sources).AtChapter(proof.ChapterNumber).Entities.SelectMany(x => x.Facts).Where(x => batch.ContextFactIds.Contains(x.Id)).ToArray());
                 var checkedFinding = SemanticQualityAuditor.Audit(response, request, sources).Findings.Single();
                 if (!checkedFinding.EvidenceValid || !checkedFinding.CanPromote) throw new InvalidOperationException("Stored finding failed independent revalidation.");
                 var f = checkedFinding.Finding; var identities = SemanticQualityAuditor.Identities(f).ToArray();
@@ -97,12 +98,17 @@ public sealed class SemanticMemoryReviewService(ProjectSession session, ProjectR
         return await new SemanticSurveyStore(session).UpdateAsync(expectedRevision, async state =>
         {
             var last = state.Reviews.Last(x => x.ProposalId == proposalId);
-            if (last.MemoryDecisionId is Guid decision)
+            var memory = await new EntityMemoryStore(session).LoadAsync(ct).ConfigureAwait(false);
+            var owned = memory.Facts.Where(x => x.Provenance.LegacyId == proposalId && x.Provenance.Key.StartsWith("fact:semantic-confirmation:", StringComparison.Ordinal)).Select(x => x.Id)
+                .Concat(memory.Events.Where(x => x.Provenance.LegacyId == proposalId && x.Provenance.Key.StartsWith("event:semantic-confirmation:", StringComparison.Ordinal)).Select(x => x.Id)).ToHashSet();
+            if (last.MemoryDecisionId is Guid decision && last.MemoryItemId is Guid linked) owned.Add(linked);
+            // A process can stop between the two atomic files. Undo must find human-owned
+            // memory by proposal provenance even when the journal never recorded the link.
+            foreach (Guid item in owned)
             {
-                var memory = await new EntityMemoryStore(session).LoadAsync(ct).ConfigureAwait(false);
-                var latest = memory.Reviews.Last(x => x.TargetId == last.MemoryItemId);
-                if (latest.Status != MemoryReviewStatus.Proposed || latest.RevertsDecisionId != decision)
-                    await new EntityMemoryReviewService(session, repository).RollbackAsync(decision, memory.Revision, note, ct).ConfigureAwait(false);
+                var latest = memory.Reviews.LastOrDefault(x => x.TargetId == item);
+                if (latest is not null && latest.Status != MemoryReviewStatus.Proposed)
+                    memory = await new EntityMemoryReviewService(session, repository).RollbackAsync(latest.Id, memory.Revision, note, ct).ConfigureAwait(false);
             }
             state.Reviews.Add(new(Guid.NewGuid(), proposalId, MemoryReviewStatus.Proposed, DateTimeOffset.UtcNow, note, last.Timeline, RevertsId: last.Id));
         }, ct).ConfigureAwait(false);

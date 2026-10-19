@@ -39,11 +39,12 @@ public sealed class SemanticSurveyState
             Hash(batch.ContextFingerprint) && Hash(batch.DependencyFingerprint) && batch.ContextFactIds is not null && batch.ContextFactIds.Count <= 16 &&
             batch.AllowedIdentities is not null && batch.AllowedIdentities.Count <= 8 && batch.CpuCandidates is not null && batch.CpuCandidates.Count <= 16 && batch.PromptVersion.Length > 0 && batch.SchemaVersion.Length > 0); batch.Options.Validate(); }
         var reserved = new HashSet<Guid>(); var completed = new HashSet<Guid>();
+        var attemptsById = Attempts!.ToDictionary(x => x.Id);
         foreach (var attempt in Attempts!)
         {
             Require(batches.ContainsKey(attempt.BatchId) && Enum.IsDefined(attempt.Status) && attempt.At != default && attempt.ReservedTokens >= 0 &&
                 attempt.InputTokens is null or >= 0 && attempt.OutputTokens is null or >= 0 && attempt.ErrorCode.Length <= 240 && (attempt.ResponseFingerprint.Length == 0 || Hash(attempt.ResponseFingerprint)));
-            if (attempt.ReservationId is Guid reservation) Require(reserved.Contains(reservation) && completed.Add(reservation) && Attempts.Any(x => x.Id == reservation && x.BatchId == attempt.BatchId) && attempt.Status != SemanticBatchStatus.Pending);
+            if (attempt.ReservationId is Guid reservation) Require(reserved.Contains(reservation) && completed.Add(reservation) && attemptsById[reservation].BatchId == attempt.BatchId && attempt.Status != SemanticBatchStatus.Pending);
             else { Require(attempt.Status == SemanticBatchStatus.Pending); reserved.Add(attempt.Id); }
         }
         foreach (var proposal in Proposals!)

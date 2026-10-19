@@ -3,12 +3,14 @@ namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 public sealed record SemanticAuditedFinding(SemanticFinding Finding, bool EvidenceValid, bool CanPromote, IReadOnlyList<string> Issues);
 public sealed record SemanticAudit(IReadOnlyList<SemanticAuditedFinding> Findings, IReadOnlyList<string> Issues, IReadOnlyList<Guid> UnprocessedCpuIds)
 {
-    public bool Validated => Issues.Count == 0 && UnprocessedCpuIds.Count == 0 && Findings.All(x => x.EvidenceValid);
+    public bool Validated => Issues.Count == 0 && UnprocessedCpuIds.Count == 0 && Findings.All(x => x.EvidenceValid && x.Issues.Count == 0);
 }
 
 /// <summary>Independent mechanical audit, NOT a claim that the model's semantics are true.</summary>
 public static class SemanticQualityAuditor
 {
+    private static readonly System.Text.RegularExpressions.Regex NonactualCue = new("想要|希望|打算|计划|提出|请求|建议|如果|假如|要是|并未|没有|尚未|不曾|不会",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
     public static SemanticAudit Audit(SemanticResponse response, SemanticSurveyRequest request, IReadOnlyList<CensusSource> sources)
     {
         var issues = new List<string>(); var output = new List<SemanticAuditedFinding>(); var e = request.Evidence;
@@ -25,6 +27,7 @@ public static class SemanticQualityAuditor
         foreach (var finding in response.Findings)
         {
             var errors = new List<string>();
+            var reviewIssues = new List<string>();
             bool eligible = true;
             if (finding.SourceEvidenceIds.Count != 1 || finding.SourceEvidenceIds[0] != e.Id || finding.SupportSpans.Count == 0) errors.Add("MissingOrForeignSupport");
             foreach (var span in finding.SupportSpans)
@@ -59,6 +62,11 @@ public static class SemanticQualityAuditor
                 if (finding.EventType is null && finding.EventActuality != SemanticActuality.NotAnEvent) errors.Add("MissingEventType");
                 if (finding.EventActuality is not (SemanticActuality.ActualCompleted or SemanticActuality.HistoricalReference) || finding.VerifiedParticipants.Count == 0) eligible = false;
                 if (finding.CpuCandidateIds.Any(id => !cpu.Contains(id))) errors.Add("ForeignCpuCandidate");
+                if (finding.EventActuality == SemanticActuality.ActualCompleted && NonactualCue.IsMatch(quotes)) errors.Add("ActualityContradictionNeedsReview");
+                if (finding.EventType == TranslationImpactEventType.RevealIdentity && finding.EventActuality == SemanticActuality.ActualCompleted &&
+                    quotes.Contains("其实是", StringComparison.Ordinal) && !new[] { "身份", "本名", "真名", "化名" }.Any(x => quotes.Contains(x, StringComparison.Ordinal))) errors.Add("ExplanationIsNotProofOfIdentityReveal");
+                if (finding.EventActuality == SemanticActuality.HistoricalReference && finding.EffectiveChapter == request.ChapterNumber &&
+                    new[] { "去年", "以前", "当年", "曾经" }.Any(x => quotes.Contains(x, StringComparison.Ordinal))) errors.Add("HistoricalStartGuessedFromMention");
             }
             else if (finding.CpuCandidateIds.Count > 0) errors.Add("EventCoverageRequiresEventFinding");
             if (finding.AffectedFactIds.Any(id => !request.ContextFactIds.Contains(id))) errors.Add("UnknownAffectedFact");
@@ -70,10 +78,21 @@ public static class SemanticQualityAuditor
             if (finding.FindingType is SemanticFindingType.CharacterIdentification or SemanticFindingType.AliasAndIdentityResolution &&
                 (finding.SubjectIdentity is null || finding.Value.Length == 0 || !quotes.Contains(finding.Value, StringComparison.Ordinal))) errors.Add("UnprovedNameOrAlias");
             if (finding.FindingType == SemanticFindingType.GapAndContradictionAudit || finding.IdentityResolutionStatus is SemanticResolution.Unresolved or SemanticResolution.Ambiguous) eligible = false;
+            if (finding.SubjectIdentity?.EntityId is Guid subject && finding.FindingType is SemanticFindingType.RelationshipExtraction or SemanticFindingType.CharacterIdentification)
+            {
+                var context = (request.ContextFacts ?? []).Select(x => new EntityMemoryFact { Id = x.Id, SubjectId = x.SubjectId, TargetId = x.TargetId, Kind = x.Kind,
+                    Value = x.Value, RelationType = x.RelationType, SelfReference = x.SelfReference, AddresseeReference = x.AddresseeReference, Timeline = x.Timeline }).ToList();
+                Guid draftId = EntityMemoryIdentity.StableId(request.ProjectId, "audit-draft:" + EntityMemoryIdentity.Fingerprint(finding));
+                var draft = new EntityMemoryFact { Id = draftId, SubjectId = subject, TargetId = finding.TargetIdentity?.EntityId,
+                    Kind = finding.FindingType == SemanticFindingType.RelationshipExtraction ? MemoryFactKind.Relationship : MemoryFactKind.PrimaryName,
+                    Value = finding.Value, RelationType = finding.RelationshipType, Timeline = new(finding.EffectiveChapter, finding.EffectiveToChapter, request.ChapterNumber, finding.RevealedChapter) };
+                context.Add(draft); var times = context.ToDictionary(x => x.Id, x => x.Timeline);
+                if (EntityMemoryConflicts.FindFacts(context, id => times[id]).Any(x => x.LeftId == draftId || x.RightId == draftId)) reviewIssues.Add("ContradictionWithConfirmedMemory");
+            }
             if (errors.Count == 0 && issues.Count == 0) foreach (Guid id in finding.CpuCandidateIds) processed.Add(id);
             // Persist refs/diagnostics, not repeated source quotations. Navigation rehydrates text.
             output.Add(new(finding with { SupportSpans = finding.SupportSpans.Select(x => x with { Text = "" }).ToArray() },
-                errors.Count == 0 && issues.Count == 0, eligible && errors.Count == 0 && issues.Count == 0, errors.Distinct().ToArray()));
+                errors.Count == 0 && issues.Count == 0, eligible && errors.Count == 0 && issues.Count == 0 && reviewIssues.Count == 0, errors.Concat(reviewIssues).Distinct().ToArray()));
         }
         return new(output, issues, cpu.Except(processed).ToArray());
     }

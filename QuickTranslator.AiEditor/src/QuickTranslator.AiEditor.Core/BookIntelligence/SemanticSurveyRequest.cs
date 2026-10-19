@@ -11,7 +11,8 @@ public sealed record SemanticCpuHint(Guid Id, TranslationImpactEventType Type);
 public sealed record SemanticNearbyMention(string Text, MentionCandidateCategory Category, int CountInRange);
 public sealed record SemanticSurveyRequest(Guid Id, Guid ProjectId, int ChapterNumber, string BackendSignature,
     MemoryEvidence Evidence, string ContextFingerprint, string DependencyFingerprint, string Prompt, int EstimatedInputTokens, int ReservedTokens,
-    IReadOnlyList<SemanticKnownIdentity> AllowedIdentities, IReadOnlyList<Guid> ContextFactIds, IReadOnlyList<SemanticCpuHint> CpuCandidates);
+    IReadOnlyList<SemanticKnownIdentity> AllowedIdentities, IReadOnlyList<Guid> ContextFactIds, IReadOnlyList<SemanticCpuHint> CpuCandidates,
+    IReadOnlyList<ChapterMemoryFact>? ContextFacts = null);
 
 public static class SemanticSurveyRequests
 {
@@ -67,7 +68,7 @@ public static class SemanticSurveyRequests
                 int reserved = checked(Encoding.UTF8.GetByteCount(prompt) + Encoding.UTF8.GetByteCount(SemanticSurveyContract.ResponseSchema.GetRawText()) + 128 + options.MaximumOutputTokens);
                 string key = EntityMemoryIdentity.Fingerprint(new { proof, backendSignature, options, fingerprint, PromptVersion, schema = SemanticSurveyContract.Version });
                 requests.Add(new(EntityMemoryIdentity.StableId(memory.ProjectId, "semantic-batch:" + key), memory.ProjectId, source.ChapterNumber, backendSignature,
-                    proof, fingerprint, SemanticDependencies.Fingerprint(query, safeFacts.Select(x => x.Id)), prompt, estimate, reserved, safeIdentities, safeFacts.Select(x => x.Id).ToArray(), cpu));
+                    proof, fingerprint, SemanticDependencies.Fingerprint(query, safeFacts.Select(x => x.Id)), prompt, estimate, reserved, safeIdentities, safeFacts.Select(x => x.Id).ToArray(), cpu, safeFacts));
             }
         }
         return requests;
@@ -84,11 +85,11 @@ public static class SemanticDependencies
         int marker = provenance.LineageKey.IndexOf(":deps=", StringComparison.Ordinal);
         return marker < 0 ? [] : provenance.LineageKey[(marker + 6)..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => Guid.ParseExact(x, "N")).ToArray();
     }
-    public static bool Current(SemanticBatch batch, MemoryEvidence proof, EntityMemoryState memory, IReadOnlyList<CensusSource> sources)
+    public static bool Current(SemanticBatch batch, MemoryEvidence proof, EntityMemoryState memory, IReadOnlyList<CensusSource> sources, EntityMemoryQuery? query = null)
     {
         var source = sources.SingleOrDefault(x => x.ChapterId == proof.ChapterId);
         if (source is null || source.ChapterNumber != proof.ChapterNumber || CorpusIntegrityAuditor.SourceHash(source.OriginalText) != proof.SourceSha256 ||
             (long)proof.StartUtf16 + proof.LengthUtf16 > source.OriginalText.Length || batch.ContextFactIds.Any(id => memory.Facts.All(x => x.Id != id))) return false;
-        return batch.DependencyFingerprint == Fingerprint(new(memory, sources), batch.ContextFactIds);
+        return batch.DependencyFingerprint == Fingerprint(query ?? new(memory, sources), batch.ContextFactIds);
     }
 }

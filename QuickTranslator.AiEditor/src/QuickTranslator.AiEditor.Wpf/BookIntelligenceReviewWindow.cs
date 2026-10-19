@@ -158,7 +158,12 @@ public sealed class BookIntelligenceReviewWindow : Window
         _memory.Click += (_, _) =>
         {
             if (_loading || _auditing || _cancellation is not null) return;
-            new EntityMemoryReviewWindow(_session, _repository, _openEvidence) { Owner = this }.ShowDialog();
+            var profile = _profile.SelectedItem as OllamaBackendProfile;
+            var runtime = (profile?.Runtime ?? AiRuntimeProfile.CreateDefault(profile?.Model ?? "")).ModelOptions;
+            bool gemini = profile?.Id == GeminiFlashPoolProfileId;
+            var options = runtime with { Model = _model.Text.Trim(), ContextSize = gemini ? Math.Max(65536, runtime.ContextSize) : runtime.ContextSize,
+                MaximumOutputTokens = gemini ? Math.Max(8192, runtime.MaximumOutputTokens) : runtime.MaximumOutputTokens };
+            new EntityMemoryReviewWindow(_session, _repository, _openEvidence, profile is null ? null : new(profile.Clone(), options, gemini)) { Owner = this }.ShowDialog();
         };
         _auditGroup.SelectionChanged += (_, _) => RefreshQueue();
         _identityNotCharacter.Click += async (_, _) => await ReviewMissingIdentityAsync(MissingIdentityDecisionKind.NotCharacter);

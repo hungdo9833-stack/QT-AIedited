@@ -50,15 +50,21 @@ public sealed class EntityMemoryReviewWindow : Window
     internal string? LastError { get; private set; }
     internal Func<string, bool> ConfirmAction { get; set; }
     internal Func<MemoryReviewRow, MemoryReviewStatus, bool, MemoryReviewEdit?> EditReview { get; set; }
+    internal SemanticSurveyPanel SemanticPanel { get; }
 
-    public EntityMemoryReviewWindow(ProjectSession session, ProjectRepository repository, Func<CorpusEvidence, Task> openEvidence)
+    public EntityMemoryReviewWindow(ProjectSession session, ProjectRepository repository, Func<CorpusEvidence, Task> openEvidence, SemanticSurveySelection? selection = null)
     {
         _session = session; _repository = repository; _openEvidence = openEvidence;
         Title = "QT Studio · Entity Memory & Event Ledger (2A)"; Width = 1180; Height = 750; MinWidth = 900; MinHeight = 580;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ConfirmAction = message => MessageBox.Show(this, message, Title, MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
         EditReview = (row, action, promotion) => { var dialog = new EntityMemoryReviewDialog(row, Memory!, action, promotion) { Owner = this }; return dialog.ShowDialog() == true ? dialog.Result : null; };
-        Content = Build(); Loaded += async (_, _) => await ReloadAsync(); Closed += (_, _) => _cancellation?.Cancel();
+        var cpu = Build(); SemanticPanel = new(session, repository, openEvidence, selection) { CanOperate = () => !Busy };
+        SemanticPanel.BusyChanged = busy => cpu.IsEnabled = !busy;
+        var tabs = new TabControl { Items = { new TabItem { Header = "Memory / CPU hypotheses (2A)", Content = cpu }, new TabItem { Header = "AI Semantic Survey (2B)", Content = SemanticPanel } } };
+        tabs.SelectionChanged += async (sender, args) => { if (ReferenceEquals(args.OriginalSource, tabs) && tabs.SelectedIndex == 0 && !Busy && !SemanticPanel.Busy) await ReloadAsync(); };
+        Content = tabs;
+        Loaded += async (_, _) => await ReloadAsync(); Closed += (_, _) => { _cancellation?.Cancel(); SemanticPanel.Cancel(); };
     }
     private UIElement Build()
     {

@@ -139,5 +139,37 @@ public sealed class SemanticEngineTests : IDisposable
         Assert.Equal(before, await File.ReadAllBytesAsync(store.PathName));
     }
 
+    [Fact]
+    public async Task Competing_semantic_writers_cannot_lose_review_decisions_and_changed_inputs_send_nothing()
+    {
+        var (_, s, store) = await Create(1); var plan = s.Plan(); var fake = Names(s, plan); string fp = SemanticSurveyEngine.DryRun(plan, await store.LoadAsync(), Legacy(s)).Fingerprint;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new SemanticSurveyEngine(fake).RunAsync(store, plan, s.Sources, Legacy(s), s.Options, new(), fp, current: _ => Task.FromResult(false)));
+        Assert.Empty(fake.Prompts);
+        var state = await new SemanticSurveyEngine(fake).RunAsync(store, plan, s.Sources, Legacy(s), s.Options, new(), fp);
+        async Task<bool> Write(string note)
+        {
+            try { await store.UpdateAsync(state.Revision, x => x.Reviews.Add(new(Guid.NewGuid(), state.Proposals.Single().Id, MemoryReviewStatus.Accepted, DateTimeOffset.UtcNow, note, new()))); return true; }
+            catch (InvalidOperationException) { return false; }
+        }
+        var results = await Task.WhenAll(Task.Run(() => Write("one")), Task.Run(() => Write("two")));
+        Assert.Single(results, x => x); Assert.Single((await store.LoadAsync()).Reviews);
+    }
+
+    [Fact]
+    public async Task Undo_recovers_an_interrupted_confirmation_even_without_a_journal_memory_link()
+    {
+        var (session, s, store) = await Create(1); var plan = s.Plan();
+        var state = await new SemanticSurveyEngine(Names(s, plan)).RunAsync(store, plan, s.Sources, Legacy(s), s.Options, new(), SemanticSurveyEngine.DryRun(plan, await store.LoadAsync(), Legacy(s)).Fingerprint);
+        Guid proposal = state.Proposals.Single().Id; var service = new SemanticMemoryReviewService(session, _repository);
+        var edit = new SemanticPromotion(new(1, null, 1, 1), "Human confirmation", new Dictionary<string, Guid>());
+        state = await service.ReviewAsync(proposal, MemoryReviewStatus.Accepted, edit, state.Revision);
+        int writes = 0; SimpleFileStorage.FaultPoint.Value = _ => { if (++writes == 2) throw new IOException("Interrupted journal"); };
+        try { await Assert.ThrowsAsync<IOException>(() => service.ReviewAsync(proposal, MemoryReviewStatus.Confirmed, edit, state.Revision)); }
+        finally { SimpleFileStorage.FaultPoint.Value = null; }
+        state = await service.UndoAsync(proposal, state.Revision, "Undo interrupted confirmation");
+        Assert.Empty(new EntityMemoryQuery(await new EntityMemoryStore(session).LoadAsync(), s.Sources).AtChapter(1).Entities);
+        Assert.Equal(MemoryReviewStatus.Proposed, state.Reviews.Last().Status);
+    }
+
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }
