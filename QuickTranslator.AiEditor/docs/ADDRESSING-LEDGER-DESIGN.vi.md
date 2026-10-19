@@ -52,24 +52,77 @@ QT Studio là phần mềm dịch tự động. Khảo sát truyện chỉ có g
 | Chỉ số | Giá trị |
 |---|---:|
 | Lời thoại tách được (`「」`) | 1.061 / 1.062 cặp ngoặc |
-| Người nói `Explicit` | 314 (29,6%) |
-| Người nói là đại từ (ứng viên) | 105 (9,9%) |
-| Không xác định | 642 (60,5%) |
-| Có ứng viên người nghe | 227 (21,4%) |
+| Người nói `Explicit` | 423 (39,9%) |
+| Người nói là đại từ (ứng viên) | 210 (19,8%) |
+| Không xác định | 428 (40,3%) |
+| Có ứng viên người nghe | 423 (39,9%) |
 | Tên ứng viên từ census | 19 |
-| Cặp có hướng | 32 (24 cặp có người nghe) |
+| Cặp có hướng | 35 |
 
 Gợi ý bí danh tìm được: 小影姐/小影 ≈ 柳月影, 小锋 ≈ 柳轻锋, 阿岚 ≈ 秦梦岚. Hô gọi gom theo cặp khớp quan hệ trong truyện (柳轻锋 → 秦梦岚: `妈妈`×8; 柳月影 → 柳轻锋: `弟弟`; 柳轻锋 → 柳恒: `父亲`). Kiểm tra tay khoảng 25 mẫu `Explicit`: người nói đúng; một lỗi gán sau ngoặc (động từ trong `知道`, đoạn kế tiếp) đã được sửa.
 
 Giới hạn quan sát được, để Bước 2–3 xử lý:
 
-- 60% lời thoại không có dấu hiệu người nói (thoại nối tiếp). Bước 1 không đoán; Bước 2 có thể xét theo lượt thoại xen kẽ trong cùng cảnh.
+- Sau khi sửa nhận diện ngắt dòng cứng (đoạn dài nhiều dòng chỉ thụt lề dòng đầu), số người nói rõ ràng tăng từ 314 lên 423. Còn 40% lời thoại không có dấu hiệu người nói (thoại nối tiếp). Bước 1 không đoán; Bước 2 có thể xét theo lượt thoại xen kẽ trong cùng cảnh.
 - Bí danh được báo riêng (`柳轻锋 → 小影姐` và `柳轻锋 → 柳月影` là hai dòng) cho tới khi người dùng duyệt gộp. Biến thể khác chữ (`小峰`) không có gợi ý.
 - Tự xưng bằng danh xưng thân tộc (`陪陪姐姐`, người nói tự gọi mình là 姐姐) được ghi là "nhắc tới", không phải hô gọi; Bước 2 cần nhận diện kiểu tự xưng này vì nó quyết định cách dịch "chị/em".
 
-### Bước 2 — AI theo cặp (chưa làm)
+### Bước 1b — CPU: cách lời kể gọi nhân vật (ngôi thứ 3)
 
-Với mỗi cặp quan trọng (lọc theo số lời thoại `Explicit`/`Vocative`), gửi 10–20 mẫu thoại ngắn kèm mệnh đề dẫn thoại, schema nhỏ: tự xưng, gọi người, quan hệ, chương bắt đầu/đổi, câu trích chứng minh. Số request tỷ lệ với số cặp (thường 50–200 cho cả truyện), không phải số cửa sổ. Câu trích được kiểm chứng nguyên văn bằng CPU.
+Xưng hô trong thoại chưa đủ: lời kể ngôi thứ 3 phải gọi một nhân vật nhất quán (hắn / nàng / y / cô ấy / lão…), đúng giới tính, và có thể đổi theo truyện. Trình dịch đã có chỗ chứa: đại từ kể chuyện có khóa (`PrimaryNarrativePronoun`, `NarrativePronounLocked`) trong hồ sơ nhân vật.
+
+Với mỗi tên ứng viên, CPU lấy các **câu kể ngoài ngoặc thoại** có nhắc tên, đếm đại từ `他`/`她`/`它` xuất hiện sau tên trong cùng câu hoặc câu kế tiếp, nhưng chỉ khi chưa có tên nhân vật khác chen vào. Kết quả là tín hiệu giới tính khách quan, kèm mẫu câu có chương và offset.
+
+### Bước 2 — AI theo cặp và theo nhân vật (đang triển khai, chưa gọi AI thật)
+
+Mỗi request gom vài **nhiệm vụ**, có hai loại:
+
+- **Cặp** (người nói → người nghe): 6–12 mẫu thoại, có mệnh đề dẫn, trải đều theo chương. AI trả về:
+  - trạng thái (`Consistent` / `Changes` / `Ambiguous` / `NotThisPair`);
+  - quan hệ;
+  - các **giai đoạn**, mỗi giai đoạn gồm: chương từ–đến, tự xưng và gọi người bằng tiếng Việt, từ gốc tiếng Trung (tự xưng, hô gọi), và các mẫu chứng minh.
+- **Nhân vật** (lời kể): 6–10 câu kể, có số đếm 他/她 của CPU. AI trả về:
+  - trạng thái (`Consistent` / `Changes` / `Ambiguous` / `NotACharacter`);
+  - giới tính;
+  - các giai đoạn, mỗi giai đoạn gồm: chương từ–đến, đại từ kể chính và phụ tiếng Việt, và các mẫu chứng minh.
+
+Schema chỉ dùng `type/properties/required/items/enum` chuỗi (an toàn với Gemini). Số request tỷ lệ với số cặp và số nhân vật, thường vài chục cho cả truyện, không phụ thuộc số cửa sổ.
+
+**Kiểm chứng CPU (fail-closed, không tự xác nhận):**
+
+- `task_id` phải thuộc đúng request, mỗi nhiệm vụ chỉ được trả lời một lần.
+- `sample_ids` phải thuộc đúng nhiệm vụ đó. Mỗi giai đoạn cần ít nhất một mẫu, và chương của mẫu phải nằm trong khoảng chương của giai đoạn.
+- Từ gốc tiếng Trung (tự xưng, hô gọi) phải xuất hiện nguyên văn trong lời thoại của mẫu được trích.
+- Khoảng chương hợp lệ (`from` ≤ `to`, `to = 0` là mở), không vượt ngoài phạm vi chương quan sát được.
+- Giới tính trái với tín hiệu 他/她 rõ rệt của CPU bị đánh `GenderConflictsWithSource`.
+- `Consistent`/`Changes` phải có cách gọi tiếng Việt cho từng giai đoạn. `Ambiguous`/`NotThisPair`/`NotACharacter` không tạo quy tắc.
+
+Checkpoint theo request (`Settings/addressing-ledger.v1.json`, chỉ ghi thêm). Một nhiệm vụ là xong khi:
+- đã có một đề xuất qua kiểm chứng; hoặc
+- đã được trả lời 2 lần mà vẫn không qua kiểm chứng (không gửi lại mãi); hoặc
+- bị provider từ chối (không bao giờ tự gửi lại, để người dùng xem tay).
+
+Mỗi lần chạy có ngân sách request; dừng khi provider lỗi dịch vụ hoặc hết quota. Vận chuyển dùng lại `SemanticSurveyBackend`: một model đã chọn, không retry, không fallback.
+
+### Bước 1c — CPU: các cách gọi khác nhau của một nhân vật
+
+Một nhân vật có nhiều cách gọi (王秀兰 / 秀兰 / 小兰 / 兰儿 / 王小姐 → Vương Tú Lan / Tú Lan / Tiểu Lan…). Nếu không gom lại, quan hệ bị tách theo cách viết và tín hiệu 他/她 bị chia nhỏ.
+
+- **Sinh biến thể từ tên đầy đủ:** tên không họ; `小/阿` + chữ cuối (hoặc chữ đầu); chữ cuối + `儿`; lặp chữ; `小X姐`; tên + `姐/哥/妹/弟`; họ + `小姐/先生/老师/公子/姑娘/夫人/少/总/姐/哥`; `老` + họ.
+- **Lọc biến thể:**
+  - chỉ giữ biến thể thực sự xuất hiện, không tính lần nằm bên trong tên đầy đủ;
+  - bỏ biến thể trùng từ hô gọi hoặc tự xưng thông dụng (`小子`, `老子`);
+  - biến thể có hơn một chủ có thể được báo là *mơ hồ* và không gán cho ai.
+- **Khi lập kế hoạch Bước 2:** lời thoại và lời kể của biến thể có đúng một chủ được tính cho chủ đó (`秀兰姐` → 王秀兰). Prompt ghi rõ đây là giả thuyết CPU. AI chỉ được chọn tên trong danh sách ứng viên (`name_forms`), kèm bản dịch tiếng Việt của từng cách gọi. Bước 3 do người dùng duyệt gộp.
+
+**Đếm 他/她 cho lời kể (bản chặt):** chỉ đếm khi
+- tên đứng đầu một vế câu (vai chủ ngữ);
+- đại từ mở đầu một vế sau đó hoặc câu kế tiếp trong cùng đoạn;
+- không có tên khác hay danh xưng (`妈妈`, `姐姐`…) chen giữa.
+
+Bản đếm đầu tiên cho 柳轻锋 (nam chính) ra 他 190 / 她 99. Bản chặt ra 132 / 7 (sau khi bỏ ngắt dòng cứng đúng cách).
+
+**Kế hoạch offline cho "test cpu":** 24 nhiệm vụ (13 cặp, 11 nhân vật), 4 request, khoảng 19.300 token đầu vào ước tính. Giới tính theo nguyên văn: 柳轻锋 nam (132:7), 柳月影 nữ (0:25), 秦梦岚 nữ (2:27), 沈夕颜 nữ (2:17), 柳恒 nam (8:2). Biến thể: 小锋×179 và 轻锋×24 → 柳轻锋; 小影×70, 小影姐×55, 月影×8 → 柳月影; 夕颜×93, 夕颜姐×79 → 沈夕颜; 梦岚, 阿岚, 小岚 → 秦梦岚; 陈老师 → 陈馨玉. `柳少/柳少爷/柳总` là mơ hồ (cả 柳轻锋 và 柳月影 đều có thể là chủ).
 
 ### Bước 3 — Tổng hợp và duyệt theo cặp (chưa làm)
 

@@ -81,6 +81,19 @@ public sealed class AddressingDialogueSurveyTests
     }
 
     [Fact]
+    public void Long_wrapped_paragraphs_with_few_indented_lines_are_still_unwrapped_but_sentence_ends_stay()
+    {
+        // Real corpus: one indented line then several ~38-char continuation lines (only 25% of lines indented).
+        const string text =
+            "    柳轻锋一边把手机递给沈夕颜一边说道：「我父亲让我先在办公室里等他\n一会，你有事先去忙\n就行了。」\n他笑了。\n" +
+            "    沈夕颜点点头说道：「好的，那我先\n去忙了，你在这里\n等一下。」\n然后走了。\n";
+        var lines = Lines(text, ["柳轻锋", "沈夕颜"]);
+        Assert.Equal("我父亲让我先在办公室里等他一会，你有事先去忙就行了。", lines[0].Quote);
+        Assert.Equal("好的，那我先去忙了，你在这里等一下。", lines[1].Quote);
+        Assert.Equal("沈夕颜", lines[1].Speaker); // The "」\n他笑了" break after a closed quote stays a break.
+    }
+
+    [Fact]
     public void Unindented_text_keeps_every_line_break_and_curly_and_nested_quotes_are_parsed()
     {
         const string text = "柳轻锋说道：“我在\n这里。”\n秦梦岚问道：「他说『走』了吗？」";

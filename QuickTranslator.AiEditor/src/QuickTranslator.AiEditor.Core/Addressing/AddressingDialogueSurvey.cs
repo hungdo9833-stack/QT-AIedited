@@ -37,7 +37,7 @@ public static class AddressingDialogueSurvey
 {
     private const int MaximumQuoteLength = 2_000;
     private const int MaximumLeadClause = 80;
-    private static readonly (char Open, char Close)[] Brackets = [('「', '」'), ('“', '”'), ('『', '』')];
+    internal static readonly (char Open, char Close)[] Brackets = [('「', '」'), ('“', '”'), ('『', '』')];
     private static Regex Rule(string pattern) => new(pattern, RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
     private static readonly Regex SpeechVerbAtEnd = Rule(
         @"(?:说道|问道|答道|喊道|叫道|笑道|骂道|嚷道|喝道|怒道|叹道|哼道|应道|回道|开口道|低声道|轻声道|冷声道|柔声道|沉声道|大声道|继续道|又道|说|问|道|答|喊|叫|嚷|嘀咕|喃喃)[：:，,]?\s*$");
@@ -78,6 +78,13 @@ public static class AddressingDialogueSurvey
 
     public static IReadOnlyList<DialogueLine> Extract(CensusSource source, IReadOnlyCollection<string> names) =>
         Extract(source, new NameMatcher(names), CancellationToken.None);
+
+    /// <summary>Every dialogue line of the given chapters in reading order (input for step 2 sampling).</summary>
+    public static IReadOnlyList<DialogueLine> ExtractAll(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names, CancellationToken cancellationToken = default)
+    {
+        var matcher = new NameMatcher(names);
+        return sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId).SelectMany(x => Extract(x, matcher, cancellationToken)).ToArray();
+    }
 
     private static IReadOnlyList<DialogueLine> Extract(CensusSource source, NameMatcher names, CancellationToken cancellationToken)
     {
@@ -122,7 +129,7 @@ public static class AddressingDialogueSurvey
         return result;
     }
 
-    private static int FindClose(string text, int open, (char Open, char Close) bracket)
+    internal static int FindClose(string text, int open, (char Open, char Close) bracket)
     {
         int depth = 0;
         for (int i = open; i < text.Length && i - open <= MaximumQuoteLength; i++)
@@ -283,7 +290,10 @@ public static class AddressingDialogueSurvey
         {
             var lines = original.Split('\n');
             int nonEmpty = lines.Count(l => l.Trim('\r').Length > 0);
-            bool hardWrapped = nonEmpty >= 4 && lines.Count(l => l.Length > 0 && l[0] is ' ' or '　' or '\t') * 2 >= nonEmpty;
+            // Indented paragraphs mark a hard-wrapped layout even when most lines are continuations; a break is
+            // then a soft wrap only when the line does not end a sentence/quote and the next line is not indented.
+            int indented = lines.Count(l => l.Length > 0 && l[0] is ' ' or '　' or '\t');
+            bool hardWrapped = nonEmpty >= 4 && indented >= 2 && indented * 10 >= nonEmpty;
             var value = new StringBuilder(original.Length); var map = new List<int>(original.Length);
             for (int i = 0; i < original.Length; i++)
             {
@@ -292,7 +302,7 @@ public static class AddressingDialogueSurvey
                 {
                     int next = i; while (next < original.Length && original[next] is '\r' or '\n') next++;
                     bool softWrap = hardWrapped && next < original.Length && next - i <= 2 && !char.IsWhiteSpace(original[next]) &&
-                        original.AsSpan(i, next - i).Count('\n') == 1;
+                        original.AsSpan(i, next - i).Count('\n') == 1 && (i == 0 || "。！？!?」”』…".IndexOf(original[i - 1]) < 0);
                     if (!softWrap) { value.Append('\n'); map.Add(i); }
                     i = next - 1; continue;
                 }
