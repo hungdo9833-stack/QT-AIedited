@@ -81,3 +81,20 @@ enables only the isolated future query when proof and reveal dates are valid.
 Rule proposals are never automatically accepted. No scenes/speaker/listener are
 guessed or written. Audit links remain excluded from context even if reviewed as
 associations. Source/name changes version assertions, leaving history intact.
+
+Checkpoint C: separate minimal review entry in the existing survey window;
+identity/chapter/status/kind filters, exact source navigation, Accepted/Confirmed/
+Rejected, append-only undo, explicit CPU-event refinement and audit-alias promotion.
+Unknown reveal and CPU co-occurrence participants are not pre-confirmed. Pause and
+idempotent resume are covered by WPF tests; late reloads cannot replace an active
+operation's snapshot. The chapter preview is explicitly isolated from translation.
+
+Document-sized pooled JSON serialization/DOM validation caused high retained
+memory in the 1,000-chapter checkpoint benchmark. Only the new sidecar codec now
+uses an unpooled buffer and streaming required-field validation; atomic replacement
+still reuses SimpleFileStorage. Focused cold-run retained managed delta fell from
+about 173 MB to 56 MB (including the retained final state, not peak process memory).
+
+Final Release suite: 639 Core + 103 WPF passed, zero failed/skipped. Solution Release
+build passed. The handoff report records reproducible commands, measured storage,
+known warnings and scope limitations. No provider calls or personal Project access.

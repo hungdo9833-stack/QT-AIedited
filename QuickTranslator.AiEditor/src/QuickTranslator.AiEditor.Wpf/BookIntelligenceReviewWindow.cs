@@ -61,6 +61,7 @@ public sealed class BookIntelligenceReviewWindow : Window
     private readonly ComboBox _identityLinkKind = new() { Width = 150, ItemsSource = new[] { "Cùng danh tính", "Bí danh / danh xưng" } };
     private bool _auditing;
     private readonly Button _audit = new() { Content = "Kiểm tra corpus (CPU)" };
+    private readonly Button _memory = new() { Content = "Entity Memory · Event Ledger (2A)" };
     private readonly ComboBox _auditGroup = new() { Width = 170, ItemsSource = new[]
         { "Đề xuất hiện có", "Missing identity", "Stale index", "Blocked excerpts", "Unverified", "Identity đã xử lý",
           "Alias candidates", "Title candidates", "Addressing terms", "Noise / Uncertain" }, SelectedIndex = 0 };
@@ -112,7 +113,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         var filters = new WrapPanel { Margin = new Thickness(0, 5, 0, 3) };
         filters.Children.Add(new TextBlock { Text = "Lọc", VerticalAlignment = VerticalAlignment.Center });
         filters.Children.Add(_kindFilter); filters.Children.Add(_statusFilter); filters.Children.Add(_search);
-        filters.Children.Add(_auditGroup); filters.Children.Add(_audit);
+        filters.Children.Add(_auditGroup); filters.Children.Add(_audit); filters.Children.Add(_memory);
         header.Children.Add(filters);
         header.Children.Add(controls); header.Children.Add(_progress); header.Children.Add(_summary);
         header.Children.Add(_auditSummary);
@@ -154,6 +155,11 @@ public sealed class BookIntelligenceReviewWindow : Window
         _rerun.Click += async (_, _) => await RunAsync(forceResurvey: true);
         _blocked.Click += async (_, _) => await ShowBlockedEvidenceAsync();
         _audit.Click += async (_, _) => await RefreshCorpusAuditAsync();
+        _memory.Click += (_, _) =>
+        {
+            if (_loading || _auditing || _cancellation is not null) return;
+            new EntityMemoryReviewWindow(_session, _repository, _openEvidence) { Owner = this }.ShowDialog();
+        };
         _auditGroup.SelectionChanged += (_, _) => RefreshQueue();
         _identityNotCharacter.Click += async (_, _) => await ReviewMissingIdentityAsync(MissingIdentityDecisionKind.NotCharacter);
         _identityQueue.Click += async (_, _) => await ReviewMissingIdentityAsync(MissingIdentityDecisionKind.VerifyNewCharacter);

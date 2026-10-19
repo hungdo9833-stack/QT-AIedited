@@ -18,7 +18,7 @@ public sealed record ChapterMemorySnapshot(int ChapterNumber, IReadOnlyList<Chap
 /// <summary>Immutable source-backed audit/query snapshot. Never connected to the translation provider in 2A.</summary>
 public sealed class EntityMemoryQuery
 {
-    public EntityMemoryState State { get; }
+    internal EntityMemoryState State { get; }
     private readonly Dictionary<Guid, CensusSource> _sources;
     private readonly Dictionary<Guid, string> _hashes;
     private readonly Dictionary<Guid, MemoryEvidence> _evidence;

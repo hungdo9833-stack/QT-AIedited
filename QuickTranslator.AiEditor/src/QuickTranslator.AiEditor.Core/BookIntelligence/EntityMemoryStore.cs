@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Buffers;
 using System.Text.Json;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
@@ -38,7 +39,14 @@ public sealed class EntityMemoryStore(ProjectSession session)
     }
 
     public static EntityMemoryState Clone(EntityMemoryState value) => JsonSerializer.Deserialize<EntityMemoryState>(Serialize(value), DocumentJson.Options)!;
-    public static byte[] Serialize(EntityMemoryState value) => JsonSerializer.SerializeToUtf8Bytes(value, DocumentJson.Options);
+    public static byte[] Serialize(EntityMemoryState value)
+    {
+        // Avoid retaining document-sized ArrayPool buffers on every checkpoint worker.
+        var buffer = new ArrayBufferWriter<byte>();
+        using var writer = new Utf8JsonWriter(buffer);
+        JsonSerializer.Serialize(writer, value, DocumentJson.Options); writer.Flush();
+        return buffer.WrittenSpan.ToArray();
+    }
     private static void Preserve<T>(IReadOnlyList<T> before, IReadOnlyList<T> after)
     {
         if (after.Count < before.Count || before.Where((x, i) => EntityMemoryIdentity.Fingerprint(x) != EntityMemoryIdentity.Fingerprint(after[i])).Any())
@@ -46,8 +54,20 @@ public sealed class EntityMemoryStore(ProjectSession session)
     }
     private EntityMemoryState Decode(byte[] bytes)
     {
-        var result = JsonFileCodec.DecodeDirect<EntityMemoryState>(bytes, value => value.Validate(),
-            "schemaVersion", "projectId", "revision", "entities", "evidence", "facts", "events", "reviews", "checkpoints");
+        // Validate required top-level fields without a pooled document-sized DOM.
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        var reader = new Utf8JsonReader(bytes);
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject) throw new InvalidDataException("Memory must be a JSON object.");
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName || !fields.Add(reader.GetString()!)) throw new InvalidDataException("Invalid/duplicate memory field.");
+            if (!reader.Read()) throw new InvalidDataException("Incomplete memory field.");
+            reader.Skip();
+        }
+        string[] required = ["schemaVersion", "projectId", "revision", "entities", "evidence", "facts", "events", "reviews", "checkpoints"];
+        if (reader.TokenType != JsonTokenType.EndObject || reader.Read() || required.Any(x => !fields.Contains(x))) throw new InvalidDataException("Incomplete memory document.");
+        var result = JsonSerializer.Deserialize<EntityMemoryState>(bytes, DocumentJson.Options) ?? throw new InvalidDataException("Empty memory document.");
+        result.Validate();
         if (result.ProjectId != session.Manifest.ProjectId) throw new InvalidDataException("Memory belongs to another Project.");
         return result;
     }

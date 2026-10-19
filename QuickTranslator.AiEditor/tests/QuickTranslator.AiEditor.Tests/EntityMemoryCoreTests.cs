@@ -175,4 +175,45 @@ public sealed class EntityMemoryCoreTests
         Assert.Equal("con", Assert.Single(s.Query().AtChapter(50).Addressing).SelfReference);
         Assert.Equal("tôi", Assert.Single(s.Query().AtChapter(19).Addressing).SelfReference);
     }
+
+    [Fact]
+    public void Derived_fact_stops_being_visible_when_an_input_is_ended_by_a_confirmed_event()
+    {
+        var s = new MemoryScenario(); Guid proof = s.Source(1), ending = s.Source(10), a = s.Entity("A"), b = s.Entity("B"), c = s.Entity("C");
+        var parent = s.Fact(a, MemoryFactKind.Relationship, "father", proof, new(1, null, 1, 1), b, KnowledgeRelationType.BiologicalFather);
+        var sibling = s.Fact(b, MemoryFactKind.Relationship, "sibling", proof, new(1, null, 1, 1), c, KnowledgeRelationType.FullSibling);
+        s.Confirm(parent.Id); s.Confirm(sibling.Id); EntityMemoryReasoning.Propose(s.State, s.Sources);
+        var derived = s.State.Facts.Single(x => x.Provenance.Origin == MemoryOrigin.Rule && x.SubjectId == a);
+        s.Confirm(derived.Id);
+        var ended = new EntityMemoryBuilder(s.State).Event(new() { Type = TranslationImpactEventType.RelationshipEnded,
+            EntityIds = [a, b], Effect = MemoryEventEffect.End, AffectedFactIds = [parent.Id], EvidenceIds = [ending], Timeline = new(10, null, 10, 10),
+            Provenance = new(MemoryOrigin.User, "end-parent", "Explicit end, not a biological inference") }); s.Confirm(ended.Id);
+        Assert.Contains(s.Query().AtChapter(9).Relationships, x => x.Id == derived.Id);
+        Assert.DoesNotContain(s.Query().AtChapter(10).Relationships, x => x.Id == derived.Id);
+    }
+
+    [Fact]
+    public void New_unsampled_mentions_stale_whole_census_assertion_even_when_all_four_stored_spans_still_match()
+    {
+        var s = new MemoryScenario(); s.Source(1, string.Concat(Enumerable.Repeat("王明来了。", 20)));
+        var resources = new ProjectResources { ProjectId = s.State.ProjectId, Characters = new CharacterProject { Id = s.State.ProjectId } };
+        resources.Characters.Profiles.Add(new() { ChineseName = "王明", VietnameseName = "Vương Minh" });
+        var survey = new BookIntelligenceState { ProjectId = s.State.ProjectId };
+        var census = CharacterMentionCensus.Scan(s.State.ProjectId, 0, s.Sources, resources, survey);
+        EntityMemoryProjection.Import(s.State, resources, survey, census, new() { ProjectId = s.State.ProjectId });
+        var fact = s.State.Facts.First(x => x.Value == "王明"); Assert.Equal(4, fact.EvidenceIds.Count); Assert.True(s.Query().IsFresh(fact.Id));
+        s.Source(2, "王明又来了。");
+        Assert.All(fact.EvidenceIds, id => Assert.True(s.Query().EvidenceCurrent(id)));
+        Assert.Equal(MemoryReviewStatus.Stale, s.Query().Status(fact.Id));
+    }
+
+    [Fact]
+    public void Invalid_utf16_surrogate_boundary_is_not_navigable_or_confirmable()
+    {
+        var s = new MemoryScenario(); s.Source(1, "甲😀乙"); var source = s.Sources.Single();
+        Guid proof = new EntityMemoryBuilder(s.State).Evidence(source.ChapterId, 1, CorpusIntegrityAuditor.SourceHash(source.OriginalText), 1, 1);
+        var fact = s.Fact(s.Entity("A"), MemoryFactKind.PrimaryName, "A", proof, new(1, null, 1, 1));
+        Assert.False(s.Query().EvidenceCurrent(proof)); Assert.Throws<InvalidOperationException>(() => s.Query().Navigation(proof));
+        Assert.Throws<InvalidOperationException>(() => s.Confirm(fact.Id));
+    }
 }
