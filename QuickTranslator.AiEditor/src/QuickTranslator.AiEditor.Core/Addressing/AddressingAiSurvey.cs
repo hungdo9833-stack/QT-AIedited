@@ -5,7 +5,8 @@ using QuickTranslator.AiEditor.Core.BookIntelligence;
 
 namespace QuickTranslator.AiEditor.Core.Addressing;
 
-public enum AddressingTaskKind { Pair, Character, Scene }
+/// <summary>Identity: are two candidate names the same character (a nickname, pet name or title of one person)?</summary>
+public enum AddressingTaskKind { Pair, Character, Scene, Identity }
 
 /// <summary>
 /// Verbatim excerpt sent to the model: a dialogue quote (pair), a narration sentence (character) or one numbered quote
@@ -81,6 +82,8 @@ public sealed record AddressingProposal(Guid Id, string RequestId, string TaskId
 {
     /// <summary>Scene proposals only. They are evidence for later pair tasks, never written to the Character Project.</summary>
     public IReadOnlyList<AddressingTurn> Turns { get; init; } = [];
+    /// <summary>Identity proposals only: the name kept as the main profile (Subject or Listener); the other becomes its alias.</summary>
+    public string Primary { get; init; } = "";
 }
 
 /// <summary>
@@ -89,10 +92,11 @@ public sealed record AddressingProposal(Guid Id, string RequestId, string TaskId
 /// </summary>
 public static class AddressingAiSurvey
 {
-    public const string PromptVersion = "addressing-ledger-6";
+    public const string PromptVersion = "addressing-ledger-7";
     private static readonly string[] PairStatus = ["Consistent", "Changes", "Ambiguous", "NotThisPair"];
     private static readonly string[] CharacterStatus = ["Consistent", "Changes", "Ambiguous", "NotACharacter"];
     private static readonly string[] Genders = ["male", "female", "unknown"];
+    private static readonly string[] IdentityVerdicts = ["same", "different", "unclear"];
 
     // ---------- planning ----------
 
@@ -242,6 +246,81 @@ public static class AddressingAiSurvey
         }).ToArray();
     }
 
+    private const int MaximumIdentities = 20, MinimumIdentityParagraphs = 2;
+    private static (string, string) Key(string a, string b) => string.CompareOrdinal(a, b) < 0 ? (a, b) : (b, a);
+
+    /// <summary>
+    /// Phase D: "same person?" tasks for two candidate names the CPU cannot tell apart (小包子 / 小宝). The CPU proposes a pair
+    /// only when every genre-independent sign agrees: at least one name is a nickname (no common surname: 小宝, 冰雕男, 阿秀),
+    /// they share a paragraph at least twice, they never talk to each other (from the dialogue, with verified scene turns),
+    /// the text never lists them side by side as two people (X和Y, X与Y, X、Y), and their narration genders do not conflict.
+    /// Samples are the shared paragraphs, spread over the chapters.
+    /// </summary>
+    public static IReadOnlyList<AddressingTask> PlanIdentities(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
+        AddressingSettings? settings = null, CancellationToken cancellationToken = default, IReadOnlyCollection<AddressingTurn>? sceneTurns = null)
+    {
+        settings ??= new(); settings.Validate();
+        var identities = Identify(sources, names);
+        string Canonical(string name) => identities.Canonical(name);
+        var talk = WithSceneTurns(AddressingDialogueSurvey.ExtractAll(sources, identities.AllNames, cancellationToken), sceneTurns)
+            .Where(x => x.Speaker is not null && x.Listener is not null).Select(x => Key(Canonical(x.Speaker!), Canonical(x.Listener!))).ToHashSet();
+        var genders = NarrativeReferenceSurvey.Analyze(sources, identities.AllNames, int.MaxValue, cancellationToken).GroupBy(x => Canonical(x.Name), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => new NarrativeCharacter(g.Key, g.Sum(x => x.NarrationMentions), g.Sum(x => x.He), g.Sum(x => x.She), g.Sum(x => x.It),
+                g.Min(x => x.FirstChapter), g.Max(x => x.LastChapter), []).SourceGender, StringComparer.Ordinal);
+        var matcher = new AddressingDialogueSurvey.NameMatcher(identities.AllNames);
+        var together = new Dictionary<(string, string), List<(int Chapter, int Index, string Text)>>();
+        var listed = new HashSet<(string, string)>();
+        foreach (var source in sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var paragraphs = AddressingDialogueSurvey.NormalizedText.From(source.OriginalText).Value.Split('\n');
+            for (int index = 0; index < paragraphs.Length; index++)
+            {
+                string paragraph = paragraphs[index].Trim();
+                var hits = matcher.Find(paragraph);
+                for (int i = 1; i < hits.Count; i++)
+                    if (paragraph[(hits[i - 1].Start + hits[i - 1].Name.Length)..hits[i].Start] is "和" or "与" or "跟" or "及" or "、" or "同")
+                        listed.Add(Key(Canonical(hits[i - 1].Name), Canonical(hits[i].Name)));
+                var present = hits.Select(h => Canonical(h.Name)).Distinct(StringComparer.Ordinal).ToArray();
+                for (int a = 0; a < present.Length; a++)
+                    for (int b = a + 1; b < present.Length; b++)
+                    {
+                        var key = Key(present[a], present[b]);
+                        if (!together.TryGetValue(key, out var list)) together[key] = list = [];
+                        list.Add((source.ChapterNumber, index, paragraph));
+                    }
+            }
+        }
+        static bool Nickname(string name) => !ChineseSurnames.HasCommonSurname(name);
+        bool GenderClash(string a, string b) => genders.GetValueOrDefault(a, "unknown") is var x && genders.GetValueOrDefault(b, "unknown") is var y &&
+            x != "unknown" && y != "unknown" && x != y;
+        string Excerpt(string paragraph, string a, string b)
+        {
+            int max = settings.MaximumSampleLength + 80;
+            if (paragraph.Length <= max) return paragraph;
+            int first = new[] { paragraph.IndexOf(a, StringComparison.Ordinal), paragraph.IndexOf(b, StringComparison.Ordinal) }.Where(i => i >= 0).DefaultIfEmpty(0).Min();
+            int start = Math.Clamp(first - 40, 0, paragraph.Length - max);
+            return paragraph.Substring(start, max);
+        }
+        var tasks = new List<AddressingTask>();
+        foreach (var (key, shared) in together
+                     .Where(kv => kv.Value.Count >= MinimumIdentityParagraphs && (Nickname(kv.Key.Item1) || Nickname(kv.Key.Item2)) &&
+                                  !talk.Contains(kv.Key) && !listed.Contains(kv.Key) && !GenderClash(kv.Key.Item1, kv.Key.Item2))
+                     .OrderByDescending(kv => kv.Value.Count).ThenBy(kv => kv.Key.Item1, StringComparer.Ordinal).ThenBy(kv => kv.Key.Item2, StringComparer.Ordinal)
+                     .Take(MaximumIdentities))
+        {
+            var queues = shared.GroupBy(x => x.Chapter).OrderBy(g => g.Key).Select(g => new Queue<(int Chapter, int Index, string Text)>(g)).ToList();
+            var picked = new List<(int Chapter, int Index, string Text)>();
+            while (picked.Count < settings.SamplesPerTask && queues.Any(q => q.Count > 0))
+                foreach (var q in queues.Where(q => q.Count > 0)) { if (picked.Count == settings.SamplesPerTask) break; picked.Add(q.Dequeue()); }
+            var samples = picked.OrderBy(x => x.Chapter).ThenBy(x => x.Index)
+                .Select((x, i) => new AddressingTaskSample("P" + (i + 1), x.Chapter, x.Index, "", Excerpt(x.Text, key.Item1, key.Item2).Replace("⟦", "").Replace("⟧", ""))).ToArray();
+            tasks.Add(new(TaskId("identity", key.Item1 + "=" + key.Item2, samples), AddressingTaskKind.Identity, key.Item1, key.Item2,
+                shared.Min(x => x.Chapter), shared.Max(x => x.Chapter), samples));
+        }
+        return tasks;
+    }
+
     private const int MaximumParticipants = 8;
 
     /// <summary>
@@ -349,6 +428,7 @@ public static class AddressingAiSurvey
         text.AppendLine("PAIR task: two characters A and B, both directions in one answer. forward = how A refers to themself and addresses B (cite S samples); reverse = how B refers to themself and addresses A (cite R samples). self_vi/address_vi are the Vietnamese pronouns or terms a translator should use (e.g. tôi/em/ta/con and anh/chị/ngươi/mẹ). self_zh/address_zh are the Chinese words actually used, copied exactly from the cited samples (self-reference by a kinship title such as 姐姐 counts as self_zh). relationship is a short Vietnamese label from the speaker's side (e.g. forward \"chị gái → em trai\", reverse \"em trai → chị gái\"). The two directions must agree: what A calls themself is what B calls A, and what A calls B is what B calls themself (anh/em ↔ em/anh, bố/con ↔ con/bố, sư phụ/đồ nhi ↔ đồ nhi/sư phụ); a neutral form on one side (tôi, ta, ngươi, bạn) is fine. Samples marked FROM-SCENE had their speaker/listener identified by an earlier scene analysis; answer NotThisPair for that direction if the text contradicts it.");
         text.AppendLine("CHARACTER task: gender, and the Vietnamese third-person pronoun narration should use for this character (narrative_vi, e.g. hắn/nàng/y/cô/anh/lão/bà; secondary_vi optional or \"\"). CPU counts of 他/她 that follow the name are given as evidence. name_forms: choose ONLY from the listed NAME CANDIDATES the forms that refer to this same character, plus the full name, each with its consistent Vietnamese rendering (Hán Việt for names, e.g. 王秀兰 → Vương Tú Lan, 小兰 → Tiểu Lan). Never add a form that is not listed.");
         text.AppendLine("SCENE task: a continuous dialogue passage in reading order; every quote is labelled ⟦Qn⟧ and a line break is a new paragraph. For every quote_id give speaker and listener, each written EXACTLY as one PARTICIPANTS name (a listed variant spelling means that participant), or \"\" when the text does not make it clear or the person is not listed (an unnamed or minor character such as a waiter). A participant marked (title) is a person known by a title (e.g. 陆老夫人); answer the title itself, unless the text makes clear it is a listed name — then answer that name. Never give one person's lines to another listed person because the real speaker is missing. Use speech verbs, turn-taking, vocatives, 他/她 and content; never guess a name that is not listed, and never answer a quote with someone who is addressed by name inside it as its speaker. self_zh/address_zh: the Chinese self-reference and address words used inside that same quote, copied exactly ([] if none).");
+        text.AppendLine("IDENTITY task: do X and Y name the SAME character (a nickname, pet name, title or the full name of one person) or two different characters? verdict: same, different, or unclear when the samples do not show it. If same: primary = the name to keep as the main profile (X or Y, usually the real or full name), secondary_vi = the Vietnamese rendering of the other name (Hán Việt or its meaning, e.g. 小包子 → Tiểu Bao Tử). Otherwise primary and secondary_vi are \"\". sample_ids: the P samples that show it.");
         text.AppendLine("Phases: if the pronouns change during the story, return several phases with chapter ranges; to_chapter 0 means it still holds. Every phase cites at least one sample_id of the SAME task; never invent chapters or ids.");
         text.AppendLine("Status: Consistent (one phase), Changes (several), Ambiguous (samples are not enough), NotThisPair (samples do not show SPEAKER talking to LISTENER) or NotACharacter. Every *_vi field, relationship and name_forms vi must be written in Vietnamese only (Latin letters): never a Chinese character (write \"Lục tiên sinh\" or \"anh\", not \"Lục先生\"). Reason: one short Vietnamese sentence. Return ONLY JSON matching the schema; use [] for the task kind that has no tasks.");
         for (int i = 0; i < tasks.Count; i++) text.AppendLine().Append("TASK ").Append(Alias(i)).Append(' ').Append(TaskBody(tasks[i]));
@@ -388,6 +468,13 @@ public static class AddressingAiSurvey
             b.AppendLine("END TASK");
             return b.ToString();
         }
+        if (task.Kind == AddressingTaskKind.Identity)
+        {
+            b.AppendLine($"IDENTITY X={task.Subject} Y={task.Listener} chapters={task.FirstChapter}-{task.LastChapter} (paragraphs where both names appear)");
+            foreach (var s in task.Samples) b.AppendLine($"{s.SampleId} [ch.{s.ChapterNumber}] {s.Text}");
+            b.AppendLine("END TASK");
+            return b.ToString();
+        }
         static string Line(AddressingTaskSample s) => $"{s.SampleId} [ch.{s.ChapterNumber}]{(s.FromScene ? " FROM-SCENE" : "")} LEAD: {s.Lead} QUOTE: 「{s.Text}」";
         if (task.Kind == AddressingTaskKind.Pair)
         {
@@ -423,7 +510,7 @@ public static class AddressingAiSurvey
     private static JsonObject Direction() => Obj(("status", Choice(PairStatus)), ("relationship", Str()),
         ("phases", ArrayOf(Obj(("from_chapter", Int()), ("to_chapter", Int()), ("self_vi", Str()), ("address_vi", Str()),
             ("self_zh", ArrayOf(Str())), ("address_zh", ArrayOf(Str())), ("sample_ids", ArrayOf(Str()))))));
-    internal static readonly string[] RootFields = ["pairs", "characters", "scenes"];
+    internal static readonly string[] RootFields = ["pairs", "characters", "scenes", "identities"];
     internal static readonly string[] PairFields = ["task_id", "forward", "reverse", "reason"];
     internal static readonly string[] DirectionFields = ["status", "relationship", "phases"];
     internal static readonly string[] PairPhaseFields = ["from_chapter", "to_chapter", "self_vi", "address_vi", "self_zh", "address_zh", "sample_ids"];
@@ -431,6 +518,7 @@ public static class AddressingAiSurvey
     internal static readonly string[] CharacterPhaseFields = ["from_chapter", "to_chapter", "narrative_vi", "secondary_vi", "sample_ids"];
     internal static readonly string[] SceneFields = ["task_id", "turns", "reason"];
     internal static readonly string[] TurnFields = ["quote_id", "speaker", "listener", "self_zh", "address_zh"];
+    internal static readonly string[] IdentityFields = ["task_id", "verdict", "primary", "secondary_vi", "sample_ids", "reason"];
 
     /// <summary>Only type/properties/required/items/string enum: the subset Gemini accepted for the semantic wire.</summary>
     public static JsonElement Schema { get; } = JsonSerializer.SerializeToElement(Obj(
@@ -441,7 +529,9 @@ public static class AddressingAiSurvey
             ("reason", Str())))),
         ("scenes", ArrayOf(Obj(("task_id", Str()),
             ("turns", ArrayOf(Obj(("quote_id", Str()), ("speaker", Str()), ("listener", Str()), ("self_zh", ArrayOf(Str())), ("address_zh", ArrayOf(Str()))))),
-            ("reason", Str()))))));
+            ("reason", Str())))),
+        ("identities", ArrayOf(Obj(("task_id", Str()), ("verdict", Choice(IdentityVerdicts)), ("primary", Str()), ("secondary_vi", Str()),
+            ("sample_ids", ArrayOf(Str())), ("reason", Str()))))));
 
     // ---------- verification ----------
 
@@ -461,7 +551,7 @@ public static class AddressingAiSurvey
         {
             var root = Fields(new Field(document.RootElement, "$"), RootFields);
             var items = new[] { (AddressingTaskKind.Pair, "pairs", PairFields), (AddressingTaskKind.Character, "characters", CharacterFields),
-                    (AddressingTaskKind.Scene, "scenes", SceneFields) }
+                    (AddressingTaskKind.Scene, "scenes", SceneFields), (AddressingTaskKind.Identity, "identities", IdentityFields) }
                 .SelectMany(k => Array(root[k.Item2]).Select(item => (Kind: k.Item1, Fields: k.Item3, Item: item))).ToArray();
             // The prompt names tasks T1…; the full id is accepted too (older prompts, replay).
             var byId = request.Tasks.Select((t, i) => (Key: Alias(i), Task: t)).Concat(request.Tasks.Select(t => (Key: t.TaskId, Task: t)))
@@ -495,6 +585,7 @@ public static class AddressingAiSurvey
                     {
                         AddressingTaskKind.Pair => VerifyPair(f, task, request.Id),
                         AddressingTaskKind.Character => [VerifyCharacter(f, task, request.Id)],
+                        AddressingTaskKind.Identity => [VerifyIdentity(f, task, request.Id)],
                         _ => [VerifyScene(f, task, request.Id)]
                     });
                 }
@@ -627,6 +718,33 @@ public static class AddressingAiSurvey
         if (task.ReverseSamples.Count > 0)
             result.Add(Proposal(task, requestId, reverse.Status, reverse.Relationship, "unknown", reverse.Phases, [], reason, reverse.Issues, task.Listener!, task.Subject));
         return result;
+    }
+
+    /// <summary>
+    /// "same" is a rule only when primary is X or Y, at least one cited sample belongs to the task, and secondary_vi is a short
+    /// Vietnamese rendering. "different" / "unclear" are valid answers that merge nothing. Status: Same, Different, Unclear.
+    /// </summary>
+    private static AddressingProposal VerifyIdentity(Node f, AddressingTask task, string requestId)
+    {
+        string verdict = Enum(f["verdict"], IdentityVerdicts), primary = Text(f["primary"]).Trim(), secondaryVi = Text(f["secondary_vi"]).Trim();
+        var ids = Strings(f["sample_ids"]);
+        var issues = new List<string>();
+        var samples = task.Samples.Select(s => s.SampleId).ToHashSet(StringComparer.Ordinal);
+        string status = verdict switch { "same" => "Same", "different" => "Different", _ => "Unclear" };
+        if (verdict == "same")
+        {
+            if (primary != task.Subject && primary != task.Listener) issues.Add("UnlistedPrimary");
+            if (ids.Length == 0 || ids.Any(id => !samples.Contains(id)) || ids.Distinct(StringComparer.Ordinal).Count() != ids.Length) issues.Add("MissingOrForeignSample");
+            if (secondaryVi.Length is 0 or > 40) issues.Add("MissingOrOverlongVietnameseName");
+            if (HasHan(secondaryVi)) issues.Add("ChineseInVietnameseField");
+        }
+        string secondary = primary == task.Subject ? task.Listener! : task.Subject;
+        string reason = Text(f["reason"]);
+        var distinct = issues.Distinct().ToArray();
+        var proposal = new AddressingProposal(Guid.Empty, requestId, task.TaskId, task.Kind, task.Subject, task.Listener, status, "", "unknown", [],
+            verdict == "same" ? [new(secondary, secondaryVi)] : [], reason.Length <= 500 ? reason : reason[..500], verdict == "same" && distinct.Length == 0, distinct)
+            { Primary = verdict == "same" ? primary : "" };
+        return proposal with { Id = EntityMemoryIdentity.StableId(Guid.Empty, "addressing-proposal:" + EntityMemoryIdentity.Fingerprint(proposal)) };
     }
 
     // Forms that carry no age or role, so a mismatch with them proves nothing ("tôi" to someone who calls you "anh").

@@ -35,10 +35,16 @@ public sealed class AddressingAiSurveyTests : IDisposable
     /// <summary>A well-formed reply that cites the task's own samples and quoted terms.</summary>
     internal static JsonObject Answer(AddressingRequestPlan request, Func<AddressingTask, JsonObject?>? overrideTask = null)
     {
-        var pairs = new JsonArray(); var characters = new JsonArray(); var scenes = new JsonArray();
+        var pairs = new JsonArray(); var characters = new JsonArray(); var scenes = new JsonArray(); var identities = new JsonArray();
         foreach (var task in request.Tasks)
         {
             var custom = overrideTask?.Invoke(task);
+            if (task.Kind == AddressingTaskKind.Identity)
+            {
+                identities.Add(custom ?? new JsonObject { ["task_id"] = task.TaskId, ["verdict"] = "unclear", ["primary"] = "", ["secondary_vi"] = "",
+                    ["sample_ids"] = new JsonArray(), ["reason"] = "Không rõ." });
+                continue;
+            }
             if (task.Kind == AddressingTaskKind.Scene)
             {
                 scenes.Add(custom ?? new JsonObject { ["task_id"] = task.TaskId, ["turns"] = new JsonArray(), ["reason"] = "Không rõ." });
@@ -69,7 +75,7 @@ public sealed class AddressingAiSurveyTests : IDisposable
                 });
             }
         }
-        return new JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = scenes };
+        return new JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = scenes, ["identities"] = identities };
     }
 
     /// <summary>One direction of a pair answer: the sister says 姐姐 and calls him 林青; he says 我 and calls her 秀兰姐.</summary>
@@ -240,7 +246,7 @@ public sealed class AddressingAiSurveyTests : IDisposable
         var whole = new Fake(_ => """{"pairs":[],"characters":[]}""");
         var failed = await new AddressingAiEngine(whole).RunAsync(await Store(), tasks, Options, maximumRequests: 1);
         Assert.Equal("SemanticSchemaViolation", failed.State.Attempts.Single().ErrorCode);
-        Assert.Equal(["Addressing schema mismatch at $: missing scenes"], failed.State.Attempts.Single().SchemaIssues); // Root fault: whole reply, still located.
+        Assert.Equal(["Addressing schema mismatch at $: missing scenes,identities"], failed.State.Attempts.Single().SchemaIssues); // Root fault: whole reply, still located.
         Assert.DoesNotContain("王秀兰看着", await File.ReadAllTextAsync(store.PathName));
     }
 

@@ -338,7 +338,7 @@ internal static class Program
                         ["narrative_vi"] = t.SourceGender == "female" ? "nàng" : "hắn", ["secondary_vi"] = "", ["sample_ids"] = ids }),
                     ["reason"] = "Đề xuất MẪU để xem giao diện, không phải kết quả AI." });
         }
-        return new System.Text.Json.Nodes.JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = new System.Text.Json.Nodes.JsonArray() }.ToJsonString();
+        return new System.Text.Json.Nodes.JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = new System.Text.Json.Nodes.JsonArray(), ["identities"] = new System.Text.Json.Nodes.JsonArray() }.ToJsonString();
     }
 
     private static GpuManagerWindow CreateGpuManager(string root)

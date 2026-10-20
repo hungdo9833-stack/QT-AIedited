@@ -12,6 +12,7 @@ public sealed record AddressingSurveyWork(IReadOnlyList<AddressingTask> Scenes, 
     public IReadOnlyList<AddressingTask> PendingTasks { get; } = Tasks.Where(t => !State.Done(t)).ToArray();
     public int PendingCharacters => PendingTasks.Count(t => t.Kind == AddressingTaskKind.Character);
     public int PendingPairs => PendingTasks.Count(t => t.Kind == AddressingTaskKind.Pair);
+    public int PendingIdentities => PendingTasks.Count(t => t.Kind == AddressingTaskKind.Identity);
     /// <summary>Requests still needed. Pairs are planned again once the scenes are answered, so this is an estimate.</summary>
     public int EstimatedRequests => Chunks(PendingScenes.Count) + Chunks(PendingTasks.Count);
     public bool Complete => PendingScenes.Count == 0 && PendingTasks.Count == 0;
@@ -41,7 +42,9 @@ public sealed class AddressingSurveyRunner(IJsonSchemaOllamaClient client)
         settings ??= new(); settings.Validate();
         var (names, titles) = AddressingAiSurvey.SurveyNames(projectId, sources, resources);
         var scenes = AddressingAiSurvey.PlanScenes(sources, names, settings, ct, titles);
-        var tasks = AddressingAiSurvey.PlanTasks(sources, names, settings, ct, state.SceneTurns());
+        var turns = state.SceneTurns();
+        // Identity questions go with characters and pairs: they need no scene answer, only the verified turns (who talks to whom).
+        var tasks = AddressingAiSurvey.PlanTasks(sources, names, settings, ct, turns).Concat(AddressingAiSurvey.PlanIdentities(sources, names, settings, ct, turns)).ToArray();
         return new(scenes, tasks, state, settings);
     }
 

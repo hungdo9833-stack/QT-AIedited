@@ -118,8 +118,8 @@ public sealed class AddressingReviewService(ProjectSession session)
     {
         var resources = before.Clone();
         var applied = new List<(AddressingAutoItem, string)>(); var held = new List<AddressingAutoItem>();
-        // One answer per character and per directed pair: the latest. A newer answer supersedes an older one even when it
-        // is invalid or says NotThisPair (it was asked with better evidence), so nothing stale is applied.
+        // One answer per character, per directed pair and per identity question: the latest. A newer answer supersedes an older
+        // one even when it is invalid or says NotThisPair (it was asked with better evidence), so nothing stale is applied.
         var latest = state.Proposals.Where(p => p.Kind != AddressingTaskKind.Scene)
             .GroupBy(p => (p.Kind, p.Subject, p.Listener)).Select(g => (Latest: g.Last(), All: g.ToArray())).ToArray();
         bool Decided(AddressingProposal[] all, out string why)
@@ -130,41 +130,119 @@ public sealed class AddressingReviewService(ProjectSession session)
         }
         AddressingAutoItem Item(AddressingProposal p, string detail) => new(p.Id, p.Kind, p.Subject, p.Listener, detail);
         var characters = latest.Where(x => x.Latest.Kind == AddressingTaskKind.Character).ToArray();
+        var pairs = latest.Where(x => x.Latest.Kind == AddressingTaskKind.Pair).ToArray();
         // A name form claimed by two characters (宁小姐: either sister) is never given to one of them.
         var shared = characters.Where(x => x.Latest.EvidenceValid).SelectMany(x => x.Latest.NameForms.Select(f => f.Zh).Where(z => z != x.Latest.Subject).Distinct())
             .GroupBy(z => z, StringComparer.Ordinal).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
+        var merges = Merges(latest.Where(x => x.Latest.Kind == AddressingTaskKind.Identity).ToArray(), pairs, resources, Decided, Item, held);
 
-        foreach (var (p, all) in characters.Concat(latest.Where(x => x.Latest.Kind == AddressingTaskKind.Pair)))
+        bool Apply(AddressingProposal p, AddressingProposal[] all, Func<ProjectResources, string> write)
         {
-            if (Decided(all, out string why)) { if (why != "đã ghi vào hồ sơ trước đó") held.Add(Item(p, why)); continue; }
+            if (Decided(all, out string why)) { if (why != "đã ghi vào hồ sơ trước đó") held.Add(Item(p, why)); return false; }
             if (!p.EvidenceValid)
             {
                 held.Add(Item(p, p.Status is "Ambiguous" or "NotThisPair" or "NotACharacter" ? "AI: " + p.Status : "chưa qua kiểm chứng (" + string.Join(", ", p.Issues) + ")"));
-                continue;
+                return false;
             }
             var trial = resources.Clone();
             try
             {
-                string text;
-                if (p.Kind == AddressingTaskKind.Character)
-                {
-                    var (edit, dropped) = AutoCharacter(trial, p, shared);
-                    text = ApplyCharacter(trial, p, edit, automatic: true);
-                    held.AddRange(dropped.Select(d => Item(p, d)));
-                }
-                else
-                {
-                    var phase = p.Phases[0];
-                    text = ApplyPair(trial, p, new(phase.SelfVi, phase.AddressVi, p.Relationship, 0), automatic: true);
-                }
+                string text = write(trial);
                 trial.Validate();
-                resources = trial; applied.Add((Item(p, text), text));
+                resources = trial; applied.Add((Item(p, text), text)); return true;
             }
-            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or InvalidDataException) { held.Add(Item(p, ex.Message)); }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or InvalidDataException) { held.Add(Item(p, ex.Message)); return false; }
+        }
+        bool Character(AddressingProposal p, AddressingProposal[] all) => Apply(p, all, trial =>
+        {
+            var (edit, dropped) = AutoCharacter(trial, p, shared);
+            string text = ApplyCharacter(trial, p, edit, automatic: true);
+            held.AddRange(dropped.Select(d => Item(p, d)));
+            return text;
+        });
+        // 1. Characters, except a nickname merged into another character: it gets no profile of its own.
+        foreach (var (p, all) in characters.Where(x => !merges.ContainsKey(x.Latest.Subject))) Character(p, all);
+        // 2. Merges: the nickname (and its own name forms) become aliases of the main profile, with their glossary renderings.
+        foreach (var (secondary, merge) in merges)
+        {
+            var nickname = characters.FirstOrDefault(x => x.Latest.Subject == secondary);
+            if (!Apply(merge.Proposal, [merge.Proposal], trial => Merge(trial, merge.Proposal, nickname.Latest is { EvidenceValid: true } n ? n : null, shared)))
+            {
+                if (nickname.Latest is not null) Character(nickname.Latest, nickname.All); // Not merged: it keeps a profile of its own.
+                continue;
+            }
+            // Its character answer was used by the merge: record it, so it is not offered as a separate profile later.
+            if (nickname.Latest is { EvidenceValid: true } used) applied.Add((Item(used, $"đã gộp vào hồ sơ {merge.Primary}"), $"đã gộp vào hồ sơ {merge.Primary}"));
+        }
+        // 3. Pairs. Names resolve through aliases, so a pair said to the nickname lands on the main profile; the main name's
+        // own rules go first and win over the same direction reached through the nickname.
+        foreach (var (p, all) in pairs.OrderBy(x => merges.ContainsKey(x.Latest.Subject) || merges.ContainsKey(x.Latest.Listener!)))
+        {
+            var phase = p.Phases.FirstOrDefault();
+            Apply(p, all, trial => ApplyPair(trial, p, new(phase?.SelfVi ?? "", phase?.AddressVi ?? "", p.Relationship, 0), automatic: true));
         }
         // "Hoàn thành" means: translate with these rules. The lock is part of what undo restores.
         if (applied.Count > 0) resources.Characters.ConsistencyLockEnabled = true;
         return (applied, held, resources);
+    }
+
+    private sealed record IdentityMerge(AddressingProposal Proposal, string Primary, string Secondary, string SecondaryVi);
+
+    /// <summary>
+    /// Merges agreed by the AI ("same") that the CPU still accepts now: one level only (no chains), the two names never talk to
+    /// each other in the ledger's pair answers, and the nickname has no profile of its own yet (undo, then complete again).
+    /// "different" / "unclear" merge nothing and are not listed.
+    /// </summary>
+    private static Dictionary<string, IdentityMerge> Merges((AddressingProposal Latest, AddressingProposal[] All)[] identities,
+        (AddressingProposal Latest, AddressingProposal[] All)[] pairs, ProjectResources resources, DecidedCheck decided,
+        Func<AddressingProposal, string, AddressingAutoItem> item, List<AddressingAutoItem> held)
+    {
+        var candidates = new List<IdentityMerge>();
+        foreach (var (p, all) in identities)
+        {
+            if (decided(all, out string why)) { if (why != "đã ghi vào hồ sơ trước đó") held.Add(item(p, why)); continue; }
+            if (p.Status != "Same") continue;
+            if (!p.EvidenceValid) { held.Add(item(p, "chưa qua kiểm chứng (" + string.Join(", ", p.Issues) + ")")); continue; }
+            candidates.Add(new(p, p.Primary, p.NameForms[0].Zh, p.NameForms[0].Vi));
+        }
+        var result = new Dictionary<string, IdentityMerge>(StringComparer.Ordinal);
+        foreach (var m in candidates)
+        {
+            string? reason =
+                candidates.Any(o => o != m && (o.Secondary == m.Secondary || o.Secondary == m.Primary || o.Primary == m.Secondary)) ? "chuỗi gộp nhiều tên; cần xem tay"
+                : pairs.Any(x => x.Latest.EvidenceValid && (x.Latest.Subject, x.Latest.Listener) is var (s, l) && (s == m.Primary && l == m.Secondary || s == m.Secondary && l == m.Primary))
+                    ? "hai tên nói chuyện với nhau; không gộp"
+                : resources.Characters.Profiles.Any(p => p.ChineseName == m.Secondary || p.Aliases.Contains(m.Secondary, StringComparer.Ordinal))
+                    ? $"{m.Secondary} đã có trong hồ sơ; hoàn tác rồi Hoàn thành lại để gộp"
+                : null;
+            if (reason is null) result[m.Secondary] = m; else held.Add(item(m.Proposal, reason));
+        }
+        return result;
+    }
+
+    private delegate bool DecidedCheck(AddressingProposal[] all, out string why);
+
+    /// <summary>Adds the nickname and its own unambiguous name forms to the main profile; the glossary keeps its renderings.</summary>
+    private static string Merge(ProjectResources resources, AddressingProposal identity, AddressingProposal? nickname, IReadOnlySet<string> shared)
+    {
+        var profile = Find(resources.Characters.Profiles, identity.Primary) ?? throw new InvalidOperationException($"chưa có hồ sơ {identity.Primary} để gộp vào");
+        var forms = new List<AddressingNameForm> { identity.NameForms[0] };
+        if (nickname is not null)
+            forms.AddRange(nickname.NameForms.Where(f => f.Zh != identity.NameForms[0].Zh && !shared.Contains(f.Zh) &&
+                !BookIntelligence.ChineseMentionDiscovery.IsTitleForm(f.Zh) && !AddressingAiSurvey.HasHan(f.Vi)));
+        var added = new List<string>();
+        foreach (var form in forms.DistinctBy(f => f.Zh))
+        {
+            string vi = Vietnamese(form.Vi.Trim(), "Tên tiếng Việt của " + form.Zh);
+            var owner = resources.Characters.Profiles.FirstOrDefault(p => p != profile && (p.ChineseName == form.Zh || p.Aliases.Contains(form.Zh, StringComparer.Ordinal)));
+            if (owner is not null) throw new InvalidOperationException($"{form.Zh} đã thuộc hồ sơ {owner.ChineseName}; không gộp");
+            if (form.Zh == profile.ChineseName || profile.Aliases.Contains(form.Zh, StringComparer.Ordinal)) continue;
+            profile.Aliases.Add(form.Zh);
+            var term = resources.Terms.FirstOrDefault(t => t.Chinese == form.Zh);
+            if (term is null) resources.Terms.Add(new(form.Zh, vi));
+            added.Add($"{form.Zh}={term?.Vietnamese ?? vi}");
+        }
+        return $"Gộp {identity.NameForms[0].Zh} vào hồ sơ {identity.Primary}={profile.VietnameseName}; tên phụ: {string.Join(", ", added)}";
     }
 
     /// <summary>

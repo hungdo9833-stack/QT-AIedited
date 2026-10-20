@@ -379,9 +379,39 @@ Công cụ probe vẫn dùng được để thử offline hoặc chạy bằng d
 - `PromptVersion` lên `addressing-ledger-6`. Mã nhiệm vụ cặp đổi, nên lần khảo sát sau sẽ hỏi lại các cặp, theo dạng mới.
 - **Đo offline trên test cpu:** trước đây có 13 nhiệm vụ một chiều. Giờ còn **8 nhiệm vụ hai chiều, phủ 16 chiều**: chiều nào cũng có mẫu, kể cả những chiều chỉ có 2 lời. Ước tính token gần như không đổi (~24 nghìn).
 
+**Giai đoạn D: hỏi "cùng một người?" rồi gộp tên phụ (đã triển khai, mới test bằng mock).**
+
+- **CPU đề xuất cặp tên cần hỏi** (`AddressingAiSurvey.PlanIdentities`). Một cặp chỉ được đưa ra khi mọi dấu hiệu, đều không phụ thuộc thể loại, cùng khớp:
+  - ít nhất một tên là biệt danh, tức không bắt đầu bằng họ phổ biến (`小宝`, `小包子`, `冰雕男`, `阿秀`);
+  - hai tên cùng xuất hiện trong ít nhất 2 đoạn;
+  - hai bên **không bao giờ nói chuyện với nhau** (tính theo lời thoại, kể cả lượt nói theo cảnh đã kiểm chứng);
+  - văn bản **không bao giờ liệt kê** họ như hai người (`X和Y`, `X与Y`, `X、Y`…);
+  - giới tính theo lời kể không mâu thuẫn.
+
+  Tối đa 20 cặp; mẫu là những đoạn có cả hai tên, trải đều theo chương. CPU cố ý đề xuất rộng tay: những cặp như `小宝 ? 陆景礼` để AI trả "different" thì rất rẻ, và không bao giờ bị gộp.
+- **AI trả lời** (`identities`): `verdict` (same / different / unclear), `primary` (tên giữ làm hồ sơ chính), `secondary_vi` (tên Việt của tên kia), và `sample_ids`.
+  - Chỉ "same" là có tác dụng, và chỉ khi `primary` đúng là một trong hai tên, mẫu trích là mẫu của chính nhiệm vụ, và `secondary_vi` là tiếng Việt, không có chữ Hán.
+  - "different" / "unclear" là câu trả lời hợp lệ, không gộp gì và không bị liệt kê.
+- **Hoàn thành gộp** khi AI nói "same" **và** CPU kiểm tra lại lúc ghi vẫn đồng ý. Thứ tự áp dụng:
+  1. Ghi hồ sơ nhân vật; tên phụ được gộp thì không có hồ sơ riêng.
+  2. Thêm tên phụ đó, cùng các cách gọi rõ ràng của nó, vào bí danh và glossary của hồ sơ chính.
+  3. Ghi các cặp. Tên được tra qua bí danh, nên lời nói với `小包子` sẽ rơi vào hồ sơ `小宝`. Quy tắc của chính tên chính được ghi trước và thắng quy tắc cùng hướng đi qua tên phụ.
+- **Không gộp** (giữ lại, có ghi lý do) khi:
+  - hai tên có câu trả lời cặp hợp lệ (tức là họ nói chuyện với nhau);
+  - tên phụ đã có hồ sơ riêng (cách làm: hoàn tác rồi Hoàn thành lại);
+  - có chuỗi gộp nhiều tên;
+  - bạn đã bác bỏ;
+  - chưa có hồ sơ chính.
+
+  Khi đó tên phụ vẫn được **ghi thành hồ sơ riêng** như trước, không bị mất. Hoàn tác khôi phục đúng như trước và đưa câu hỏi về trạng thái chờ.
+- Câu hỏi "cùng một người?" chạy chung đợt với nhân vật và cặp trong nút Khảo sát. `PromptVersion` lên `addressing-ledger-7`; JSON gốc có thêm mảng `identities`.
+- **Thử offline trên 隐婚100分** (bản sao, sổ thật + một câu trả lời mock "same" cho `小包子 = 小宝`):
+  - CPU đưa ra 3 cặp cần hỏi.
+  - Hoàn thành ghi 22 mục; `小宝 = Tiểu Bảo` có thêm tên phụ `小包子 = Tiểu Bao Tử`; còn 8 hồ sơ thay vì 9.
+  - Hoàn tác khôi phục đúng như trước.
+
 **Còn lại (các giai đoạn sau):**
 
-- **D:** gộp danh tính (`小包子` và `小宝` hiện là hai hồ sơ).
 - Người chỉ có danh xưng (`陆老夫人`) chưa có hồ sơ, nên các cặp của bà chưa được ghi.
 
 ### Bước 3 · duyệt từng mục (tùy chọn)

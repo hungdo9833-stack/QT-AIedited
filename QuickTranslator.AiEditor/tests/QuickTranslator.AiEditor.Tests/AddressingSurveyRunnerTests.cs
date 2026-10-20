@@ -43,6 +43,8 @@ public sealed class AddressingSurveyRunnerTests : IDisposable
         public int Calls { get; private set; }
         public Func<int, Exception?> Fail { get; set; } = _ => null;
         public Func<AddressingTask, bool> AnswerBadly { get; set; } = _ => false;
+        /// <summary>Identity answers: "same" with this primary and rendering, or null for "different".</summary>
+        public Func<AddressingTask, (string Primary, string SecondaryVi)?> Identity { get; set; } = _ => null;
         public List<string> Sent { get; } = [];
         public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
@@ -51,7 +53,7 @@ public sealed class AddressingSurveyRunnerTests : IDisposable
             if (Fail(Calls) is { } error) throw error;
             var tasks = AddressingAiSurvey.TasksInPrompt(prompt, candidates());
             Sent.AddRange(tasks.Select(t => t.TaskId));
-            JsonArray pairs = [], characters = [], scenes = [];
+            JsonArray pairs = [], characters = [], scenes = [], identities = [];
             foreach (var (t, i) in tasks.Select((t, i) => (t, i)))
             {
                 string id = "T" + (i + 1);
@@ -75,13 +77,18 @@ public sealed class AddressingSurveyRunnerTests : IDisposable
                         }) };
                     pairs.Add(new JsonObject { ["task_id"] = id, ["forward"] = Direction(t.Subject, t.Samples), ["reverse"] = Direction(t.Listener!, t.ReverseSamples), ["reason"] = "Mẫu." });
                 }
+                else if (t.Kind == AddressingTaskKind.Identity)
+                    identities.Add(Identity(t) is { } same
+                        ? new JsonObject { ["task_id"] = id, ["verdict"] = "same", ["primary"] = same.Primary, ["secondary_vi"] = same.SecondaryVi, ["reason"] = "Biệt danh.",
+                            ["sample_ids"] = new JsonArray(t.Samples.Select(s => (JsonNode)s.SampleId).ToArray()) }
+                        : new JsonObject { ["task_id"] = id, ["verdict"] = "different", ["primary"] = "", ["secondary_vi"] = "", ["sample_ids"] = new JsonArray(), ["reason"] = "Hai người." });
                 else
                     characters.Add(new JsonObject { ["task_id"] = id, ["status"] = "Consistent", ["gender"] = t.SourceGender, ["reason"] = "Mẫu.",
                         ["name_forms"] = new JsonArray(new JsonObject { ["zh"] = t.Subject, ["vi"] = t.Subject == "宁夕" ? "Ninh Tịch" : "Lục Đình Kiêu" }),
                         ["phases"] = new JsonArray(new JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 0, ["narrative_vi"] = t.SourceGender == "female" ? "cô" : "anh",
                             ["secondary_vi"] = "", ["sample_ids"] = ids }) });
             }
-            string json = new JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = scenes }.ToJsonString();
+            string json = new JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = scenes, ["identities"] = identities }.ToJsonString();
             return Task.FromResult(new OllamaCompletion(json, true, "stop", new GenerationMetrics { InputTokens = 1000, OutputTokens = 300 }));
         }
     }

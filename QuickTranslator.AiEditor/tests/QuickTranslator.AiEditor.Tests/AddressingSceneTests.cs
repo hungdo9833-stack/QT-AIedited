@@ -75,7 +75,7 @@ public sealed class AddressingSceneTests : IDisposable
             edit?.Invoke(task, turns);
             scenes.Add(new JsonObject { ["task_id"] = task.TaskId, ["turns"] = turns, ["reason"] = "Theo lượt thoại." });
         }
-        return new JsonObject { ["pairs"] = new JsonArray(), ["characters"] = new JsonArray(), ["scenes"] = scenes };
+        return new JsonObject { ["pairs"] = new JsonArray(), ["characters"] = new JsonArray(), ["scenes"] = scenes, ["identities"] = new JsonArray() };
     }
 
     private static AddressingRequestPlan Request(params AddressingTask[] tasks) => AddressingAiSurvey.PlanRequests(tasks, "mock-scene").Single();

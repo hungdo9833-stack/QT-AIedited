@@ -316,7 +316,7 @@ sealed class MockSceneClient(IReadOnlyList<AddressingTask> tasks) : IJsonSchemaO
             }
             scenes.Add(new JsonObject { ["task_id"] = "T" + (index + 1), ["turns"] = turns, ["reason"] = "MOCK" }); // Short id, as the prompt asks.
         }
-        string json = new JsonObject { ["pairs"] = new JsonArray(), ["characters"] = new JsonArray(), ["scenes"] = scenes }.ToJsonString();
+        string json = new JsonObject { ["pairs"] = new JsonArray(), ["characters"] = new JsonArray(), ["scenes"] = scenes, ["identities"] = new JsonArray() }.ToJsonString();
         return Task.FromResult(new OllamaCompletion(json, true, "stop", new QuickTranslator.AiEditor.Core.Models.GenerationMetrics()));
     }
     private static string Other(AddressingTask task, string name) => task.Participants[0] == name ? task.Participants[1] : task.Participants[0];
