@@ -735,7 +735,7 @@
                                         <CheckBox x:Name="NormalizeAfterTranslationCheck" Content="Chuẩn hóa an toàn sau dịch" IsChecked="True"/>
                                     </WrapPanel>
                                     <WrapPanel>
-                                        <Button x:Name="AddressingLedgerButton" Content="Sổ xưng hô · khảo sát &amp; Hoàn thành" Click="OnOpenAddressingLedger" ToolTip="Khảo sát nhân vật, tên phụ, đại từ lời kể và xưng hô theo cặp bằng AI, rồi bấm Hoàn thành để ghi tất cả vào hồ sơ (có thể hoàn tác)"/>
+                                        <Button x:Name="AddressingLedgerButton" Content="Sổ xưng hô · khảo sát &amp; Hoàn thành" Click="OnOpenAddressingLedger" Style="{StaticResource PrimaryButton}" ToolTip="Khảo sát nhân vật, tên phụ, đại từ lời kể và xưng hô theo cặp bằng AI, rồi bấm Hoàn thành để ghi tất cả vào hồ sơ (có thể hoàn tác)"/>
                                         <Button x:Name="NewCharacterProjectButton" Content="Dự án mới" Click="OnNewCharacterProject"/>
                                         <Button x:Name="AddCharacterButton" Content="Thêm" Click="OnAddCharacter"/>
                                         <Button x:Name="EditCharacterButton" Content="Sửa" Click="OnEditCharacter"/>
