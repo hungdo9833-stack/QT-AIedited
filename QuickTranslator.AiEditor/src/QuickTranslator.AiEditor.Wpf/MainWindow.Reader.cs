@@ -312,10 +312,10 @@ public partial class MainWindow
     {
         if (ReaderText is null) return;
         var palette = ReaderThemePalette.For(_readerPreferences.Theme);
-        Color background = (Color)ColorConverter.ConvertFromString(palette.PageBackground);
-        Color foreground = (Color)ColorConverter.ConvertFromString(palette.TextForeground);
-        ReaderBackground.Background = new SolidColorBrush(background);
-        ReaderText.Foreground = ReaderTitle.Foreground = new SolidColorBrush(foreground);
+        ApplyReaderPalette(palette);
+        ReaderBackground.SetResourceReference(Border.BackgroundProperty, "ReaderPageBrush");
+        ReaderText.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
+        ReaderTitle.SetResourceReference(TextElement.ForegroundProperty, "ReaderTextBrush");
         try { ReaderText.FontFamily = new FontFamily(_readerPreferences.FontFamily); }
         catch (ArgumentException ex)
         {
@@ -336,6 +336,27 @@ public partial class MainWindow
         ApplyReaderChrome();
     }
 
+    private static void ApplyReaderPalette(ReaderThemePalette palette)
+    {
+        ResourceDictionary resources = Application.Current.Resources;
+        Color page = ParseReaderColor(palette.PageBackground);
+        Color text = ParseReaderColor(palette.TextForeground);
+        resources["ReaderPageBrush"] = new SolidColorBrush(page);
+        resources["ReaderTextBrush"] = new SolidColorBrush(text);
+        // ReaderThemePalette has no muted role. Blend 80% text over the page so the
+        // secondary text remains distinct while retaining WCAG AA contrast in every palette.
+        resources["ReaderMutedBrush"] = new SolidColorBrush(Color.FromRgb(
+            BlendReaderChannel(text.R, page.R), BlendReaderChannel(text.G, page.G), BlendReaderChannel(text.B, page.B)));
+        resources["ReaderAccentBrush"] = new SolidColorBrush(ParseReaderColor(palette.Warning));
+        resources["ReaderPanelBrush"] = new SolidColorBrush(ParseReaderColor(palette.ControlBackground));
+        resources["ReaderBorderBrush"] = new SolidColorBrush(ParseReaderColor(palette.Border));
+    }
+
+    private static Color ParseReaderColor(string value) => (Color)ColorConverter.ConvertFromString(value);
+
+    private static byte BlendReaderChannel(byte text, byte page) =>
+        (byte)Math.Round((text * 0.8) + (page * 0.2), MidpointRounding.AwayFromZero);
+
     private void ApplyReaderChrome()
     {
         if (ChapterWorkspace is null) return;
@@ -347,49 +368,49 @@ public partial class MainWindow
             ChapterModeHint.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
             return;
         }
-        bool dark = active && _readerPreferences.Theme == ReaderTheme.Dark;
-        var palette = ReaderThemePalette.For(dark ? ReaderTheme.Dark : ReaderTheme.Light);
-        var background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ChromeBackground));
-        var foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.TextForeground));
-        ChapterWorkspace.Background = background;
-        ChapterModeBar.Background = ReaderToolbar.Background = background;
-        ChapterModeHint.Foreground = foreground;
-        ReaderSearchPanel.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(dark ? palette.ControlBackground : "#F7F9FC"));
-        ReaderAppearancePanel.Background = background;
-        ReaderAppearancePanel.SetValue(TextElement.ForegroundProperty, foreground);
-        ReaderSearchInput.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-        ReaderSearchInput.Foreground = foreground;
-        ReaderWarning.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Warning));
-        ReaderChineseIssuesButton.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-        ReaderChineseIssuesButton.Foreground = foreground;
-        ReaderChineseIssuesButton.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Border));
-        ReaderProgressText.Foreground = foreground;
+        ChapterWorkspace.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
+        ChapterModeBar.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
+        ReaderToolbar.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
+        ChapterModeHint.SetResourceReference(TextElement.ForegroundProperty, "ReaderTextBrush");
+        ReaderSearchPanel.SetResourceReference(Border.BackgroundProperty, "ReaderPanelBrush");
+        ReaderAppearancePanel.SetResourceReference(Border.BackgroundProperty, "ReaderPanelBrush");
+        ReaderAppearancePanel.SetResourceReference(TextElement.ForegroundProperty, "ReaderTextBrush");
+        ReaderSearchInput.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+        ReaderSearchInput.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
+        ReaderWarning.SetResourceReference(TextElement.ForegroundProperty, "ReaderAccentBrush");
+        ReaderChineseIssuesButton.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+        ReaderChineseIssuesButton.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
+        ReaderChineseIssuesButton.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
+        ReaderProgressText.SetResourceReference(TextElement.ForegroundProperty, "ReaderMutedBrush");
         foreach (var button in FindVisualChildren<Button>(ReaderToolbar))
         {
-            button.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-            button.Foreground = foreground;
-            button.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Border));
+            button.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+            button.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
+            button.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
         }
         foreach (var button in FindVisualChildren<Button>(ReaderSearchPanel))
         {
-            button.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-            button.Foreground = foreground;
-            button.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Border));
+            button.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+            button.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
+            button.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
         }
         foreach (var combo in FindVisualChildren<ComboBox>(ReaderAppearancePanel))
         {
-            combo.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-            combo.Foreground = foreground;
+            combo.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+            combo.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
         }
-        ReaderModeButton.Foreground = EditorModeButton.Foreground = foreground;
-        ReaderModeButton.Background = EditorModeButton.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-        ReaderModeButton.BorderBrush = EditorModeButton.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Border));
-        ReaderCatalogPanel.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-        ReaderCatalogPanel.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.Border));
-        ReaderChapterSearchInput.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-        ReaderChapterSearchInput.Foreground = foreground;
-        ReaderChapterList.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(palette.ControlBackground));
-        ReaderChapterList.Foreground = foreground;
+        ReaderModeButton.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
+        EditorModeButton.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
+        ReaderModeButton.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+        EditorModeButton.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+        ReaderModeButton.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
+        EditorModeButton.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
+        ReaderCatalogPanel.SetResourceReference(Border.BackgroundProperty, "ReaderPanelBrush");
+        ReaderCatalogPanel.SetResourceReference(Border.BorderBrushProperty, "ReaderBorderBrush");
+        ReaderChapterSearchInput.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+        ReaderChapterSearchInput.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
+        ReaderChapterList.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
+        ReaderChapterList.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject

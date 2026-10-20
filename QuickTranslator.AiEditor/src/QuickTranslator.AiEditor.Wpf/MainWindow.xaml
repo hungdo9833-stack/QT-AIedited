@@ -222,28 +222,52 @@
                                 <RowDefinition Height="*"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <Border x:Name="ReaderCatalogPanel" Grid.RowSpan="4" Grid.Column="0" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="9" Margin="0,0,8,0">
+                            <Border x:Name="ReaderCatalogPanel" Grid.RowSpan="4" Grid.Column="0" Background="{DynamicResource ReaderPanelBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="1" CornerRadius="8" Padding="9" Margin="0,0,8,0">
                                 <DockPanel>
                                     <StackPanel DockPanel.Dock="Top">
                                         <DockPanel LastChildFill="False">
-                                            <TextBlock x:Name="ReaderChapterCountText" DockPanel.Dock="Right" Foreground="{DynamicResource MutedBrush}"/>
-                                            <TextBlock DockPanel.Dock="Left" Text="MỤC LỤC" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
+                                            <TextBlock x:Name="ReaderChapterCountText" DockPanel.Dock="Right" Foreground="{DynamicResource ReaderMutedBrush}"/>
+                                            <TextBlock DockPanel.Dock="Left" Text="MỤC LỤC" FontWeight="SemiBold" Foreground="{DynamicResource ReaderMutedBrush}"/>
                                         </DockPanel>
                                         <TextBox x:Name="ReaderChapterSearchInput" ToolTip="Tìm theo số hoặc tên chương" TextChanged="OnReaderChapterSearchChanged" Margin="0,8,0,6"/>
                                     </StackPanel>
                                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <Button Content="← Trước" Click="OnReaderPreviousChapter" ToolTip="Chương trước (Alt+PageUp)"/>
-                                        <Button Content="Sau →" Click="OnReaderNextChapter" ToolTip="Chương sau (Alt+PageDown)"/>
+                                        <Button Content="← Trước" Click="OnReaderPreviousChapter" ToolTip="Chương trước (Alt+PageUp)" Background="{DynamicResource ReaderPanelBrush}" Foreground="{DynamicResource ReaderTextBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}"/>
+                                        <Button Content="Sau →" Click="OnReaderNextChapter" ToolTip="Chương sau (Alt+PageDown)" Background="{DynamicResource ReaderPanelBrush}" Foreground="{DynamicResource ReaderTextBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}"/>
                                     </StackPanel>
-                                    <ListBox x:Name="ReaderChapterList" SelectionChanged="OnReaderChapterSelected" DisplayMemberPath="Label" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True"/>
+                                    <ListBox x:Name="ReaderChapterList" SelectionChanged="OnReaderChapterSelected" DisplayMemberPath="Label" Background="{DynamicResource ReaderPanelBrush}" Foreground="{DynamicResource ReaderTextBrush}" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="Background" Value="{x:Null}"/>
+                                                <Setter Property="Foreground" Value="{DynamicResource ReaderTextBrush}"/>
+                                                <Setter Property="Padding" Value="6,4"/>
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                <Setter Property="FocusVisualStyle" Value="{StaticResource ControlFocusVisual}"/>
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="ListBoxItem">
+                                                            <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                                                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ReaderBorderBrush}"/></Trigger>
+                                                                <Trigger Property="IsSelected" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ReaderBorderBrush}"/></Trigger>
+                                                                <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                    </ListBox>
                                 </DockPanel>
                             </Border>
-                            <GridSplitter x:Name="ReaderCatalogSplitter" Grid.RowSpan="4" Grid.Column="1" Width="5" Background="{DynamicResource BorderBrush}" HorizontalAlignment="Stretch"/>
-                            <DockPanel x:Name="ReaderToolbar" Grid.Column="2">
+                            <GridSplitter x:Name="ReaderCatalogSplitter" Grid.RowSpan="4" Grid.Column="1" Width="5" Background="{DynamicResource ReaderBorderBrush}" HorizontalAlignment="Stretch"/>
+                            <DockPanel x:Name="ReaderToolbar" Grid.Column="2" Background="{DynamicResource ReaderPageBrush}">
                                 <WrapPanel>
                                     <Button x:Name="ReaderCatalogToggleButton" Content="Ẩn mục lục" Click="OnToggleReaderCatalog"/>
-                                    <Button Content="←" Click="OnReaderPreviousChapter" ToolTip="Chương trước (Alt+PageUp)"/>
-                                    <Button Content="→" Click="OnReaderNextChapter" ToolTip="Chương sau (Alt+PageDown)"/>
+                                    <Button Content="←" Click="OnReaderPreviousChapter" ToolTip="Chương trước (Alt+PageUp)" AutomationProperties.Name="Chương trước"/>
+                                    <Button Content="→" Click="OnReaderNextChapter" ToolTip="Chương sau (Alt+PageDown)" AutomationProperties.Name="Chương sau"/>
                                     <Button x:Name="ReaderAppearanceButton" Content="Aa  Kiểu đọc" Click="OnToggleReaderAppearance"/>
                                     <Button Content="Tìm trong chương" Click="OnOpenReaderSearch" ToolTip="Ctrl+F"/>
                                     <Button x:Name="ReaderBookmarkButton" Content="Đánh dấu" Click="OnToggleBookmark"/>
@@ -254,7 +278,7 @@
                                     <Button x:Name="ReaderFullScreenButton" Content="Toàn màn hình" Click="OnToggleFullScreen" ToolTip="F11"/>
                                 </WrapPanel>
                             </DockPanel>
-                            <Border x:Name="ReaderSearchPanel" Grid.Row="1" Grid.Column="2" Visibility="Collapsed" Background="{DynamicResource SurfaceBrush}" CornerRadius="6" Padding="6" Margin="4">
+                            <Border x:Name="ReaderSearchPanel" Grid.Row="1" Grid.Column="2" Visibility="Collapsed" Background="{DynamicResource ReaderPanelBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}" BorderThickness="1" CornerRadius="6" Padding="6" Margin="4">
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Content="Đóng" Click="OnCloseReaderSearch"/>
                                     <Button DockPanel.Dock="Right" Content="Tiếp" Click="OnFindNext"/>
@@ -262,45 +286,57 @@
                                 </DockPanel>
                             </Border>
                             <Grid Grid.Row="2" Grid.Column="2">
-                                <Border x:Name="ReaderBackground" Background="#F5EBD1" CornerRadius="8">
+                                <Border x:Name="ReaderBackground" Background="{DynamicResource ReaderPageBrush}" CornerRadius="8">
                                     <ScrollViewer x:Name="ReaderScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" ScrollChanged="OnReaderScrollChanged">
-                                        <Border x:Name="ReaderPage" MaxWidth="760" HorizontalAlignment="Center" Padding="44,38" MinHeight="600">
+                                        <Border x:Name="ReaderPage" MaxWidth="760" HorizontalAlignment="Center" Padding="44,38" MinHeight="600" Background="{DynamicResource ReaderPageBrush}">
                                             <StackPanel>
-                                                <TextBlock x:Name="ReaderTitle" FontSize="30" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,28"/>
-                                                <RichTextBox x:Name="ReaderText" IsReadOnly="True" IsDocumentEnabled="True" BorderThickness="0" Background="Transparent" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled" Padding="0" MouseDoubleClick="OnReaderTextDoubleClick" SelectionChanged="OnReaderSelectionChanged"/>
+                                                <TextBlock x:Name="ReaderTitle" FontSize="30" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" Margin="0,0,0,28" Foreground="{DynamicResource ReaderTextBrush}"/>
+                                                <RichTextBox x:Name="ReaderText" IsReadOnly="True" IsDocumentEnabled="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource ReaderTextBrush}" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled" Padding="0" MouseDoubleClick="OnReaderTextDoubleClick" SelectionChanged="OnReaderSelectionChanged"/>
                                             </StackPanel>
                                         </Border>
                                     </ScrollViewer>
                                 </Border>
                                 <Popup x:Name="ReaderAppearancePopup" PlacementTarget="{Binding ElementName=ReaderAppearanceButton}" Placement="Bottom" StaysOpen="False">
-                                    <Border x:Name="ReaderAppearancePanel" Style="{StaticResource Card}" Width="390" Background="White">
+                                    <Border x:Name="ReaderAppearancePanel" Style="{StaticResource Card}" Width="390" Background="{DynamicResource ReaderPanelBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}">
                                         <ScrollViewer MaxHeight="700" VerticalScrollBarVisibility="Auto">
                                             <StackPanel>
-                                                <TextBlock Text="Tùy chỉnh đọc" Style="{StaticResource SectionTitle}"/>
-                                                <TextBlock Text="Mật độ" Style="{StaticResource FieldLabel}"/>
+                                                <TextBlock Text="Tùy chỉnh đọc" Style="{StaticResource SectionTitle}" Foreground="{DynamicResource ReaderTextBrush}"/>
+                                                <TextBlock Text="Mật độ" Style="{StaticResource FieldLabel}" Foreground="{DynamicResource ReaderMutedBrush}"/>
                                                 <ComboBox x:Name="ReaderDensityInput" SelectionChanged="OnReaderDensityChanged">
                                                     <ComboBoxItem Tag="Compact">Gọn</ComboBoxItem>
                                                     <ComboBoxItem Tag="Standard">Tiêu chuẩn</ComboBoxItem>
                                                     <ComboBoxItem Tag="Spacious">Thoáng</ComboBoxItem>
                                                 </ComboBox>
-                                                <TextBlock Text="Màu nền" Style="{StaticResource FieldLabel}"/>
+                                                <TextBlock Text="Màu nền" Style="{StaticResource FieldLabel}" Foreground="{DynamicResource ReaderMutedBrush}"/>
                                                 <ComboBox x:Name="ReaderThemeInput" SelectionChanged="OnReaderAppearanceChanged">
                                                     <ComboBoxItem Tag="Warm">Ấm (mặc định)</ComboBoxItem>
                                                     <ComboBoxItem Tag="Light">Sáng</ComboBoxItem>
                                                     <ComboBoxItem Tag="Dark">Tối</ComboBoxItem>
                                                     <ComboBoxItem Tag="Vintage">Cổ điển</ComboBoxItem>
                                                 </ComboBox>
-                                                <TextBlock Text="Phông chữ" Style="{StaticResource FieldLabel}"/>
+                                                <TextBlock Text="Phông chữ" Style="{StaticResource FieldLabel}" Foreground="{DynamicResource ReaderMutedBrush}"/>
                                                 <ComboBox x:Name="ReaderFontInput" IsEditable="True" SelectionChanged="OnReaderAppearanceChanged" LostKeyboardFocus="OnReaderAppearanceChanged"/>
-                                                <TextBlock Text="Cỡ chữ" Style="{StaticResource FieldLabel}"/>
-                                                <Slider x:Name="ReaderFontSizeInput" Minimum="14" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnReaderAppearanceChanged"/>
-                                                <TextBlock Text="Giãn dòng" Style="{StaticResource FieldLabel}"/>
-                                                <Slider x:Name="ReaderLineHeightInput" Minimum="1.3" Maximum="2.2" TickFrequency="0.05" ValueChanged="OnReaderAppearanceChanged"/>
-                                                <TextBlock Text="Khoảng cách đoạn" Style="{StaticResource FieldLabel}"/>
-                                                <Slider x:Name="ReaderParagraphSpacingInput" Minimum="0" Maximum="36" TickFrequency="1" ValueChanged="OnReaderAppearanceChanged"/>
-                                                <TextBlock Text="Lề trang" Style="{StaticResource FieldLabel}"/>
-                                                <Slider x:Name="ReaderPageMarginInput" Minimum="8" Maximum="100" TickFrequency="2" ValueChanged="OnReaderAppearanceChanged"/>
-                                                <TextBlock Text="Chiều rộng trang" Style="{StaticResource FieldLabel}"/>
+                                                <TextBlock Text="Cỡ chữ" Style="{StaticResource FieldLabel}" Foreground="{DynamicResource ReaderMutedBrush}"/>
+                                                <DockPanel LastChildFill="True">
+                                                    <TextBlock DockPanel.Dock="Right" MinWidth="52" Margin="8,0,0,0" VerticalAlignment="Center" TextAlignment="Right" Language="vi-VN" Foreground="{DynamicResource ReaderTextBrush}" Text="{Binding Value, ElementName=ReaderFontSizeInput, StringFormat={}{0:0} px}"/>
+                                                    <Slider x:Name="ReaderFontSizeInput" Minimum="14" Maximum="30" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnReaderAppearanceChanged"/>
+                                                </DockPanel>
+                                                <TextBlock Text="Giãn dòng" Style="{StaticResource FieldLabel}" Foreground="{DynamicResource ReaderMutedBrush}"/>
+                                                <DockPanel LastChildFill="True">
+                                                    <TextBlock DockPanel.Dock="Right" MinWidth="52" Margin="8,0,0,0" VerticalAlignment="Center" TextAlignment="Right" Language="vi-VN" Foreground="{DynamicResource ReaderTextBrush}" Text="{Binding Value, ElementName=ReaderLineHeightInput, StringFormat={}{0:0.0}}"/>
+                                                    <Slider x:Name="ReaderLineHeightInput" Minimum="1.3" Maximum="2.2" TickFrequency="0.05" ValueChanged="OnReaderAppearanceChanged"/>
+                                                </DockPanel>
+                                                <TextBlock Text="Khoảng cách đoạn" Style="{StaticResource FieldLabel}" Foreground="{DynamicResource ReaderMutedBrush}"/>
+                                                <DockPanel LastChildFill="True">
+                                                    <TextBlock DockPanel.Dock="Right" MinWidth="52" Margin="8,0,0,0" VerticalAlignment="Center" TextAlignment="Right" Language="vi-VN" Foreground="{DynamicResource ReaderTextBrush}" Text="{Binding Value, ElementName=ReaderParagraphSpacingInput, StringFormat={}{0:0} px}"/>
+                                                    <Slider x:Name="ReaderParagraphSpacingInput" Minimum="0" Maximum="36" TickFrequency="1" ValueChanged="OnReaderAppearanceChanged"/>
+                                                </DockPanel>
+                                                <TextBlock Text="Lề trang" Style="{StaticResource FieldLabel}" Foreground="{DynamicResource ReaderMutedBrush}"/>
+                                                <DockPanel LastChildFill="True">
+                                                    <TextBlock DockPanel.Dock="Right" MinWidth="52" Margin="8,0,0,0" VerticalAlignment="Center" TextAlignment="Right" Language="vi-VN" Foreground="{DynamicResource ReaderTextBrush}" Text="{Binding Value, ElementName=ReaderPageMarginInput, StringFormat={}{0:0} px}"/>
+                                                    <Slider x:Name="ReaderPageMarginInput" Minimum="8" Maximum="100" TickFrequency="2" ValueChanged="OnReaderAppearanceChanged"/>
+                                                </DockPanel>
+                                                <TextBlock Text="Chiều rộng trang" Style="{StaticResource FieldLabel}" Foreground="{DynamicResource ReaderMutedBrush}"/>
                                                 <ComboBox x:Name="ReaderWidthInput" SelectionChanged="OnReaderAppearanceChanged">
                                                     <ComboBoxItem Tag="Narrow">Hẹp</ComboBoxItem>
                                                     <ComboBoxItem Tag="Comfortable">Vừa</ComboBoxItem>
@@ -315,10 +351,10 @@
                                 </Popup>
                             </Grid>
                             <DockPanel Grid.Row="3" Grid.Column="2" Margin="4,8">
-                                <TextBlock x:Name="ReaderWarning" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="ReaderWarning" Foreground="{DynamicResource ReaderAccentBrush}" TextWrapping="Wrap"/>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                     <Button x:Name="ReaderChineseIssuesButton" Content="Xử lý chữ Hán" Click="OnScanChineseText" Visibility="Collapsed" Padding="8,3"/>
-                                    <TextBlock x:Name="ReaderProgressText" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+                                    <TextBlock x:Name="ReaderProgressText" VerticalAlignment="Center" Foreground="{DynamicResource ReaderMutedBrush}"/>
                                 </StackPanel>
                             </DockPanel>
                         </Grid>
