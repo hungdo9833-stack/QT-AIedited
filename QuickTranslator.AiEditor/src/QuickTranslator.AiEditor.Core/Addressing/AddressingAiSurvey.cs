@@ -87,7 +87,7 @@ public sealed record AddressingProposal(Guid Id, string RequestId, string TaskId
 /// </summary>
 public static class AddressingAiSurvey
 {
-    public const string PromptVersion = "addressing-ledger-4";
+    public const string PromptVersion = "addressing-ledger-5";
     private static readonly string[] PairStatus = ["Consistent", "Changes", "Ambiguous", "NotThisPair"];
     private static readonly string[] CharacterStatus = ["Consistent", "Changes", "Ambiguous", "NotACharacter"];
     private static readonly string[] Genders = ["male", "female", "unknown"];
@@ -311,6 +311,8 @@ public static class AddressingAiSurvey
     private static string TaskId(string kind, string key, IReadOnlyList<AddressingTaskSample> samples) =>
         kind + ":" + EntityMemoryIdentity.Fingerprint(new { kind, key, samples = samples.Select(s => new { s.ChapterNumber, s.StartUtf16 }).ToArray() })[..16];
     private static string Clip(string text, int max) => text.Length <= max ? text : text[..max];
+    // CJK unified ideographs (with extension A) and compatibility ideographs; surrogate halves cover the rarer extensions.
+    internal static bool HasHan(string text) => text.Any(c => c is >= '㐀' and <= '鿿' or >= '豈' and <= '﫿' || char.IsSurrogate(c));
     // The speaker and verb sit at the end of the lead clause ("…柳轻锋连忙说道："), right before the quote.
     private static string Tail(string text, int max) => text.Length <= max ? text : "…" + text[^max..];
     private static int PromptTokenEstimate(string prompt) => Translation.PromptTokenBudget.Estimate(prompt) + Translation.PromptTokenBudget.Estimate(Schema.GetRawText());
@@ -326,7 +328,7 @@ public static class AddressingAiSurvey
         text.AppendLine("CHARACTER task: gender, and the Vietnamese third-person pronoun narration should use for this character (narrative_vi, e.g. hắn/nàng/y/cô/anh/lão/bà; secondary_vi optional or \"\"). CPU counts of 他/她 that follow the name are given as evidence. name_forms: choose ONLY from the listed NAME CANDIDATES the forms that refer to this same character, plus the full name, each with its consistent Vietnamese rendering (Hán Việt for names, e.g. 王秀兰 → Vương Tú Lan, 小兰 → Tiểu Lan). Never add a form that is not listed.");
         text.AppendLine("SCENE task: a continuous dialogue passage in reading order; every quote is labelled ⟦Qn⟧ and a line break is a new paragraph. For every quote_id give speaker and listener, each written EXACTLY as one PARTICIPANTS name (a listed variant spelling means that participant), or \"\" when the text does not make it clear or the person is not listed (an unnamed or minor character such as a waiter). A participant marked (title) is a person known by a title (e.g. 陆老夫人); answer the title itself, unless the text makes clear it is a listed name — then answer that name. Never give one person's lines to another listed person because the real speaker is missing. Use speech verbs, turn-taking, vocatives, 他/她 and content; never guess a name that is not listed, and never answer a quote with someone who is addressed by name inside it as its speaker. self_zh/address_zh: the Chinese self-reference and address words used inside that same quote, copied exactly ([] if none).");
         text.AppendLine("Phases: if the pronouns change during the story, return several phases with chapter ranges; to_chapter 0 means it still holds. Every phase cites at least one sample_id of the SAME task; never invent chapters or ids.");
-        text.AppendLine("Status: Consistent (one phase), Changes (several), Ambiguous (samples are not enough), NotThisPair (samples do not show SPEAKER talking to LISTENER) or NotACharacter. Reason: one short Vietnamese sentence. Return ONLY JSON matching the schema; use [] for the task kind that has no tasks.");
+        text.AppendLine("Status: Consistent (one phase), Changes (several), Ambiguous (samples are not enough), NotThisPair (samples do not show SPEAKER talking to LISTENER) or NotACharacter. Every *_vi field, relationship and name_forms vi must be written in Vietnamese only (Latin letters): never a Chinese character (write \"Lục tiên sinh\" or \"anh\", not \"Lục先生\"). Reason: one short Vietnamese sentence. Return ONLY JSON matching the schema; use [] for the task kind that has no tasks.");
         for (int i = 0; i < tasks.Count; i++) text.AppendLine().Append("TASK ").Append(Alias(i)).Append(' ').Append(TaskBody(tasks[i]));
         return text.ToString();
     }
@@ -573,7 +575,10 @@ public static class AddressingAiSurvey
                 if (phase.SelfZh.Concat(phase.AddressZh).Any(term => term.Length == 0 || !quoted.Contains(term, StringComparison.Ordinal))) issues.Add("UnquotedChineseTerm");
             }
         }
-        return Proposal(task, requestId, status, Text(f["relationship"]), "unknown", phases, [], Text(f["reason"]), issues);
+        string relationship = Text(f["relationship"]);
+        // Vietnamese fields are what the translator writes: a Han character there ("Lục先生") is never a valid rendering.
+        if (status is "Consistent" or "Changes" && (HasHan(relationship) || phases.Any(p => HasHan(p.SelfVi) || HasHan(p.AddressVi)))) issues.Add("ChineseInVietnameseField");
+        return Proposal(task, requestId, status, relationship, "unknown", phases, [], Text(f["reason"]), issues);
     }
 
     private static AddressingProposal VerifyCharacter(Node f, AddressingTask task, string requestId)
@@ -595,6 +600,7 @@ public static class AddressingAiSurvey
         var allowed = task.NameCandidates.Select(v => v.Form).Append(task.Subject).ToHashSet(StringComparer.Ordinal);
         if (forms.Any(x => !allowed.Contains(x.Zh)) || forms.Select(x => x.Zh).Distinct(StringComparer.Ordinal).Count() != forms.Length) issues.Add("UnlistedOrDuplicateNameForm");
         if (forms.Any(x => x.Vi.Trim().Length is 0 or > 40)) issues.Add("MissingOrOverlongVietnameseName");
+        if (forms.Any(x => HasHan(x.Vi)) || status is "Consistent" or "Changes" && phases.Any(p => HasHan(p.NarrativeVi) || HasHan(p.SecondaryVi))) issues.Add("ChineseInVietnameseField");
         return Proposal(task, requestId, status, "", gender, phases, forms, Text(f["reason"]), issues);
     }
 

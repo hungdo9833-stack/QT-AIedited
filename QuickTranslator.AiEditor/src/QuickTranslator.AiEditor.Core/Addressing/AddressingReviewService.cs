@@ -32,6 +32,8 @@ public sealed class AddressingReviewService(ProjectSession session)
         string narrative = Term(edit.NarrativePronoun, "Đại từ kể chính"), secondary = edit.SecondaryPronoun.Trim(), vietnamese = edit.VietnameseName.Trim();
         if (vietnamese.Length is 0 or > 200) throw new InvalidOperationException("Cần tên tiếng Việt của nhân vật (tối đa 200 ký tự).");
         if (secondary.Length > 80) throw new InvalidOperationException("Đại từ kể phụ quá dài.");
+        Vietnamese(vietnamese, "Tên tiếng Việt"); Vietnamese(secondary, "Đại từ kể phụ");
+        foreach (var form in edit.NameForms) Vietnamese(form.Vi.Trim(), "Tên tiếng Việt của cách gọi " + form.Zh);
         var phase = Phase(proposal, edit.PhaseIndex);
         var allowed = proposal.NameForms.Select(f => f.Zh).ToHashSet(StringComparer.Ordinal);
         var forms = edit.NameForms.Select(f => f with { Zh = f.Zh.Trim(), Vi = f.Vi.Trim() }).ToArray();
@@ -67,7 +69,7 @@ public sealed class AddressingReviewService(ProjectSession session)
         // Several phases become chapter-ranged narrative pronouns; the reviewed phase uses the edited values and is also the default.
         profile.NarrativePhases = proposal.Phases.Count < 2 ? [] : proposal.Phases.Select((p, i) => i == edit.PhaseIndex
             ? new NarrativePronounPhase(p.FromChapter, p.ToChapter == 0 ? null : p.ToChapter, narrative, secondary)
-            : new NarrativePronounPhase(p.FromChapter, p.ToChapter == 0 ? null : p.ToChapter, Term(p.NarrativeVi, "Đại từ kể của giai đoạn"), p.SecondaryVi.Trim())).ToList();
+            : new NarrativePronounPhase(p.FromChapter, p.ToChapter == 0 ? null : p.ToChapter, Term(p.NarrativeVi, "Đại từ kể của giai đoạn"), Vietnamese(p.SecondaryVi.Trim(), "Đại từ kể phụ của giai đoạn"))).ToList();
         if (created) profiles.Add(profile);
 
         string applied = $"{(created ? "Tạo" : "Cập nhật")} hồ sơ {proposal.Subject}={vietnamese}; {edit.Gender}; kể: {narrative}" + (secondary.Length > 0 ? "/" + secondary : "") +
@@ -79,7 +81,7 @@ public sealed class AddressingReviewService(ProjectSession session)
     {
         var proposal = await PendingVerified(proposalId, AddressingTaskKind.Pair, ct).ConfigureAwait(false);
         string self = Term(edit.SelfReference, "Tự xưng"), address = Term(edit.AddresseeReference, "Gọi người");
-        string relationship = edit.Relationship.Trim().Length > 0 ? edit.Relationship.Trim() : "Xưng hô";
+        string relationship = Vietnamese(edit.Relationship.Trim().Length > 0 ? edit.Relationship.Trim() : "Xưng hô", "Quan hệ");
         if (relationship.Length > 200) throw new InvalidOperationException("Nhãn quan hệ quá dài.");
         _ = Phase(proposal, edit.PhaseIndex); // Validates the reviewed phase index.
         var resources = await Fresh(expectedResourceRevision, ct).ConfigureAwait(false);
@@ -163,7 +165,14 @@ public sealed class AddressingReviewService(ProjectSession session)
     private static string Term(string value, string label)
     {
         string trimmed = value.Trim();
-        return trimmed.Length is > 0 and <= 80 ? trimmed : throw new InvalidOperationException(label + " phải có từ 1 đến 80 ký tự.");
+        if (trimmed.Length is 0 or > 80) throw new InvalidOperationException(label + " phải có từ 1 đến 80 ký tự.");
+        return Vietnamese(trimmed, label);
+    }
+    // Whatever is written to the Character Project goes into translations: a Han character there is never valid (also guards proposals verified before this rule).
+    private static string Vietnamese(string value, string label)
+    {
+        if (AddressingAiSurvey.HasHan(value)) throw new InvalidOperationException(label + " phải viết bằng tiếng Việt, không chứa chữ Hán: \"" + value + "\".");
+        return value;
     }
     private static string Clip(string note) => note.Length <= 500 ? note : note[..500];
 }

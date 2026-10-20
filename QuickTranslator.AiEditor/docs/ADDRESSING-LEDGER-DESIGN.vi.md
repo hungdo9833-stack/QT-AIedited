@@ -117,6 +117,7 @@ Dùng cho truyện viết đối đáp liên tục mà CPU không gán được 
   - `UnlistedParticipant`: tên không có trong danh sách người tham gia.
   - `SpeakerIsListener`: người nói trùng người nghe.
   - `UnquotedChineseTerm`: từ tiếng Trung không có nguyên văn trong câu. Nếu đó là lỗi duy nhất, chỉ bỏ từ đó (`DroppedUnquotedTerm`), giữ người nói.
+  - (Nhiệm vụ theo cặp và theo nhân vật) `ChineseInVietnameseField`: ô tiếng Việt có chữ Hán.
   - `SpeakerNamedInOwnQuote`: người nói bị gọi tên ngay trong câu của mình.
   - `ListenerConflictsWithVocative`: người nghe không phải người được gọi tên trong câu.
   - `ConflictsWithCpuSpeaker`: trái với người nói `Explicit` mà CPU đã tìm ra.
@@ -218,6 +219,22 @@ Lần chạy kế tiếp trên 隐婚100分 (kiểm tra offline với sổ hiệ
 3. **Tên trong 800 ký tự trước cảnh** (`DialogueScene.NearbyNames`, tên gần nhất xếp trước) được thêm vào danh sách người tham gia. Thứ tự ưu tiên là: tên trong cảnh → người của cảnh liền trước → tên ngay trước cảnh. Tối đa 8 người.
 
 Hệ quả: danh sách người tham gia của nhiều cảnh thay đổi, nên lần chạy kế tiếp sẽ hỏi lại 22 cảnh. Tổng cộng còn khoảng 39 nhiệm vụ, tức 7 request (kiểm tra offline với sổ hiện có). Mock của probe chỉ trả lời cảnh có đúng 2 người, nên giờ để trống gần hết; điều này không phản ánh một model thật.
+
+**Lần chạy thứ tư: 7 request (2026-10-20, `gemini-3.5-flash-lite`).**
+
+- **7/7 request thành công, không còn lỗi cấu trúc nào** sau khi dùng mã nhiệm vụ ngắn.
+- Trong 112 lượt nói qua kiểm chứng, đối chiếu tay với nguyên văn:
+  - 111 lượt đúng người nói;
+  - 1 lượt gây tranh cãi: một câu hát được dẫn lại trong lời kể;
+  - **0 lượt sai**.
+- Hai nhân vật trước đây bị bỏ sót nay đã được nhận đúng: 陆老夫人 (ch.17–19) và 常莉 (ch.3, ch.17). 陆霆骁 trong các cảnh chỉ gọi anh là `男人` / `冰雕男` cũng đúng.
+- Lỗi mới phát hiện: đề xuất cặp `宁夕 → 陆霆骁` có `address_vi = "Lục先生"` (lẫn chữ Hán vào ô tiếng Việt), và một `relationship` viết bằng chữ Hán.
+
+**Chỉnh sửa: ô tiếng Việt không được có chữ Hán.**
+
+- **Bộ kiểm chứng** gắn mã `ChineseInVietnameseField` khi một trong các ô sau có chữ Hán (CJK, kể cả các vùng mở rộng): `self_vi`, `address_vi`, `relationship`, `narrative_vi`, `secondary_vi`, `name_forms.vi`. Đề xuất bị gắn mã này không hợp lệ.
+- **Prompt** nhắc rõ các ô này chỉ viết tiếng Việt. `PromptVersion` lên `addressing-ledger-5`.
+- **Bước duyệt** (`AddressingReviewService`) cũng từ chối ghi chữ Hán vào hồ sơ nhân vật. Việc này chặn cả đề xuất đã kiểm chứng trước khi có quy tắc mới (như đề xuất `Lục先生` đang có trong sổ), và chặn cả lỗi gõ nhầm của người duyệt.
 
 **Chưa làm:**
 

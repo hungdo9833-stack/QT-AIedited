@@ -250,6 +250,16 @@ public sealed class AddressingAiSurveyTests : IDisposable
         Assert.Contains("GenderConflictsWithSource", Issues(t => t == heroine ? CharacterWith(t, c => c["gender"] = "male") : null, heroine));
         Assert.Contains("UnlistedOrDuplicateNameForm", Issues(t => t == heroine ? CharacterWith(t, c => ((JsonArray)c["name_forms"]!).Add(new JsonObject { ["zh"] = "兰花", ["vi"] = "Lan Hoa" })) : null, heroine));
         Assert.Contains("PhaseCountMismatch", Issues(t => t == heroine ? CharacterWith(t, c => c["status"] = "Changes") : null, heroine));
+        // Live Gemini case: address_vi "Lục先生". Every Vietnamese field must be Vietnamese only.
+        const string han = "ChineseInVietnameseField";
+        Assert.Contains(han, Issues(t => t == sister ? PairWith(t, p => p["address_vi"] = "Lục先生") : null, sister));
+        Assert.Contains(han, Issues(t => t == sister ? PairWith(t, p => p["self_vi"] = "姐") : null, sister));
+        Assert.Contains(han, Issues(t => t == sister ? PairWith(t, _ => { }).Also(n => n["relationship"] = "王秀兰 → 林青") : null, sister));
+        Assert.Contains(han, Issues(t => t == heroine ? CharacterWith(t, c => c["phases"]![0]!["narrative_vi"] = "她") : null, heroine));
+        Assert.Contains(han, Issues(t => t == heroine ? CharacterWith(t, c => c["phases"]![0]!["secondary_vi"] = "nàng/她") : null, heroine));
+        Assert.Contains(han, Issues(t => t == heroine ? CharacterWith(t, c => c["name_forms"]![0]!["vi"] = "Vương 秀兰") : null, heroine));
+        Assert.DoesNotContain(han, Issues(t => t == sister ? PairWith(t, p => p["address_vi"] = "Lục tiên sinh") : null, sister)); // Diacritics are fine.
+        Assert.True(AddressingAiSurvey.HasHan("𠀀")); Assert.False(AddressingAiSurvey.HasHan("Đình Kiêu → chị/em, ông, bà"));
         // Ambiguous is a valid answer but never a rule.
         var ambiguous = AddressingAiSurvey.Verify(Answer(request, t => t == sister ? PairWith(t, _ => { }).Also(n => n["status"] = "Ambiguous") : null).ToJsonString(), request)
             .Single(p => p.TaskId == sister.TaskId);

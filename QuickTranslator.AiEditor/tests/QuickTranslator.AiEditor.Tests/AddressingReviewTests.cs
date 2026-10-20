@@ -49,6 +49,28 @@ public sealed class AddressingReviewTests : IDisposable
     }
 
     [Fact]
+    public async Task Accepting_never_writes_a_chinese_character_into_a_vietnamese_field()
+    {
+        // Guards proposals verified before the ChineseInVietnameseField rule, and reviewer typos.
+        var (session, service, ledger) = await Seed(_root);
+        var heroine = Character(ledger, "王秀兰"); long revision = await Revision(session);
+        foreach (var bad in new[] { Heroine(heroine) with { NarrativePronoun = "她" }, Heroine(heroine) with { VietnameseName = "Vương 秀兰" },
+                     Heroine(heroine) with { SecondaryPronoun = "nàng/她" },
+                     Heroine(heroine) with { NameForms = heroine.NameForms.Select(f => f with { Vi = f.Vi + "兰" }).ToArray() } })
+        {
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.AcceptCharacterAsync(heroine.Id, bad, revision));
+            Assert.Contains("chữ Hán", error.Message);
+        }
+        Assert.Equal(revision, await Revision(session)); // Nothing was written.
+        var r1 = await service.AcceptCharacterAsync(heroine.Id, Heroine(heroine), revision);
+        var r2 = await service.AcceptCharacterAsync(Character(ledger, "林青").Id, Hero(Character(ledger, "林青")), r1.Revision);
+        var pair = Pair(ledger, "王秀兰");
+        foreach (var bad in new PairAcceptance[] { new("chị", "Lục先生", "chị → em", 0), new("姐", "em", "chị → em", 0), new("chị", "em", "王秀兰 → 林青", 0) })
+            Assert.Contains("chữ Hán", (await Assert.ThrowsAsync<InvalidOperationException>(() => service.AcceptPairAsync(pair.Id, bad, r2.Revision))).Message);
+        Assert.Equal(r2.Revision, await Revision(session));
+    }
+
+    [Fact]
     public async Task Pair_needs_both_profiles_then_writes_one_locked_directed_rule_used_by_the_translation_prompt()
     {
         var (session, service, ledger) = await Seed(_root);
