@@ -12,7 +12,6 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <ProjectReference Include="../../src/QuickTranslator.AiEditor.Core/QuickTranslator.AiEditor.Core.csproj" />
-    <ProjectReference Include="../../tools/QuickTranslator.AiEditor.GeminiSchema.Probe/QuickTranslator.AiEditor.GeminiSchema.Probe.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Update="Fixtures/ChapterDetection/golden-headings.tsv" CopyToOutputDirectory="PreserveNewest" />

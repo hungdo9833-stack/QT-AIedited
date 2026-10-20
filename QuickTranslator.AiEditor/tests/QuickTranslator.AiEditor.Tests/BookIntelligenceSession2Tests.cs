@@ -25,18 +25,6 @@ public sealed class BookIntelligenceSession2Tests
     }
 
     [Fact]
-    public void Quality_evaluator_reports_precision_recall_and_false_rates_against_human_fixture()
-    {
-        var expected = new IntelligenceQualitySet(["林朝", "苏雨"], ["小朝→林朝"], ["林朝→苏雨:Sibling"], ["青云宗"], 2, 2);
-        var actual = new IntelligenceQualitySet(["林朝", "陌生人"], ["小朝→林朝"], [], ["青云宗"], 1, 2);
-        IntelligenceQualityReport report = IntelligenceQualityEvaluator.Evaluate(expected, actual);
-        Assert.Equal(0.5, report.Characters.Precision);
-        Assert.Equal(0.5, report.Characters.Recall);
-        Assert.Equal(1, report.Relationships.FalseNegative);
-        Assert.Equal(0.5, report.EvidenceValidationAccuracy);
-    }
-
-    [Fact]
     public void Adaptive_scanner_covers_long_regex_free_chapter_and_audit_is_deterministic()
     {
         Guid chapter = Guid.NewGuid();
@@ -60,21 +48,6 @@ public sealed class BookIntelligenceSession2Tests
         Assert.Contains(evidence.SelectMany(x => x.Signals), x => x == "relationship-signal");
     }
 
-    [Fact]
-    public void Cache_fingerprint_ignores_unrelated_resources_but_changes_for_relevant_context()
-    {
-        Guid project = Guid.NewGuid();
-        var evidence = new[] { Evidence("林朝说道：你好。") };
-        ProjectResources resources = Resources(project, Profile("林朝", "Lâm Triều"));
-        string first = AdaptiveBookIntelligenceAnalyzer.RelevantContextFingerprint(evidence, resources);
-        resources.Terms.Add(new("青云宗", "Thanh Vân Tông"));
-        resources.Revision++;
-        string unrelated = AdaptiveBookIntelligenceAnalyzer.RelevantContextFingerprint(evidence, resources);
-        resources.Characters.Profiles[0].VietnameseName = "Lâm Triều Mới";
-        string relevant = AdaptiveBookIntelligenceAnalyzer.RelevantContextFingerprint(evidence, resources);
-        Assert.Equal(first, unrelated);
-        Assert.NotEqual(first, relevant);
-    }
 
     [Fact]
     public void Entity_resolution_aggregates_evidence_and_does_not_auto_merge_similar_names()
@@ -91,39 +64,7 @@ public sealed class BookIntelligenceSession2Tests
         Assert.Null(b.ProposedExistingCharacterId);
     }
 
-    [Theory]
-    [InlineData(KnowledgeRelationType.FullSibling, true)]
-    [InlineData(KnowledgeRelationType.PaternalHalfSibling, true)]
-    [InlineData(KnowledgeRelationType.MaternalHalfSibling, false)]
-    [InlineData(KnowledgeRelationType.UnknownSibling, false)]
-    [InlineData(KnowledgeRelationType.AdoptiveChild, false)]
-    [InlineData(KnowledgeRelationType.SwornSibling, false)]
-    public void Kinship_father_rule_only_uses_compatible_confirmed_blood_sibling(
-        KnowledgeRelationType siblingType, bool expected)
-    {
-        Guid project = Guid.NewGuid(), father = Guid.NewGuid(), b = Guid.NewGuid(), c = Guid.NewGuid();
-        BookIntelligenceState state = State(project);
-        state.RelationshipGraph.Add(Rel(father, b, KnowledgeRelationType.BiologicalFather));
-        state.RelationshipGraph.Add(Rel(b, c, siblingType));
-        IReadOnlyList<DerivedRelationship> result = new KinshipInferenceEngine().Recalculate(state);
-        Assert.Equal(expected, result.Any(x => x.SubjectCharacterId == father && x.TargetCharacterId == c &&
-            x.OutputRelation == KnowledgeRelationType.BiologicalFather && x.ValidityStatus == InferenceValidityStatus.Valid));
-    }
 
-    [Fact]
-    public void Kinship_creates_grandparent_dependency_and_marks_it_stale_when_input_is_rejected()
-    {
-        Guid project = Guid.NewGuid(), a = Guid.NewGuid(), b = Guid.NewGuid(), c = Guid.NewGuid();
-        BookIntelligenceState state = State(project);
-        KnowledgeRelationship first = Rel(a, b, KnowledgeRelationType.BiologicalMother);
-        KnowledgeRelationship second = Rel(b, c, KnowledgeRelationType.BiologicalFather);
-        state.RelationshipGraph.AddRange([first, second]);
-        DerivedRelationship derived = Assert.Single(new KinshipInferenceEngine().Recalculate(state), x => x.OutputRelation == KnowledgeRelationType.Grandmother);
-        Assert.Equal(2, derived.InputRelationIds.Count);
-        second.Status = KnowledgeRelationshipStatus.Rejected;
-        _ = new KinshipInferenceEngine().Recalculate(state);
-        Assert.Equal(InferenceValidityStatus.Stale, derived.ValidityStatus);
-    }
 
     [Fact]
     public void Timeline_does_not_leak_relationship_or_addressing_before_reveal()

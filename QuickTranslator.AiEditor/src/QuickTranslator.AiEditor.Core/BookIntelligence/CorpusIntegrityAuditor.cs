@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using QuickTranslator.AiEditor.Core.Models;
-using QuickTranslator.AiEditor.Core.Projects;
 
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
@@ -16,79 +15,9 @@ public sealed record ChapterIntegrityAudit(Guid ChapterId, int ChapterNumber, bo
         ? CorpusCompletion.NeedsReindex : Blocked > 0 ? CorpusCompletion.Blocked
         : Skipped > 0 ? CorpusCompletion.Skipped : Unverified > 0 ? CorpusCompletion.Indexed : CorpusCompletion.Analyzed;
 }
-public sealed record CorpusIntegrityReport(Guid ProjectId, long StateRevision,
-    IReadOnlyList<ChapterIntegrityAudit> Chapters, int PendingReviews)
-{
-    public int ActiveChapters => Chapters.Count(x => x.Active);
-    public int IndexedChapters => Chapters.Count(x => x.Indexed);
-    public int Current => Chapters.Where(x => x.Active).Sum(x => x.Current);
-    public int Analyzed => Chapters.Where(x => x.Active).Sum(x => x.Analyzed);
-    public int Blocked => Chapters.Where(x => x.Active).Sum(x => x.Blocked);
-    public int Skipped => Chapters.Where(x => x.Active).Sum(x => x.Skipped);
-    public int Unverified => Chapters.Where(x => x.Active).Sum(x => x.Unverified);
-    public int Missing => Chapters.Where(x => x.Active).Sum(x => x.Issues.Count(i => i.Code is "Gap" or "MissingIndex" or "Unreadable"));
-    public int Stale => Chapters.Sum(x => x.Stale);
-    public bool NeedsReindex => Chapters.Any(x => x.Active && !x.Indexed || !x.Active && x.Current > 0);
-    public bool CorpusProcessed => ActiveChapters > 0 && !NeedsReindex;
-    public bool AiSurveyComplete => CorpusProcessed && Blocked == 0 && Skipped == 0 && Unverified == 0;
-    public bool ManualReviewComplete => AiSurveyComplete && PendingReviews == 0;
-    // Compatibility getter, never a claim about extraction accuracy. No quality
-    // benchmark/human-labelled corpus is recorded by this operational report.
-    public bool AccuracyVerified => false;
-    public bool Verified => AccuracyVerified;
-    public bool Complete => AiSurveyComplete && ManualReviewComplete;
-    public CorpusCompletion Status => NeedsReindex ? CorpusCompletion.NeedsReindex
-        : ActiveChapters == 0 ? CorpusCompletion.Incomplete : Blocked > 0 ? CorpusCompletion.Blocked
-        : Skipped > 0 ? CorpusCompletion.Skipped : Unverified > 0 ? CorpusCompletion.Indexed
-        : Complete ? CorpusCompletion.Complete : CorpusCompletion.Analyzed;
-    public string Summary => $"{Status} · Corpus: {(CorpusProcessed ? "xử lý xong" : "chưa xong")} · AI survey: {(AiSurveyComplete ? "xong" : "chưa xong")} · " +
-        $"Manual review: {(ManualReviewComplete ? "xong" : "NeedsReview")} · Accuracy: chưa được kiểm chứng · active {IndexedChapters}/{ActiveChapters} chương · " +
-        $"current {Current} · analyzed {Analyzed} · blocked {Blocked} · missing {Missing} · stale {Stale} · skipped {Skipped} · unverified {Unverified}";
-}
 
-/// <summary>Reads the manifest and source, never infers active chapters or completion from a survey JSON alone.</summary>
-public sealed class CorpusIntegrityAuditor(ProjectRepository repository)
+public sealed class CorpusIntegrityAuditor
 {
-    public async Task<CorpusIntegrityReport> AuditAsync(ProjectSession session, BookIntelligenceState state,
-        CancellationToken cancellationToken = default)
-    {
-        if (state.ProjectId != session.Manifest.ProjectId) throw new InvalidOperationException("Corpus belongs to another project.");
-        var result = new List<ChapterIntegrityAudit>();
-        var groups = session.Manifest.Chapters.Where(x => x.DeletedAt is null).GroupBy(x => x.ChapterId).ToArray();
-        var duplicateNumbers = session.Manifest.Chapters.Where(x => x.DeletedAt is null).GroupBy(x => x.Number)
-            .Where(x => x.Count() > 1).Select(x => x.Key).ToHashSet();
-        foreach (var group in groups.OrderBy(x => x.First().Number).ThenBy(x => x.Key))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var entry = group.First();
-            try
-            {
-                var chapter = (await repository.LoadChapterAsync(session, entry.ChapterId, cancellationToken).ConfigureAwait(false)).Chapter;
-                var index = state.Chapters.Where(x => x.ChapterId == entry.ChapterId).ToArray();
-                var audit = Inspect(entry.ChapterId, entry.Number, chapter.OriginalText ?? "", index.FirstOrDefault(), state.ScanMode);
-                var issues = audit.Issues.ToList();
-                if (group.Count() != 1 || index.Length > 1) issues.Add(new("DuplicateChapter", 0, 0, "Duplicate ChapterId in manifest/index."));
-                if (duplicateNumbers.Contains(entry.Number)) issues.Add(new("DuplicateChapterNumber", 0, 0, "Active chapter number is not unique in manifest."));
-                if (chapter.Id != entry.ChapterId || chapter.ProjectId != state.ProjectId)
-                    issues.Add(new("ChapterIdentity", 0, 0, "ChapterDocument identity does not match manifest."));
-                result.Add(audit with { Issues = issues });
-            }
-            catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException or InvalidOperationException)
-            {
-                result.Add(new(entry.ChapterId, entry.Number, true, "", 0,
-                    [new("Unreadable", 0, 0, $"Cannot validate ChapterDocument ({ex.GetType().Name}); reindex pending.")], 0, 0, 0, 0, 0, 0));
-            }
-        }
-        var activeIds = groups.Select(x => x.Key).ToHashSet();
-        foreach (var index in state.Chapters.Where(x => !activeIds.Contains(x.ChapterId)))
-            result.Add(new(index.ChapterId, index.ChapterNumber, false, index.SourceSha256, index.SourceLengthUtf16,
-                [new("InactiveChapter", 0, 0, session.Manifest.Chapters.Any(x => x.ChapterId == index.ChapterId)
-                    ? "Chapter deleted in manifest; retained for audit only." : "Chapter absent from manifest; retained for audit only.")],
-                index.Evidence.Count(x => x.IsCurrent), 0, 0, 0, 0, index.Evidence.Count));
-        return new(state.ProjectId, state.Revision, result, state.PendingCount + state.DerivedRelationships.Count(x =>
-            x.Status == KnowledgeRelationshipStatus.DerivedAwaitingReview));
-    }
-
     public static ChapterIntegrityAudit Inspect(Guid id, int number, string source, CorpusChapterIndex? index,
         IntelligenceScanMode mode = IntelligenceScanMode.FullSemantic)
     {

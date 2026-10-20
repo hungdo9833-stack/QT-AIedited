@@ -11,18 +11,20 @@ WPF (src/QuickTranslator.AiEditor.Wpf, WinExe net10.0-windows)
   ChapterManagerWindow    đổi tên, nhân bản, xóa mềm/phục hồi chương
   ProjectTranslationQueueWindow + GpuManagerWindow   hàng đợi dịch nhiều chương, nhiều GPU (Local/Remote Ollama)
   ProjectPublicationWindow + ProjectPdfExporter      xuất TXT UTF-8 / PDF A4
-  BookIntelligenceReviewWindow   khảo sát nhân vật bằng AI (Gemini pool / Ollama), corpus audit CPU
-  EntityMemoryReviewWindow + SemanticSurveyPanel     Entity Memory/Event Ledger (2A) và AI Semantic Survey (2B)
+  AddressingLedgerWindow   Sổ xưng hô: Khảo sát (CPU + Gemini/Ollama), Hoàn thành, Hoàn tác
 Core (src/QuickTranslator.AiEditor.Core, net10.0)
   Projects / Persistence   ProjectRepository, manifest *.qtproj, SimpleFileStorage (ghi file tạm rồi replace)
   Importing / Segmentation chia chương, chia đoạn, Verified Chapter Reconstruction
   Translation              Ollama client, ProjectTranslationCoordinator (multi-worker), prompt presets
   Editing / TextCleaning / Traditional   batch replace, chuẩn hóa xưng hô, Hán Việt/VP
   Reading                  ChapterTranslationComposer dùng chung Reader và Export
-  BookIntelligence         survey nhân vật, census, Entity Memory, Semantic Survey (contract, engine, auditor, Gemini wire)
+  Addressing               sổ xưng hô: kế hoạch CPU, nhiệm vụ AI (cảnh, nhân vật, cặp, "cùng một người?"), kiểm chứng, Hoàn thành
+  BookIntelligence         census tên, Gemini/Ollama backend dùng chung, đọc dữ liệu khảo sát cũ (ai-book-intelligence.json) cho ngữ cảnh dịch
 ```
 
-Luồng UI tới Gemini Semantic Survey: **Thiết lập dịch → Nhân vật & xưng hô → Khảo sát bằng AI** → chọn backend *Gemini Flash Pool* và model → **Entity Memory · Event Ledger (2A)** → tab **AI Semantic Survey (2B)** → *Dry-run* (không gọi AI) → *Khảo sát / Resume AI* (hỏi xác nhận, ngân sách Max HTTP mặc định 5).
+Luồng UI khảo sát: **Thiết lập dịch → Nhân vật & xưng hô → Sổ xưng hô · khảo sát & Hoàn thành** → chọn backend và model → **Khảo sát** (hỏi xác nhận, giới hạn request mỗi lần) → **Hoàn thành**.
+
+Luồng khảo sát cũ ("Khảo sát bằng AI", Entity Memory 2A, Semantic Survey 2B, corpus audit) đã được gỡ khỏi mã nguồn. File dữ liệu cũ trong `Settings/` không bị xóa; nếu Project đã bật `BookKnowledgeContextEnabled` thì ngữ cảnh từ `ai-book-intelligence.json` vẫn được đưa vào prompt dịch như trước.
 
 ## 2. Thay đổi trong đợt tiếp quản
 
@@ -92,7 +94,7 @@ Khi smoke test EXE, ứng dụng ghi `Projects/library.json` (thêm Project tổ
 3. Dịch bằng Ollama/GPU thật chưa được chạy trong đợt này (chỉ provider giả). Cần kiểm tra trên máy có `translategemma:12b`.
 4. `M5.UiSmoke` chụp off-screen: một số cửa sổ con hiện nền trắng sau tiêu đề. EXE thật hiển thị đúng, đây là giới hạn của công cụ chụp.
 5. EXE không ký số; Windows SmartScreen có thể cảnh báo lần đầu.
-6. Kiểm tra Gemini dùng `tools/QuickTranslator.AiEditor.GeminiSchema.Probe` (công cụ cũ `GeminiSurvey.Preflight` đã bị gỡ).
+6. Kiểm tra khảo sát offline dùng `tools/QuickTranslator.AiEditor.Addressing.Probe` (các công cụ cũ `GeminiSurvey.Preflight`, `GeminiSchema.Probe`, `BookIntelligence.Benchmark` đã bị gỡ).
 
 ## 6. Hướng dẫn sử dụng nhanh
 
@@ -101,6 +103,6 @@ Khi smoke test EXE, ứng dụng ghi `Projects/library.json` (thêm Project tổ
 3. **Thiết lập dịch → AI & hiệu năng**: chọn Ollama Local/Remote và model, **Kiểm tra kết nối** (chỉ đọc danh sách model). Nhiều GPU: **AI & hiệu năng → Mở Quản lý GPU**.
 4. Dịch chương (**Dịch toàn chương**) hoặc cả Project (**Hàng đợi**). Tạm dừng/Tiếp tục an toàn; tiến độ lưu theo từng đoạn.
 5. **Nhân vật & xưng hô**, **Từ điển & ngữ cảnh**: hồ sơ, glossary, khóa xưng hô.
-6. Gemini: nhập key ở **AI & hiệu năng → Lưu API key** → **Nhân vật & xưng hô → Khảo sát bằng AI** → backend *Gemini Flash Pool* → **Entity Memory · Event Ledger (2A)** → tab **AI Semantic Survey (2B)** → **Dry-run** → **Khảo sát / Resume AI** (giữ Max HTTP nhỏ, ví dụ 1–5). Đề xuất AI phải được duyệt/xác nhận thủ công.
+6. Gemini: nhập key ở **AI & hiệu năng → Lưu API key** → **Nhân vật & xưng hô → Sổ xưng hô · khảo sát & Hoàn thành** → backend *Gemini Flash Pool* → **Khảo sát** (giữ giới hạn request nhỏ, bấm lại để chạy tiếp) → **Hoàn thành** (có Hoàn tác).
 7. **Đọc** (Reader) và **Xuất bản** (TXT UTF-8/PDF A4).
 8. Project là một thư mục tự chứa (`*.qtproj` + `Chapters/`, `Settings/`, `Resources/`…). Sao lưu bằng cách sao chép cả thư mục khi ứng dụng đã đóng.

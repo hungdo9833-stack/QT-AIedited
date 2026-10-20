@@ -6,7 +6,6 @@ using QuickTranslator.AiEditor.Core.Models;
 
 namespace QuickTranslator.AiEditor.Tests;
 
-/// <summary>A live event finding quoted only "他知道自己又在做梦了": the pronoun did not prove who was dreaming.</summary>
 public sealed class SemanticNamedQuotePromptTests
 {
     private static int Count(string text, string value) { int n = 0; for (int i = 0; (i = text.IndexOf(value, i, StringComparison.Ordinal)) >= 0; i += value.Length) n++; return n; }
@@ -18,9 +17,8 @@ public sealed class SemanticNamedQuotePromptTests
         Assert.Equal(1, single.WireVersion); Assert.Equal(1, Count(single.Prompt, SemanticSurveyRequests.NamedQuoteRule));
         var multi = AdaptiveSemanticTests.Plan(new SemanticFixture(AdaptiveSemanticTests.Windows(2)), 2).Single();
         Assert.Equal(2, multi.WireVersion); Assert.Equal(1, Count(multi.Prompt, SemanticSurveyRequests.NamedQuoteRule));
-        foreach (string required in new[] { "EventVerification", "RelationshipExtraction", "DirectionalAddressing", "exact name", "他/她", "Unresolved" })
+        foreach (string required in new[] { "EventVerification", "RelationshipExtraction", "DirectionalAddressing", "exact name", "他/她/它/我/你", "Unresolved" })
             Assert.Contains(required, SemanticSurveyRequests.NamedQuoteRule, StringComparison.Ordinal);
-        // The rule is instruction text, placed before the source data, never inside an evidence block.
         Assert.True(multi.Prompt.IndexOf(SemanticSurveyRequests.NamedQuoteRule, StringComparison.Ordinal) < multi.Prompt.IndexOf("CONTEXT (", StringComparison.Ordinal));
     }
 
@@ -47,23 +45,6 @@ public sealed class SemanticNamedQuotePromptTests
         string sent = json.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString()!;
         Assert.Contains(SemanticSurveyRequests.NamedQuoteRule, sent, StringComparison.Ordinal);
         Assert.EndsWith(GeminiSemanticWire.PromptAddendum, sent, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Auditor_is_not_loosened_pronoun_only_event_quote_still_cannot_prove_a_new_identity()
-    {
-        const string text = "柳轻锋站在门口。他知道自己又\r\n在做梦了。";
-        var s = new SemanticFixture(text); var r = s.Plan().Single();
-        var finding = s.Name(r, "柳轻锋") with
-        {
-            FindingType = SemanticFindingType.EventVerification, EventType = TranslationImpactEventType.CharacterStateChanged,
-            EventActuality = SemanticActuality.ActualCompleted, Value = "dreaming", SupportSpans = [new(r.Evidence.Id, 8, 10, "他知道自己又在做梦了")]
-        };
-        var pronounOnly = SemanticQualityAuditor.Audit(SemanticFixture.Response(r, finding), r, s.Sources).Findings.Single();
-        Assert.Contains("UnprovedOrConflictingLocalIdentity", pronounOnly.Issues); Assert.False(pronounOnly.EvidenceValid);
-        // Following the new instruction (a second quote naming the person) is what makes it provable.
-        var named = SemanticQualityAuditor.Audit(SemanticFixture.Response(r, finding with { SupportSpans = [new(r.Evidence.Id, 0, 3, "柳轻锋"), .. finding.SupportSpans] }), r, s.Sources).Findings.Single();
-        Assert.DoesNotContain("UnprovedOrConflictingLocalIdentity", named.Issues); Assert.DoesNotContain("SupportSpanMismatch", named.Issues);
     }
 
     private sealed class Capture(Action<string> onBody) : HttpMessageHandler
