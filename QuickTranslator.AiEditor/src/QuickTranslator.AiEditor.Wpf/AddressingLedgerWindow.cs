@@ -36,9 +36,12 @@ public sealed class AddressingLedgerWindow : Window
     private readonly TextBox _forms = new() { AcceptsReturn = true, Height = 90, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, TextWrapping = TextWrapping.NoWrap };
     private readonly TextBox _details = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly StackPanel _characterFields = new(), _pairFields = new();
-    private readonly Button _accept = new() { Content = "Chấp nhận & ghi vào hồ sơ" }, _reject = new() { Content = "Bác bỏ" }, _defer = new() { Content = "Để sau" };
-    private readonly Button _complete = new() { Content = "✔ Hoàn thành: ghi tất cả vào hồ sơ và dùng khi dịch", FontWeight = FontWeights.SemiBold, Padding = new Thickness(12, 6, 12, 6) };
-    private readonly Button _undo = new() { Content = "Hoàn tác lần Hoàn thành gần nhất", Margin = new Thickness(8, 0, 0, 0), IsEnabled = false };
+    private static Style Themed(string key) => (Style)Application.Current.FindResource(key);
+    private static Button WithGlyph(Button button, string glyph) { ButtonIcon.SetGlyph(button, glyph); return button; }
+    private readonly Button _accept = new() { Content = "Chấp nhận & ghi vào hồ sơ" }, _reject = new() { Content = "Bác bỏ", Style = Themed("DangerButton") }, _defer = new() { Content = "Để sau" };
+    // "Hoàn thành" is the window's one primary action.
+    private readonly Button _complete = WithGlyph(new() { Content = "Hoàn thành: ghi tất cả vào hồ sơ và dùng khi dịch", Style = Themed("PrimaryButton"), Padding = new Thickness(12, 6, 12, 6) }, Glyphs.Accept);
+    private readonly Button _undo = WithGlyph(new() { Content = "Hoàn tác lần Hoàn thành gần nhất", Margin = new Thickness(8, 0, 0, 0), IsEnabled = false }, Glyphs.Undo);
     private readonly TextBox _completion = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 140, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) };
     internal AddressingCompletion? Preview { get; private set; }
     internal string CompletionText => _completion.Text;
@@ -47,8 +50,8 @@ public sealed class AddressingLedgerWindow : Window
     private readonly ComboBox _backend = new() { Width = 190, DisplayMemberPath = nameof(OllamaBackendProfile.Name) };
     private readonly ComboBox _model = new() { Width = 190, IsEditable = true, Margin = new Thickness(6, 0, 0, 0) };
     private readonly TextBox _maxRequests = new() { Text = "10", Width = 45, Margin = new Thickness(4, 0, 0, 0), VerticalContentAlignment = VerticalAlignment.Center };
-    private readonly Button _survey = new() { Content = "▶ Khảo sát / chạy tiếp", FontWeight = FontWeights.SemiBold, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) };
-    private readonly Button _stop = new() { Content = "Dừng", Margin = new Thickness(6, 0, 0, 0), IsEnabled = false };
+    private readonly Button _survey = WithGlyph(new() { Content = "Khảo sát / chạy tiếp", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) }, Glyphs.Play);
+    private readonly Button _stop = WithGlyph(new() { Content = "Dừng", Margin = new Thickness(6, 0, 0, 0), IsEnabled = false }, Glyphs.Stop);
     private readonly TextBlock _surveyStatus = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
     private CancellationTokenSource? _surveyCancel;
     private IReadOnlyList<CensusSource> _sources = [];
