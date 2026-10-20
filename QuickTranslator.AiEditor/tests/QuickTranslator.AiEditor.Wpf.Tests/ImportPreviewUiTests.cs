@@ -113,7 +113,7 @@ public sealed class ImportPreviewUiTests
                 StringComparison.CurrentCultureIgnoreCase);
             Assert.Contains("Số 1", ((TextBlock)window.FindName("FooterHintText")).Text +
                 string.Join(" ", ((ListBox)window.FindName("IssuesList")).Items.Cast<object>()), StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(System.Windows.Media.Color.FromRgb(7, 17, 31),
+            Assert.Equal(System.Windows.Media.Color.FromRgb(15, 17, 21),
                 ((System.Windows.Media.SolidColorBrush)window.Background).Color);
         }
         finally { window.Close(); }

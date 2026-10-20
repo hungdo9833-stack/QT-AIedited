@@ -16,6 +16,6 @@ public sealed class TestHostIsolationTests
         Assert.Null(Application.Current.MainWindow);
         // A fixture must not pick up the user's real workspace layout (e.g. a saved Light theme).
         using var fixture = new WorkspaceFixture(); await fixture.CreateProjectAsync();
-        Assert.Equal(Color.FromRgb(7, 17, 31), ((SolidColorBrush)Application.Current.Resources["AppBackgroundBrush"]).Color);
+        Assert.Equal(Color.FromRgb(15, 17, 21), ((SolidColorBrush)Application.Current.Resources["AppBackgroundBrush"]).Color);
     });
 }
