@@ -510,6 +510,7 @@ public partial class MainWindow
             ItemsSource = relationshipRows, AutoGenerateColumns = false, CanUserAddRows = false,
             MinHeight = 140, MaxHeight = 230, SelectionMode = DataGridSelectionMode.Single
         };
+        System.Windows.Automation.AutomationProperties.SetName(relationshipGrid, "Danh sách quan hệ xưng hô");
         relationshipGrid.Columns.Add(listenerColumn);
         var relationshipColumn = new DataGridTextColumn { Header = "Quan hệ (A→B)", Binding = new Binding(nameof(RelationshipEditorRow.Relationship)), Width = new DataGridLength(0.95, DataGridLengthUnitType.Star) };
         var selfReferenceColumn = new DataGridTextColumn { Header = "Tự xưng", Binding = new Binding(nameof(RelationshipEditorRow.SelfReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star) };

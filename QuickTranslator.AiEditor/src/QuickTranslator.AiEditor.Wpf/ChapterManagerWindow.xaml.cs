@@ -31,6 +31,8 @@ public partial class ChapterManagerWindow : Window
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _commands = commands ?? throw new ArgumentNullException(nameof(commands));
         InitializeComponent();
+        DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock))
+            .AddValueChanged(StatusText, (_, _) => Accessibility.Announce(StatusText));
         MainWindow.ClampWindowToWorkArea(this, 1320, 820);
         ProjectTitleText.Text = session.Manifest.VietnameseTitle;
         _catalog.Changed += OnCatalogChanged;

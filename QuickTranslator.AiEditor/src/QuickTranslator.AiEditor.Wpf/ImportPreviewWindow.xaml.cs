@@ -29,6 +29,8 @@ public partial class ImportPreviewWindow : Window
         _project = project ?? throw new ArgumentNullException(nameof(project));
         _titleRuntimeFactory = titleRuntimeFactory;
         InitializeComponent();
+        System.ComponentModel.DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock))
+            .AddValueChanged(PreviewStatusText, (_, _) => Accessibility.Announce(PreviewStatusText));
         MainWindow.ClampWindowToWorkArea(this, 1380, 860);
         PreviewGrid.ItemsSource = _rows;
         if (!string.IsNullOrWhiteSpace(initialPath))

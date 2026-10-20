@@ -27,6 +27,7 @@ public partial class MainWindow
         if (SettingsDirtyText is null) return;
         SettingsDirtyText.Text = _settingsDirtyValue ? "Có thay đổi chưa lưu" : "Mọi thay đổi đã được lưu";
         SettingsDirtyText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, _settingsDirtyValue ? "WarningBrush" : "MutedBrush");
+        Accessibility.Announce(SettingsDirtyText);
     }
     private bool _syncingGlossary;
     private readonly ObservableCollection<GlossaryRow> _glossaryRows = [];
@@ -215,6 +216,7 @@ public partial class MainWindow
             await SavePresetEditorAsync();
             var working = new PromptPresetManager(_presetManager.Snapshot());
             var list = new ListBox { Width = 250, DisplayMemberPath = "Name", Margin = new Thickness(4) };
+            System.Windows.Automation.AutomationProperties.SetName(list, "Danh sách preset");
             var name = new TextBox();
             var description = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 64 };
             var template = new TextBox { AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap,

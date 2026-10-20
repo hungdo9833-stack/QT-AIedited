@@ -29,6 +29,8 @@ public partial class GpuManagerWindow : Window
         _backends = backends; _connections = connections;
         _preferences = preferences ?? new();
         InitializeComponent();
+        System.ComponentModel.DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock))
+            .AddValueChanged(StatusText, (_, _) => Accessibility.Announce(StatusText));
         MainWindow.ClampWindowToWorkArea(this, 1180, 820);
         _loadingMode = true;
         TranslationModeInput.SelectedIndex = (int)_preferences.Mode;

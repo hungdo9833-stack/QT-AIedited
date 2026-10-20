@@ -20,7 +20,7 @@
     <StackPanel DockPanel.Dock="Top">
      <TextBlock x:Name="FormatDescriptionText" Text="TXT giữ nguyên nội dung tiếng Việt do Reader và trình xuất chương đang sử dụng." TextWrapping="Wrap"/>
      <ProgressBar x:Name="ExportProgress" Height="7" Minimum="0" Maximum="1" Margin="4,14,4,6" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
-     <TextBlock x:Name="ProgressText" Text="Chưa bắt đầu." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+     <TextBlock x:Name="ProgressText" Text="Chưa bắt đầu." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
      <TextBlock x:Name="OutputPathText" Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource SuccessBrush}"/>
      <WrapPanel x:Name="ExportedActionsPanel" Visibility="Collapsed" Margin="0,6,0,0">
       <Button x:Name="OpenExportedFileButton" Content="Mở tệp vừa xuất" ui:ButtonIcon.Glyph="&#xE70F;" Click="OnOpenExportedFile"/>
@@ -29,7 +29,7 @@
     </StackPanel>
     <StackPanel x:Name="IssueChaptersPanel" Visibility="Collapsed" Margin="0,10,0,0">
      <TextBlock Text="Danh sách chương chưa hoàn tất / cần kiểm tra (nhấp đúp để mở trong Editor):" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}" Margin="0,0,0,4"/>
-     <ListBox x:Name="IssueChaptersList" MaxHeight="140" MouseDoubleClick="OnIssueChapterDoubleClick" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
+     <ListBox x:Name="IssueChaptersList" MaxHeight="140" MouseDoubleClick="OnIssueChapterDoubleClick" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Danh sách chương chưa hoàn tất"/>
     </StackPanel>
    </DockPanel>
   </Border>

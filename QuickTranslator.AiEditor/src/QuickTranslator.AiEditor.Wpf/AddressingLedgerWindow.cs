@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Automation;
@@ -161,6 +162,9 @@ public sealed class AddressingLedgerWindow : Window
         surveyActions.Children.Add(_survey); surveyActions.Children.Add(_stop); surveyCardContent.Children.Add(surveyActions);
         var progress = new ProgressBar { Height = 4, IsIndeterminate = true, Margin = new Thickness(0, 8, 0, 0) };
         progress.SetBinding(VisibilityProperty, new Binding(nameof(IsEnabled)) { Source = _stop, Converter = new BooleanToVisibilityConverter() });
+        AutomationProperties.SetLiveSetting(_surveyStatus, AutomationLiveSetting.Polite);
+        DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock))
+            .AddValueChanged(_surveyStatus, (_, _) => Accessibility.Announce(_surveyStatus));
         surveyCardContent.Children.Add(progress); surveyCardContent.Children.Add(_surveyStatus);
 
         var reviewCardContent = new StackPanel();
@@ -170,7 +174,12 @@ public sealed class AddressingLedgerWindow : Window
         reviewCardContent.Children.Add(_onlyValid); reviewCardContent.Children.Add(_lock);
 
         var completionSummary = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
-        void ShowCompletionFirstLine() => completionSummary.Text = _completion.Text.Split(["\r\n", "\n"], StringSplitOptions.None)[0];
+        AutomationProperties.SetLiveSetting(completionSummary, AutomationLiveSetting.Polite);
+        void ShowCompletionFirstLine()
+        {
+            completionSummary.Text = _completion.Text.Split(["\r\n", "\n"], StringSplitOptions.None)[0];
+            Accessibility.Announce(completionSummary);
+        }
         _completion.TextChanged += (_, _) => ShowCompletionFirstLine();
         ShowCompletionFirstLine();
         var finishCardContent = new StackPanel();
@@ -220,6 +229,8 @@ public sealed class AddressingLedgerWindow : Window
         var body = new Grid();
         body.ColumnDefinitions.Add(new() { Width = new GridLength(3, GridUnitType.Star) });
         body.ColumnDefinitions.Add(new() { Width = new GridLength(2, GridUnitType.Star) });
+        AutomationProperties.SetName(_characters, "Danh sách đề xuất nhân vật");
+        AutomationProperties.SetName(_pairs, "Danh sách cặp xưng hô");
         _tabs.Items.Add(new TabItem { Header = "Nhân vật (lời kể + cách gọi)", Content = _characters });
         _tabs.Items.Add(new TabItem { Header = "Cặp xưng hô (lời thoại)", Content = _pairs });
         body.Children.Add(_tabs);

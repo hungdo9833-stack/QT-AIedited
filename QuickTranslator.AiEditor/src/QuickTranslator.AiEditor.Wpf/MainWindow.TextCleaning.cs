@@ -101,6 +101,7 @@ public partial class MainWindow
         };
         var search = new TextBox { Width = 220, ToolTip = "Lọc kết quả" };
         var classification = new ComboBox { Width = 175 };
+        System.Windows.Automation.AutomationProperties.SetName(classification, "Lọc theo phân loại");
         classification.ItemsSource = new[] { "Tất cả trạng thái", "Đã xác nhận", "Chưa biết", "Xung đột", "Giữ nguyên", "Được bảo vệ" };
         classification.SelectedIndex = 0;
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = (Brush)FindResource("TextBrush"), Margin = new Thickness(6) };
@@ -109,6 +110,8 @@ public partial class MainWindow
         var chineseRows = new ObservableCollection<ChineseOccurrenceRow>();
         var previewGrid = CreatePreviewGrid();
         var chineseGrid = CreateChineseGrid();
+        System.Windows.Automation.AutomationProperties.SetName(previewGrid, "Danh sách thay đổi xem trước");
+        System.Windows.Automation.AutomationProperties.SetName(chineseGrid, "Danh sách chữ Hán còn sót");
         previewGrid.ItemsSource = previewRows;
         chineseGrid.ItemsSource = chineseRows;
         var previewView = CollectionViewSource.GetDefaultView(previewRows);

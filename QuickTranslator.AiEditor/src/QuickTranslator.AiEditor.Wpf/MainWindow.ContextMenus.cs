@@ -27,11 +27,11 @@ public partial class MainWindow
     private void AttachSourceContextMenu(TextBox textBox)
     {
         var menu = new ContextMenu();
-        var addCharacter = WorkspaceMenuItem("Thêm vào hồ sơ nhân vật (Ctrl+Shift+C)", () => AddQuickCharacterAsync(textBox));
-        var addGlossary = WorkspaceMenuItem("Thêm vào Glossary Trung–Việt (Ctrl+Shift+G)", () => AddSelectedGlossaryAsync(textBox));
-        var find = MenuItem("Tìm các vị trí xuất hiện trong chương", () => ShowSourceOccurrences(textBox));
-        var translate = MenuItem("Dịch riêng phần đã chọn", async () => await TranslateSourceSelectionAsync(textBox));
-        var copy = MenuItem("Sao chép", () => CopySourceSelection(textBox));
+        var addCharacter = WorkspaceMenuItem("Thêm vào hồ sơ _nhân vật (Ctrl+Shift+C)", () => AddQuickCharacterAsync(textBox));
+        var addGlossary = WorkspaceMenuItem("Thêm vào _Glossary Trung–Việt (Ctrl+Shift+G)", () => AddSelectedGlossaryAsync(textBox));
+        var find = MenuItem("_Tìm các vị trí xuất hiện trong chương", () => ShowSourceOccurrences(textBox));
+        var translate = MenuItem("_Dịch riêng phần đã chọn", async () => await TranslateSourceSelectionAsync(textBox));
+        var copy = MenuItem("_Sao chép", () => CopySourceSelection(textBox));
         menu.Items.Add(addCharacter); menu.Items.Add(addGlossary); menu.Items.Add(find); menu.Items.Add(translate);
         menu.Items.Add(new Separator()); menu.Items.Add(copy);
 
@@ -377,6 +377,7 @@ public partial class MainWindow
             foreach (int start in SourceContextActions.FindOccurrences(ChapterInput.Text, selected))
                 items.Add(new(null, start, $"Vị trí {start + 1} · {OccurrencePreview(ChapterInput.Text, start, selected.Length)}"));
         var list = new ListBox { ItemsSource = items, DisplayMemberPath = "Label", Margin = new Thickness(24) };
+        System.Windows.Automation.AutomationProperties.SetName(list, "Danh sách vị trí xuất hiện");
         var open = new Button { Content = "Mở vị trí" }; open.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var close = new Button { Content = "Đóng" };
         var panel = new DockPanel();

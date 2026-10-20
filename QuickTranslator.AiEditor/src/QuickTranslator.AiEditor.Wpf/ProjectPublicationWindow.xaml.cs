@@ -28,6 +28,8 @@ public partial class ProjectPublicationWindow : Window
         _service = service ?? throw new ArgumentNullException(nameof(service));
         _openChapter = openChapter;
         InitializeComponent();
+        DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock))
+            .AddValueChanged(ProgressText, (_, _) => Accessibility.Announce(ProgressText));
         MainWindow.ClampWindowToWorkArea(this, 780, 640);
         ProjectTitleText.Text = session.Manifest.VietnameseTitle;
         UpdateFormatDescription();

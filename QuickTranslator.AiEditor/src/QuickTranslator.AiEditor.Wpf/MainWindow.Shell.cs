@@ -306,6 +306,15 @@ public partial class MainWindow
     // A command chosen from the "Thêm" popup closes it.
     private void OnCommandOverflowClick(object sender, RoutedEventArgs e) { CommandOverflowToggle.IsChecked = false; StructureOverflowToggle.IsChecked = false; }
 
+    private void OnPopupContentPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        CommandOverflowToggle.IsChecked = false;
+        StructureOverflowToggle.IsChecked = false;
+        ReaderAppearancePopup.IsOpen = false;
+        e.Handled = true;
+    }
+
     // Only in-window workspaces are destinations; the other navigation items open separate windows.
     private void MarkActiveNavigation(Button active)
     {

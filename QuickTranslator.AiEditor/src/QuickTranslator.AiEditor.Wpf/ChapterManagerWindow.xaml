@@ -19,18 +19,18 @@
     <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8">
       <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-        <TextBox x:Name="SearchInput" ToolTip="Tìm theo số, tên Việt hoặc tên Trung" TextChanged="OnFilterChanged"/>
-        <ComboBox x:Name="VolumeFilter" Grid.Column="1" SelectionChanged="OnFilterChanged"><ComboBoxItem Tag="" IsSelected="True">Tất cả quyển</ComboBoxItem></ComboBox>
-        <ComboBox x:Name="StateFilter" Grid.Column="2" SelectionChanged="OnFilterChanged">
+        <TextBox x:Name="SearchInput" ToolTip="Tìm theo số, tên Việt hoặc tên Trung" TextChanged="OnFilterChanged" AutomationProperties.Name="Tìm chương" AutomationProperties.HelpText="Tìm theo số, tên Việt hoặc tên Trung"/>
+        <ComboBox x:Name="VolumeFilter" Grid.Column="1" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Lọc quyển"><ComboBoxItem Tag="" IsSelected="True">Tất cả quyển</ComboBoxItem></ComboBox>
+        <ComboBox x:Name="StateFilter" Grid.Column="2" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Lọc trạng thái dịch">
           <ComboBoxItem Tag="" IsSelected="True">Tất cả trạng thái dịch</ComboBoxItem><ComboBoxItem Tag="Untranslated">Chưa dịch</ComboBoxItem><ComboBoxItem Tag="Translating">Đang dịch</ComboBoxItem><ComboBoxItem Tag="AwaitingReview">Chờ duyệt</ComboBoxItem><ComboBoxItem Tag="NeedsInspection">Cần kiểm tra</ComboBoxItem><ComboBoxItem Tag="Approved">Đã duyệt</ComboBoxItem><ComboBoxItem Tag="Error">Lỗi</ComboBoxItem>
         </ComboBox>
-        <ComboBox x:Name="ApprovalFilter" Grid.Column="3" SelectionChanged="OnFilterChanged">
+        <ComboBox x:Name="ApprovalFilter" Grid.Column="3" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Lọc trạng thái duyệt">
           <ComboBoxItem Tag="All" IsSelected="True">Tất cả duyệt</ComboBoxItem><ComboBoxItem Tag="NotApproved">Chưa duyệt xong</ComboBoxItem><ComboBoxItem Tag="Approved">Đã duyệt</ComboBoxItem>
         </ComboBox>
-        <ComboBox x:Name="DeletionFilter" Grid.Column="4" SelectionChanged="OnFilterChanged">
+        <ComboBox x:Name="DeletionFilter" Grid.Column="4" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Lọc trạng thái lưu trữ">
           <ComboBoxItem Tag="Active" IsSelected="True">Đang hoạt động</ComboBoxItem><ComboBoxItem Tag="Deleted">Trong History</ComboBoxItem><ComboBoxItem Tag="All">Tất cả</ComboBoxItem>
         </ComboBox>
-        <ComboBox x:Name="SortInput" Grid.Column="5" SelectionChanged="OnFilterChanged">
+        <ComboBox x:Name="SortInput" Grid.Column="5" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Sắp xếp chương">
           <ComboBoxItem Tag="ReadingOrder" IsSelected="True">Thứ tự đọc</ComboBoxItem><ComboBoxItem Tag="Number">Số chương</ComboBoxItem><ComboBoxItem Tag="Title">Tên chương</ComboBoxItem><ComboBoxItem Tag="Updated">Mới sửa trước</ComboBoxItem>
         </ComboBox>
       </Grid>
@@ -52,9 +52,9 @@
       </WrapPanel>
       <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
         <TextBlock Text="Từ chương:" VerticalAlignment="Center" Margin="4,0,2,0" Foreground="{DynamicResource MutedBrush}"/>
-        <TextBox x:Name="RangeStartInput" Width="62" ToolTip="Số chương bắt đầu"/>
+        <TextBox x:Name="RangeStartInput" Width="62" ToolTip="Số chương bắt đầu" AutomationProperties.Name="Số chương bắt đầu" AutomationProperties.HelpText="Số chương bắt đầu"/>
         <TextBlock Text="đến:" VerticalAlignment="Center" Margin="4,0,2,0" Foreground="{DynamicResource MutedBrush}"/>
-        <TextBox x:Name="RangeEndInput" Width="62" ToolTip="Số chương kết thúc"/>
+        <TextBox x:Name="RangeEndInput" Width="62" ToolTip="Số chương kết thúc" AutomationProperties.Name="Số chương kết thúc" AutomationProperties.HelpText="Số chương kết thúc"/>
         <Button x:Name="SelectRangeButton" Content="Chọn dải" Click="OnSelectChapterRange" ToolTip="Chọn nhanh toàn bộ chương nằm trong dải từ X đến Y"/>
         <Button x:Name="ClearSelectionButton" Content="Bỏ chọn" Click="OnClearSelection"/>
         <TextBlock x:Name="SelectionText" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"/>
@@ -65,7 +65,7 @@
               Background="{DynamicResource PanelBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" RowBackground="{DynamicResource PanelBrush}" AlternatingRowBackground="{DynamicResource PanelAltBrush}"
               EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True"
               VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True"
-              SelectionChanged="OnSelectionChanged" MouseDoubleClick="OnGridDoubleClick">
+              SelectionChanged="OnSelectionChanged" MouseDoubleClick="OnGridDoubleClick" AutomationProperties.Name="Danh sách chương">
       <DataGrid.Columns>
         <DataGridTextColumn Header="#" Binding="{Binding DisplayOrder}" SortMemberPath="DisplayOrder" Width="62"/>
         <DataGridTextColumn Header="Số gốc" Binding="{Binding Number}" SortMemberPath="Number" Width="78"/>
@@ -80,7 +80,7 @@
       </DataGrid.Columns>
     </DataGrid>
     <Border Grid.Row="4" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,8,0,0">
-      <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/>
+      <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
     </Border>
   </Grid>
 </Window>

@@ -37,6 +37,10 @@ public partial class ProjectTranslationQueueWindow : Window
         _openChapter = openChapter;
         _refreshCoordinator = refreshCoordinator;
         InitializeComponent();
+        DependencyPropertyDescriptor.FromProperty(System.Windows.Controls.TextBlock.TextProperty, typeof(System.Windows.Controls.TextBlock))
+            .AddValueChanged(CurrentText, (_, _) => Accessibility.Announce(CurrentText));
+        DependencyPropertyDescriptor.FromProperty(System.Windows.Controls.TextBlock.TextProperty, typeof(System.Windows.Controls.TextBlock))
+            .AddValueChanged(StatusText, (_, _) => Accessibility.Announce(StatusText));
         QueueGrid.ItemsSource = _rows;
         _refreshTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {

@@ -399,6 +399,7 @@ public partial class MainWindow : Window
         if (AutosaveStatusText is null) return;
         AutosaveStatusText.Text = text;
         AutosaveStatusText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, pending ? "WarningBrush" : "SuccessBrush");
+        Accessibility.Announce(AutosaveStatusText);
     }
 
     private async void OnSaveProgress(object sender, RoutedEventArgs e)
@@ -681,6 +682,7 @@ public partial class MainWindow : Window
     {
         StatusText.Text = text;
         StatusText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextBrush");
+        Accessibility.Announce(StatusText);
     }
 
     private bool BeginUiOperation(bool allowDuringTranslation = false)
@@ -712,6 +714,7 @@ public partial class MainWindow : Window
                 ? " Tác vụ chưa hoàn tất; hãy giữ ứng dụng mở, kiểm tra dung lượng/quyền ghi và thử lại thao tác lưu."
                 : _service?.HasUnsavedChanges == true ? " Có thay đổi chưa lưu; hãy giữ ứng dụng mở và thử Lưu tiến độ." : "");
         StatusText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
+        Accessibility.Announce(StatusText);
     }
 
     private async void OnWindowClosing(object? sender, CancelEventArgs e)

@@ -783,6 +783,9 @@ public partial class MainWindow
             Margin = new Thickness(0, 0, 0, 8)
         };
         var list = new ListBox { Height = 320, DisplayMemberPath = nameof(QuickPaletteItem.Label) };
+        System.Windows.Automation.AutomationProperties.SetName(input, commandsMode ? "Tìm lệnh" : "Tìm chương để chuyển nhanh");
+        System.Windows.Automation.AutomationProperties.SetHelpText(input, (string)input.ToolTip);
+        System.Windows.Automation.AutomationProperties.SetName(list, commandsMode ? "Danh sách lệnh" : "Danh sách chương chuyển nhanh");
         var hint = new TextBlock
         {
             Text = commandsMode

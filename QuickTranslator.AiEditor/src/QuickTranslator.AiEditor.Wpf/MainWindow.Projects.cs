@@ -415,12 +415,23 @@ public partial class MainWindow
     private void OnRecentProjectsOpened(object sender, RoutedEventArgs e)
     {
         RecentProjectsMenu.Items.Clear();
+        var accessKeys = new HashSet<char>();
+        static string WithAccessKey(string text, HashSet<char> used)
+        {
+            for (int index = 0; index < text.Length; index++)
+            {
+                char candidate = char.ToUpperInvariant(text[index]);
+                if (!char.IsLetterOrDigit(candidate) || !used.Add(candidate)) continue;
+                return text.Insert(index, "_");
+            }
+            return text;
+        }
         foreach (var recent in _projectLibrary.RecentProjects.OrderByDescending(x => x.LastOpenedAt).Take(12))
         {
-            var item = new MenuItem { Header = (recent.Missing ? "⚠ " : "") + recent.Title, Tag = recent.ManifestPath, IsEnabled = !recent.Missing };
+            var item = new MenuItem { Header = WithAccessKey((recent.Missing ? "⚠ " : "") + recent.Title, accessKeys), Tag = recent.ManifestPath, IsEnabled = !recent.Missing };
             item.Click += async (_, _) => await OpenProjectPathAsync((string)item.Tag); RecentProjectsMenu.Items.Add(item);
         }
-        if (RecentProjectsMenu.Items.Count == 0) RecentProjectsMenu.Items.Add(new MenuItem { Header = "Chưa có dự án", IsEnabled = false });
+        if (RecentProjectsMenu.Items.Count == 0) RecentProjectsMenu.Items.Add(new MenuItem { Header = "_Chưa có dự án", IsEnabled = false });
     }
 
     private void OnShowProjectLibrary(object sender, RoutedEventArgs e) => ShowProjectLibraryWindow();

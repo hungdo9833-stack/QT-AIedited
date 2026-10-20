@@ -18,16 +18,16 @@
     <DockPanel x:Name="ApplicationShell" LastChildFill="True">
         <Menu DockPanel.Dock="Top" Padding="8,2" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <MenuItem Header="_Tệp">
-                <MenuItem Header="Dự án mới…" Click="OnNewProject"/>
-                <MenuItem Header="Mở dự án…" Click="OnOpenProject"/>
-                <MenuItem x:Name="RecentProjectsMenu" Header="Dự án gần đây" SubmenuOpened="OnRecentProjectsOpened"/>
+                <MenuItem Header="_Dự án mới…" Click="OnNewProject"/>
+                <MenuItem Header="_Mở dự án…" Click="OnOpenProject"/>
+                <MenuItem x:Name="RecentProjectsMenu" Header="Dự án _gần đây" SubmenuOpened="OnRecentProjectsOpened"/>
                 <Separator/>
-                <MenuItem Header="Đóng dự án" Click="OnCloseProject"/>
+                <MenuItem Header="Đóng dự á_n" Click="OnCloseProject"/>
             </MenuItem>
             <MenuItem Header="_Dự án">
-                <MenuItem Header="Thư viện dự án…" Click="OnShowProjectLibrary"/>
-                <MenuItem Header="Thuộc tính…" Click="OnEditProjectProperties"/>
-                <MenuItem Header="Mở thư mục" Click="OnOpenProjectFolder"/>
+                <MenuItem Header="_Thư viện dự án…" Click="OnShowProjectLibrary"/>
+                <MenuItem Header="Th_uộc tính…" Click="OnEditProjectProperties"/>
+                <MenuItem Header="_Mở thư mục" Click="OnOpenProjectFolder"/>
             </MenuItem>
         </Menu>
         <Border x:Name="GlobalToolbar" DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,7">
@@ -44,7 +44,7 @@
                     <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" Style="{StaticResource PrimaryButton}" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)"/>
                 </StackPanel>
                 <DockPanel>
-                    <ComboBox x:Name="ProjectSwitcher" Width="300" HorizontalAlignment="Left" DisplayMemberPath="Title" SelectionChanged="OnProjectSwitcherChanged" ToolTip="Chuyển dự án gần đây"/>
+                    <ComboBox x:Name="ProjectSwitcher" Width="300" HorizontalAlignment="Left" DisplayMemberPath="Title" SelectionChanged="OnProjectSwitcherChanged" ToolTip="Chuyển dự án gần đây" AutomationProperties.Name="Chuyển dự án gần đây" AutomationProperties.HelpText="Chuyển dự án gần đây"/>
                     <TextBlock x:Name="ShellChapterText" Text="Chưa mở chương" VerticalAlignment="Center" Margin="12,0" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
                 </DockPanel>
                 <Button x:Name="NewButton" Content="Chương mới" Click="OnNewChapter" Visibility="Collapsed"/>
@@ -60,11 +60,11 @@
         <Border x:Name="GlobalStatus" DockPanel.Dock="Bottom" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="10,5">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
-                    <TextBlock x:Name="AutosaveStatusText" Text="✓ Đã tự lưu" TextWrapping="NoWrap" Foreground="{DynamicResource SuccessBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                    <TextBlock x:Name="AutosaveStatusText" Text="✓ Đã tự lưu" TextWrapping="NoWrap" Foreground="{DynamicResource SuccessBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,14,0" AutomationProperties.LiveSetting="Polite"/>
                     <Button Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)" AutomationProperties.Name="Backend dịch · mở Quản lý GPU"><TextBlock x:Name="OllamaBackendStatus" Text="Local · Ollama Local · translategemma:12b" TextWrapping="NoWrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
                     <TextBlock x:Name="SavePathText" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="14,0,0,0" MaxWidth="420"/>
                 </StackPanel>
-                <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap"/>
+                <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
             </DockPanel>
         </Border>
         <Border x:Name="ShellNavigation" DockPanel.Dock="Left" Width="176" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="4,10">
@@ -72,7 +72,7 @@
                 <StackPanel DockPanel.Dock="Bottom">
                     <Separator Margin="8"/>
                     <Button x:Name="SettingsNavButton" Content="Thiết lập" ui:ButtonIcon.Glyph="&#xE713;" Tag="Settings" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
-                    <Button x:Name="NavRailToggleButton" Content="«" Click="OnToggleNavRail" Style="{StaticResource NavigationButton}" HorizontalContentAlignment="Center" ToolTip="Thu gọn / Mở rộng thanh điều hướng"/>
+                    <Button x:Name="NavRailToggleButton" Content="«" Click="OnToggleNavRail" Style="{StaticResource NavigationButton}" HorizontalContentAlignment="Center" ToolTip="Thu gọn / Mở rộng thanh điều hướng" AutomationProperties.Name="Thu gọn hoặc mở rộng thanh điều hướng" AutomationProperties.HelpText="Thu gọn / Mở rộng thanh điều hướng"/>
                 </StackPanel>
                 <StackPanel>
                     <TextBlock Text="WORKSPACE" Margin="14,4,8,8" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
@@ -96,8 +96,8 @@
                         </StackPanel>
                         <TextBlock x:Name="ActiveProjectTitle" Text="Dự án" FontSize="18" FontWeight="SemiBold" Margin="4" TextTrimming="CharacterEllipsis"/>
                     </DockPanel>
-                    <TextBox x:Name="ChapterSearchInput" ToolTip="Tìm theo số hoặc tên chương" TextChanged="OnChapterSearchChanged"/>
-                    <ComboBox x:Name="ChapterStateFilter" SelectionChanged="OnChapterSearchChanged">
+                    <TextBox x:Name="ChapterSearchInput" ToolTip="Tìm theo số hoặc tên chương" TextChanged="OnChapterSearchChanged" AutomationProperties.Name="Tìm chương" AutomationProperties.HelpText="Tìm theo số hoặc tên chương"/>
+                    <ComboBox x:Name="ChapterStateFilter" SelectionChanged="OnChapterSearchChanged" AutomationProperties.Name="Lọc trạng thái chương">
                         <ComboBoxItem Tag="All" IsSelected="True">Tất cả trạng thái</ComboBoxItem>
                         <ComboBoxItem Tag="Untranslated">Chưa dịch</ComboBoxItem>
                         <ComboBoxItem Tag="AwaitingReview">Chờ duyệt</ComboBoxItem>
@@ -105,7 +105,7 @@
                         <ComboBoxItem Tag="Approved">Đã duyệt</ComboBoxItem>
                         <ComboBoxItem Tag="Error">Lỗi</ComboBoxItem>
                     </ComboBox>
-                    <ComboBox x:Name="ProjectChapterSort" SelectionChanged="OnChapterSearchChanged">
+                    <ComboBox x:Name="ProjectChapterSort" SelectionChanged="OnChapterSearchChanged" AutomationProperties.Name="Sắp xếp chương">
                         <ComboBoxItem Tag="Number" IsSelected="True">Sắp theo số chương</ComboBoxItem>
                         <ComboBoxItem Tag="Title">Sắp theo tên</ComboBoxItem>
                         <ComboBoxItem Tag="Updated">Mới sửa trước</ComboBoxItem>
@@ -125,14 +125,14 @@
                     </WrapPanel>
                     <TextBlock x:Name="ProjectAutosaveStatus" Text="Đã lưu" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="4" TextWrapping="Wrap"/>
                 </StackPanel>
-                <ListBox x:Name="ProjectChapterList" DisplayMemberPath="Label" SelectionChanged="OnProjectChapterSelected" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/>
+                <ListBox x:Name="ProjectChapterList" DisplayMemberPath="Label" SelectionChanged="OnProjectChapterSelected" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Danh sách chương"/>
             </DockPanel>
         </Border>
-        <GridSplitter x:Name="ProjectSidebarSplitter" DockPanel.Dock="Left" Width="4" Background="{DynamicResource BorderBrush}" Visibility="Collapsed" DragCompleted="OnWorkspaceSplitterDragCompleted"/>
+        <GridSplitter x:Name="ProjectSidebarSplitter" DockPanel.Dock="Left" Width="4" Background="{DynamicResource BorderBrush}" Visibility="Collapsed" DragCompleted="OnWorkspaceSplitterDragCompleted" AutomationProperties.Name="Đổi kích thước mục lục"/>
         <Border x:Name="TranslationInspector" DockPanel.Dock="Right" Width="300" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1,0,0,0" Padding="10">
             <DockPanel>
                 <DockPanel DockPanel.Dock="Top">
-                    <Button DockPanel.Dock="Right" Content="×" Padding="7,2" Click="OnToggleInspector" ToolTip="Ẩn Inspector (Ctrl+Shift+I)"/>
+                    <Button DockPanel.Dock="Right" Content="×" Padding="7,2" Click="OnToggleInspector" ToolTip="Ẩn Inspector (Ctrl+Shift+I)" AutomationProperties.Name="Ẩn Inspector" AutomationProperties.HelpText="Ẩn Inspector (Ctrl+Shift+I)"/>
                     <StackPanel>
                         <TextBlock Text="INSPECTOR" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
                         <TextBlock x:Name="InspectorSelectionText" Text="Chọn một segment" FontWeight="SemiBold" Margin="0,4,0,8" TextWrapping="Wrap"/>
@@ -185,14 +185,14 @@
                                     <Button x:Name="InspectorUndoPronounsButton" Content="Hoàn tác" Click="OnUndoPronouns"/>
                                 </WrapPanel>
                                 <TextBlock x:Name="InspectorPronounSummaryText" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}" FontSize="12" Margin="2,4"/>
-                                <ListBox x:Name="InspectorPronounResultsList" MaxHeight="160" DisplayMemberPath="Label" SelectionChanged="OnPronounResultSelected"/>
+                                <ListBox x:Name="InspectorPronounResultsList" MaxHeight="160" DisplayMemberPath="Label" SelectionChanged="OnPronounResultSelected" AutomationProperties.Name="Danh sách kết quả xưng hô"/>
                             </StackPanel>
                         </ScrollViewer>
                     </TabItem>
                 </TabControl>
             </DockPanel>
         </Border>
-        <GridSplitter x:Name="InspectorSplitter" DockPanel.Dock="Right" Width="5" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted"/>
+        <GridSplitter x:Name="InspectorSplitter" DockPanel.Dock="Right" Width="5" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted" AutomationProperties.Name="Đổi kích thước Inspector"/>
         <AdornerDecorator>
             <TabControl x:Name="EditorTabs" Style="{StaticResource ShellTabControl}" SelectedIndex="0">
                 <TabItem Header="Bản dịch chương">
@@ -229,13 +229,13 @@
                                             <TextBlock x:Name="ReaderChapterCountText" DockPanel.Dock="Right" Foreground="{DynamicResource ReaderMutedBrush}"/>
                                             <TextBlock DockPanel.Dock="Left" Text="MỤC LỤC" FontWeight="SemiBold" Foreground="{DynamicResource ReaderMutedBrush}"/>
                                         </DockPanel>
-                                        <TextBox x:Name="ReaderChapterSearchInput" ToolTip="Tìm theo số hoặc tên chương" TextChanged="OnReaderChapterSearchChanged" Margin="0,8,0,6"/>
+                                        <TextBox x:Name="ReaderChapterSearchInput" ToolTip="Tìm theo số hoặc tên chương" TextChanged="OnReaderChapterSearchChanged" Margin="0,8,0,6" AutomationProperties.Name="Tìm chương trong mục lục đọc" AutomationProperties.HelpText="Tìm theo số hoặc tên chương"/>
                                     </StackPanel>
                                     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Center">
                                         <Button Content="← Trước" Click="OnReaderPreviousChapter" ToolTip="Chương trước (Alt+PageUp)" Background="{DynamicResource ReaderPanelBrush}" Foreground="{DynamicResource ReaderTextBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}"/>
                                         <Button Content="Sau →" Click="OnReaderNextChapter" ToolTip="Chương sau (Alt+PageDown)" Background="{DynamicResource ReaderPanelBrush}" Foreground="{DynamicResource ReaderTextBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}"/>
                                     </StackPanel>
-                                    <ListBox x:Name="ReaderChapterList" SelectionChanged="OnReaderChapterSelected" DisplayMemberPath="Label" Background="{DynamicResource ReaderPanelBrush}" Foreground="{DynamicResource ReaderTextBrush}" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
+                                    <ListBox x:Name="ReaderChapterList" SelectionChanged="OnReaderChapterSelected" DisplayMemberPath="Label" Background="{DynamicResource ReaderPanelBrush}" Foreground="{DynamicResource ReaderTextBrush}" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" AutomationProperties.Name="Danh sách chương để đọc">
                                         <ListBox.ItemContainerStyle>
                                             <Style TargetType="ListBoxItem">
                                                 <Setter Property="Background" Value="{x:Null}"/>
@@ -262,7 +262,7 @@
                                     </ListBox>
                                 </DockPanel>
                             </Border>
-                            <GridSplitter x:Name="ReaderCatalogSplitter" Grid.RowSpan="4" Grid.Column="1" Width="5" Background="{DynamicResource ReaderBorderBrush}" HorizontalAlignment="Stretch"/>
+                            <GridSplitter x:Name="ReaderCatalogSplitter" Grid.RowSpan="4" Grid.Column="1" Width="5" Background="{DynamicResource ReaderBorderBrush}" HorizontalAlignment="Stretch" AutomationProperties.Name="Đổi kích thước mục lục đọc"/>
                             <DockPanel x:Name="ReaderToolbar" Grid.Column="2" Background="{DynamicResource ReaderPageBrush}">
                                 <WrapPanel>
                                     <Button x:Name="ReaderCatalogToggleButton" Content="Ẩn mục lục" Click="OnToggleReaderCatalog"/>
@@ -282,7 +282,7 @@
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Content="Đóng" Click="OnCloseReaderSearch"/>
                                     <Button DockPanel.Dock="Right" Content="Tiếp" Click="OnFindNext"/>
-                                    <TextBox x:Name="ReaderSearchInput" KeyDown="OnReaderSearchKeyDown" ToolTip="Nhập từ cần tìm trong chương hiện tại"/>
+                                    <TextBox x:Name="ReaderSearchInput" KeyDown="OnReaderSearchKeyDown" ToolTip="Nhập từ cần tìm trong chương hiện tại" AutomationProperties.Name="Tìm trong chương hiện tại" AutomationProperties.HelpText="Nhập từ cần tìm trong chương hiện tại"/>
                                 </DockPanel>
                             </Border>
                             <Grid Grid.Row="2" Grid.Column="2">
@@ -297,7 +297,7 @@
                                     </ScrollViewer>
                                 </Border>
                                 <Popup x:Name="ReaderAppearancePopup" PlacementTarget="{Binding ElementName=ReaderAppearanceButton}" Placement="Bottom" StaysOpen="False">
-                                    <Border x:Name="ReaderAppearancePanel" Style="{StaticResource Card}" Width="390" Background="{DynamicResource ReaderPanelBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}">
+                                    <Border x:Name="ReaderAppearancePanel" Style="{StaticResource Card}" Width="390" Background="{DynamicResource ReaderPanelBrush}" BorderBrush="{DynamicResource ReaderBorderBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
                                         <ScrollViewer MaxHeight="700" VerticalScrollBarVisibility="Auto">
                                             <StackPanel>
                                                 <TextBlock Text="Tùy chỉnh đọc" Style="{StaticResource SectionTitle}" Foreground="{DynamicResource ReaderTextBrush}"/>
@@ -370,9 +370,9 @@
                                             <Border Width="1" Margin="6,6" Background="{DynamicResource BorderBrush}"/>
                                             <Button x:Name="ApproveCurrentButton" Content="Duyệt đoạn" ui:ButtonIcon.Glyph="&#xE73E;" Click="OnApprove" ToolTip="Duyệt đoạn hiện tại (Ctrl+Enter: Duyệt &amp; sang đoạn kế)"/>
                                             <Button x:Name="ApproveAllChapterButton" Content="Duyệt chương" Click="OnApproveAllSegments" ToolTip="Duyệt toàn bộ các đoạn đã có bản dịch trong chương này"/>
-                                            <ToggleButton x:Name="CommandOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm lệnh: quét, lịch sử, xuất, thay thế" AutomationProperties.Name="Thêm lệnh"/>
+                                            <ToggleButton x:Name="CommandOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm lệnh: quét, lịch sử, xuất, thay thế" AutomationProperties.Name="Thêm lệnh" AutomationProperties.HelpText="Thêm lệnh: quét, lịch sử, xuất, thay thế" IsTabStop="True"/>
                                             <Popup IsOpen="{Binding IsChecked, ElementName=CommandOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=CommandOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                                                <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}">
+                                                <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
                                                     <StackPanel ButtonBase.Click="OnCommandOverflowClick">
                                                         <Button x:Name="QuickScanChineseToolbarButton" Content="Quét chữ Hán còn sót" ui:ButtonIcon.Glyph="&#xE721;" Click="OnScanChineseText" Style="{StaticResource MenuButton}"/>
                                                         <Button x:Name="QuickScanPronounsToolbarButton" Content="Quét xưng hô" ui:ButtonIcon.Glyph="&#xE716;" Click="OnScanPronouns" Style="{StaticResource MenuButton}" ToolTip="Quét đại từ &amp; xưng hô bằng quy tắc nhân vật"/>
@@ -402,7 +402,7 @@
                                     <ProgressBar x:Name="ChapterProgress" Height="4" Margin="4,5,4,2" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
                                     <TextBlock x:Name="QueueInfo" Margin="4,2" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
                                     <TextBlock x:Name="PronounReportSummary" Margin="4" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"/>
-                                    <ListBox x:Name="PronounResultsList" MaxHeight="80" DisplayMemberPath="Label" SelectionChanged="OnPronounResultSelected"/>
+                                    <ListBox x:Name="PronounResultsList" MaxHeight="80" DisplayMemberPath="Label" SelectionChanged="OnPronounResultSelected" AutomationProperties.Name="Danh sách kết quả xưng hô"/>
                                 </StackPanel>
                             </Border>
                             <Grid>
@@ -420,7 +420,7 @@
                                         <TextBox x:Name="ChapterInput" AcceptsReturn="True" AcceptsTab="True" TextChanged="OnChapterInputChanged" SelectionChanged="OnChapterSourceSelectionChanged" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" FontSize="16" BorderThickness="0" Margin="0,5,0,0"/>
                                     </DockPanel>
                                 </Border>
-                                <GridSplitter x:Name="ChapterTwoPaneSplitter" Grid.Column="1" Width="5" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted"/>
+                                <GridSplitter x:Name="ChapterTwoPaneSplitter" Grid.Column="1" Width="5" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted" AutomationProperties.Name="Đổi kích thước hai ô biên dịch"/>
                                 <Border Grid.Column="2" Style="{StaticResource Card}" Margin="3,0,0,0">
                                     <DockPanel>
                                         <DockPanel DockPanel.Dock="Top" LastChildFill="False">
@@ -487,9 +487,9 @@
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                     <CheckBox x:Name="FollowQueueCheck" Content="Theo queue" IsChecked="True"/>
                                     <Button x:Name="RestoreAllPanesButton" Content="Hiện đủ 4 ô" Click="OnRestoreTraditionalPanes" ToolTip="Hiện đủ 4 ô / Khôi phục ô phóng lớn (Ctrl+Shift+M)"/>
-                                    <ToggleButton x:Name="StructureOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Cấu trúc đoạn: tách, gộp, ranh giới, lịch sử, khôi phục" AutomationProperties.Name="Lệnh cấu trúc đoạn"/>
+                                    <ToggleButton x:Name="StructureOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Cấu trúc đoạn: tách, gộp, ranh giới, lịch sử, khôi phục" AutomationProperties.Name="Lệnh cấu trúc đoạn" AutomationProperties.HelpText="Cấu trúc đoạn: tách, gộp, ranh giới, lịch sử, khôi phục" IsTabStop="True"/>
                                     <Popup IsOpen="{Binding IsChecked, ElementName=StructureOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=StructureOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                                        <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}">
+                                        <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
                                             <StackPanel ButtonBase.Click="OnCommandOverflowClick">
                                                 <Button x:Name="SplitSegmentButton" Content="Tách đoạn" Click="OnSplitSegment" Style="{StaticResource MenuButton}"/>
                                                 <Button x:Name="MergeSegmentButton" Content="Gộp đoạn" Click="OnMergeSegments" Style="{StaticResource MenuButton}"/>
@@ -511,7 +511,7 @@
                             <DockPanel Grid.Column="0">
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                     <Button x:Name="NextIssueSegmentButton" DockPanel.Dock="Right" Content="Lỗi kế" ui:ButtonIcon.Glyph="&#xE7BA;" Click="OnJumpToNextIssueSegment" Padding="8,4" ToolTip="Nhảy tới đoạn lỗi / cần kiểm tra kế tiếp (F8)"/>
-                                    <ComboBox x:Name="SegmentStateFilter" SelectionChanged="OnSegmentFilterChanged" ToolTip="Lọc nhanh đoạn theo trạng thái">
+                                    <ComboBox x:Name="SegmentStateFilter" SelectionChanged="OnSegmentFilterChanged" ToolTip="Lọc nhanh đoạn theo trạng thái" AutomationProperties.Name="Lọc trạng thái đoạn" AutomationProperties.HelpText="Lọc nhanh đoạn theo trạng thái">
                                         <ComboBoxItem Tag="All" IsSelected="True">Tất cả đoạn</ComboBoxItem>
                                         <ComboBoxItem Tag="Untranslated">○ Chưa dịch</ComboBoxItem>
                                         <ComboBoxItem Tag="AwaitingReview">◐ Chờ duyệt</ComboBoxItem>
@@ -519,7 +519,7 @@
                                         <ComboBoxItem Tag="Approved">● Đã duyệt</ComboBoxItem>
                                     </ComboBox>
                                 </DockPanel>
-                                <ListBox x:Name="SegmentList" SelectionChanged="OnSegmentSelected" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox x:Name="SegmentList" SelectionChanged="OnSegmentSelected" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Danh sách đoạn">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <TextBlock Text="{Binding Label}" TextWrapping="Wrap" Padding="4,6"/>
@@ -527,7 +527,7 @@
                                     </ListBox.ItemTemplate>
                                 </ListBox>
                             </DockPanel>
-                            <GridSplitter x:Name="SegmentNavigatorSplitter" Grid.Column="1" Width="5" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted"/>
+                            <GridSplitter x:Name="SegmentNavigatorSplitter" Grid.Column="1" Width="5" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted" AutomationProperties.Name="Đổi kích thước danh sách đoạn"/>
                             <Grid Grid.Column="2">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -559,7 +559,7 @@
                                             <TextBox x:Name="SourceText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsInactiveSelectionHighlightEnabled="False" SelectionChanged="OnTraditionalSelectionChanged" FontSize="16"/>
                                         </DockPanel>
                                     </Border>
-                                    <GridSplitter x:Name="TraditionalVerticalSplitter" Grid.Column="1" Grid.RowSpan="3" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted"/>
+                                    <GridSplitter x:Name="TraditionalVerticalSplitter" Grid.Column="1" Grid.RowSpan="3" Width="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted" AutomationProperties.Name="Đổi kích thước cột biên dịch"/>
                                     <Border x:Name="HanVietPane" Grid.Column="2" Style="{StaticResource Card}" Margin="2">
                                         <DockPanel>
                                             <DockPanel DockPanel.Dock="Top">
@@ -572,7 +572,7 @@
                                             <TextBox x:Name="HanVietText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsInactiveSelectionHighlightEnabled="False" SelectionChanged="OnTraditionalSelectionChanged" FontSize="16"/>
                                         </DockPanel>
                                     </Border>
-                                    <GridSplitter x:Name="TraditionalHorizontalSplitter" Grid.Row="1" Grid.ColumnSpan="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted"/>
+                                    <GridSplitter x:Name="TraditionalHorizontalSplitter" Grid.Row="1" Grid.ColumnSpan="3" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted" AutomationProperties.Name="Đổi kích thước hàng biên dịch"/>
                                     <Border x:Name="VietPhrasePane" Grid.Row="2" Style="{StaticResource Card}" Margin="2">
                                         <DockPanel>
                                             <DockPanel DockPanel.Dock="Top">
@@ -620,7 +620,7 @@
                             <ColumnDefinition Width="230"/>
                             <ColumnDefinition/>
                         </Grid.ColumnDefinitions>
-                        <ListBox x:Name="SettingsNavigation" SelectionChanged="OnSettingsNavigationChanged" SelectedIndex="0" Background="{DynamicResource SurfaceBrush}" BorderThickness="0" Padding="6">
+                        <ListBox x:Name="SettingsNavigation" SelectionChanged="OnSettingsNavigationChanged" SelectedIndex="0" Background="{DynamicResource SurfaceBrush}" BorderThickness="0" Padding="6" AutomationProperties.Name="Danh sách nhóm thiết lập">
                             <ListBoxItem Tag="Ai">AI &amp; hiệu năng</ListBoxItem>
                             <ListBoxItem Tag="Traditional">Data QuickTranslator</ListBoxItem>
                             <ListBoxItem Tag="Prompts">Prompt Presets</ListBoxItem>
@@ -749,7 +749,7 @@
                                             <TextBlock Text="Thuật ngữ đã xác nhận" FontWeight="SemiBold"/>
                                             <TextBlock Text="Mỗi mục gồm từ tiếng Trung và bản tiếng Việt đã xác nhận." Foreground="{DynamicResource MutedBrush}"/>
                                             <TextBox x:Name="TermsInput" Visibility="Collapsed"/>
-                                            <DataGrid x:Name="GlossaryGrid" Height="280" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single">
+                                            <DataGrid x:Name="GlossaryGrid" Height="280" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" AutomationProperties.Name="Danh sách thuật ngữ">
                                                 <DataGrid.Columns>
                                                     <DataGridTextColumn Header="Tiếng Trung" Binding="{Binding Chinese}" Width="*"/>
                                                     <DataGridTextColumn Header="Tiếng Việt" Binding="{Binding Vietnamese}" Width="2*"/>
@@ -779,8 +779,8 @@
                                     <TextBlock Text="Nhân vật &amp; xưng hô" Style="{StaticResource SectionTitle}"/>
                                     <TextBlock Text="Chỉ quy tắc đã xác nhận được đưa vào prompt; ứng dụng không tự suy đoán nhân vật hay vai thoại." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
                                     <WrapPanel>
-                                        <TextBox x:Name="CharacterSearchInput" Width="240" ToolTip="Tìm nhân vật" TextChanged="OnCharacterSearchChanged"/>
-                                        <TextBox x:Name="CharacterProjectNameInput" Width="300" ToolTip="Tên dự án"/>
+                                        <TextBox x:Name="CharacterSearchInput" Width="240" ToolTip="Tìm nhân vật" TextChanged="OnCharacterSearchChanged" AutomationProperties.Name="Tìm nhân vật" AutomationProperties.HelpText="Tìm nhân vật"/>
+                                        <TextBox x:Name="CharacterProjectNameInput" Width="300" ToolTip="Tên dự án" AutomationProperties.Name="Tên dự án nhân vật" AutomationProperties.HelpText="Tên dự án"/>
                                         <CheckBox x:Name="ConsistencyLockCheck" Content="Bật khóa nhất quán Project" ToolTip="Chèn đại từ và cách xưng hô đã khóa vào prompt của đúng nhân vật xuất hiện trong đoạn"/>
                                         <CheckBox x:Name="NormalizeAfterTranslationCheck" Content="Chuẩn hóa an toàn sau dịch" IsChecked="True"/>
                                     </WrapPanel>
@@ -795,7 +795,7 @@
                                         <Button x:Name="ExportCharactersButton" Content="Xuất JSON" Click="OnExportCharacters"/>
                                         <Button x:Name="PreviewCharactersButton" Content="Xem prompt khóa" Click="OnPreviewCharacters"/>
                                     </WrapPanel>
-                                    <DataGrid x:Name="CharactersGrid" AutoGenerateColumns="False" IsReadOnly="False" SelectionMode="Single" SelectionChanged="OnCharacterSelected" Height="430" CanUserAddRows="False">
+                                    <DataGrid x:Name="CharactersGrid" AutoGenerateColumns="False" IsReadOnly="False" SelectionMode="Single" SelectionChanged="OnCharacterSelected" Height="430" CanUserAddRows="False" AutomationProperties.Name="Danh sách nhân vật">
                                         <DataGrid.Columns>
                                             <DataGridTextColumn Header="Nhân vật" IsReadOnly="True" Binding="{Binding VietnameseName}" Width="2*"/>
                                             <DataGridTextColumn Header="Tên Trung" IsReadOnly="True" Binding="{Binding ChineseName}" Width="2*"/>

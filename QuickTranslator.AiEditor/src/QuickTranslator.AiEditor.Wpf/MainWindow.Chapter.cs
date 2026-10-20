@@ -386,6 +386,9 @@ public partial class MainWindow
         selector.SelectedItem = boundaries.MinBy(b => Math.Abs(b.Offset - preferred));
         var left = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         var right = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        System.Windows.Automation.AutomationProperties.SetName(selector, "Chọn ranh giới cuối câu");
+        System.Windows.Automation.AutomationProperties.SetName(left, "Nội dung trước ranh giới");
+        System.Windows.Automation.AutomationProperties.SetName(right, "Nội dung sau ranh giới");
         void ShowParts() { if (selector.SelectedItem is not BoundaryChoice choice) return; int offset = choice.Offset; left.Text = text[..offset]; right.Text = text[offset..]; }
         selector.SelectionChanged += (_, _) => ShowParts(); ShowParts();
         var content = new DockPanel { Margin = new Thickness(24) }; content.Children.Add(selector); DockPanel.SetDock(selector, Dock.Top);
@@ -438,7 +441,9 @@ public partial class MainWindow
         var root = new DockPanel();
         Border footer = ThemedDialog.Footer(null, close);
         DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
-        root.Children.Add(new TextBox { Text = text, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(24) });
+        var contentText = new TextBox { Text = text, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(24) };
+        System.Windows.Automation.AutomationProperties.SetName(contentText, title);
+        root.Children.Add(contentText);
         var window = new Window
         {
             Owner = this, Title = title, Width = 900, Height = 650,
