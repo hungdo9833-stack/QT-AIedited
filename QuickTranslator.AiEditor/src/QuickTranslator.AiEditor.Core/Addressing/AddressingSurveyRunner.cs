@@ -14,9 +14,8 @@ public sealed record AddressingSurveyWork(IReadOnlyList<AddressingTask> Scenes, 
     public int PendingPairs => PendingTasks.Count(t => t.Kind == AddressingTaskKind.Pair);
     public int PendingIdentities => PendingTasks.Count(t => t.Kind == AddressingTaskKind.Identity);
     /// <summary>Requests still needed. Pairs are planned again once the scenes are answered, so this is an estimate.</summary>
-    public int EstimatedRequests => Chunks(PendingScenes.Count) + Chunks(PendingTasks.Count);
+    public int EstimatedRequests => AddressingAiSurvey.CountRequests(PendingScenes, Settings) + AddressingAiSurvey.CountRequests(PendingTasks, Settings);
     public bool Complete => PendingScenes.Count == 0 && PendingTasks.Count == 0;
-    private int Chunks(int n) => (n + Settings.TasksPerRequest - 1) / Settings.TasksPerRequest;
 }
 
 public sealed record AddressingSurveyProgress(string Stage, int RequestsSent, int MaximumRequests, string Message);

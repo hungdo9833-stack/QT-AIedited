@@ -422,7 +422,8 @@ public sealed class AddressingLedgerWindow : Window
         var options = runtime with
         {
             Model = model.Trim(), ContextSize = gemini ? Math.Max(65536, runtime.ContextSize) : runtime.ContextSize,
-            MaximumOutputTokens = gemini ? Math.Max(8192, runtime.MaximumOutputTokens) : runtime.MaximumOutputTokens
+            // 16 tasks of ~350 tokens are planned into ~6K; the rest is headroom so a long answer is never cut off.
+            MaximumOutputTokens = gemini ? Math.Max(16384, runtime.MaximumOutputTokens) : runtime.MaximumOutputTokens
         };
         options.Validate(); return options;
     }

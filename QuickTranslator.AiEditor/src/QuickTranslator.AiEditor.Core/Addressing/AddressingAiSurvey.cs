@@ -48,13 +48,15 @@ public sealed record AddressingRequestPlan(string Id, IReadOnlyList<AddressingTa
 public sealed record AddressingVerification(IReadOnlyList<AddressingProposal> Proposals, IReadOnlyList<string> SchemaIssues);
 
 public sealed record AddressingSettings(int MinimumPairLines = 3, int MaximumPairs = 120, int MinimumNarrationMentions = 3, int MaximumCharacters = 60,
-    int SamplesPerTask = 8, int TasksPerRequest = 6, int MaximumSampleLength = 160, int MaximumScenes = 40, int SceneQuotes = 10, int SceneCharacters = 1_400)
+    int SamplesPerTask = 8, int TasksPerRequest = 16, int MaximumSampleLength = 160, int MaximumScenes = 40, int SceneQuotes = 10, int SceneCharacters = 1_400,
+    int InputTokensPerRequest = 12_000, int OutputTokensPerTask = 350, int OutputTokensPerRequest = 6_000)
 {
     public void Validate()
     {
         if (MinimumPairLines < 1 || MaximumPairs is < 0 or > 1000 || MinimumNarrationMentions < 1 || MaximumCharacters is < 0 or > 1000 ||
-            SamplesPerTask is < 2 or > 20 || TasksPerRequest is < 1 or > 12 || MaximumSampleLength is < 40 or > 400 ||
-            MaximumScenes is < 0 or > 2000 || SceneQuotes is < 2 or > 30 || SceneCharacters is < 200 or > 4000)
+            SamplesPerTask is < 2 or > 20 || TasksPerRequest is < 1 or > 24 || MaximumSampleLength is < 40 or > 400 ||
+            MaximumScenes is < 0 or > 2000 || SceneQuotes is < 2 or > 30 || SceneCharacters is < 200 or > 4000 ||
+            InputTokensPerRequest is < 1_000 or > 60_000 || OutputTokensPerTask is < 50 or > 2_000 || OutputTokensPerRequest is < 500 or > 32_000)
             throw new ArgumentOutOfRangeException(nameof(AddressingSettings));
     }
 }
@@ -401,16 +403,52 @@ public static class AddressingAiSurvey
         return strong.OrderBy(x => x.ChapterNumber).ThenBy(x => x.QuoteStartUtf16).ToArray();
     }
 
-    public static IReadOnlyList<AddressingRequestPlan> PlanRequests(IReadOnlyList<AddressingTask> tasks, string model, AddressingSettings? settings = null)
+    /// <summary>
+    /// Packs the tasks, in order, into requests. A request is closed when the next task would break any of three budgets: the
+    /// estimated input tokens, the expected output tokens (so the reply cannot be cut off by the output limit) or the task count.
+    /// <paramref name="options"/> (the model actually used) only lowers the budgets; one task always travels alone if it is over.
+    /// </summary>
+    public static IReadOnlyList<AddressingRequestPlan> PlanRequests(IReadOnlyList<AddressingTask> tasks, string model, AddressingSettings? settings = null,
+        Models.ModelOptions? options = null)
     {
         settings ??= new(); settings.Validate();
-        return tasks.Chunk(settings.TasksPerRequest).Select(chunk =>
+        return Pack(tasks, settings, options).Select(chunk =>
         {
             string prompt = Prompt(chunk);
             string id = EntityMemoryIdentity.Fingerprint(new { PromptVersion, model, tasks = chunk.Select(t => t.TaskId).ToArray() });
             return new AddressingRequestPlan(id, chunk, prompt, PromptTokenEstimate(prompt));
         }).ToArray();
     }
+
+    /// <summary>How many requests these tasks need: the same packing as <see cref="PlanRequests"/>, without building the prompts.</summary>
+    public static int CountRequests(IReadOnlyList<AddressingTask> tasks, AddressingSettings settings, Models.ModelOptions? options = null) =>
+        Pack(tasks, settings, options).Count;
+
+    private static IReadOnlyList<AddressingTask[]> Pack(IReadOnlyList<AddressingTask> tasks, AddressingSettings settings, Models.ModelOptions? options)
+    {
+        int inputBudget = settings.InputTokensPerRequest, outputBudget = settings.OutputTokensPerRequest;
+        if (options is not null)
+        {
+            inputBudget = Math.Min(inputBudget, options.ContextSize - options.MaximumOutputTokens - 128);
+            outputBudget = Math.Min(outputBudget, options.MaximumOutputTokens * 3 / 5); // Never plan a reply near the cut-off.
+        }
+        int fixedInput = PromptTokenEstimate(Prompt([]));
+        var packs = new List<AddressingTask[]>(); var open = new List<AddressingTask>();
+        int input = fixedInput, output = 0;
+        foreach (var task in tasks)
+        {
+            int taskInput = Translation.PromptTokenBudget.Estimate(TaskBody(task)) + 8, taskOutput = ExpectedOutputTokens(task, settings);
+            if (open.Count > 0 && (open.Count >= settings.TasksPerRequest || input + taskInput > inputBudget || output + taskOutput > outputBudget))
+            { packs.Add([.. open]); open.Clear(); input = fixedInput; output = 0; }
+            open.Add(task); input += taskInput; output += taskOutput;
+        }
+        if (open.Count > 0) packs.Add([.. open]);
+        return packs;
+    }
+
+    // A scene answers every quote with a turn; the other kinds answer once, whatever the number of samples.
+    private static int ExpectedOutputTokens(AddressingTask task, AddressingSettings settings) =>
+        task.Kind == AddressingTaskKind.Scene ? Math.Max(settings.OutputTokensPerTask, 40 * task.Samples.Count) : settings.OutputTokensPerTask;
 
     private static string TaskId(string kind, string key, IReadOnlyList<AddressingTaskSample> samples) =>
         kind + ":" + EntityMemoryIdentity.Fingerprint(new { kind, key, samples = samples.Select(s => new { s.ChapterNumber, s.StartUtf16 }).ToArray() })[..16];

@@ -166,7 +166,7 @@ public sealed class AddressingAiEngine(IJsonSchemaOllamaClient client)
         options.Validate();
         if (maximumRequests is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(maximumRequests));
         var state = await store.LoadAsync(ct).ConfigureAwait(false);
-        var plan = AddressingAiSurvey.PlanRequests(tasks.Where(t => !state.Done(t)).ToArray(), options.Model, settings);
+        var plan = AddressingAiSurvey.PlanRequests(tasks.Where(t => !state.Done(t)).ToArray(), options.Model, settings, options);
         int sent = 0; string? stoppedBy = null;
         foreach (var request in plan)
         {
