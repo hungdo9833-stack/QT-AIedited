@@ -368,41 +368,103 @@ public partial class MainWindow
     private CharacterProfile? ShowCharacterEditor(CharacterProfile profile)
     {
         var panel = new StackPanel { Margin = new Thickness(24) };
-        TextBox Field(string label, string value, int height = 30)
+        TextBox Field(string value, int height = 30)
         {
-            panel.Children.Add(new TextBlock { Text = label, FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 6, 4, 2) });
-            var box = new TextBox { Text = value, MinHeight = height, AcceptsReturn = height > 40, TextWrapping = TextWrapping.Wrap,
+            return new TextBox { Text = value, MinHeight = height, AcceptsReturn = height > 40, TextWrapping = TextWrapping.Wrap,
                 VerticalScrollBarVisibility = height > 40 ? ScrollBarVisibility.Auto : ScrollBarVisibility.Hidden };
-            panel.Children.Add(box); return box;
         }
-        ComboBox PronounField(string label, string value)
+        ComboBox PronounField(string value)
         {
-            panel.Children.Add(new TextBlock { Text = label, FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 6, 4, 2) });
-            var box = new ComboBox { IsEditable = true, Text = value,
+            return new ComboBox { IsEditable = true, Text = value,
                 ItemsSource = new[] { "nàng", "nàng ấy", "hắn", "hắn ta", "y", "người ấy" } };
-            panel.Children.Add(box); return box;
         }
-        var vietnamese = Field("Tên Hán Việt / tiếng Việt (bắt buộc)", profile.VietnameseName);
-        var chinese = Field("Tên tiếng Trung đã xác nhận (có thể để trống; không tự suy đoán)", profile.ChineseName);
-        var aliases = Field("Bí danh / tên thay thế đã xác nhận — mỗi dòng một tên", string.Join(Environment.NewLine, profile.Aliases), 70);
-        panel.Children.Add(new TextBlock { Text = "Giới tính đã xác định", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 6, 4, 2) });
+        StackPanel LabeledField(string label, FrameworkElement field)
+        {
+            var fieldPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var fieldLabel = new TextBlock { Text = label };
+            fieldLabel.SetResourceReference(FrameworkElement.StyleProperty, "FieldLabel");
+            fieldPanel.Children.Add(fieldLabel);
+            fieldPanel.Children.Add(field);
+            return fieldPanel;
+        }
+        Grid TwoColumnGrid()
+        {
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            return grid;
+        }
+        void AddFormRow(Grid grid, UIElement left, UIElement? right = null)
+        {
+            int row = grid.RowDefinitions.Count;
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(left, row);
+            if (right is null) Grid.SetColumnSpan(left, 3);
+            grid.Children.Add(left);
+            if (right is null) return;
+            Grid.SetRow(right, row);
+            Grid.SetColumn(right, 2);
+            grid.Children.Add(right);
+        }
+        Border Section(string title, params UIElement[] children)
+        {
+            var content = new StackPanel();
+            var header = new TextBlock
+            {
+                Text = title,
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(4, 0, 4, 8)
+            };
+            header.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextBrush");
+            content.Children.Add(header);
+            foreach (UIElement child in children) content.Children.Add(child);
+            var card = new Border { Child = content };
+            card.SetResourceReference(FrameworkElement.StyleProperty, "Card");
+            return card;
+        }
+
+        var vietnamese = Field(profile.VietnameseName);
+        var chinese = Field(profile.ChineseName);
+        var aliases = Field(string.Join(Environment.NewLine, profile.Aliases), 70);
         var genderChoices = new[] { new GenderChoice(CharacterGender.Unknown, "Chưa xác định"),
             new GenderChoice(CharacterGender.Female, "Nữ"), new GenderChoice(CharacterGender.Male, "Nam"),
             new GenderChoice(CharacterGender.Other, "Khác") };
         var gender = new ComboBox { ItemsSource = genderChoices, DisplayMemberPath = "Label",
             SelectedItem = genderChoices.Single(g => g.Value == profile.Gender) };
-        panel.Children.Add(gender);
-        var primary = PronounField("Đại từ trần thuật chính — chọn hoặc nhập thủ công", profile.PrimaryNarrativePronoun);
-        var secondary = PronounField("Đại từ trần thuật phụ — chọn hoặc nhập thủ công", profile.SecondaryNarrativePronoun);
+        var identityGrid = TwoColumnGrid();
+        AddFormRow(identityGrid,
+            LabeledField("Tên tiếng Trung đã xác nhận (có thể để trống; không tự suy đoán)", chinese),
+            LabeledField("Tên Hán Việt / tiếng Việt (bắt buộc)", vietnamese));
+        AddFormRow(identityGrid, LabeledField("Bí danh / tên thay thế đã xác nhận — mỗi dòng một tên", aliases));
+        AddFormRow(identityGrid, LabeledField("Giới tính đã xác định", gender));
+        panel.Children.Add(Section("Tên & giới tính", identityGrid));
+
+        var primary = PronounField(profile.PrimaryNarrativePronoun);
+        var secondary = PronounField(profile.SecondaryNarrativePronoun);
         var narrativeLocked = new CheckBox { Content = "Khóa đại từ trần thuật chính cho nhân vật này",
             IsChecked = profile.NarrativePronounLocked, Margin = new Thickness(4, 8, 4, 4) };
-        panel.Children.Add(narrativeLocked);
-        panel.Children.Add(new TextBlock { Text = "Khi khóa nhất quán của Project bật, đại từ phụ không thay thế đại từ chính trong prompt hoặc chuẩn hóa.",
-            TextWrapping = TextWrapping.Wrap, Foreground = (System.Windows.Media.Brush)FindResource("MutedBrush"), Margin = new Thickness(4) });
-        var disallowed = Field("Cách gọi cần tránh trong lời kể — mỗi dòng một cách gọi", string.Join(Environment.NewLine, profile.DisallowedNarrativePronouns), 85);
-        panel.Children.Add(new TextBlock { Text = "Quan hệ với nhân vật khác", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 10, 4, 2) });
-        panel.Children.Add(new TextBlock { Text = $"Người nói: {profile.VietnameseName}. Chọn người nghe; mỗi chiều A→B và B→A là quy tắc độc lập, cần xác nhận riêng và không ghi đè quy tắc đã Khóa.",
-            TextWrapping = TextWrapping.Wrap, Foreground = (System.Windows.Media.Brush)FindResource("MutedBrush"), Margin = new Thickness(4) });
+        var narrativeHelp = new TextBlock { Text = "Khi khóa nhất quán của Project bật, đại từ phụ không thay thế đại từ chính trong prompt hoặc chuẩn hóa.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        narrativeHelp.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
+        var disallowed = Field(string.Join(Environment.NewLine, profile.DisallowedNarrativePronouns), 85);
+        var enabled = new CheckBox { Content = "Bật chuẩn hóa cho nhân vật này", IsChecked = profile.NormalizationEnabled, Margin = new Thickness(4, 8, 4, 4) };
+        var narrativeGrid = TwoColumnGrid();
+        AddFormRow(narrativeGrid,
+            LabeledField("Đại từ trần thuật chính — chọn hoặc nhập thủ công", primary),
+            LabeledField("Đại từ trần thuật phụ — chọn hoặc nhập thủ công", secondary));
+        AddFormRow(narrativeGrid, narrativeLocked);
+        AddFormRow(narrativeGrid, narrativeHelp);
+        AddFormRow(narrativeGrid, enabled);
+        AddFormRow(narrativeGrid, LabeledField("Cách gọi cần tránh trong lời kể — mỗi dòng một cách gọi", disallowed));
+        panel.Children.Add(Section("Đại từ lời kể", narrativeGrid));
+
+        var relationshipHeading = new TextBlock { Text = "Quan hệ với nhân vật khác" };
+        relationshipHeading.SetResourceReference(FrameworkElement.StyleProperty, "FieldLabel");
+        var relationshipHelp = new TextBlock { Text = $"Người nói: {profile.VietnameseName}. Chọn người nghe; mỗi chiều A→B và B→A là quy tắc độc lập, cần xác nhận riêng và không ghi đè quy tắc đã Khóa.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        relationshipHelp.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
 
         var createdListeners = new List<CharacterProfile>();
         List<CharacterProfile> AvailableListeners() => _characterProject.Profiles
@@ -449,19 +511,36 @@ public partial class MainWindow
             MinHeight = 140, MaxHeight = 230, SelectionMode = DataGridSelectionMode.Single
         };
         relationshipGrid.Columns.Add(listenerColumn);
-        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Quan hệ (A→B)", Binding = new Binding(nameof(RelationshipEditorRow.Relationship)), Width = new DataGridLength(0.95, DataGridLengthUnitType.Star) });
-        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Tự xưng", Binding = new Binding(nameof(RelationshipEditorRow.SelfReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star) });
-        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Gọi đối phương", Binding = new Binding(nameof(RelationshipEditorRow.AddresseeReference)), Width = new DataGridLength(0.85, DataGridLengthUnitType.Star) });
-        relationshipGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Bật", Binding = new Binding(nameof(RelationshipEditorRow.Enabled)), Width = 48 });
-        relationshipGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Khóa", Binding = new Binding(nameof(RelationshipEditorRow.Locked)), Width = 52 });
+        var relationshipColumn = new DataGridTextColumn { Header = "Quan hệ (A→B)", Binding = new Binding(nameof(RelationshipEditorRow.Relationship)), Width = new DataGridLength(0.95, DataGridLengthUnitType.Star) };
+        var selfReferenceColumn = new DataGridTextColumn { Header = "Tự xưng", Binding = new Binding(nameof(RelationshipEditorRow.SelfReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star) };
+        var addresseeReferenceColumn = new DataGridTextColumn { Header = "Gọi đối phương", Binding = new Binding(nameof(RelationshipEditorRow.AddresseeReference)), Width = new DataGridLength(0.85, DataGridLengthUnitType.Star) };
+        var enabledColumn = new DataGridCheckBoxColumn { Header = "Bật", Binding = new Binding(nameof(RelationshipEditorRow.Enabled)), Width = 48, Visibility = Visibility.Collapsed };
+        var lockedColumn = new DataGridCheckBoxColumn { Header = "Khóa", Binding = new Binding(nameof(RelationshipEditorRow.Locked)), Width = 52, Visibility = Visibility.Collapsed };
+        relationshipGrid.Columns.Add(selfReferenceColumn);
+        relationshipGrid.Columns.Add(addresseeReferenceColumn);
+        relationshipGrid.Columns.Add(relationshipColumn);
+        relationshipGrid.Columns.Add(enabledColumn);
+        relationshipGrid.Columns.Add(lockedColumn);
         // Optional chapter range (sổ xưng hô); empty = whole book.
         relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Từ ch.", Binding = new Binding(nameof(RelationshipEditorRow.FromChapter)) { TargetNullValue = "" }, Width = 56 });
         relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Đến ch.", Binding = new Binding(nameof(RelationshipEditorRow.ToChapter)) { TargetNullValue = "" }, Width = 60 });
-        relationshipGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Xác nhận B→A", Binding = new Binding(nameof(RelationshipEditorRow.SyncReverse)), Width = 92 });
-        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "B tự xưng", Binding = new Binding(nameof(RelationshipEditorRow.ReverseSelfReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star) });
-        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "B gọi A", Binding = new Binding(nameof(RelationshipEditorRow.ReverseAddresseeReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star) });
-        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Ghi chú", Binding = new Binding(nameof(RelationshipEditorRow.AddressingNotes)), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
-        panel.Children.Add(relationshipGrid);
+        var syncReverseColumn = new DataGridCheckBoxColumn { Header = "Xác nhận B→A", Binding = new Binding(nameof(RelationshipEditorRow.SyncReverse)), Width = 92, Visibility = Visibility.Collapsed };
+        var reverseSelfColumn = new DataGridTextColumn { Header = "B tự xưng", Binding = new Binding(nameof(RelationshipEditorRow.ReverseSelfReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star), Visibility = Visibility.Collapsed };
+        var reverseAddresseeColumn = new DataGridTextColumn { Header = "B gọi A", Binding = new Binding(nameof(RelationshipEditorRow.ReverseAddresseeReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star), Visibility = Visibility.Collapsed };
+        var relationshipNotesColumn = new DataGridTextColumn { Header = "Ghi chú", Binding = new Binding(nameof(RelationshipEditorRow.AddressingNotes)), Width = new DataGridLength(1, DataGridLengthUnitType.Star), Visibility = Visibility.Collapsed };
+        relationshipGrid.Columns.Add(syncReverseColumn);
+        relationshipGrid.Columns.Add(reverseSelfColumn);
+        relationshipGrid.Columns.Add(reverseAddresseeColumn);
+        relationshipGrid.Columns.Add(relationshipNotesColumn);
+        var showAllColumns = new CheckBox { Content = "Hiện tất cả cột", Margin = new Thickness(4, 6, 4, 6) };
+        void SetExtendedColumnVisibility(Visibility visibility)
+        {
+            foreach (DataGridColumn column in new DataGridColumn[]
+                     { enabledColumn, lockedColumn, syncReverseColumn, reverseSelfColumn, reverseAddresseeColumn, relationshipNotesColumn })
+                column.Visibility = visibility;
+        }
+        showAllColumns.Checked += (_, _) => SetExtendedColumnVisibility(Visibility.Visible);
+        showAllColumns.Unchecked += (_, _) => SetExtendedColumnVisibility(Visibility.Collapsed);
 
         var presetBar = new WrapPanel { Margin = new Thickness(0, 4, 0, 2) };
         var presetCombo = new ComboBox
@@ -487,7 +566,8 @@ public partial class MainWindow
         relationButtons.Children.Add(addRelation);
         relationButtons.Children.Add(removeRelation);
         relationButtons.Children.Add(createListenerBtn);
-        panel.Children.Add(relationButtons);
+        panel.Children.Add(Section("Xưng hô & quan hệ", relationshipHeading, relationshipHelp, showAllColumns,
+            relationshipGrid, presetBar, relationButtons));
 
         addRelation.Click += (_, _) =>
         {
@@ -530,23 +610,26 @@ public partial class MainWindow
             relationshipGrid.Items.Refresh();
         };
 
-        var notes = Field("Ghi chú đặc biệt về xưng hô", profile.AddressingNotes, 75);
-        var enabled = new CheckBox { Content = "Bật chuẩn hóa cho nhân vật này", IsChecked = profile.NormalizationEnabled, Margin = new Thickness(4, 8, 4, 4) };
-        panel.Children.Add(enabled);
+        var notes = Field(profile.AddressingNotes, 75);
         var validation = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
         validation.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
-        panel.Children.Add(validation);
+        var notesGrid = TwoColumnGrid();
+        AddFormRow(notesGrid, LabeledField("Ghi chú đặc biệt về xưng hô", notes));
+        AddFormRow(notesGrid, validation);
+        panel.Children.Add(Section("Ghi chú", notesGrid));
         var save = new Button { Content = "Lưu hồ sơ" }; save.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var cancel = new Button { Content = "Hủy" };
         var root = new DockPanel();
         Border footer = ThemedDialog.Footer(save, cancel);
         DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
         root.Children.Add(new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        var window = new Window { Owner = this, Title = "Hồ sơ nhân vật", Width = 860, Height = Math.Min(860, SystemParameters.WorkArea.Height - 60), MinHeight = 560,
+        double dialogWidth = Math.Min(860, SystemParameters.WorkArea.Width - 80);
+        double dialogMaxHeight = SystemParameters.WorkArea.Height - 80;
+        var window = new Window { Owner = this, Title = "Hồ sơ nhân vật", Width = dialogWidth, Height = Math.Min(860, dialogMaxHeight), MaxHeight = dialogMaxHeight, MinHeight = Math.Min(560, dialogMaxHeight),
             MinWidth = 420, Content = root };
         window.SetResourceReference(BackgroundProperty, "PanelBrush");
         window.SetResourceReference(ForegroundProperty, "TextBrush");
-        ClampWindowToWorkArea(window, 860, 860);
+        ClampWindowToWorkArea(window, dialogWidth, Math.Min(860, dialogMaxHeight));
 
         createListenerBtn.Click += (_, _) =>
         {
@@ -581,18 +664,30 @@ public partial class MainWindow
                 profile.Relationships = relationshipRows.Select(row =>
                 {
                     if (row.TargetCharacterId == Guid.Empty || !allCandidates.Any(p => p.Id == row.TargetCharacterId))
+                    {
+                        relationshipGrid.Focus();
                         throw new ArgumentException("Mỗi quan hệ phải chọn một nhân vật đang có trong dự án.");
+                    }
                     if (string.IsNullOrWhiteSpace(row.Relationship) &&
                         (string.IsNullOrWhiteSpace(row.SelfReference) || string.IsNullOrWhiteSpace(row.AddresseeReference)))
+                    {
+                        relationshipGrid.Focus();
                         throw new ArgumentException("Quan hệ cần tên quan hệ hoặc đủ cách tự xưng và gọi đối phương.");
+                    }
                     bool directional = !string.IsNullOrWhiteSpace(row.SelfReference) ||
                         !string.IsNullOrWhiteSpace(row.AddresseeReference) || row.Enabled || row.Locked;
                     if (directional && (string.IsNullOrWhiteSpace(row.SelfReference) ||
                                         string.IsNullOrWhiteSpace(row.AddresseeReference)))
+                    {
+                        relationshipGrid.Focus();
                         throw new ArgumentException("Quy tắc hai chiều cần đủ cách tự xưng và gọi đối phương.");
+                    }
                     if (row.SyncReverse && (string.IsNullOrWhiteSpace(row.ReverseSelfReference) ||
                                             string.IsNullOrWhiteSpace(row.ReverseAddresseeReference)))
+                    {
+                        relationshipGrid.Focus();
                         throw new ArgumentException("Khi tích chọn Xác nhận B→A, hãy nhập đủ B tự xưng và B gọi A.");
+                    }
                     return new CharacterRelationship { TargetCharacterId = row.TargetCharacterId,
                         SpeakerCharacterId = directional ? profile.Id : Guid.Empty,
                         ListenerCharacterId = directional ? row.TargetCharacterId : Guid.Empty,
