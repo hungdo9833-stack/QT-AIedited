@@ -34,6 +34,8 @@ Codex làm phần đọc code, sửa và chạy test.
   Không cân nhắc model mỗi lần giao việc. Task nào tốn quota bất thường thì báo user chọn model.
 - Không dùng `--dangerously-bypass-approvals-and-sandbox`. Claude không bao giờ tự đăng nhập Codex.
 - Review: `git -C <worktree> diff`, tự chạy test; đạt thì Claude commit lên nhánh `codex/<tên>` rồi merge.
+- Sandbox của Codex không đọc được `%APPDATA%\NuGet\NuGet.Config`, nên `dotnet restore` thất bại. Claude chạy
+  `dotnet restore <slnx>` trong worktree trước, rồi dặn Codex luôn build/test với `--no-restore`.
 - Codex CLI phải được cài ngoài sandbox của Claude (npm global trong AppData thật), vì file Claude cài
   từ trong sandbox không hiện ra ở terminal thật. Config mỗi CODEX_HOME phải có
   `[windows] sandbox = "elevated"`; thiếu dòng này Codex chạy read-only và chặn mọi lệnh.
