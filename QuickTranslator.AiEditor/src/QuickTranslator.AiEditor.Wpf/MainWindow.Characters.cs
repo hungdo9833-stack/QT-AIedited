@@ -367,6 +367,21 @@ public partial class MainWindow
 
     private CharacterProfile? ShowCharacterEditor(CharacterProfile profile)
     {
+        try
+        {
+            return ShowCharacterEditorCore(profile);
+        }
+        catch (Exception ex)
+        {
+            // Dialog construction runs from async-void UI handlers. Keep an unexpected
+            // WPF layout/binding error from escaping the dispatcher and terminating the app.
+            ShowError(ex);
+            return null;
+        }
+    }
+
+    private CharacterProfile? ShowCharacterEditorCore(CharacterProfile profile)
+    {
         var panel = new StackPanel { Margin = new Thickness(24) };
         TextBox Field(string value, int height = 30)
         {
@@ -557,8 +572,6 @@ public partial class MainWindow
         presetBar.Children.Add(presetCombo);
         presetBar.Children.Add(applyPresetBtn);
         presetBar.Children.Add(suggestReverseBtn);
-        panel.Children.Add(presetBar);
-
         var relationButtons = new WrapPanel();
         var addRelation = new Button { Content = "Thêm quan hệ" };
         var removeRelation = new Button { Content = "Xóa quan hệ đã chọn" };

@@ -1,4 +1,6 @@
+using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Translation;
 using Xunit;
@@ -7,6 +9,40 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 
 public sealed class CharacterConsistencyUiTests
 {
+    [Fact]
+    public Task Character_editor_opens_without_reusing_visual_children() => StaHost.Run(() =>
+    {
+        using var fixture = new WorkspaceFixture();
+        var profile = new CharacterProfile
+        {
+            ChineseName = "林风",
+            VietnameseName = "Lâm Phong",
+            PrimaryNarrativePronoun = "hắn"
+        };
+        fixture.Call("LoadCharacterProject", new CharacterProject
+        {
+            Name = "Character editor regression",
+            Profiles = [profile]
+        });
+        fixture.Window.Show();
+
+        bool opened = false;
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
+        {
+            Window? dialog = Application.Current.Windows.Cast<Window>()
+                .SingleOrDefault(window => window.Owner == fixture.Window && window.Title == "Hồ sơ nhân vật");
+            if (dialog is null) return;
+            opened = true;
+            dialog.DialogResult = false;
+        }));
+
+        object? result = fixture.Call("ShowCharacterEditorCore", profile);
+
+        Assert.Null(result);
+        Assert.True(opened);
+        return Task.CompletedTask;
+    });
+
     [Fact]
     public Task Character_panel_exposes_project_lock_and_quick_edit_columns() => StaHost.Run(() =>
     {
