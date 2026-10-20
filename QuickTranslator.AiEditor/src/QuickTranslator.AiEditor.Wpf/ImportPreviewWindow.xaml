@@ -1,14 +1,14 @@
 <Window x:Class="QuickTranslator.AiEditor.Wpf.ImportPreviewWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:QuickTranslator.AiEditor.Wpf"
         Title="QT Studio · Import Preview" Width="1380" Height="860" MinWidth="820" MinHeight="480"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource TextBrush}"
         AllowDrop="True" PreviewDragOver="OnWindowPreviewDragOver" Drop="OnWindowDrop">
  <Window.Resources>
-  <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="{DynamicResource PrimaryBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource PrimaryBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
-  <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="8"/><Setter Property="Padding" Value="12"/></Style>
+  <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="12"/></Style>
  </Window.Resources>
- <Grid Margin="14">
+ <Grid Margin="16">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Border Style="{StaticResource Card}" Padding="14,10">
    <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -17,7 +17,7 @@
       <ComboBox x:Name="EncodingInput" Width="190" SelectedIndex="0"><ComboBoxItem Tag="Auto">Tự động (khuyên dùng)</ComboBoxItem><ComboBoxItem Tag="Utf8">UTF-8</ComboBoxItem><ComboBoxItem Tag="Gbk">GBK · CP936</ComboBoxItem><ComboBoxItem Tag="Gb18030">GB18030</ComboBoxItem><ComboBoxItem Tag="Utf16Le">UTF-16 LE</ComboBoxItem><ComboBoxItem Tag="Utf16Be">UTF-16 BE</ComboBoxItem></ComboBox>
     </Expander>
     <Button Grid.Column="2" Content="Chọn TXT…" Click="OnBrowse"/>
-    <Button Grid.Column="3" Content="Phân tích" Style="{StaticResource Primary}" Click="OnAnalyze"/>
+    <Button Grid.Column="3" Content="Phân tích" ui:ButtonIcon.Glyph="&#xE72C;" Click="OnAnalyze"/>
    </Grid>
   </Border>
   <Grid Grid.Row="1" Margin="0,10"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -27,7 +27,7 @@
    <Border Grid.Column="3" Style="{StaticResource Card}"><StackPanel><TextBlock Text="CÓ THỂ NHẬP" Foreground="{DynamicResource MutedBrush}" FontSize="12"/><TextBlock x:Name="ImportCountText" Text="0 chương" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="SourceSummaryText" Text="Chưa chọn tệp" Foreground="{DynamicResource MutedBrush}" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
   </Grid>
   <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,10" Padding="10"><DockPanel>
-   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SkipExistingButton" Content="Bỏ qua chương đã có" Click="OnSkipExisting" ToolTip="Chỉ giữ các chương mới; không ghi đè chương trong Project"/><Button x:Name="TranslateAllTitlesButton" Content="Dịch tất cả" Style="{StaticResource Primary}" Click="OnTranslateAllTitles"/><Button x:Name="RetryFailedTitlesButton" Content="Dịch lại mục lỗi" Click="OnRetryFailedTitles"/><Button x:Name="RetrySelectedTitlesButton" Content="Dịch lại mục đã chọn" Click="OnRetrySelectedTitles"/><Button x:Name="CancelTitleTranslationButton" Content="Hủy" Click="OnCancelTitleTranslation" IsEnabled="False"/></StackPanel>
+   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SkipExistingButton" Content="Bỏ qua chương đã có" Click="OnSkipExisting" ToolTip="Chỉ giữ các chương mới; không ghi đè chương trong Project"/><Button x:Name="TranslateAllTitlesButton" Content="Dịch tất cả" ui:ButtonIcon.Glyph="&#xE768;" Click="OnTranslateAllTitles"/><Button x:Name="RetryFailedTitlesButton" Content="Dịch lại mục lỗi" Click="OnRetryFailedTitles"/><Button x:Name="RetrySelectedTitlesButton" Content="Dịch lại mục đã chọn" Click="OnRetrySelectedTitles"/><Button x:Name="CancelTitleTranslationButton" Content="Hủy" Click="OnCancelTitleTranslation" IsEnabled="False"/></StackPanel>
    <StackPanel>
     <StackPanel Orientation="Horizontal"><CheckBox x:Name="TranslateTitlesCheck" Content="Dịch tiêu đề sang tiếng Việt" VerticalAlignment="Center" Margin="4" Checked="OnTitleTranslationOptionChanged" Unchecked="OnTitleTranslationOptionChanged"/><ComboBox x:Name="TitleMethodInput" Width="210" SelectedIndex="0" Margin="6,2"><ComboBoxItem Tag="Ollama">AI Ollama đang chọn</ComboBoxItem><ComboBoxItem Tag="HanViet">Hán Việt</ComboBoxItem><ComboBoxItem Tag="VietPhrase">VietPhrase</ComboBoxItem><ComboBoxItem Tag="KeepChinese">Giữ nguyên tiếng Trung</ComboBoxItem></ComboBox><TextBlock x:Name="TitleTranslationProgressText" Text="Chưa dịch tiêu đề" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="8,0"/></StackPanel>
      <TextBlock x:Name="PreviewStatusText" Text="Chọn hoặc kéo-thả TXT để bắt đầu" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="4,3,4,0"/>
@@ -50,9 +50,9 @@
     <TextBlock Text="Kiểm tra &amp; sửa" FontSize="17" FontWeight="SemiBold" Margin="4,2,4,8"/>
     <TextBlock Text="Số chương" Foreground="{DynamicResource MutedBrush}" Margin="4,5,4,0"/><TextBox x:Name="NumberInput"/>
     <TextBlock Text="Tên chương" Foreground="{DynamicResource MutedBrush}" Margin="4,5,4,0"/><TextBox x:Name="TitleInput"/>
-     <WrapPanel><Button Content="Áp dụng số / tên" Style="{StaticResource Primary}" Click="OnApplyEdit"/><Button x:Name="IncludeButton" Content="Include / Exclude" Click="OnToggleInclude"/></WrapPanel>
+     <WrapPanel><Button Content="Áp dụng số / tên" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnApplyEdit"/><Button x:Name="IncludeButton" Content="Include / Exclude" Click="OnToggleInclude"/></WrapPanel>
      <WrapPanel><Button x:Name="ConfirmBoundaryButton" Content="Xác nhận tiêu đề thật" Click="OnConfirmBoundary"/><Button x:Name="RejectBoundaryButton" Content="Loại ranh giới giả" Click="OnRejectFalseBoundary" ToolTip="Giữ nguyên dòng tiêu đề và nội dung, nối trở lại chương vật lý trước"/></WrapPanel>
-    <WrapPanel><Button Content="Tách tại dòng…" Click="OnSplit"/><Button Content="Gộp với chương sau" Click="OnMerge"/><Button Content="Dời ranh giới…" Click="OnMoveBoundary"/><Button x:Name="UndoButton" Content="Hoàn tác" Click="OnUndo"/></WrapPanel>
+    <WrapPanel><Button Content="Tách tại dòng…" Click="OnSplit"/><Button Content="Gộp với chương sau" Click="OnMerge"/><Button Content="Dời ranh giới…" Click="OnMoveBoundary"/><Button x:Name="UndoButton" Content="Hoàn tác" ui:ButtonIcon.Glyph="&#xE7A7;" Click="OnUndo"/></WrapPanel>
     <TextBlock Text="Quanh điểm bắt đầu" Foreground="{DynamicResource MutedBrush}" Margin="4,14,4,2"/><TextBox x:Name="StartContextText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="145" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
     <TextBlock Text="Quanh điểm kết thúc" Foreground="{DynamicResource MutedBrush}" Margin="4,10,4,2"/><TextBox x:Name="EndContextText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="145" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
     <TextBlock x:Name="SelectedDetailText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="4,10"/>
@@ -60,7 +60,7 @@
   </Grid>
   <Border Grid.Row="4" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="0,10,0,0"><DockPanel>
    <TextBlock x:Name="FooterHintText" Text="Nguồn chỉ được đọc; mọi sửa trong preview không đổi file TXT." Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Hủy" Click="OnCancel"/><Button x:Name="ConfirmButton" Content="Nhập" Click="OnConfirm" IsEnabled="False"/><Button x:Name="ImportAndTranslateButton" Content="Nhập &amp; Dịch" Style="{StaticResource Primary}" Click="OnConfirmAndTranslate" IsEnabled="False" ToolTip="Nhập các chương mới và bắt đầu dịch ngay"/></StackPanel>
+   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Hủy" Click="OnCancel"/><Button x:Name="ConfirmButton" Content="Nhập" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE8B5;" Click="OnConfirm" IsEnabled="False"/><Button x:Name="ImportAndTranslateButton" Content="Nhập &amp; Dịch" ui:ButtonIcon.Glyph="&#xE768;" Click="OnConfirmAndTranslate" IsEnabled="False" ToolTip="Nhập các chương mới và bắt đầu dịch ngay"/></StackPanel>
   </DockPanel></Border>
  </Grid>
 </Window>
