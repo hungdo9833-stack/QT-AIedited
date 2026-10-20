@@ -212,6 +212,10 @@ public partial class MainWindow
     private void ApplyShellTheme(ShellTheme theme)
     {
         ThemeManager.Apply(theme);
+        // Segment rows hold their status brush as a value, not a resource key: give them the new theme's brush.
+        if (_service is not null)
+            foreach (var segment in _service.GetSnapshot().Segments)
+                _chapterBlocks.FirstOrDefault(b => b.Id == segment.Id)?.UpdateMetadataOnly(segment, segment.Id == _selectedId);
         ThemeToggleButton.Content = theme == ShellTheme.Dark ? "Light" : "Dark";
         SetResourceReference(BackgroundProperty, "AppBackgroundBrush");
         SetResourceReference(ForegroundProperty, "TextBrush");
