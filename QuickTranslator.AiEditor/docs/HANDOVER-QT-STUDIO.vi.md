@@ -92,7 +92,7 @@ Khi smoke test EXE, ứng dụng ghi `Projects/library.json` (thêm Project tổ
 3. Dịch bằng Ollama/GPU thật chưa được chạy trong đợt này (chỉ provider giả). Cần kiểm tra trên máy có `translategemma:12b`.
 4. `M5.UiSmoke` chụp off-screen: một số cửa sổ con hiện nền trắng sau tiêu đề. EXE thật hiển thị đúng, đây là giới hạn của công cụ chụp.
 5. EXE không ký số; Windows SmartScreen có thể cảnh báo lần đầu.
-6. `tools/QuickTranslator.AiEditor.GeminiSurvey.Preflight` là công cụ cũ (schema v1, budget/pool khác); dùng `GeminiSchema.Probe` cho kiểm tra Gemini.
+6. Kiểm tra Gemini dùng `tools/QuickTranslator.AiEditor.GeminiSchema.Probe` (công cụ cũ `GeminiSurvey.Preflight` đã bị gỡ).
 
 ## 6. Hướng dẫn sử dụng nhanh
 
