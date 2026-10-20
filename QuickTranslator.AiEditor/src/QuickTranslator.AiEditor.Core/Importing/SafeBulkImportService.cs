@@ -324,15 +324,6 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
             PostCommitVerified = postCommitVerified
         };
 
-    private static string CoverageFingerprint(IEnumerable<SourceCoverageEntry> entries)
-    {
-        var text = new StringBuilder();
-        foreach (SourceCoverageEntry entry in entries.OrderBy(x => x.Span.StartUtf16))
-            text.Append(entry.Span.StartUtf16).Append(':').Append(entry.Span.LengthUtf16).Append('|')
-                .Append(entry.Sha256).Append('|').Append(entry.Status).Append('|').Append(entry.TargetChapterId).Append('\n');
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
-    }
-
     private static string Title(ImportPreviewItem item) => string.IsNullOrWhiteSpace(item.VietnameseTitle)
         ? item.Title.Trim() : item.VietnameseTitle.Trim();
     private static string ChineseTitle(ImportPreviewItem item) => item.Title.Trim();

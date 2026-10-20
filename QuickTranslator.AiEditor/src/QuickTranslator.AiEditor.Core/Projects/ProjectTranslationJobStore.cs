@@ -94,24 +94,6 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
             () => (ProjectTranslationJob)null!, cancellationToken).ConfigureAwait(false);
     }
 
-    internal async Task<ProjectTranslationJob> PrepareNextAsync(ProjectTranslationJob proposed,
-        CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            ProjectTranslationJob? current = await ReadCurrentAsync(cancellationToken).ConfigureAwait(false);
-            if (current is null || current.JobId != proposed.JobId || current.Revision != proposed.Revision)
-                throw new InvalidOperationException("Translation job đã thay đổi trên đĩa; preflight phải chạy lại.");
-            ProjectTranslationJob saved = Clone(proposed);
-            saved.Revision = checked(current.Revision + 1);
-            saved.UpdatedAt = DateTimeOffset.UtcNow;
-            saved.Validate();
-            return saved;
-        }
-        finally { _gate.Release(); }
-    }
-
     private async Task<ProjectTranslationJob> WriteAsync(ProjectTranslationJob job, CancellationToken cancellationToken)
     {
         byte[] bytes = Serialize(job);

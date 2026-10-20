@@ -284,9 +284,6 @@ public class OllamaProfileStore
     private string? Unprotect(string? value) => string.IsNullOrEmpty(value) ? null : _protector.Unprotect(value);
 }
 
-public sealed class BackendProfileStore(string? path = null, IOllamaSecretProtector? protector = null)
-    : OllamaProfileStore(path, protector);
-
 public interface IOllamaBackendClient : IOllamaClient, IDisposable
 {
     Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default);

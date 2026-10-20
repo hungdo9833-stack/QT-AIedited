@@ -291,7 +291,6 @@ public sealed partial class ProjectRepository
         return JsonFileCodec.DecodeDirect<ProjectManifest>(bytes, value => value.Validate(),
             "schemaVersion", "projectId", "vietnameseTitle", "chapters");
     }
-    private static bool IsRecoverable(Exception ex) => ex is IOException or JsonException or InvalidDataException;
     private static string SafeFileName(string value)
     {
         string result = string.Concat(value.Trim().Select(x => Path.GetInvalidFileNameChars().Contains(x) ? '_' : x));

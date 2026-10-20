@@ -11,10 +11,6 @@ public sealed class ProjectSettingsStore(ProjectSession session)
         SaveAsync(session.Manifest.Files.TranslationSettings, value, DecodeTranslation, cancellationToken);
     public Task<ProjectTranslationSettings> LoadTranslationAsync(CancellationToken cancellationToken = default) =>
         LoadAsync(session.Manifest.Files.TranslationSettings, DecodeTranslation, () => new ProjectTranslationSettings(), cancellationToken);
-    public Task SaveExportAsync(ProjectExportSettings value, CancellationToken cancellationToken = default) =>
-        SaveAsync(session.Manifest.Files.ExportSettings, value, DecodeExport, cancellationToken);
-    public Task<ProjectExportSettings> LoadExportAsync(CancellationToken cancellationToken = default) =>
-        LoadAsync(session.Manifest.Files.ExportSettings, DecodeExport, () => new ProjectExportSettings(), cancellationToken);
     private async Task SaveAsync<T>(string relative, T value, Func<byte[], T> decode, CancellationToken token)
     {
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(value,
@@ -36,12 +32,5 @@ public sealed class ProjectSettingsStore(ProjectSession session)
                 throw new InvalidDataException("Thiết lập dịch thiếu dữ liệu.");
             value.Model.Validate(); value.Segmentation.Validate();
         }, "model", "segmentation", "ollamaProfileId");
-
-    private static ProjectExportSettings DecodeExport(byte[] bytes) =>
-        JsonFileCodec.DecodeDirect<ProjectExportSettings>(bytes, value =>
-        {
-            if (string.IsNullOrWhiteSpace(value.FileNameTemplate) || value.FileNameTemplate.Length > 300)
-                throw new InvalidDataException("Mẫu tên file xuất không hợp lệ.");
-        }, "fileNameTemplate");
 
 }

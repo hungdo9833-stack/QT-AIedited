@@ -6,10 +6,7 @@ namespace QuickTranslator.AiEditor.Core.Translation;
 
 public sealed partial class TranslationService
 {
-    private readonly ChineseTextScanner _chineseScanner = new();
     private readonly BatchReplacementEngine _batchReplacement = new();
-
-    public ChineseTextScanReport ScanChineseText() => _chineseScanner.Scan(GetOperationSnapshot(), _clock.GetUtcNow());
 
     public IReadOnlyList<BatchReplacementPreviewItem> PreviewBatchReplacement(
         IEnumerable<BatchReplacementRule> rules, BatchReplacementScope scope)

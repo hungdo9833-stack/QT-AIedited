@@ -15,7 +15,7 @@ public sealed class GpuConnectionManagerTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         string path = Path.Combine(_root, "profiles.json");
-        var store = new BackendProfileStore(path, new Protector());
+        var store = new OllamaProfileStore(path, new Protector());
         var remote = RemoteProfile();
         remote.Ssh!.Authentication = SshAuthenticationKind.PrivateKey;
         remote.Ssh.Password = null;
@@ -233,7 +233,7 @@ public sealed class GpuConnectionManagerTests : IDisposable
     public async Task Ssh_profile_never_uses_saved_endpoint_before_runtime_tunnel_is_attached()
     {
         Directory.CreateDirectory(_root);
-        var store = new BackendProfileStore(Path.Combine(_root, "manager.json"), new Protector());
+        var store = new OllamaProfileStore(Path.Combine(_root, "manager.json"), new Protector());
         var remote = RemoteProfile();
         await store.SaveAsync(new() { ActiveProfileId = remote.Id, Profiles = [remote] });
         using var manager = new OllamaBackendManager(store);

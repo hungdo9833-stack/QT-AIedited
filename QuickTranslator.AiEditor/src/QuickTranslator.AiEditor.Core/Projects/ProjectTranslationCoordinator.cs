@@ -382,13 +382,6 @@ public sealed class ProjectTranslationCoordinator
         }).ToArray();
     }
 
-    public ProjectTranslationAggregateMetrics GetAggregateMetrics()
-    {
-        ProjectTranslationJob? job = CurrentJob;
-        if (job is null) return new(0, null, 0);
-        return CalculateAggregateMetrics(job, CalculateWorkerProgress(job));
-    }
-
     private static ProjectTranslationAggregateMetrics CalculateAggregateMetrics(ProjectTranslationJob job,
         IReadOnlyList<ProjectTranslationWorkerProgress> workers)
     {
