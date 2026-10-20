@@ -83,7 +83,7 @@ public partial class MainWindow
         if (!BeginUiOperation()) return;
         try
         {
-            if (_characterProject.Profiles.Count > 0 && MessageBox.Show(this,
+            if (_characterProject.Profiles.Count > 0 && ThemedDialog.Show(this,
                     "Tạo Project ID mới? Hồ sơ hiện tại vẫn còn trong tệp đã lưu nhưng sẽ không áp dụng cho chương này.",
                     "Dự án nhân vật mới", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             _characterProject = new CharacterProject { Name = "Bộ truyện mới" };
@@ -158,7 +158,7 @@ public partial class MainWindow
     private async void OnDeleteCharacter(object sender, RoutedEventArgs e)
     {
         if (CharactersGrid.SelectedItem is not CharacterProfile selected || WorkActive || _uiOperation) return;
-        if (MessageBox.Show(this, $"Xóa hồ sơ {selected.VietnameseName}? Lịch sử chuẩn hóa cũ trong chương vẫn được giữ.",
+        if (ThemedDialog.Show(this, $"Xóa hồ sơ {selected.VietnameseName}? Lịch sử chuẩn hóa cũ trong chương vẫn được giữ.",
                 "Xóa nhân vật", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         if (!BeginUiOperation()) return;
         try
@@ -196,7 +196,7 @@ public partial class MainWindow
         try
         {
             var imported = await _characterStore.LoadAsync(dialog.FileName);
-            if (_characterProject.Profiles.Count > 0 && imported.Id != _characterProject.Id && MessageBox.Show(this,
+            if (_characterProject.Profiles.Count > 0 && imported.Id != _characterProject.Id && ThemedDialog.Show(this,
                     $"Thay dự án “{_characterProject.Name}” bằng “{imported.Name}” cho chương hiện tại?",
                     "Nhập hồ sơ", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             CharacterConsistencyProtection.PreserveLockedRules(_characterProject, imported);

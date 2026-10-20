@@ -24,7 +24,7 @@ public partial class App : Application
         catch (AbandonedMutexException) { _ownsInstance = true; }
         if (!_ownsInstance)
         {
-            MessageBox.Show("AI Editor đang mở. Hãy dùng cửa sổ đó để tránh hai ứng dụng ghi đè cùng tệp tiến độ.", "QuickTranslator AI Editor");
+            ThemedDialog.Show("AI Editor đang mở. Hãy dùng cửa sổ đó để tránh hai ứng dụng ghi đè cùng tệp tiến độ.", "QuickTranslator AI Editor");
             Shutdown();
             return;
         }

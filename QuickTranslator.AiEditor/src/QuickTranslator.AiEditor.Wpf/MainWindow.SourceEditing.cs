@@ -69,7 +69,7 @@ public partial class MainWindow
             .AppendLine().AppendLine("Nội dung bỏ đi:").AppendLine(PreviewChange(preview.Change.RemovedText))
             .AppendLine().AppendLine("Nội dung thêm vào:").AppendLine(PreviewChange(preview.Change.AddedText))
             .AppendLine().Append("Bạn có muốn lưu thay đổi này?").ToString();
-        return MessageBox.Show(this, details, "Sửa nguyên văn ảnh hưởng bản dịch", MessageBoxButton.YesNo,
+        return ThemedDialog.Show(this, details, "Sửa nguyên văn ảnh hưởng bản dịch", MessageBoxButton.YesNo,
             MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
     }
 

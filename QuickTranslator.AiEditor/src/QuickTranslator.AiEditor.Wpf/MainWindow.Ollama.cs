@@ -221,7 +221,7 @@ public partial class MainWindow
             OllamaBackendProfile profile = ReadOllamaProfileEditor();
             if (profile.Kind == OllamaBackendKind.Remote && !profile.RemoteDisclosureAccepted)
             {
-                MessageBoxResult confirmed = MessageBox.Show(this,
+                MessageBoxResult confirmed = ThemedDialog.Show(this,
                     $"QT Studio sẽ gửi prompt và nguyên văn segment tới server remote “{profile.Name}” tại {profile.Endpoint}. " +
                     "Token chỉ lưu mã hóa bằng Windows DPAPI và không nằm trong Project. Tiếp tục?",
                     "Xác nhận gửi nội dung tới Remote Ollama", MessageBoxButton.YesNo, MessageBoxImage.Warning);

@@ -26,7 +26,7 @@ public partial class MainWindow
 
     private void OnRemoveGeminiApiKey(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show(this, "Xóa Gemini API key đã lưu trên Windows? Các Project truyện sẽ không bị ảnh hưởng.",
+        if (ThemedDialog.Show(this, "Xóa Gemini API key đã lưu trên Windows? Các Project truyện sẽ không bị ảnh hưởng.",
             "Xóa Gemini API key", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         try

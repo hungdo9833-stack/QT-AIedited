@@ -581,7 +581,7 @@ public partial class ImportPreviewWindow : Window
         if (_editor is null || !ConfirmButton.IsEnabled) return;
         int historyCollisions = _editor.Current.ImportableChapters.Count(IsSoftDeletedCollision);
         bool replaceHistory = historyCollisions > 0 && ReplaceHistoryCheck.IsChecked == true;
-        if (replaceHistory && MessageBox.Show(this,
+        if (replaceHistory && ThemedDialog.Show(this,
                 $"Xóa vĩnh viễn {historyCollisions:N0} chương đang nằm trong History và nhập lại từ TXT?\n\n" +
                 "Bản dịch, bản nháp, duyệt và lịch sử của các bản cũ sẽ bị xóa khi chương thay thế được lưu. " +
                 "Các chương đã lưu thành công được báo riêng nếu import dừng giữa chừng.",
@@ -597,7 +597,7 @@ public partial class ImportPreviewWindow : Window
     }
 
     private void OnCancel(object sender, RoutedEventArgs e) => DialogResult = false;
-    private void ShowError(string message) { PreviewStatusText.Text = "Lỗi: " + message; MessageBox.Show(this, message, "Import Preview", MessageBoxButton.OK, MessageBoxImage.Error); }
+    private void ShowError(string message) { PreviewStatusText.Text = "Lỗi: " + message; ThemedDialog.Show(this, message, "Import Preview", MessageBoxButton.OK, MessageBoxImage.Error); }
     private static string SeverityLabel(DetectionIssueSeverity severity) => severity switch { DetectionIssueSeverity.Error => "●", DetectionIssueSeverity.Warning => "▲", _ => "ℹ" };
     private static string PreviewStatus(ImportPreviewPlan plan)
     {

@@ -38,7 +38,7 @@ public partial class MainWindow
         var latest = snapshot.BatchReplacementHistory.Where(x => !x.Reverted && !x.Automatic)
             .OrderByDescending(x => x.CreatedAt).FirstOrDefault();
         if (latest is null) { SetStatus("Không có lần thay thế thủ công nào để hoàn tác."); return; }
-        if (MessageBox.Show(this,
+        if (ThemedDialog.Show(this,
                 $"Hoàn tác đợt thay thế lúc {latest.CreatedAt.LocalDateTime:g}? Nếu bản dịch đã được sửa sau đó, ứng dụng sẽ từ chối ghi đè.",
                 "Hoàn tác thay thế", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         if (!BeginUiOperation()) return;
@@ -354,7 +354,7 @@ public partial class MainWindow
             if (protectedText) warning += "\n\nBạn đã cho phép ghi lên bản sửa/duyệt được bảo vệ. QT Studio sẽ tạo revision mới, " +
                                            "lưu draft hiện tại vào lịch sử, giữ nguyên Approval cũ và đưa nội dung mới về chờ duyệt.";
             if (project) warning += "\n\nỨng dụng sẽ sao lưu các chương trước khi ghi và báo riêng từng chương thất bại.";
-            if (MessageBox.Show(window, warning, "Xác nhận thay thế", MessageBoxButton.YesNo,
+            if (ThemedDialog.Show(window, warning, "Xác nhận thay thế", MessageBoxButton.YesNo,
                     protectedText || project ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             SetWorking(true, "Đang ghi an toàn…");
             try
@@ -543,7 +543,7 @@ public partial class MainWindow
                 var edited = ShowGlossaryEditor(null, row.Item.Text);
                 if (edited is null) return false;
                 var existing = _glossaryRows.SingleOrDefault(x => string.Equals(x.Chinese, edited.Chinese, StringComparison.Ordinal));
-                if (existing is not null && MessageBox.Show(window,
+                if (existing is not null && ThemedDialog.Show(window,
                         $"Mục này đang là “{existing.Vietnamese}”. Thay bằng “{edited.Vietnamese}”?", "Cập nhật Glossary",
                         MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
                 if (existing is null) _glossaryRows.Add(edited); else _glossaryRows[_glossaryRows.IndexOf(existing)] = edited;
@@ -633,7 +633,7 @@ public partial class MainWindow
         string details = string.Join(Environment.NewLine, report.Chapters.Select(x =>
             $"{(x.Applied ? "ĐÃ GHI" : "CHƯA GHI")} · {x.ChapterTitle} · {x.OccurrencesChanged} vị trí" +
             (x.Error is null ? "" : " · " + x.Error)));
-        MessageBox.Show(this, details, title,
+        ThemedDialog.Show(this, details, title,
             MessageBoxButton.OK, report.FailedChapters == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 

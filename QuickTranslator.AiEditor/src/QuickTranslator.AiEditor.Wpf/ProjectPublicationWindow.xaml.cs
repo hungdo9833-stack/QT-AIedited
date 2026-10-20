@@ -184,7 +184,7 @@ public partial class ProjectPublicationWindow : Window
     {
         ProgressText.Text = "Lỗi: " + ex.Message;
         ProgressText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
-        MessageBox.Show(this, ex.Message, "Xuất bản", MessageBoxButton.OK, MessageBoxImage.Error);
+        ThemedDialog.Show(this, ex.Message, "Xuất bản", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     private static string SanitizeFileName(string value)

@@ -71,7 +71,7 @@ public sealed class AddressingLedgerWindow : Window
     {
         _session = session; _repository = repository; _applyResources = applyResources; _service = new AddressingReviewService(session);
         _profiles = [GeminiSurveyProfile.Create(), .. (profiles ?? []).Where(p => p.Id != GeminiSurveyProfile.Id)];
-        ConfirmSend = message => MessageBox.Show(this, message, "Sổ xưng hô · khảo sát", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+        ConfirmSend = message => ThemedDialog.Show(this, message, "Sổ xưng hô · khảo sát", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
         BackendFactory = (profile, options, maximumRequests) =>
         {
             var budget = new SemanticSurveyBudget(maximumRequests, 100_000_000);
@@ -362,7 +362,7 @@ public sealed class AddressingLedgerWindow : Window
         catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
         {
             LastError = ex.Message;
-            if (IsVisible) MessageBox.Show(this, ex.Message, "Sổ xưng hô", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (IsVisible) ThemedDialog.Show(this, ex.Message, "Sổ xưng hô", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
         {
@@ -413,7 +413,7 @@ public sealed class AddressingLedgerWindow : Window
             ProjectResources saved;
             try { saved = await _service.UndoCompletionAsync(discardLaterEdits); }
             catch (AddressingUndoConflictException ex) when (IsVisible && !discardLaterEdits &&
-                MessageBox.Show(this, ex.Message + " Vẫn hoàn tác?", "Sổ xưng hô", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+                ThemedDialog.Show(this, ex.Message + " Vẫn hoàn tác?", "Sổ xưng hô", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
             {
                 saved = await _service.UndoCompletionAsync(discardLaterEdits: true);
             }
@@ -446,7 +446,7 @@ public sealed class AddressingLedgerWindow : Window
         catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
         {
             LastError = ex.Message; _summary.Text = "Không thực hiện được: " + ex.Message;
-            if (IsVisible) MessageBox.Show(this, ex.Message, "Sổ xưng hô", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (IsVisible) ThemedDialog.Show(this, ex.Message, "Sổ xưng hô", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally { IsEnabled = true; }
     }

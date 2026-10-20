@@ -8,5 +8,5 @@ public partial class MainWindow
 
     private bool ConfirmWorkspaceChange(string message, string title) =>
         WorkspaceConfirmation?.Invoke(message, title) ??
-        MessageBox.Show(this, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        ThemedDialog.Show(this, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 }

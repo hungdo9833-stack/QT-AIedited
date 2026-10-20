@@ -39,7 +39,7 @@ public partial class MainWindow
                         await LoadProjectChapterCoreAsync(current);
                     ShowBulkImportReport(report);
                     if (report.Completed || !report.CanResume ||
-                        MessageBox.Show(this, "Tiếp tục ngay các chương chưa xử lý bằng đúng preview và stable ID này?",
+                        ThemedDialog.Show(this, "Tiếp tục ngay các chương chưa xử lý bằng đúng preview và stable ID này?",
                             "Tiếp tục bulk import", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                         break;
                 }
@@ -135,7 +135,7 @@ public partial class MainWindow
             return;
         }
         string message = report.Error ?? "Một số chương chưa được nhập. Bạn có thể thử tiếp tục mà không tạo bản trùng.";
-        MessageBox.Show(this, message, "Nhập truyện chưa hoàn tất", MessageBoxButton.OK, MessageBoxImage.Warning);
+        ThemedDialog.Show(this, message, "Nhập truyện chưa hoàn tất", MessageBoxButton.OK, MessageBoxImage.Warning);
         SetStatus(message);
     }
 

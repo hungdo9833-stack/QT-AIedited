@@ -156,7 +156,7 @@ public partial class ChapterManagerWindow : Window
     {
         ChapterManagerRow[] rows = SelectedRows().Where(row => !row.IsDeleted).ToArray();
         if (rows.Length == 0) return;
-        if (MessageBox.Show(this, $"Chuyển {rows.Length:N0} chương đã chọn vào History? File không bị xóa vĩnh viễn.",
+        if (ThemedDialog.Show(this, $"Chuyển {rows.Length:N0} chương đã chọn vào History? File không bị xóa vĩnh viễn.",
                 "Xóa mềm chương", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await RunAsync(() => _commands.SoftDelete(rows.Select(row => row.ChapterId).ToArray()),
             "Đã chuyển các chương đã chọn vào History.");
@@ -215,7 +215,7 @@ public partial class ChapterManagerWindow : Window
         catch (Exception ex)
         {
             StatusText.Text = "Thao tác chưa hoàn tất: " + ex.Message;
-            MessageBox.Show(this, ex.Message, "Chapter Manager", MessageBoxButton.OK, MessageBoxImage.Error);
+            ThemedDialog.Show(this, ex.Message, "Chapter Manager", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally { _working = false; UpdateCommands(); }
     }

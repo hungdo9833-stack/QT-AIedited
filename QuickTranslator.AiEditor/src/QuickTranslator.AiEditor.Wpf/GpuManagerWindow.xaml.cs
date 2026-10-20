@@ -138,7 +138,7 @@ public partial class GpuManagerWindow : Window
     {
         OllamaBackendProfile profile = ReadProfile();
         if (profile.Kind == OllamaBackendKind.Remote && !profile.RemoteDisclosureAccepted &&
-            MessageBox.Show(this, "Remote GPU sẽ nhận prompt và nguyên văn segment. Xác nhận lưu profile Remote?",
+            ThemedDialog.Show(this, "Remote GPU sẽ nhận prompt và nguyên văn segment. Xác nhận lưu profile Remote?",
                 "Quyền gửi dữ liệu", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         profile.RemoteDisclosureAccepted = profile.Kind == OllamaBackendKind.Remote;
         bool isActive = _backends.ActiveProfile.Id == profile.Id;
@@ -152,7 +152,7 @@ public partial class GpuManagerWindow : Window
     private async void OnDeleteProfile(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
-        if (MessageBox.Show(this, $"Xóa profile “{profile.Name}”?", "Xóa profile",
+        if (ThemedDialog.Show(this, $"Xóa profile “{profile.Name}”?", "Xóa profile",
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await _backends.DetachRuntimeClientAsync(profile.Id);
         await _connections.DisconnectAsync(profile.Id);
@@ -192,7 +192,7 @@ public partial class GpuManagerWindow : Window
         {
             FingerprintInput.Text = error.ObservedFingerprint;
             StatusText.Text = error.Message + " Fingerprint quan sát: " + error.ObservedFingerprint;
-            if (IsVisible && MessageBox.Show(this,
+            if (IsVisible && ThemedDialog.Show(this,
                     $"Máy chủ trả về SSH Host Key Fingerprint:\n{error.ObservedFingerprint}\n\nTin cậy fingerprint này, lưu profile và kết nối ngay?",
                     "Xác nhận SSH Fingerprint (1 chạm)", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
@@ -271,7 +271,7 @@ public partial class GpuManagerWindow : Window
 
     private async Task ConfirmSetupAsync(RemoteSetupAction action, string message, string? model = null)
     {
-        if (MessageBox.Show(this, message, "Xác nhận thao tác Remote GPU", MessageBoxButton.YesNo,
+        if (ThemedDialog.Show(this, message, "Xác nhận thao tác Remote GPU", MessageBoxButton.YesNo,
             MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         if (_busy) return;
         _busy = true;

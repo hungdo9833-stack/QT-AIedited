@@ -239,7 +239,7 @@ public partial class MainWindow : Window
             var history = HistoryList.SelectedItem as AttemptItem;
             string? ai = HistoryText(selected, history);
             if (selected.UserDraft is not null && selected.UserDraft != ai &&
-                MessageBox.Show(this, "Thao tác này thay bản nháp đang sửa bằng bản AI đang xem. Tiếp tục?", "Chọn bản AI",
+                ThemedDialog.Show(this, "Thao tác này thay bản nháp đang sửa bằng bản AI đang xem. Tiếp tục?", "Chọn bản AI",
                     MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
             if (history?.Kind == 0) await _service.UseAiAsDraftAsync(id, attemptId);
             else await _service.RestoreDraftAsync(id, attemptId, history?.Kind == 1);
@@ -726,7 +726,7 @@ public partial class MainWindow : Window
         }
         if (_uiOperation) { SetStatus("Đang đọc hoặc lưu tệp. Hãy chờ thao tác hoàn tất rồi đóng ứng dụng."); return; }
         if (_service is null && !string.IsNullOrWhiteSpace(ChapterInput.Text) &&
-            MessageBox.Show(this, "Chương này chưa được chia và lưu. Đóng sẽ mất phần văn bản đang nhập. Chọn Không để chia/lưu trước.",
+            ThemedDialog.Show(this, "Chương này chưa được chia và lưu. Đóng sẽ mất phần văn bản đang nhập. Chọn Không để chia/lưu trước.",
                 "Nguyên văn chưa lưu", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _closing = true;
         _autosave.Stop();
@@ -770,7 +770,7 @@ public partial class MainWindow : Window
             _closing = false;
             ShowError(ex);
             UpdateButtons();
-            MessageBox.Show(this, "Chưa lưu được tiến độ. Ứng dụng vẫn mở để giữ bản nháp. Hãy kiểm tra dung lượng/quyền ghi rồi bấm Lưu tiến độ.",
+            ThemedDialog.Show(this, "Chưa lưu được tiến độ. Ứng dụng vẫn mở để giữ bản nháp. Hãy kiểm tra dung lượng/quyền ghi rồi bấm Lưu tiến độ.",
                 "Không đóng khi chưa lưu", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }

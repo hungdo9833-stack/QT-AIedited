@@ -104,7 +104,7 @@ public partial class MainWindow
                 (warnings.Length == 0 ? "" : "\n\n" + warnings) +
                 "\n\nChỉ vùng chưa dịch được chia lại; nháp, approvals và lịch sử giữ nguyên theo anchor. Áp dụng cho toàn bộ lựa chọn?";
             Window owner = _chapterManagerWindow is null ? this : _chapterManagerWindow;
-            if (MessageBox.Show(owner, message, "Preview chia lại đoạn", MessageBoxButton.YesNo,
+            if (ThemedDialog.Show(owner, message, "Preview chia lại đoạn", MessageBoxButton.YesNo,
                     preview.ProtectedChapters > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information,
                     MessageBoxResult.No) != MessageBoxResult.Yes)
                 throw new OperationCanceledException("Đã hủy chia lại đoạn trước khi ghi dữ liệu.");

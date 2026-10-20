@@ -460,8 +460,8 @@ public partial class MainWindow
                 if (action == ProjectLibraryAction.Delete)
                 {
                     if (selected.ProjectId == _projectSession?.Manifest.ProjectId)
-                    { MessageBox.Show(this, "Hãy đóng dự án đang mở trước."); continue; }
-                    if (MessageBox.Show(this, $"Chuyển toàn bộ thư mục “{selected.Title}” vào Thùng rác của Windows?\nBạn có thể phục hồi từ Thùng rác.",
+                    { ThemedDialog.Show(this, "Hãy đóng dự án đang mở trước."); continue; }
+                    if (ThemedDialog.Show(this, $"Chuyển toàn bộ thư mục “{selected.Title}” vào Thùng rác của Windows?\nBạn có thể phục hồi từ Thùng rác.",
                         "Xóa dự án", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) continue;
                     Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(Path.GetDirectoryName(selected.ManifestPath)!,
                         Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
@@ -610,7 +610,7 @@ public partial class MainWindow
     private async void OnDeleteProjectChapter(object sender, RoutedEventArgs e)
     {
         if (_projectSession is null || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
-        if (MessageBox.Show(this, "Chuyển chương vào History của dự án? Có thể phục hồi bằng dữ liệu manifest; tệp không bị xóa vĩnh viễn.", "Xóa mềm chương", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (ThemedDialog.Show(this, "Chuyển chương vào History của dự án? Có thể phục hồi bằng dữ liệu manifest; tệp không bị xóa vĩnh viễn.", "Xóa mềm chương", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         try
         {
             await RunWorkspaceTransitionAsync(async () =>

@@ -92,7 +92,7 @@ public partial class ChapterTitleTranslationWindow : Window
         catch (Exception ex)
         {
             StatusText.Text = "Dịch tiêu đề dừng: " + ex.Message;
-            MessageBox.Show(this, ex.Message, "Dịch tiêu đề", MessageBoxButton.OK, MessageBoxImage.Error);
+            ThemedDialog.Show(this, ex.Message, "Dịch tiêu đề", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {

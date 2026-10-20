@@ -96,7 +96,7 @@ public partial class MainWindow
                 SetStatus("Không có đoạn chờ duyệt nào đủ điều kiện trong chương này.");
                 return;
             }
-            if (MessageBox.Show(this,
+            if (ThemedDialog.Show(this,
                     $"Duyệt toàn bộ {eligible.Length:N0} đoạn đã có bản dịch trong chương “{snapshot.Title}”?",
                     "Duyệt toàn chương", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
@@ -284,7 +284,7 @@ public partial class MainWindow
             var snapshot = _service.GetSnapshot();
             var composed = ChapterTranslationComposer.Compose(snapshot);
             bool incomplete = !composed.IsComplete;
-            if ((incomplete || composed.InspectionIds.Count > 0) && MessageBox.Show(this,
+            if ((incomplete || composed.InspectionIds.Count > 0) && ThemedDialog.Show(this,
                 incomplete ? "Còn đoạn lỗi/chưa hoàn tất. Xuất bản nháp hiện tại? File có thể thiếu phần dịch." : "Có đoạn cần kiểm tra. Xuất bản đang chờ duyệt?",
                 "Xuất bản nháp", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             string title = string.Concat(snapshot.Title.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
@@ -312,7 +312,7 @@ public partial class MainWindow
                 return;
             }
             boundary = decision.Boundary;
-            if (decision.RequiresConfirmation && MessageBox.Show(this,
+            if (decision.RequiresConfirmation && ThemedDialog.Show(this,
                 $"Con trỏ chưa nằm ở cuối câu. Tách tại điểm gần nhất?\n\n{decision.Preview}",
                 "Gợi ý điểm tách", MessageBoxButton.YesNo, MessageBoxImage.Question,
                 MessageBoxResult.Yes) != MessageBoxResult.Yes)
@@ -366,7 +366,7 @@ public partial class MainWindow
             try { await change(false); }
             catch (SegmentationConfirmationRequiredException)
             {
-                if (MessageBox.Show(this, "Lưu toàn bộ bản cũ vào lịch sử và thay ranh giới của phần này?\n" +
+                if (ThemedDialog.Show(this, "Lưu toàn bộ bản cũ vào lịch sử và thay ranh giới của phần này?\n" +
                     "Chỉ các đoạn bị ảnh hưởng cần xử lý lại. Bản sửa/duyệt được giữ và bảo vệ khỏi dịch tự động. Khi tách, hãy lấy bản cũ trong lịch sử để chia bản Việt thủ công hoặc dịch lại riêng.",
                     "Xác nhận đổi ranh giới", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
                 await change(true);

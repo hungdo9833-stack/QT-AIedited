@@ -148,7 +148,7 @@ public partial class MainWindow
         var existing = SourceContextActions.FindCharacter(_characterProject, chinese);
         if (existing is not null)
         {
-            if (MessageBox.Show(this, $"“{chinese}” đã thuộc hồ sơ {existing.VietnameseName}. Mở hồ sơ để sửa?",
+            if (ThemedDialog.Show(this, $"“{chinese}” đã thuộc hồ sơ {existing.VietnameseName}. Mở hồ sơ để sửa?",
                 "Nhân vật đã có", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes) return;
             var edited = ShowCharacterEditor(CloneProfile(existing));
             if (edited is null) return;
@@ -170,7 +170,7 @@ public partial class MainWindow
         {
             var conflict = _glossaryRows.FirstOrDefault(t => string.Equals(t.Chinese, quick.Profile.ChineseName, StringComparison.Ordinal));
             if (conflict is not null && !string.Equals(conflict.Vietnamese, quick.Profile.VietnameseName, StringComparison.Ordinal) &&
-                MessageBox.Show(this, $"Glossary đang có “{conflict.Chinese} = {conflict.Vietnamese}”. Thay bằng “{quick.Profile.VietnameseName}”?",
+                ThemedDialog.Show(this, $"Glossary đang có “{conflict.Chinese} = {conflict.Vietnamese}”. Thay bằng “{quick.Profile.VietnameseName}”?",
                     "Xác nhận ánh xạ", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             _characterProject.Profiles.Add(quick.Profile);
             var merged = ReadTerms().Where(t => !string.Equals(t.Chinese, quick.Profile.ChineseName, StringComparison.Ordinal)).ToList();
@@ -298,7 +298,7 @@ public partial class MainWindow
         var character = _characterProject.Profiles.FirstOrDefault(p => string.Equals(p.ChineseName, chinese, StringComparison.Ordinal));
         if (character is not null && !string.Equals(character.VietnameseName, edited.Vietnamese, StringComparison.Ordinal))
         {
-            if (MessageBox.Show(this, $"“{chinese}” đang gắn với hồ sơ {character.VietnameseName}. Mở hồ sơ nhân vật để đổi đồng bộ?",
+            if (ThemedDialog.Show(this, $"“{chinese}” đang gắn với hồ sơ {character.VietnameseName}. Mở hồ sơ nhân vật để đổi đồng bộ?",
                 "Thuật ngữ thuộc hồ sơ nhân vật", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
             {
                 var profile = ShowCharacterEditor(CloneProfile(character));
@@ -313,7 +313,7 @@ public partial class MainWindow
             return;
         }
         if (existing is not null && existing.Vietnamese != edited.Vietnamese &&
-            MessageBox.Show(this, $"Đổi nghĩa “{existing.Vietnamese}” thành “{edited.Vietnamese}”?", "Cập nhật glossary",
+            ThemedDialog.Show(this, $"Đổi nghĩa “{existing.Vietnamese}” thành “{edited.Vietnamese}”?", "Cập nhật glossary",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         try
         {

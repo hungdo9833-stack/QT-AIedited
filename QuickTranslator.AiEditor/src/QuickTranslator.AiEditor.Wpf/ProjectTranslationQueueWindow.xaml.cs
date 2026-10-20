@@ -272,7 +272,7 @@ public partial class ProjectTranslationQueueWindow : Window
 
     private async void OnReplan(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show(this,
+        if (ThemedDialog.Show(this,
             "Tạo hàng đợi mới cho toàn bộ chapter chưa hoàn tất bằng card/model, prompt và tài nguyên hiện tại?\n\n" +
             "Các chapter và segment đã hoàn tất vẫn được giữ nguyên.",
             "Tạo lại phần chưa xong", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
@@ -303,7 +303,7 @@ public partial class ProjectTranslationQueueWindow : Window
         ProjectTranslationWorkerProgress? worker = _coordinator.GetWorkerProgress().FirstOrDefault(value =>
             value.Status is ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted);
         if (worker is null) return;
-        if (MessageBox.Show(this,
+        if (ThemedDialog.Show(this,
             $"Retry worker “{worker.Name}”? Chapter có request Remote không chắc chắn sẽ được gửi lại sau khi bạn đã kiểm tra checkpoint.",
             "Xác nhận Retry Remote", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await RunControlAsync(() => _coordinator.RetryWorkerAsync(worker.WorkerId, true),
@@ -376,7 +376,7 @@ public partial class ProjectTranslationQueueWindow : Window
     {
         if (_closed) return;
         StatusText.Text = "Translation Queue dừng: " + ex.Message;
-        MessageBox.Show(this, ex.Message, "Translation Queue", MessageBoxButton.OK, MessageBoxImage.Error);
+        ThemedDialog.Show(this, ex.Message, "Translation Queue", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     private void OnClosed(object? sender, EventArgs e)

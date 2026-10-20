@@ -146,7 +146,7 @@ public partial class MainWindow
     private void OnDeleteGlossaryTerm(object sender, RoutedEventArgs e)
     {
         if (GlossaryGrid.SelectedItem is not GlossaryRow selected) return;
-        if (MessageBox.Show(this, $"Xóa thuật ngữ {selected.Chinese} = {selected.Vietnamese}?", "Xóa thuật ngữ",
+        if (ThemedDialog.Show(this, $"Xóa thuật ngữ {selected.Chinese} = {selected.Vietnamese}?", "Xóa thuật ngữ",
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         _glossaryRows.Remove(selected);
         GlossaryChanged();
@@ -251,8 +251,8 @@ public partial class MainWindow
             ClampWindowToWorkArea(window, 1050, 720);
             save.Click += (_, _) => SaveEditor();
             restore.Click += (_, _) => { template.Text = PromptPreset.DefaultTemplate; dirty = true; validation.Text = "Đã nạp nội dung mặc định; bấm Lưu thay đổi để xác nhận."; };
-            close.Click += (_, _) => { if (dirty && MessageBox.Show(window, "Bỏ thay đổi chưa lưu trong cửa sổ preset?", "Đóng", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return; window.DialogResult = true; };
-            window.Closing += (_, args) => { if (window.DialogResult != true && dirty && MessageBox.Show(window, "Bỏ thay đổi chưa lưu trong cửa sổ preset?", "Đóng", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) args.Cancel = true; };
+            close.Click += (_, _) => { if (dirty && ThemedDialog.Show(window, "Bỏ thay đổi chưa lưu trong cửa sổ preset?", "Đóng", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return; window.DialogResult = true; };
+            window.Closing += (_, args) => { if (window.DialogResult != true && dirty && ThemedDialog.Show(window, "Bỏ thay đổi chưa lưu trong cửa sổ preset?", "Đóng", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) args.Cancel = true; };
             RefreshList();
             if (window.ShowDialog() == true)
             {
