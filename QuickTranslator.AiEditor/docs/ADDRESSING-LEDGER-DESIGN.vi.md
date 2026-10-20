@@ -298,7 +298,57 @@ Bản đếm đầu tiên cho 柳轻锋 (nam chính) ra 他 190 / 她 99. Bản 
 
 **Kế hoạch offline cho "test cpu":** 24 nhiệm vụ (13 cặp, 11 nhân vật), 4 request, khoảng 19.300 token đầu vào ước tính. Giới tính theo nguyên văn: 柳轻锋 nam (132:7), 柳月影 nữ (0:25), 秦梦岚 nữ (2:27), 沈夕颜 nữ (2:17), 柳恒 nam (8:2). Biến thể: 小锋×179 và 轻锋×24 → 柳轻锋; 小影×70, 小影姐×55, 月影×8 → 柳月影; 夕颜×93, 夕颜姐×79 → 沈夕颜; 梦岚, 阿岚, 小岚 → 秦梦岚; 陈老师 → 陈馨玉. `柳少/柳少爷/柳总` là mơ hồ (cả 柳轻锋 và 柳月影 đều có thể là chủ).
 
-### Bước 3 — Duyệt theo nhân vật/cặp và ghi vào hồ sơ (đang triển khai, mock)
+### Bước 3 — "Hoàn thành": ghi tất cả vào hồ sơ bằng một nút (đã triển khai; giai đoạn A của hướng tự động)
+
+**Mục tiêu sản phẩm (2026-10-20).** QT Studio là phần mềm dịch tự động. Khảo sát xong, người dùng chỉ bấm **Hoàn thành** rồi dịch, không phải duyệt từng nhân vật hay từng cặp. Duyệt từng mục vẫn có, nhưng chỉ là tùy chọn để kiểm tra hoặc sửa.
+
+**Nút Hoàn thành** (cửa sổ Sổ xưng hô, `AddressingReviewService.CompleteAsync`):
+
+- Ghi mọi đề xuất đã kiểm chứng và chưa có quyết định trong **một lần lưu** (có kiểm tra revision). Các quy tắc ghi giống hệt khi duyệt tay:
+  - **Nhân vật:** tên Việt, giới tính, đại từ kể chính/phụ (khóa; nếu có nhiều giai đoạn thì ghi theo chương), tên phụ vào bí danh và glossary.
+  - **Cặp:** quy tắc xưng hô có hướng (khóa; nếu có nhiều giai đoạn thì ghi theo chương). Nhân vật được ghi trước nên cặp có sẵn hồ sơ.
+- **Bật khóa nhất quán**, vì "Hoàn thành" nghĩa là dịch theo các quy tắc này.
+- **Mỗi nhân vật và mỗi cặp có hướng chỉ lấy câu trả lời mới nhất.** Nếu câu mới nhất không hợp lệ hoặc là `NotThisPair`, mục đó bị giữ lại; không quay về câu trả lời cũ hơn.
+- **Không bao giờ ghi đè.** Các trường hợp sau đều bị giữ lại:
+  - hồ sơ đã khóa;
+  - hồ sơ đã có đại từ kể hoặc giới tính khác;
+  - đã có quy tắc cho cùng hướng (khóa hay không cũng vậy);
+  - quyết định của người dùng: mục bị bác bỏ thì giữ lại, mục đã ghi thì bỏ qua.
+- **Glossary của người dùng thắng AI.** Tên Việt và tên phụ dùng bản dịch đã có trong glossary.
+- **Tên phụ chỉ bị bỏ khi không tự quyết được**, và hồ sơ vẫn được ghi. Một tên phụ bị bỏ khi:
+  - có hai nhân vật cùng nhận tên đó;
+  - tên đó đã thuộc một hồ sơ khác;
+  - tên Việt của nó có chữ Hán;
+  - đó là **danh xưng** (`宁小姐`, `陆总`, `王老师`), vì một danh xưng có thể chỉ nhiều người.
+- Mục bị giữ lại chỉ được **liệt kê, không chặn Hoàn thành**. Bản dịch dùng mặc định cho các mục này.
+
+**Hoàn tác** (`UndoCompletionAsync`):
+
+- Mỗi lần Hoàn thành lưu bản Character Project trước đó vào `Settings/addressing-apply.v1.json`, giữ 3 bản gần nhất.
+- Hoàn tác khôi phục đúng bản đó, kể cả trạng thái khóa nhất quán, và đưa các đề xuất về trạng thái chờ (quyết định `Reverted`).
+- Nếu hồ sơ đã được sửa sau khi Hoàn thành, chương trình hỏi trước khi bỏ những sửa đổi đó.
+
+**Thử trên sổ thật của 隐婚100分 (bản sao, HTTP = 0):**
+
+- Một nút ghi **21 mục**: 9 nhân vật và 12 cặp. Ví dụ:
+  - `陆霆骁 = Lục Đình Kiêu · anh · tên phụ 霆骁 = Đình Kiêu`;
+  - `宁夕 → 小宝: dì / con`;
+  - `陆景礼 → 陆霆骁: em / anh`.
+- **5 mục được giữ lại:**
+  - 2 cặp AI trả `NotThisPair` (các mẫu thực ra là lời 陆老夫人);
+  - 2 cặp có chữ Hán trong ô tiếng Việt (`Lục先生`);
+  - tên phụ `宁小姐` (danh xưng).
+- Khối quy tắc trình dịch nhận ở ch.18 có đủ đại từ kể của 陆霆骁 / 小宝 / 陆景礼 / 陆老爷子 và 4 quy tắc xưng hô.
+- Hoàn tác khôi phục đúng như trước.
+
+**Còn lại (các giai đoạn sau):**
+
+- **B:** chạy toàn bộ khảo sát ngay trong phần mềm (hiện vẫn dùng probe).
+- **C:** hỏi mỗi cặp theo cả hai chiều trong một nhiệm vụ và kiểm tra chéo cho khớp (ví dụ `陆霆骁 → 小宝: tôi / con` lẽ ra phải là `ba / con`).
+- **D:** gộp danh tính (`小包子` và `小宝` hiện là hai hồ sơ).
+- Người chỉ có danh xưng (`陆老夫人`) chưa có hồ sơ, nên các cặp của bà chưa được ghi.
+
+### Bước 3 · duyệt từng mục (tùy chọn)
 
 Cửa sổ **Sổ xưng hô** mở từ *Thiết lập dịch → Nhân vật & xưng hô*. Có hai tab: **Nhân vật** và **Cặp xưng hô**. Mỗi dòng là một đề xuất của Bước 2, kèm kết quả kiểm chứng, lỗi (nếu có) và các mẫu nguyên văn AI đã dùng. Người dùng có thể sửa trước khi chấp nhận. Chỉ đề xuất đã qua kiểm chứng mới được chấp nhận. Mỗi quyết định (Chấp nhận / Bác bỏ / Để sau) được ghi thêm vào ledger.
 
@@ -323,7 +373,7 @@ Không bao giờ ghi đè dữ liệu người dùng đã khóa hoặc đã có:
 
 **Nhiều giai đoạn:** hồ sơ hiện chưa có mốc chương, nên người dùng chọn giai đoạn áp dụng mặc định. Các giai đoạn khác được ghi vào ghi chú của hồ sơ/quan hệ và vào ledger, để Bước 4 áp dụng theo chương.
 
-**Khóa nhất quán Project** (để trình dịch dùng hồ sơ) được bật bằng một ô chọn riêng, không tự bật khi chấp nhận.
+**Khóa nhất quán Project** (để trình dịch dùng hồ sơ): duyệt từng mục không tự bật; Hoàn thành thì bật.
 
 ### Bước 4 — Nối vào dịch (đang triển khai)
 

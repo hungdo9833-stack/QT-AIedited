@@ -38,6 +38,8 @@ internal static class ChineseMentionDiscovery
         (Rule(LeftBoundary + @"(?<name>" + Family + Titles + @")"), MentionSignal.Title)
     ];
     private static readonly Regex TitleForm = Rule(@"^" + Family + Titles + "$");
+    /// <summary>Surname + title (宁小姐, 陆总, 王老师): may name several people, so never an automatic alias.</summary>
+    internal static bool IsTitleForm(string name) => TitleForm.IsMatch(name);
     private static readonly Regex AliasForm = Rule(@"^[小阿老]" + Han + "{1,2}$");
     private static readonly Regex PredicateTail = Rule(@"(?:说道|问道|答道|喊道|笑道|走来|点头|摇头|回头|转身|起身|跑来|走去|看着|看向|进来|出去)$");
     private static readonly Regex GrammarFragment = Rule(@"^(?:应该|应当|应了|明明|明显|任何|何时|何苦|谢谢|所谓|过去|明年|今年|去年|明天|今天|昨天)|[的地得了们你我他她它呢吗吧呀啊]|(?:不大|起来|之间|依旧|并不|商量|回家|那边|里面|身上|面前|这里|那儿|自己|似乎|氏|氏内部)$");

@@ -12,8 +12,9 @@ namespace QuickTranslator.AiEditor.Wpf;
 internal sealed record AddressingRow(AddressingProposal Proposal, string Subject, string Status, string Check, string Summary, string Decision);
 
 /// <summary>
-/// Addressing Ledger step 3 (docs/ADDRESSING-LEDGER-DESIGN.vi.md): review per character / per pair and write accepted
-/// rules to the Character Project. Nothing is accepted automatically; the translation lock is a separate switch.
+/// Addressing Ledger step 3 (docs/ADDRESSING-LEDGER-DESIGN.vi.md). "Hoàn thành" writes every verified proposal to the
+/// Character Project at once and switches the translation lock on (undoable); per character / per pair review is optional,
+/// for checking or editing. Locked or conflicting data is never overwritten.
 /// </summary>
 public sealed class AddressingLedgerWindow : Window
 {
@@ -35,6 +36,11 @@ public sealed class AddressingLedgerWindow : Window
     private readonly TextBox _details = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly StackPanel _characterFields = new(), _pairFields = new();
     private readonly Button _accept = new() { Content = "Chấp nhận & ghi vào hồ sơ" }, _reject = new() { Content = "Bác bỏ" }, _defer = new() { Content = "Để sau" };
+    private readonly Button _complete = new() { Content = "✔ Hoàn thành: ghi tất cả vào hồ sơ và dùng khi dịch", FontWeight = FontWeights.SemiBold, Padding = new Thickness(12, 6, 12, 6) };
+    private readonly Button _undo = new() { Content = "Hoàn tác lần Hoàn thành gần nhất", Margin = new Thickness(8, 0, 0, 0), IsEnabled = false };
+    private readonly TextBox _completion = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 140, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) };
+    internal AddressingCompletion? Preview { get; private set; }
+    internal string CompletionText => _completion.Text;
     private Dictionary<string, AddressingTask> _tasks = [];
     private bool _updatingLock;
     internal AddressingLedgerState State { get; private set; } = new();
@@ -45,7 +51,7 @@ public sealed class AddressingLedgerWindow : Window
     public AddressingLedgerWindow(ProjectSession session, ProjectRepository repository, Action<ProjectResources> applyResources)
     {
         _session = session; _repository = repository; _applyResources = applyResources; _service = new AddressingReviewService(session);
-        Title = "QT Studio · Sổ xưng hô (duyệt)"; Width = 1200; Height = 760; MinWidth = 820; MinHeight = 520;
+        Title = "QT Studio · Sổ xưng hô"; Width = 1200; Height = 760; MinWidth = 820; MinHeight = 520;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         SetResourceReference(BackgroundProperty, "AppBackgroundBrush"); SetResourceReference(ForegroundProperty, "TextBrush");
         Content = Build();
@@ -67,9 +73,12 @@ public sealed class AddressingLedgerWindow : Window
     {
         var root = new DockPanel { Margin = new Thickness(12) };
         var top = new StackPanel(); DockPanel.SetDock(top, Dock.Top);
-        top.Children.Add(new TextBlock { Text = "Sổ xưng hô · duyệt theo nhân vật và theo cặp", FontSize = 20 });
-        top.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "Đề xuất của AI là giả thuyết đã kiểm chứng cơ học (câu trích nguyên văn, mẫu đúng chương), KHÔNG phải dữ kiện. " +
-            "Chỉ những gì bạn chấp nhận mới được ghi vào hồ sơ nhân vật; quy tắc khóa của bạn không bao giờ bị ghi đè. Duyệt nhân vật trước, rồi tới cặp." });
+        top.Children.Add(new TextBlock { Text = "Sổ xưng hô · kết quả khảo sát", FontSize = 20 });
+        top.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "Bấm Hoàn thành để ghi toàn bộ nhân vật (tên Việt, tên phụ, đại từ ngôi thứ 3) và xưng hô theo cặp đã qua kiểm chứng vào hồ sơ, " +
+            "rồi dịch ngay. Hồ sơ hoặc quy tắc bạn đã khóa / đã có sẵn không bao giờ bị ghi đè; những mục không tự quyết được chỉ được liệt kê, không chặn Hoàn thành. " +
+            "Có thể hoàn tác. Duyệt từng mục bên dưới là tùy chọn." });
+        var finish = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+        finish.Children.Add(_complete); finish.Children.Add(_undo); top.Children.Add(finish); top.Children.Add(_completion);
         var bar = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
         bar.Children.Add(_reload); bar.Children.Add(_onlyValid); bar.Children.Add(_lock); top.Children.Add(bar); top.Children.Add(_summary);
         root.Children.Add(top);
@@ -106,6 +115,8 @@ public sealed class AddressingLedgerWindow : Window
         _accept.Click += async (_, _) => await AcceptAsync(); _reject.Click += async (_, _) => await DecideAsync(AddressingDecision.Rejected);
         _defer.Click += async (_, _) => await DecideAsync(AddressingDecision.Deferred);
         _lock.Click += async (_, _) => await SetLockAsync(_lock.IsChecked == true);
+        _complete.Click += async (_, _) => await CompleteAsync();
+        _undo.Click += async (_, _) => await UndoAsync(discardLaterEdits: false);
         ShowSelection();
         return root;
     }
@@ -123,6 +134,7 @@ public sealed class AddressingLedgerWindow : Window
             var turns = State.SceneTurns();
             _tasks = (await Task.Run(() => AddressingAiSurvey.PlanTasks(sources, names, sceneTurns: turns))).ToDictionary(t => t.TaskId, StringComparer.Ordinal);
             _updatingLock = true; _lock.IsChecked = CurrentResources.Characters.ConsistencyLockEnabled; _updatingLock = false;
+            await RefreshCompletionAsync();
             Refresh();
         }, "Đã nạp sổ xưng hô.");
     }
@@ -134,7 +146,7 @@ public sealed class AddressingLedgerWindow : Window
             string summary = p.Kind == AddressingTaskKind.Character
                 ? $"{GenderLabel(p.Gender)} · " + string.Join("; ", p.Phases.Select(x => $"{Range(x)} {x.NarrativeVi}")) + (p.NameForms.Count > 0 ? " · " + string.Join(", ", p.NameForms.Select(f => $"{f.Zh}={f.Vi}")) : "")
                 : $"{p.Relationship} · " + string.Join("; ", p.Phases.Select(x => $"{Range(x)} xưng {x.SelfVi} / gọi {x.AddressVi}"));
-            string decision = State.LatestReview(p.Id)?.Decision switch { AddressingDecision.Accepted => "Đã ghi", AddressingDecision.Rejected => "Bác bỏ", AddressingDecision.Deferred => "Để sau", _ => "Chờ" };
+            string decision = State.LatestReview(p.Id)?.Decision switch { AddressingDecision.Accepted => "Đã ghi", AddressingDecision.Rejected => "Bác bỏ", AddressingDecision.Deferred => "Để sau", _ => "Chờ" } + (State.LatestReview(p.Id)?.Note == "Tự động · Hoàn thành" ? " (tự động)" : "");
             return new(p, p.Listener is null ? p.Subject : $"{p.Subject} → {p.Listener}", p.Status, p.EvidenceValid ? "✅ hợp lệ" : "❌ " + string.Join(", ", p.Issues), summary, decision);
         }
         bool onlyValid = _onlyValid.IsChecked == true;
@@ -148,7 +160,7 @@ public sealed class AddressingLedgerWindow : Window
         }
         // Scene proposals are evidence for pair tasks only; they are counted apart and never reviewed here.
         var reviewable = State.Proposals.Where(p => p.Kind != AddressingTaskKind.Scene).ToArray();
-        int pending = reviewable.Count(p => p.EvidenceValid && State.LatestReview(p.Id) is null);
+        int pending = reviewable.Count(p => p.EvidenceValid && State.LatestReview(p.Id)?.Decision is null or AddressingDecision.Reverted);
         int scenes = State.Proposals.Count(p => p.Kind == AddressingTaskKind.Scene && p.EvidenceValid);
         _summary.Text = $"{reviewable.Length} đề xuất ({reviewable.Count(p => p.EvidenceValid)} đã kiểm chứng, {pending} chờ duyệt) · {State.Reviews.Count} quyết định · " +
             (scenes > 0 ? $"{scenes} cảnh đã xác định lượt nói ({State.SceneTurns().Count} lượt) · " : "") +
@@ -212,7 +224,7 @@ public sealed class AddressingLedgerWindow : Window
                 ? await _service.AcceptCharacterAsync(p.Id, new(Genders[Math.Max(0, _gender.SelectedIndex)].Value, _vietName.Text, _narrative.Text, _secondary.Text,
                     ParseForms(_forms.Text), _phase.SelectedIndex, _note.Text), CurrentResources.Revision)
                 : await _service.AcceptPairAsync(p.Id, new(_self.Text, _address.Text, _relationship.Text, _phase.SelectedIndex, _note.Text), CurrentResources.Revision);
-            CurrentResources = saved; _applyResources(saved); State = await _service.LoadAsync(); Refresh();
+            CurrentResources = saved; _applyResources(saved); State = await _service.LoadAsync(); Refresh(); await RefreshCompletionAsync();
         }, "Đã ghi vào hồ sơ nhân vật.");
     }
 
@@ -222,6 +234,7 @@ public sealed class AddressingLedgerWindow : Window
         await Run(async () =>
         {
             State = decision == AddressingDecision.Rejected ? await _service.RejectAsync(p.Id, _note.Text) : await _service.DeferAsync(p.Id, _note.Text);
+            await RefreshCompletionAsync();
             Refresh();
         }, decision == AddressingDecision.Rejected ? "Đã bác bỏ đề xuất." : "Đã để sau.");
     }
@@ -234,6 +247,55 @@ public sealed class AddressingLedgerWindow : Window
             var saved = await _service.SetConsistencyLockAsync(enabled, CurrentResources.Revision);
             CurrentResources = saved; _applyResources(saved); Refresh();
         }, enabled ? "Đã bật khóa nhất quán: trình dịch sẽ dùng hồ sơ nhân vật." : "Đã tắt khóa nhất quán.");
+    }
+
+    /// <summary>What "Hoàn thành" would write now, shown above the lists; nothing is written.</summary>
+    private async Task RefreshCompletionAsync()
+    {
+        Preview = await _service.PreviewCompletionAsync();
+        _undo.IsEnabled = await _service.CanUndoCompletionAsync();
+        _complete.IsEnabled = Preview.Applied.Count > 0;
+        _completion.Text = Preview.Applied.Count == 0 && Preview.Held.Count == 0 ? "Chưa có gì để ghi: chạy khảo sát trước, hoặc mọi đề xuất đã được ghi."
+            : $"Hoàn thành sẽ ghi {Count(Preview.Applied, AddressingTaskKind.Character)} nhân vật và {Count(Preview.Applied, AddressingTaskKind.Pair)} cặp xưng hô." +
+              (Preview.Held.Count == 0 ? "" : Environment.NewLine + Held(Preview.Held));
+    }
+    private static int Count(IEnumerable<AddressingAutoItem> items, AddressingTaskKind kind) => items.Count(x => x.Kind == kind);
+    private static string Held(IReadOnlyList<AddressingAutoItem> held) =>
+        $"Giữ lại {held.Count} mục (không chặn Hoàn thành; bản dịch dùng mặc định cho các mục này):" + Environment.NewLine +
+        string.Join(Environment.NewLine, held.Select(h => $"• {h.Subject}{(h.Listener is null ? "" : " → " + h.Listener)}: {h.Detail}"));
+
+    internal async Task CompleteAsync()
+    {
+        if (CurrentResources is null) return;
+        AddressingCompletion? done = null;
+        await Run(async () =>
+        {
+            done = await _service.CompleteAsync(CurrentResources.Revision);
+            CurrentResources = done.Resources; _applyResources(done.Resources);
+            State = await _service.LoadAsync();
+            _updatingLock = true; _lock.IsChecked = done.Resources.Characters.ConsistencyLockEnabled; _updatingLock = false;
+            Refresh(); await RefreshCompletionAsync();
+        }, "Đã Hoàn thành.");
+        if (done is not null)
+            _completion.Text = $"Đã ghi {Count(done.Applied, AddressingTaskKind.Character)} nhân vật và {Count(done.Applied, AddressingTaskKind.Pair)} cặp xưng hô; khóa nhất quán đã BẬT, có thể dịch ngay." +
+                (done.Held.Count == 0 ? "" : Environment.NewLine + Held(done.Held));
+    }
+
+    internal async Task UndoAsync(bool discardLaterEdits)
+    {
+        await Run(async () =>
+        {
+            ProjectResources saved;
+            try { saved = await _service.UndoCompletionAsync(discardLaterEdits); }
+            catch (AddressingUndoConflictException ex) when (IsVisible && !discardLaterEdits &&
+                MessageBox.Show(this, ex.Message + " Vẫn hoàn tác?", "Sổ xưng hô", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+            {
+                saved = await _service.UndoCompletionAsync(discardLaterEdits: true);
+            }
+            CurrentResources = saved; _applyResources(saved); State = await _service.LoadAsync();
+            _updatingLock = true; _lock.IsChecked = saved.Characters.ConsistencyLockEnabled; _updatingLock = false;
+            Refresh(); await RefreshCompletionAsync();
+        }, "Đã hoàn tác lần Hoàn thành gần nhất.");
     }
 
     internal void SelectRow(AddressingTaskKind kind, string subject)

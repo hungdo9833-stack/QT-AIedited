@@ -31,7 +31,8 @@ public sealed class AddressingLedgerUiTests
             {
                 bool female = t.SourceGender == "female";
                 characters.Add(new JsonObject { ["task_id"] = t.TaskId, ["status"] = "Consistent", ["gender"] = t.SourceGender,
-                    ["name_forms"] = new JsonArray(t.NameCandidates.Select(v => (JsonNode)new JsonObject { ["zh"] = v.Form, ["vi"] = "Tú Lan" }).ToArray()),
+                    ["name_forms"] = new JsonArray(t.NameCandidates.Select(v => (JsonNode)new JsonObject { ["zh"] = v.Form, ["vi"] = "Tú Lan" })
+                        .Append(new JsonObject { ["zh"] = t.Subject, ["vi"] = t.Subject == "王秀兰" ? "Vương Tú Lan" : t.Subject == "林青" ? "Lâm Thanh" : "Nhân vật" }).ToArray()),
                     ["phases"] = new JsonArray(new JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 0, ["narrative_vi"] = female ? "nàng" : "hắn",
                         ["secondary_vi"] = "", ["sample_ids"] = ids }), ["reason"] = "Mock" });
             }
@@ -83,6 +84,41 @@ public sealed class AddressingLedgerUiTests
             window.SelectRow(AddressingTaskKind.Pair, "林青"); await window.DecideAsync(AddressingDecision.Rejected);
             Assert.Equal(AddressingDecision.Rejected, window.State.LatestReview(window.Selected!.Id)!.Decision);
             Assert.Equal(0, fixture.Client.Calls); // The review window never calls an AI provider.
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
+    public Task One_click_Complete_writes_everything_turns_translation_on_and_can_be_undone() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture(); await fixture.CreateProjectAsync();
+        for (int n = 1; n <= 2; n++)
+            await fixture.Repository.AddChapterAsync(fixture.Project, TranslationService.CreateChapter("Chương " + n, string.Concat(Enumerable.Repeat(Block, 3))), n);
+        var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(fixture.Project, fixture.Repository);
+        var resources = await new ProjectResourceStore(fixture.Project).LoadAsync();
+        var tasks = AddressingAiSurvey.PlanTasks(sources, AddressingAiSurvey.CandidateNames(fixture.Project.Manifest.ProjectId, sources, resources));
+        var request = AddressingAiSurvey.PlanRequests(tasks, "mock").Single();
+        await new AddressingLedgerStore(fixture.Project).UpdateAsync(s => s.Proposals.AddRange(AddressingAiSurvey.Verify(Reply(request), request)));
+
+        ProjectResources? applied = null;
+        var window = new AddressingLedgerWindow(fixture.Project, fixture.Repository, r => applied = r);
+        try
+        {
+            await window.LoadAsync(); Assert.Null(window.LastError);
+            Assert.Equal(request.Tasks.Count, window.Preview!.Applied.Count); Assert.Contains("Hoàn thành sẽ ghi", window.CompletionText);
+            await window.CompleteAsync(); Assert.Null(window.LastError);
+            var saved = await new ProjectResourceStore(fixture.Project).LoadAsync();
+            Assert.True(saved.Characters.ConsistencyLockEnabled); Assert.Equal(saved.Revision, applied!.Revision);
+            var sister = saved.Characters.Profiles.Single(p => p.ChineseName == "王秀兰");
+            Assert.Equal("Vương Tú Lan", sister.VietnameseName); Assert.True(sister.NarrativePronounLocked); Assert.NotEmpty(sister.Relationships);
+            Assert.Contains("Đã ghi", window.CompletionText);
+            Assert.All(window.State.Proposals, p => Assert.Equal(AddressingDecision.Accepted, window.State.LatestReview(p.Id)!.Decision));
+
+            await window.UndoAsync(discardLaterEdits: false); Assert.Null(window.LastError);
+            var restored = await new ProjectResourceStore(fixture.Project).LoadAsync();
+            Assert.Empty(restored.Characters.Profiles); Assert.False(restored.Characters.ConsistencyLockEnabled); Assert.Equal(restored.Revision, applied!.Revision);
+            Assert.Equal(request.Tasks.Count, window.Preview!.Applied.Count); // Pending again.
+            Assert.Equal(0, fixture.Client.Calls);
         }
         finally { window.Close(); }
     });

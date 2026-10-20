@@ -91,6 +91,65 @@ public sealed class AddressingLedgerStore(ProjectSession session)
     }
 }
 
+/// <summary>One "Hoàn thành": the Character Project as it was before (for undo) and the proposals it wrote.</summary>
+public sealed record AddressingApplyRecord(Guid Id, DateTimeOffset At, long BeforeRevision, long AfterRevision, IReadOnlyList<Guid> ProposalIds, ProjectResources? Before)
+{
+    public DateTimeOffset? UndoneAt { get; init; }
+}
+
+public sealed class AddressingApplyState
+{
+    public int SchemaVersion { get; set; } = 1;
+    public Guid ProjectId { get; set; }
+    public List<AddressingApplyRecord> Records { get; set; } = [];
+}
+
+/// <summary>
+/// Settings/addressing-apply.v1.json: the history of "Hoàn thành". Only the last few records keep their snapshot (a full
+/// Character Project), so the file stays small; older ones keep the list of what they wrote.
+/// </summary>
+public sealed class AddressingApplyStore(ProjectSession session)
+{
+    private const int SnapshotsKept = 3;
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.OrdinalIgnoreCase);
+    public string PathName => session.Resolve("Settings/addressing-apply.v1.json");
+
+    public Task<AddressingApplyState> LoadAsync(CancellationToken ct = default) =>
+        SimpleFileStorage.ReadOptionalAsync(PathName, Decode, () => new AddressingApplyState { ProjectId = session.Manifest.ProjectId }, ct);
+
+    public Task AppendAsync(AddressingApplyRecord record, CancellationToken ct = default) => UpdateAsync(s =>
+    {
+        s.Records.Add(record);
+        for (int i = 0; i < s.Records.Count - SnapshotsKept; i++) s.Records[i] = s.Records[i] with { Before = null };
+    }, ct);
+
+    public Task MarkUndoneAsync(Guid id, CancellationToken ct = default) => UpdateAsync(s =>
+    {
+        int i = s.Records.FindIndex(r => r.Id == id);
+        if (i >= 0) s.Records[i] = s.Records[i] with { UndoneAt = DateTimeOffset.UtcNow };
+    }, ct);
+
+    private async Task UpdateAsync(Action<AddressingApplyState> update, CancellationToken ct)
+    {
+        var gate = Gates.GetOrAdd(PathName, _ => new(1, 1)); await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var state = await LoadAsync(ct).ConfigureAwait(false);
+            update(state);
+            Directory.CreateDirectory(Path.GetDirectoryName(PathName)!);
+            await SimpleFileStorage.WriteAsync(PathName, JsonSerializer.SerializeToUtf8Bytes(state, DocumentJson.Options), Decode, ct).ConfigureAwait(false);
+        }
+        finally { gate.Release(); }
+    }
+
+    private AddressingApplyState Decode(byte[] bytes)
+    {
+        var state = JsonSerializer.Deserialize<AddressingApplyState>(bytes, DocumentJson.Options) ?? throw new InvalidDataException("Empty addressing apply history.");
+        if (state.SchemaVersion != 1 || state.ProjectId != session.Manifest.ProjectId) throw new InvalidDataException("Addressing apply history belongs to another Project or schema.");
+        return state;
+    }
+}
+
 public sealed record AddressingRunResult(AddressingLedgerState State, int RequestsSent, int Planned, string? StoppedBy);
 
 /// <summary>
