@@ -109,31 +109,6 @@ public static class RelationshipKnowledgeService
         return existing;
     }
 
-    public static KnowledgeRelationType ParseType(string value)
-    {
-        RelationshipLabelNormalizer.Result normalized = RelationshipLabelNormalizer.Normalize(value);
-        if (normalized.Classification == RelationshipLabelNormalizer.Kind.Stable)
-            return normalized.RelationType;
-        string v = value.Trim().ToLowerInvariant();
-        if (v.Contains("亲生父") || v.Contains("生父") || v.Contains("biological father")) return KnowledgeRelationType.BiologicalFather;
-        if (v.Contains("亲生母") || v.Contains("生母") || v.Contains("biological mother")) return KnowledgeRelationType.BiologicalMother;
-        if (v.Contains("养父") || v.Contains("养母") || v.Contains("adoptive parent")) return KnowledgeRelationType.AdoptiveParent;
-        if (v.Contains("同父同母") || v.Contains("full sibling")) return KnowledgeRelationType.FullSibling;
-        if (v.Contains("同父异母") || v.Contains("paternal half")) return KnowledgeRelationType.PaternalHalfSibling;
-        if (v.Contains("同母异父") || v.Contains("maternal half")) return KnowledgeRelationType.MaternalHalfSibling;
-        if (v.Contains("结义") || v.Contains("sworn")) return KnowledgeRelationType.SwornSibling;
-        if (v.Contains("兄") || v.Contains("弟") || v.Contains("姐") || v.Contains("妹") || v.Contains("sibling")) return KnowledgeRelationType.UnknownSibling;
-        if (v.Contains("夫妻") || v.Contains("丈夫") || v.Contains("妻子") || v.Contains("spouse")) return KnowledgeRelationType.Spouse;
-        if (v.Contains("恋") || v.Contains("romantic")) return KnowledgeRelationType.RomanticPartner;
-        if (v.Contains("师父") || v.Contains("teacher")) return KnowledgeRelationType.Teacher;
-        if (v.Contains("徒弟") || v.Contains("disciple")) return KnowledgeRelationType.Disciple;
-        if (v.Contains("父") || v.Contains("母") || v.Contains("parent")) return KnowledgeRelationType.Parent;
-        if (v.Contains("子") || v.Contains("女") || v.Contains("child")) return KnowledgeRelationType.Child;
-        if (v.Contains("上司") || v.Contains("superior")) return KnowledgeRelationType.Superior;
-        if (v.Contains("下属") || v.Contains("subordinate")) return KnowledgeRelationType.Subordinate;
-        return KnowledgeRelationType.Social;
-    }
-
     private static int? FirstChapter(BookIntelligenceState state, IEnumerable<Guid> evidenceIds)
     {
         var ids = evidenceIds.ToHashSet();

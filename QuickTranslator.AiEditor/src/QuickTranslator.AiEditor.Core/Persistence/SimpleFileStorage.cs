@@ -39,19 +39,6 @@ public static class SimpleFileStorage
         catch (DirectoryNotFoundException) { return missingDefault(); }
     }
 
-    public static async Task<byte[]?> ReadOptionalBytesAsync(string path,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            byte[] bytes = await File.ReadAllBytesAsync(Path.GetFullPath(path), cancellationToken).ConfigureAwait(false);
-            StorageIoMetricsCapture.Read(bytes.Length);
-            return bytes;
-        }
-        catch (FileNotFoundException) { return null; }
-        catch (DirectoryNotFoundException) { return null; }
-    }
-
     public static async Task WriteAsync<T>(string path, byte[] bytes, Func<byte[], T> decode,
         CancellationToken cancellationToken = default)
     {

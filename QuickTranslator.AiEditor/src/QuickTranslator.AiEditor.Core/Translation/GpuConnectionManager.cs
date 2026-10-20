@@ -306,25 +306,6 @@ public sealed class GpuConnectionManager : IAsyncDisposable
     };
 }
 
-public sealed class BackendHealthMonitor
-{
-    public async Task<GpuProfileStatus> CheckAsync(OllamaBackendProfile profile, IOllamaBackendClient client,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            await client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
-            return new(profile.Id, GpuConnectionState.Connected, "Ollama và model đã sẵn sàng.", CheckedAt: DateTimeOffset.UtcNow);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch
-        {
-            return new(profile.Id, GpuConnectionState.Offline,
-                "Ollama không phản hồi hoặc model chưa sẵn sàng.", CheckedAt: DateTimeOffset.UtcNow);
-        }
-    }
-}
-
 public sealed record LocalOllamaStatus(bool Ready, bool Installed, string Message);
 
 public sealed class LocalOllamaService

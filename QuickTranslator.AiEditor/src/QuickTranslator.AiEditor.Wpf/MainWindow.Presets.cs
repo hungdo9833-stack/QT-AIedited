@@ -108,20 +108,6 @@ public partial class MainWindow
         catch (Exception ex) { ShowError(ex); RefreshPresetEditor(); }
         finally { EndUiOperation(); }
     }
-    private async void OnCreatePreset(object sender, RoutedEventArgs e)
-    {
-        if (!BeginUiOperation()) return;
-        try { await SavePresetEditorAsync(); _presetManager.Create("Preset mới"); RefreshPresetEditor(); await _presetStore.SaveAsync(_presetManager.Snapshot()); await SaveProjectPresetSelectionAsync(); }
-        catch (Exception ex) { ShowError(ex); }
-        finally { EndUiOperation(); }
-    }
-    private async void OnDuplicatePreset(object sender, RoutedEventArgs e)
-    {
-        if (!BeginUiOperation()) return;
-        try { await SavePresetEditorAsync(); var selected = _presetManager.Selected; _presetManager.Duplicate(selected.Id, selected.Name + " (bản sao)"); RefreshPresetEditor(); await _presetStore.SaveAsync(_presetManager.Snapshot()); await SaveProjectPresetSelectionAsync(); }
-        catch (Exception ex) { ShowError(ex); }
-        finally { EndUiOperation(); }
-    }
     private async void OnSavePreset(object sender, RoutedEventArgs e)
     {
         if (!BeginUiOperation()) return;

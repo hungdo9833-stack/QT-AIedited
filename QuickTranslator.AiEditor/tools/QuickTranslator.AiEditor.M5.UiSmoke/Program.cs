@@ -343,7 +343,7 @@ internal static class Program
 
     private static GpuManagerWindow CreateGpuManager(string root)
     {
-        var store = new BackendProfileStore(Path.Combine(root, "gpu-profiles.json"), new SyntheticProtector());
+        var store = new OllamaProfileStore(Path.Combine(root, "gpu-profiles.json"), new SyntheticProtector());
         var manager = new OllamaBackendManager(store, _ => new SyntheticBackendClient());
         manager.LoadAsync().GetAwaiter().GetResult();
         var remote = new OllamaBackendProfile
