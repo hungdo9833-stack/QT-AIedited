@@ -1,3 +1,4 @@
+using System.Windows;
 using System.IO;
 using System.Windows.Controls;
 using QuickTranslator.AiEditor.Core.Importing;
@@ -203,7 +204,62 @@ public sealed class ImportPreviewUiTests
     });
 
     [Fact]
-    public Task Preview_blocks_unreviewed_same_number_chapters() => StaHost.Run(async () =>
+    public Task Outside_text_can_become_a_chapter_and_a_real_block_is_explained_with_a_jump() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        string path = Path.Combine(fixture.Root, "preface.txt");
+        await File.WriteAllTextAsync(path,
+            "那一年冬天格外寒冷，北风卷着雪花从山口灌进村子，家家户户都早早关了门，只有村东头的铁匠铺还亮着火光。\n" +
+            "第1章 开始\n正文一。\n第2章 继续\n正文二。\n");
+        var window = new ImportPreviewWindow(fixture.Project);
+        try
+        {
+            await window.LoadSourceAsync(path, SourceTextEncoding.Auto);
+            var confirm = (Button)window.FindName("ConfirmButton");
+            var banner = (Border)window.FindName("BlockingBanner");
+            Assert.True(confirm.IsEnabled); // The preface does not block.
+            Assert.Equal(Visibility.Collapsed, banner.Visibility);
+            Assert.Contains(window.CurrentPlan!.Issues, x => x.Code == ImportPreviewIssueCode.OutsideChapterProse);
+
+            // Select the preface: it can become a chapter (nothing before it to merge into).
+            var grid = (DataGrid)window.FindName("PreviewGrid");
+            Guid prefaceId = window.CurrentPlan.Items.First(x => x.Kind == PlannedRegionKind.Unclassified).Id;
+            grid.SelectedItem = grid.Items.Cast<object>().First(row => (Guid)row.GetType().GetProperty("Id")!.GetValue(row)! == prefaceId);
+            var include = (Button)window.FindName("IncludeButton");
+            Assert.Equal("Tạo chương từ vùng này", include.Content);
+            Assert.True(include.IsEnabled);
+            Assert.False(((Button)window.FindName("RejectBoundaryButton")).IsEnabled);
+            ((TextBox)window.FindName("NumberInput")).Text = "99";
+            ((TextBox)window.FindName("TitleInput")).Text = "Lời mở đầu";
+            include.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Contains(window.CurrentPlan.ImportableChapters, x => x.Number == 99 && x.Title == "Lời mở đầu");
+
+            // A real block (the same number chosen twice) shows the reason and a jump to it.
+            ImportPreviewItem two = window.CurrentPlan.Chapters.Single(x => x.Number == 2);
+            grid.SelectedItem = grid.Items.Cast<object>().First(row => (Guid)row.GetType().GetProperty("Id")!.GetValue(row)! == two.Id);
+            ((TextBox)window.FindName("NumberInput")).Text = "1";
+            FindButton(window, "Áp dụng số / tên").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.False(confirm.IsEnabled);
+            Assert.Equal(Visibility.Visible, banner.Visibility);
+            Assert.Contains("Số chương 1", ((TextBlock)window.FindName("BlockingText")).Text, StringComparison.Ordinal);
+            Assert.Equal(Visibility.Visible, ((Button)window.FindName("GoToBlockingButton")).Visibility);
+        }
+        finally { window.Close(); }
+    });
+
+    private static Button FindButton(DependencyObject root, string content)
+    {
+        foreach (object child in LogicalTreeHelper.GetChildren(root))
+        {
+            if (child is Button { Content: string text } button && text == content) return button;
+            if (child is DependencyObject node && FindButton(node, content) is { } found) return found;
+        }
+        return null!;
+    }
+
+    [Fact]
+    public Task Preview_imports_by_default_and_lists_the_repeated_number_without_blocking() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
         await fixture.CreateProjectAsync();
@@ -215,9 +271,12 @@ public sealed class ImportPreviewUiTests
         {
             await window.LoadSourceAsync(path, SourceTextEncoding.Auto);
 
-            Assert.Equal([1, 1, 2, 3], window.CurrentPlan!.ImportableChapters.Select(chapter => chapter.Number));
+            // The second "第1章" is kept in the snapshot and listed; the rest imports right away.
+            Assert.Equal([1, 2, 3], window.CurrentPlan!.ImportableChapters.Select(chapter => chapter.Number));
             Assert.Equal(0, window.CurrentPlan.AutomaticallySkippedDuplicateCount);
-            Assert.False(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.True(((Button)window.FindName("ConfirmButton")).IsEnabled);
+            Assert.Equal(Visibility.Collapsed, ((Border)window.FindName("BlockingBanner")).Visibility);
+            Assert.Contains(window.CurrentPlan.Issues, issue => issue.Code == ImportPreviewIssueCode.ChapterNotImported);
             Assert.Contains("tự sắp xếp", ((TextBlock)window.FindName("PreviewStatusText")).Text,
                 StringComparison.CurrentCultureIgnoreCase);
 

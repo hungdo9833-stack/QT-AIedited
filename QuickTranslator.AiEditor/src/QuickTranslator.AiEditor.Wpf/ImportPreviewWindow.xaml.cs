@@ -199,7 +199,8 @@ public partial class ImportPreviewWindow : Window
                 : TranslateTitlesCheck.IsChecked == true && (failedTitles > 0 || untranslatedCount > 0)
                 ? $"Sẵn sàng nhập {newChapters:N0} chương mới. {failedTitles:N0} tiêu đề lỗi và {untranslatedCount:N0} tiêu đề chưa dịch sẽ dùng tên dự phòng."
                 : $"Sẵn sàng nhập {newChapters:N0} chương mới theo thứ tự đọc.")
-            : "Cần xử lý các mục cảnh báo hoặc bỏ qua chương đã có trước khi nhập. File TXT không bị thay đổi.";
+            : "Chưa nhập được — xem lý do ở dải đỏ phía trên. File TXT không bị thay đổi.";
+        UpdateBlockingBanner(plan, collisions, canImport);
         int translatedCount = plan.ImportableChapters.Count(item => !string.IsNullOrWhiteSpace(item.VietnameseTitle));
         TitleTranslationProgressText.Text = $"{translatedCount:N0}/{plan.ImportableChapters.Count():N0} tiêu đề · {failedTitles:N0} lỗi";
         TranslateAllTitlesButton.IsEnabled = !_translatingTitles && plan.ImportableChapters.Any();
@@ -207,6 +208,51 @@ public partial class ImportPreviewWindow : Window
         RetrySelectedTitlesButton.IsEnabled = !_translatingTitles && PreviewGrid.SelectedItems.Count > 0;
         CancelTitleTranslationButton.IsEnabled = _translatingTitles;
         UpdateSelection();
+    }
+
+    private Guid? _blockingItemId;
+
+    // Says exactly why "Nhập" is disabled (only the reasons that really block), with a jump to the first item concerned.
+    private void UpdateBlockingBanner(ImportPreviewPlan plan, int collisions, bool canImport)
+    {
+        var reasons = new List<string>();
+        _blockingItemId = null;
+        if (!canImport)
+        {
+            foreach (ImportPreviewIssue issue in plan.Issues.Where(x => x.Severity == DetectionIssueSeverity.Error).Take(5))
+            {
+                reasons.Add(issue.Message);
+                _blockingItemId ??= issue.ItemIds.IsDefaultOrEmpty ? null : issue.ItemIds[0];
+            }
+            int more = plan.Issues.Count(x => x.Severity == DetectionIssueSeverity.Error) - 5;
+            if (more > 0) reasons.Add($"… và {more:N0} lỗi khác trong danh sách Cảnh báo.");
+            if (collisions > 0)
+            {
+                reasons.Add($"{collisions:N0} chương trùng số với chương đã có trong Project. Bấm “Bỏ qua chương đã có” hoặc đổi số.");
+                _blockingItemId ??= plan.ImportableChapters.FirstOrDefault(x => ProjectCollision(x) is not null)?.Id;
+            }
+            if (_translatingTitles) reasons.Add("Đang dịch tiêu đề; chờ xong hoặc bấm Hủy.");
+            if (!plan.ImportableChapters.Any()) reasons.Add("Không có chương nào được chọn để nhập.");
+        }
+        BlockingBanner.Visibility = reasons.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        BlockingText.Text = "Chưa nhập được vì:\n• " + string.Join("\n• ", reasons);
+        GoToBlockingButton.Visibility = _blockingItemId is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnGoToBlocking(object sender, RoutedEventArgs e)
+    {
+        if (_blockingItemId is not Guid id) return;
+        if (_rows.FirstOrDefault(x => x.Id == id) is not { } row)
+        {
+            SearchInput.Text = "";
+            FilterInput.SelectedIndex = 0;
+            RefreshRows(id);
+            row = _rows.FirstOrDefault(x => x.Id == id)!;
+            if (row is null) return;
+        }
+        PreviewGrid.SelectedItem = row;
+        PreviewGrid.ScrollIntoView(row);
+        PreviewGrid.Focus();
     }
 
     private void OnFilterChanged(object sender, EventArgs e)
@@ -222,10 +268,15 @@ public partial class ImportPreviewWindow : Window
         ImportPreviewItem item = _editor.Current.Items.Single(x => x.Id == row.Id);
         NumberInput.Text = item.Number?.ToString() ?? "";
         TitleInput.Text = item.Title;
-        NumberInput.IsEnabled = TitleInput.IsEnabled = IncludeButton.IsEnabled = item.IsChapter;
+        // A region outside chapters can become a chapter (number + title) or join the chapter before it.
+        bool outside = item.Kind == PlannedRegionKind.Unclassified;
+        int position = _editor.Current.Items.IndexOf(item);
+        bool afterChapter = position > 0 && _editor.Current.Items[position - 1].IsChapter;
+        NumberInput.IsEnabled = TitleInput.IsEnabled = IncludeButton.IsEnabled = item.IsChapter || outside;
         ConfirmBoundaryButton.IsEnabled = item.IsChapter && item.Decision != CandidateDecision.Accepted;
-        RejectBoundaryButton.IsEnabled = item.IsChapter && _editor.Current.Items.IndexOf(item) > 0;
-        IncludeButton.Content = item.Included ? "Loại khỏi import" : "Đưa vào import";
+        RejectBoundaryButton.IsEnabled = (item.IsChapter || outside) && afterChapter;
+        RejectBoundaryButton.Content = outside ? "Gộp vào chương trước" : "Loại ranh giới giả";
+        IncludeButton.Content = outside ? "Tạo chương từ vùng này" : item.Included ? "Loại khỏi import" : "Đưa vào import";
         StartContextText.Text = Context(item.Span.StartUtf16, "⟦ BẮT ĐẦU ⟧");
         EndContextText.Text = Context(item.Span.EndUtf16, "⟦ KẾT THÚC ⟧");
         string[] duplicateDetails = _editor.Current.DuplicateEvidence.Where(x => x.FirstItemId == item.Id || x.SecondItemId == item.Id)
@@ -257,11 +308,23 @@ public partial class ImportPreviewWindow : Window
 
     private void OnToggleInclude(object sender, RoutedEventArgs e)
     {
+        if (SelectedOutsideRegion() is { } outside)
+        {
+            if (!int.TryParse(NumberInput.Text.Trim(), out int number) || number <= 0)
+            { ShowError("Nhập số chương (lớn hơn 0) cho chương mới rồi bấm lại."); return; }
+            try { _editor!.PromoteToChapter(outside.Id, number, TitleInput.Text); InvalidateTitleDraft(); RefreshRows(); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException) { ShowError(ex.Message); }
+            return;
+        }
         if (!TrySelectedChapter(out PreviewRow? row)) return;
         ImportPreviewItem item = _editor!.Current.Items.Single(x => x.Id == row.Id);
         try { _editor.SetIncluded(row.Id, !item.Included); RefreshRows(row.Id); }
         catch (Exception ex) { ShowError(ex.Message); }
     }
+
+    private ImportPreviewItem? SelectedOutsideRegion() =>
+        PreviewGrid.SelectedItem is PreviewRow row && _editor?.Current.Items.FirstOrDefault(x => x.Id == row.Id) is { Kind: PlannedRegionKind.Unclassified } item
+            ? item : null;
 
     private void OnConfirmBoundary(object sender, RoutedEventArgs e)
     {
@@ -272,6 +335,12 @@ public partial class ImportPreviewWindow : Window
 
     private void OnRejectFalseBoundary(object sender, RoutedEventArgs e)
     {
+        if (SelectedOutsideRegion() is { } outside)
+        {
+            try { _editor!.MergeIntoPreviousChapter(outside.Id); InvalidateTitleDraft(); RefreshRows(); }
+            catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException) { ShowError(ex.Message); }
+            return;
+        }
         if (!TrySelectedChapter(out PreviewRow? row)) return;
         try { _editor!.RejectFalseBoundary(row.Id); InvalidateTitleDraft(); RefreshRows(); }
         catch (Exception ex) { ShowError(ex.Message); }

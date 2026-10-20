@@ -19,9 +19,12 @@ internal static class HeadingText
 {
     private static readonly char[] Separators = [' ', '\t', ':', '：', '-', '—', '_', '.', '．', '、', '·', ']', '】', '〕', '）', ')'];
 
+    // Zero-width characters that TXT files carry at line starts, e.g. a BOM left in the middle of files concatenated together.
+    private static readonly char[] Invisible = ['﻿', '​', '‌', '‍', '⁠'];
+
     public static string NormalizeOuter(string line)
     {
-        string value = line.Trim();
+        string value = line.Trim().Trim(Invisible).Trim();
         if (value.Length >= 2 && ((value[0] == '【' && value[^1] == '】') || (value[0] == '[' && value[^1] == ']') ||
             (value[0] == '〖' && value[^1] == '〗'))) value = value[1..^1].Trim();
         else if (value.Length >= 3 && value[0] is '【' or '[' or '〖')

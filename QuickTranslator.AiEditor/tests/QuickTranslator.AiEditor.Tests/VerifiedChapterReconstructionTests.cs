@@ -64,13 +64,25 @@ public sealed class VerifiedChapterReconstructionTests
     [Fact]
     public void Same_number_with_different_content_is_not_silently_resolved()
     {
-        const string source = "第2章 一\n甲。\n第2章 二\n乙。\n第2章 三\n丙。\n第2章 四\n丁。";
-        ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source)).Current;
+        // Parts titled 一…四 right after each other are one chapter posted in parts: all four texts are imported in it.
+        const string parts = "第2章 一\n甲。\n第2章 二\n乙。\n第2章 三\n丙。\n第2章 四\n丁。";
+        ImportPreviewPlan merged = ImportPreviewEditor.Create(new ChapterDetector().Detect(parts)).Current;
+        ImportPreviewItem chapter = Assert.Single(merged.ImportableChapters);
+        Assert.All(new[] { "甲。", "乙。", "丙。", "丁。" }, text => Assert.Contains(text, merged.Slice(chapter.ContentSpan), StringComparison.Ordinal));
+        Assert.False(merged.HasBlockingIssues);
+        Assert.Equal(parts, merged.ReconstructSource());
 
-        Assert.Equal(4, plan.ImportableChapters.Count());
-        Assert.Contains(plan.DuplicateEvidence, x => x.Kind == ChapterDuplicateKind.ConflictingVersion);
-        Assert.True(plan.HasBlockingIssues);
-        Assert.True(plan.CoverageAudit.BlockingIssues.Length > 0);
+        // Two versions with real, different titles: the first is imported; the other is not dropped silently but kept in
+        // the snapshot and listed, so the import is not blocked and nothing is lost.
+        const string source = "第2章 风起\n甲。\n第2章 云涌\n乙。";
+        ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source)).Current;
+        Assert.Single(plan.ImportableChapters);
+        Assert.Contains(plan.Issues, x => x.Code == ImportPreviewIssueCode.ExcludedDifferentContent && x.Severity == DetectionIssueSeverity.Warning);
+        Assert.Contains(plan.Issues, x => x.Code == ImportPreviewIssueCode.ChapterNotImported && x.Severity == DetectionIssueSeverity.Warning);
+        Assert.False(plan.HasBlockingIssues);
+        Assert.True(plan.CoverageAudit.CanImport);
+        Assert.Equal(0, plan.CoverageAudit.Summary.UnresolvedUtf16);
+        Assert.Equal(source, plan.ReconstructSource());
     }
 
     [Fact]
@@ -82,8 +94,11 @@ public sealed class VerifiedChapterReconstructionTests
         ChapterDuplicateEvidence duplicate = Assert.Single(plan.DuplicateEvidence);
         Assert.Equal(ChapterDuplicateKind.ExactDuplicate, duplicate.Kind);
         Assert.False(duplicate.IsAutomaticallyVerifiable);
-        Assert.Equal(2, plan.ImportableChapters.Count());
-        Assert.True(plan.HasBlockingIssues);
+        // Not auto-excluded as a verified copy: the second is left out by the default decision and listed as a warning.
+        Assert.Equal(0, plan.AutomaticallySkippedDuplicateCount);
+        Assert.Single(plan.ImportableChapters);
+        Assert.Contains(plan.Issues, x => x.Code == ImportPreviewIssueCode.ChapterNotImported);
+        Assert.False(plan.HasBlockingIssues);
     }
 
     [Fact]
@@ -140,13 +155,23 @@ public sealed class VerifiedChapterReconstructionTests
     }
 
     [Fact]
-    public void Unknown_nonmetadata_prefix_is_unresolved_and_blocks_safe_import()
+    public void Text_before_the_first_chapter_is_kept_as_source_text_and_can_become_a_chapter()
     {
         const string source = "这段正文没有归属。\n第一章 开始\n正文。";
-        ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source)).Current;
+        var editor = ImportPreviewEditor.Create(new ChapterDetector().Detect(source));
+        ImportPreviewPlan plan = editor.Current;
 
-        Assert.True(plan.CoverageAudit.Summary.UnresolvedUtf16 > 0);
-        Assert.False(plan.CoverageAudit.CanImport);
-        Assert.True(plan.HasBlockingIssues);
+        // Every character has a decision: the prefix is kept in the snapshot (not imported) and does not block.
+        Assert.Equal(0, plan.CoverageAudit.Summary.UnresolvedUtf16);
+        Assert.True(plan.CoverageAudit.CanImport);
+        Assert.False(plan.HasBlockingIssues);
+        Assert.True(plan.CoverageAudit.Summary.MetadataUtf16 >= "这段正文没有归属。".Length);
+
+        ImportPreviewItem prefix = plan.Items.First(x => x.Kind == PlannedRegionKind.Unclassified);
+        Assert.Throws<InvalidOperationException>(() => editor.MergeIntoPreviousChapter(prefix.Id)); // Nothing before it.
+        editor.PromoteToChapter(prefix.Id, 1000, "Lời mở đầu");
+        Assert.Equal(2, editor.Current.ImportableChapters.Count());
+        Assert.Equal(0, editor.Current.CoverageAudit.Summary.MetadataUtf16);
+        Assert.Equal(source, editor.Current.ReconstructSource());
     }
 }

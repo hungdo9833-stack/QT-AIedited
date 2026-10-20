@@ -55,3 +55,26 @@ dotnet test tests/QuickTranslator.AiEditor.Tests/QuickTranslator.AiEditor.Tests.
 dotnet test tests/QuickTranslator.AiEditor.Wpf.Tests/QuickTranslator.AiEditor.Wpf.Tests.csproj
 
 Run on Windows/.NET 10 with test fixtures that contain neutral, non-sensitive dummy Chinese text.
+
+## 2026-10 revision: default decisions instead of blocking
+
+The blocking policy above made whole books unimportable for text the user could not act on (e.g. `------------ 正文卷 ------------`
+before chapter 1 of 隐婚100分, or one low-confidence heading: chapter 878). The no-silent-loss guarantee is kept, the block is not:
+
+- **Every character still has a ledger status**, and `Unresolved` is no longer produced. Included chapters are imported (whatever the
+  detector's confidence); excluded chapters stay in the raw snapshot (`ExplicitlyExcluded` now also covers default decisions);
+  text outside chapters is `SourceMetadata`.
+- **Default decisions** (`ImportPreviewEditor.ApplyDefaultDecisions`): a low-confidence numbered heading is imported; an unnumbered
+  heading right after a chapter (番外, 后记, a false heading) is imported inside that chapter and named in a warning; the same number
+  again right after itself with no title of its own (`第24章1`, `（续）`, `（二）`, uploader notes such as `(PC修改)`) continues that
+  chapter; the same number elsewhere or with a different title keeps the first and lists the others (`ChapterNotImported`,
+  `ExcludedDifferentContent`); a missing title becomes `Chương N`; an included chapter without text is left out.
+- **Outside-chapter text** is classified by shape only (`OutsideChapterText`: decoration, volume markers, book-info keys, links,
+  end markers); prose of 40+ characters is a warning with two actions in the preview: *Gộp vào chương trước* and *Tạo chương từ vùng này*.
+- **Still blocking** (all caused by the user's own edits, each named in the red banner with a jump): an included chapter without a
+  number, title or text; the same number chosen twice; collisions with chapters already in the project.
+- Numbering gaps were always warnings; the message now says the chapter is absent from the source and the import can proceed.
+- Also fixed while testing on real books: zero-width characters (a BOM mid-file) hid headings and leaked into titles; ordering by
+  volume threw when a volume identity differed from its title.
+- `tools/QuickTranslator.AiEditor.Import.Probe` reports this on real files (`QT_PROBE_WARNINGS=1`, `QT_PROBE_IMPORT_ROOT=<dir>` for a
+  real import into a throw-away project). Verified: 隐婚100分 2,163/2,163 chapters, 反派：我的母亲是大帝 147/147, two more books unchanged.

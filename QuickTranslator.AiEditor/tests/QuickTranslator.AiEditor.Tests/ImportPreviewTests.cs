@@ -62,7 +62,9 @@ public sealed class ImportPreviewTests
         const string source = "序章\n序。\n第1章 一\n甲。\n第1章 重复\n乙。\n第0章 倒序\n丙。";
         var editor = ImportPreviewEditor.Create(new ChapterDetector().Detect(source));
         Assert.Contains(editor.Current.Issues, x => x.Code == ImportPreviewIssueCode.MissingNumber);
-        Assert.Contains(editor.Current.Issues, x => x.Code == ImportPreviewIssueCode.DuplicateNumber);
+        // The repeated "第1章" with another title is kept out of the import by default and reported, not blocking.
+        Assert.Contains(editor.Current.Issues, x => x.Code is ImportPreviewIssueCode.ExcludedDifferentContent or ImportPreviewIssueCode.DuplicateNumber);
+        Assert.False(editor.Current.HasBlockingIssues);
 
         ImportPreviewItem special = editor.Current.Chapters.First(x => x.Kind == PlannedRegionKind.SpecialChapter);
         Assert.False(special.Included);
@@ -79,17 +81,23 @@ public sealed class ImportPreviewTests
         const string source = "第4章 四\n正文四。\n第2章 二（前）\n正文二前。\n第3章 三\n正文三。\n第2章 二（后）\n正文二后。\n第1章 一\n正文一。";
         var editor = ImportPreviewEditor.Create(new ChapterDetector().Detect(source, "unordered.txt"));
         ImportPreviewPlan plan = editor.Current;
-        Assert.Equal(5, plan.ImportableChapters.Count());
-        Assert.Equal(2, plan.Chapters.Count(x => x.Number == 2 && x.Included));
-        Assert.True(plan.HasBlockingIssues);
+        // Default: the first "第2章" is imported; the later one is not dropped silently: it stays in the snapshot and both a
+        // "not imported" and a "different content" warning name it. The import is not blocked.
+        Assert.Equal(4, plan.ImportableChapters.Count());
+        Assert.Equal(1, plan.Chapters.Count(x => x.Number == 2 && x.Included));
+        Assert.False(plan.HasBlockingIssues);
         Assert.Equal(0, plan.AutomaticallySkippedDuplicateCount);
-        Assert.Contains(plan.Issues, issue => issue.Code == ImportPreviewIssueCode.DuplicateNumber &&
-            issue.Severity == DetectionIssueSeverity.Error);
-        AssertExact(source, plan);
+        Assert.Contains(plan.Issues, issue => issue.Code == ImportPreviewIssueCode.ExcludedDifferentContent);
         ImportPreviewItem second = plan.Chapters.Where(x => x.Number == 2).OrderBy(x => x.Span.StartUtf16).Last();
-        editor.SetIncluded(second.Id, false);
+        Assert.Contains(plan.Issues, issue => issue.Code == ImportPreviewIssueCode.ChapterNotImported && issue.ItemIds.Contains(second.Id));
+        AssertExact(source, plan);
+        // Including it again under the same number is a user choice the preview refuses to import as is…
+        editor.SetIncluded(second.Id, true);
+        Assert.True(editor.Current.HasBlockingIssues);
+        // …and renumbering it imports both.
+        editor.UpdateChapter(second.Id, 5, second.Title);
         Assert.False(editor.Current.HasBlockingIssues);
-        Assert.Contains(editor.Current.Issues, issue => issue.Code == ImportPreviewIssueCode.ExcludedDifferentContent);
+        Assert.Equal(5, editor.Current.ImportableChapters.Count());
         AssertExact(source, editor.Current);
     }
 

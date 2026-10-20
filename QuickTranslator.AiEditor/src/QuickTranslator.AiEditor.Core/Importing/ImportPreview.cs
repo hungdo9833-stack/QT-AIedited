@@ -17,7 +17,11 @@ public enum ImportPreviewIssueCode
     UnclassifiedSource,
     EmptyContent,
     UnreviewedExclusion,
-    ExcludedDifferentContent
+    ExcludedDifferentContent,
+    /// <summary>Prose outside every chapter: kept in the snapshot, not imported (warning).</summary>
+    OutsideChapterProse,
+    /// <summary>A chapter with text that is not imported (excluded by the user or by a default decision): kept in the snapshot.</summary>
+    ChapterNotImported
 }
 
 public sealed record ImportPreviewIssue(
@@ -48,6 +52,8 @@ public sealed record ImportPreviewItem(
     public string? VietnameseTitle { get; init; }
     public SourceStructureKind StructureKind { get; init; } = SourceStructureKind.Unclassified;
     public string? VolumeIdentity { get; init; }
+    /// <summary>Titles of unnumbered headings folded into this chapter by default (their text is imported here).</summary>
+    public ImmutableArray<string> AbsorbedTitles { get; init; } = ImmutableArray<string>.Empty;
 }
 
 public sealed class ImportPreviewPlan
@@ -130,20 +136,25 @@ public sealed class ImportPreviewPlan
 
         foreach (ImportPreviewItem item in chapters)
         {
-            if (item.Decision == CandidateDecision.NeedsReview)
+            if (!item.AbsorbedTitles.IsEmpty && item.Included)
                 issues.Add(new(ImportPreviewIssueCode.UncertainBoundary, DetectionIssueSeverity.Warning,
-                    "Ranh giới này có độ tin cậy thấp; hãy kiểm tra trước khi include.", [item.Id]));
+                    $"Chương {item.Number} gồm cả phần không đánh số “{string.Join("”, “", item.AbsorbedTitles)}” ngay sau nó " +
+                    "(gộp để không mất nội dung). Dùng “Tách tại dòng…” nếu muốn thành chương riêng.", [item.Id]));
+            if (item.Decision == CandidateDecision.NeedsReview && item.Included)
+                issues.Add(new(ImportPreviewIssueCode.UncertainBoundary, DetectionIssueSeverity.Warning,
+                    "Ranh giới có độ tin cậy thấp; vẫn được nhập theo mặc định. Nếu đây không phải chương thật, bấm “Loại ranh giới giả”.", [item.Id]));
             if (item.Number is not > 0)
                 issues.Add(new(ImportPreviewIssueCode.MissingNumber,
                     item.Included ? DetectionIssueSeverity.Error : DetectionIssueSeverity.Warning,
                     item.Included
-                        ? "Chương được chọn chưa có số hợp lệ; QT Studio không tự đánh lại số."
-                        : "Chương chưa có số đang được exclude; hãy gán số trước khi include.", [item.Id]));
+                        ? "Chương được chọn chưa có số hợp lệ; nhập số chương hoặc loại khỏi import."
+                        : "Chương chưa có số nên không được nhập (vẫn giữ trong bản nguồn); nhập số chương để đưa vào.", [item.Id]));
             if (!item.Included)
             {
-                if (!item.ExplicitlyExcluded && !string.IsNullOrWhiteSpace(source.Text.Substring(item.ContentSpan.StartUtf16, item.ContentSpan.LengthUtf16)))
-                    issues.Add(new(ImportPreviewIssueCode.UnreviewedExclusion, DetectionIssueSeverity.Error,
-                        $"Chương {item.Number?.ToString() ?? "chưa đánh số"} có nội dung nhưng đang bị loại mà chưa xác nhận. Hãy kiểm tra, ghép lại hoặc chủ động loại.", [item.Id]));
+                bool hasText = !string.IsNullOrWhiteSpace(source.Text.Substring(item.ContentSpan.StartUtf16, item.ContentSpan.LengthUtf16));
+                if (hasText && !item.AutomaticallyExcludedDuplicate)
+                    issues.Add(new(ImportPreviewIssueCode.ChapterNotImported, DetectionIssueSeverity.Warning,
+                        $"Chương {item.Number?.ToString() ?? "chưa đánh số"} có nội dung nhưng không được nhập; vẫn giữ trong bản nguồn. Bấm “Đưa vào import” nếu cần.", [item.Id]));
                 continue;
             }
             if (string.IsNullOrWhiteSpace(item.Title))
@@ -191,14 +202,29 @@ public sealed class ImportPreviewPlan
                 int current = ordered[index].Number!.Value;
                 if (current > previous + 1)
                     issues.Add(new(ImportPreviewIssueCode.NumberJump, DetectionIssueSeverity.Warning,
-                        $"Thiếu số giữa chương {previous} và {current}.", [ordered[index - 1].Id, ordered[index].Id]));
+                        current == previous + 2
+                            ? $"Nguồn không có chương {previous + 1} (giữa {previous} và {current}). Chỉ là cảnh báo; vẫn nhập được."
+                            : $"Nguồn không có chương {previous + 1}–{current - 1} (giữa {previous} và {current}). Chỉ là cảnh báo; vẫn nhập được.",
+                        [ordered[index - 1].Id, ordered[index].Id]));
             }
         }
 
-        foreach (ImportPreviewItem item in items.Where(x => x.Kind == PlannedRegionKind.Unclassified &&
-                     !string.IsNullOrWhiteSpace(source.Text.Substring(x.Span.StartUtf16, x.Span.LengthUtf16))))
-            issues.Add(new(ImportPreviewIssueCode.UnclassifiedSource, DetectionIssueSeverity.Information,
-                "Vùng nguồn chưa phân loại được giữ nguyên trong snapshot nguyên văn và không tự nhập thành chương.", [item.Id]));
+        foreach (ImportPreviewItem item in items.Where(x => x.Kind == PlannedRegionKind.Unclassified))
+        {
+            string text = source.Text.Substring(item.Span.StartUtf16, item.Span.LengthUtf16);
+            switch (OutsideChapterText.Classify(text))
+            {
+                case OutsideChapterKind.Prose:
+                    issues.Add(new(ImportPreviewIssueCode.OutsideChapterProse, DetectionIssueSeverity.Warning,
+                        $"Vùng ngoài chương có {OutsideChapterText.ProseLength(text):N0} ký tự nội dung; giữ trong bản nguồn, không nhập. " +
+                        "Có thể “Gộp vào chương trước” hoặc “Tạo chương từ vùng này”.", [item.Id]));
+                    break;
+                case OutsideChapterKind.SourceNote:
+                    issues.Add(new(ImportPreviewIssueCode.UnclassifiedSource, DetectionIssueSeverity.Information,
+                        "Ghi chú của nguồn (dấu phân cách, tên quyển, thông tin truyện, liên kết) được giữ trong bản nguồn, không nhập.", [item.Id]));
+                    break;
+            }
+        }
         foreach (string issue in coverage.BlockingIssues)
             issues.Add(new(ImportPreviewIssueCode.UnclassifiedSource, DetectionIssueSeverity.Error, issue, []));
         return issues.ToImmutable();
@@ -223,7 +249,8 @@ public sealed class ImportPreviewPlan
         Dictionary<string, int> volumeOrder = Items.Where(x => x.IsChapter)
             .GroupBy(x => x.VolumeIdentity ?? "", StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Min(x => x.Span.StartUtf16), StringComparer.Ordinal);
-        return chapters.OrderBy(x => volumeOrder[x.VolumeTitle ?? ""])
+        // Keyed by VolumeIdentity (as built above): a volume whose identity differs from its title used to throw here.
+        return chapters.OrderBy(x => volumeOrder.GetValueOrDefault(x.VolumeIdentity ?? "", x.Span.StartUtf16))
             .ThenBy(x => x.Number is > 0 ? 0 : 1)
             .ThenBy(x => x.Number ?? int.MaxValue)
             .ThenBy(x => x.Span.StartUtf16);
@@ -253,7 +280,132 @@ public sealed class ImportPreviewEditor
         ImmutableArray<ImportPreviewItem> items =
             detected.Regions.Select(region => FromRegion(detected, region)).ToImmutableArray();
         items = ResolveExactDuplicates(detected.Source, items);
+        items = ApplyDefaultDecisions(detected.Source, items);
         return new(new ImportPreviewPlan(detected.Source, detected.Lines, items, 0));
+    }
+
+    /// <summary>
+    /// Gives every chapter a decision so the preview can always be imported, keeping all text accounted for:
+    /// a low-confidence numbered heading with text is imported; an unnumbered heading that is not a confirmed special chapter
+    /// is folded into the chapter before it (its text stays imported); an included chapter without text is left out; a missing
+    /// title becomes "Chương N"; anything else not imported is an explicit "kept in the snapshot" decision, listed as a warning.
+    /// The user can change each of these in the preview.
+    /// </summary>
+    private static ImmutableArray<ImportPreviewItem> ApplyDefaultDecisions(RawSourceSnapshot source, ImmutableArray<ImportPreviewItem> items)
+    {
+        var list = items.ToList();
+        for (int index = 0; index < list.Count; index++)
+        {
+            ImportPreviewItem item = list[index];
+            if (!item.IsChapter || item.AutomaticallyExcludedDuplicate) continue;
+            bool hasText = !string.IsNullOrWhiteSpace(source.Text.Substring(item.ContentSpan.StartUtf16, item.ContentSpan.LengthUtf16));
+            bool followsChapter = index > 0 && list[index - 1].IsChapter && list[index - 1].Span.EndUtf16 == item.Span.StartUtf16;
+            // An unnumbered heading that is not a confirmed special chapter, or the same number again right after itself with no
+            // title of its own ("第24章" then "第24章1" / "第24章（下）": one chapter posted in parts), continues the chapter before it.
+            // The same number with a different title is not merged (it may be another version): see the duplicate rule below.
+            ImportPreviewItem? before = followsChapter ? list[index - 1] : null;
+            bool continuation = before is not null && (
+                item.Number is not > 0 ||
+                item.Number is > 0 && before.Number == item.Number && IsPartTitle(item.Title, before.Title) &&
+                string.Equals(before.VolumeIdentity ?? "", item.VolumeIdentity ?? "", StringComparison.Ordinal));
+            if (continuation)
+            {
+                ImportPreviewItem previous = list[index - 1];
+                list[index - 1] = previous with
+                {
+                    Span = new(previous.Span.StartUtf16, item.Span.EndUtf16 - previous.Span.StartUtf16),
+                    ContentSpan = new(previous.ContentSpan.StartUtf16, item.Span.EndUtf16 - previous.ContentSpan.StartUtf16),
+                    // An unnumbered part (番外, 后记...) is named in a warning so the user can split it out again.
+                    AbsorbedTitles = item.Number is > 0 ? previous.AbsorbedTitles : previous.AbsorbedTitles.Add(item.Title)
+                };
+                list.RemoveAt(index--);
+                continue;
+            }
+            if (!item.Included && item.Number is > 0 && hasText && item.Decision == CandidateDecision.NeedsReview)
+                item = item with { Included = true };
+            if (item.Included && !hasText) item = item with { Included = false };
+            if (item.Included && string.IsNullOrWhiteSpace(item.Title)) item = item with { Title = $"Chương {item.Number}" };
+            if (!item.Included) item = item with { ExplicitlyExcluded = true };
+            list[index] = item;
+        }
+        // The same number again elsewhere (different text): the first one is imported, later ones are kept in the snapshot
+        // and listed for comparison; the user can renumber and include them.
+        foreach (var group in list.Select((item, index) => (item, index)).Where(x => x.item.IsChapter && x.item.Included && x.item.Number > 0)
+                     .GroupBy(x => (x.item.VolumeIdentity ?? "", x.item.Number!.Value)).Where(g => g.Count() > 1))
+            foreach (var (item, index) in group.OrderBy(x => x.item.Span.StartUtf16).Skip(1))
+                list[index] = item with { Included = false, ExplicitlyExcluded = true };
+        return list.ToImmutableArray();
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex PartSuffix = new(
+        @"^[（(【\[〔]?\s*([0-9０-９]{1,2}|[一二三四五六七八九十]|上|中|下|续|續|完|终|終|part\s*[0-9]+)\s*[）)】\]〕]?$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    private static string CleanTitle(string value) => value.Trim().Trim('﻿', '​', '‌', '‍', '⁠').Trim();
+
+    private static readonly System.Text.RegularExpressions.Regex UploaderNote = new(@"[（(【\[〔][^（(【\[〔）)】\]〕]{1,16}[）)】\]〕]\s*$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>A later heading with the same number names no chapter of its own: empty, the same title again, or a part suffix.</summary>
+    private static bool IsPartTitle(string title, string previousTitle)
+    {
+        string later = Strip(title), earlier = Strip(previousTitle);
+        if (later.Length == 0 || string.Equals(later, earlier, StringComparison.Ordinal)) return true;
+        if (earlier.Length > 0 && later.StartsWith(earlier, StringComparison.Ordinal)) later = later[earlier.Length..].Trim();
+        return later.Length == 0 || PartSuffix.IsMatch(later);
+
+        // The recognizer may keep "第24章" in the title; compare only what follows the number marker, without a short
+        // bracketed note from the uploader at the end ("(PC修改)", "(Android端修改1)", "（修）", "【补】").
+        static string Strip(string value)
+        {
+            string text = CleanTitle(value);
+            int marker = text.IndexOfAny(['章', '回', '节', '節']);
+            text = (marker >= 0 && marker <= 12 && text.StartsWith('第') ? text[(marker + 1)..] : text).Trim();
+            return UploaderNote.Replace(text, "").Trim();
+        }
+    }
+
+    /// <summary>Imports a region outside chapters (or a chapter) as part of the chapter right before it.</summary>
+    public void MergeIntoPreviousChapter(Guid itemId)
+    {
+        int index = IndexOf(itemId);
+        ImportPreviewItem item = Current.Items[index];
+        if (item.Kind == PlannedRegionKind.Volume) throw new InvalidOperationException("Không gộp tiêu đề quyển vào chương.");
+        if (index <= 0 || !Current.Items[index - 1].IsChapter)
+            throw new InvalidOperationException("Không có chương liền trước để gộp vào.");
+        ImportPreviewItem previous = Current.Items[index - 1];
+        if (previous.Span.EndUtf16 != item.Span.StartUtf16) throw new InvalidOperationException("Vùng này không liền kề chương trước.");
+        var merged = previous with
+        {
+            Span = new(previous.Span.StartUtf16, item.Span.EndUtf16 - previous.Span.StartUtf16),
+            ContentSpan = new(previous.ContentSpan.StartUtf16, item.Span.EndUtf16 - previous.ContentSpan.StartUtf16)
+        };
+        Mutate(Current.Items.RemoveAt(index).SetItem(index - 1, merged));
+    }
+
+    /// <summary>Turns a region outside chapters into a chapter of its own (the whole region becomes its text).</summary>
+    public void PromoteToChapter(Guid itemId, int number, string title)
+    {
+        if (number <= 0) throw new ArgumentOutOfRangeException(nameof(number), "Số chương phải lớn hơn 0.");
+        int index = IndexOf(itemId);
+        ImportPreviewItem item = Current.Items[index];
+        if (item.Kind != PlannedRegionKind.Unclassified) throw new InvalidOperationException("Chỉ tạo chương từ vùng ngoài chương.");
+        ImportPreviewItem? neighbour = Current.Items.Take(index).LastOrDefault(x => x.IsChapter) ?? Current.Items.Skip(index + 1).FirstOrDefault(x => x.IsChapter);
+        var chapter = new ImportPreviewItem(
+            StableId(Current.Source.RawSha256, "preview-item", item.Span, PlannedRegionKind.Chapter),
+            StableId(Current.Source.RawSha256, "chapter", item.Span, PlannedRegionKind.Chapter),
+            PlannedRegionKind.Chapter, item.Span, null, item.Span, number,
+            string.IsNullOrWhiteSpace(title) ? $"Chương {number}" : title.Trim(),
+            neighbour?.VolumeTitle, "", true, CandidateDecision.Accepted, null)
+        { StructureKind = SourceStructureKind.Chapter, VolumeIdentity = neighbour?.VolumeIdentity };
+        Mutate(Current.Items.SetItem(index, chapter));
+    }
+
+    private int IndexOf(Guid itemId)
+    {
+        for (int index = 0; index < Current.Items.Length; index++)
+            if (Current.Items[index].Id == itemId) return index;
+        throw new KeyNotFoundException("Không tìm thấy item preview.");
     }
 
     public void UpdateChapter(Guid itemId, int? number, string title)
@@ -441,7 +593,8 @@ public sealed class ImportPreviewEditor
     {
         HeadingCandidate? candidate = region.CandidateIndex is int index ? detected.Candidates[index] : null;
         string rawHeading = region.HeadingSpan is SourceSpan heading ? detected.Slice(heading) : "";
-        string title = !string.IsNullOrWhiteSpace(region.Title) ? region.Title : rawHeading.Trim();
+        // Titles never keep zero-width characters (a BOM left in the middle of concatenated files) into the project.
+        string title = CleanTitle(!string.IsNullOrWhiteSpace(region.Title) ? region.Title : rawHeading);
         bool isChapter = region.Kind is PlannedRegionKind.Chapter or PlannedRegionKind.SpecialChapter;
         bool included = isChapter && candidate?.Decision == CandidateDecision.Accepted && region.ChapterNumber is > 0;
         Guid chapterId = isChapter ? StableId(detected.Source.RawSha256, "chapter", region.Span, region.Kind) : Guid.Empty;

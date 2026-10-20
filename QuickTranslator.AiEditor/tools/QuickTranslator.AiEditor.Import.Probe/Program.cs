@@ -22,6 +22,9 @@ foreach (string path in paths)
         FileReport report = await AnalyzeAsync(path, showRegions);
         reports.Add(report);
         PrintReport(report, showRegions);
+        // QT_PROBE_IMPORT_ROOT=<folder>: also run the real import into a new, throw-away project under that folder.
+        if (Environment.GetEnvironmentVariable("QT_PROBE_IMPORT_ROOT") is { Length: > 0 } importRoot)
+            await ImportIntoNewProjectAsync(path, importRoot);
     }
     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or
                                ArgumentException or NotSupportedException)
@@ -46,6 +49,21 @@ if (jsonPath is not null)
 
 return failures.Count == 0 ? 0 : 2;
 
+// Real end-to-end import with the preview's default decisions, into a new project in its own folder (never an existing one).
+static async Task ImportIntoNewProjectAsync(string path, string root)
+{
+    RawSourceSnapshot source = await RawSourceReader.ReadFileAsync(Path.GetFullPath(path), SourceTextEncoding.Auto);
+    ImportPreviewPlan plan = ImportPreviewEditor.Create(new ChapterDetector().Detect(source)).Current;
+    string folder = Path.Combine(Path.GetFullPath(root), "probe-" + Guid.NewGuid().ToString("N")[..8]);
+    var repository = new QuickTranslator.AiEditor.Core.Projects.ProjectRepository();
+    var session = await repository.CreateAsync(folder, "Import probe");
+    var defaults = new BulkImportChapterDefaults(new QuickTranslator.AiEditor.Core.Models.SegmenterOptions(),
+        new QuickTranslator.AiEditor.Core.Models.ModelOptions(), QuickTranslator.AiEditor.Core.Models.PromptPreset.Default);
+    BulkImportReport report = await new SafeBulkImportService(repository).ImportAsync(session, plan, defaults);
+    Console.WriteLine($"  Real import: completed={report.Completed}; imported={report.ImportedCount:N0}; " +
+        $"chapters in project={session.Manifest.Chapters.Count:N0}; error={report.Error ?? "none"}; project={folder}");
+}
+
 static async Task<FileReport> AnalyzeAsync(string path, bool includeRegionText)
 {
     string fullPath = Path.GetFullPath(path);
@@ -68,11 +86,17 @@ static async Task<FileReport> AnalyzeAsync(string path, bool includeRegionText)
         .ThenBy(x => x.Key.Code)
         .Select(x => new IssueGroup(x.Key.Code, x.Key.Severity, x.Count()))
         .ToArray();
+    // QT_PROBE_WARNINGS=1 also lists warning messages (they name chapter numbers only, never novel text).
+    bool withWarnings = Environment.GetEnvironmentVariable("QT_PROBE_WARNINGS") == "1";
     string[] errorMessages = plan.Issues
-        .Where(x => x.Severity == DetectionIssueSeverity.Error)
+        .Where(x => x.Severity == DetectionIssueSeverity.Error || withWarnings && x.Severity == DetectionIssueSeverity.Warning)
         .Select(x => x.Message)
         .Take(20)
         .ToArray();
+    if (withWarnings)
+        errorMessages = errorMessages.Concat(plan.Items.Select((item, index) => (item, index))
+            .Where(x => x.item.IsChapter && !x.item.Included)
+            .Select(x => $"not imported #{x.item.Number} title=[{x.item.Title}] decision={x.item.Decision} previous=[{(x.index > 0 ? plan.Items[x.index - 1].Title : "")}] #{(x.index > 0 ? plan.Items[x.index - 1].Number : null)}")).ToArray();
 
     RegionReport[] regions = plan.Items
         .Where(x => x.Kind == PlannedRegionKind.Unclassified)

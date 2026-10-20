@@ -76,7 +76,7 @@ public static class SourceCoverageAuditor
                 {
                     SourceCoverageStatus.ImportedContent => "Nhập vào ChapterDocument.OriginalText",
                     SourceCoverageStatus.VerifiedDuplicate => "Không nhập lặp; đối chiếu SHA-256 tuyệt đối",
-                    SourceCoverageStatus.ExplicitlyExcluded => "Người dùng chủ động loại; vẫn có trong snapshot nguyên văn",
+                    SourceCoverageStatus.ExplicitlyExcluded => "Không nhập (người dùng loại hoặc quyết định mặc định); vẫn có trong snapshot nguyên văn",
                     SourceCoverageStatus.SourceMetadata => "Giữ trong snapshot nguyên văn dưới dạng metadata",
                     _ => "Chưa có quyết định an toàn"
                 };
@@ -121,39 +121,25 @@ public static class SourceCoverageAuditor
                 decision, evidence));
         }
 
+        // Every region has a decision, so nothing is Unresolved and nothing blocks the import by itself: included chapters are
+        // imported whatever the detector's confidence, excluded ones stay in the raw snapshot, and text outside chapters
+        // (separators, book information, a preface, an author's note) is kept as source metadata. The preview lists the
+        // excluded chapters and outside prose as warnings so nothing is dropped silently.
         SourceCoverageStatus HeadingStatus(ImportPreviewItem item) => item.Kind switch
         {
-            PlannedRegionKind.Volume => SourceCoverageStatus.SourceMetadata,
-            PlannedRegionKind.Unclassified => SourceCoverageStatus.Unresolved,
+            PlannedRegionKind.Volume or PlannedRegionKind.Unclassified => SourceCoverageStatus.SourceMetadata,
             _ when exactDuplicateTargets.ContainsKey(item.Id) => SourceCoverageStatus.VerifiedDuplicate,
-            _ when item.Included && item.Decision == CandidateDecision.Accepted => SourceCoverageStatus.ImportedHeading,
-            _ when item.ExplicitlyExcluded => SourceCoverageStatus.ExplicitlyExcluded,
-            _ => SourceCoverageStatus.Unresolved
+            _ when item.Included => SourceCoverageStatus.ImportedHeading,
+            _ => SourceCoverageStatus.ExplicitlyExcluded
         };
 
         SourceCoverageStatus ContentStatus(ImportPreviewItem item) => item.Kind switch
         {
-            PlannedRegionKind.Volume => SourceCoverageStatus.SourceMetadata,
-            PlannedRegionKind.Unclassified when item.StructureKind is SourceStructureKind.WorkTitle or
-                SourceStructureKind.Metadata or SourceStructureKind.TableOfContents or SourceStructureKind.AggregatePost =>
-                SourceCoverageStatus.SourceMetadata,
-            PlannedRegionKind.Unclassified => ClassifyFreeRegion(item),
+            PlannedRegionKind.Volume or PlannedRegionKind.Unclassified => SourceCoverageStatus.SourceMetadata,
             _ when exactDuplicateTargets.ContainsKey(item.Id) => SourceCoverageStatus.VerifiedDuplicate,
-            _ when item.Included && item.Decision == CandidateDecision.Accepted => SourceCoverageStatus.ImportedContent,
-            _ when item.ExplicitlyExcluded => SourceCoverageStatus.ExplicitlyExcluded,
-            _ => SourceCoverageStatus.Unresolved
+            _ when item.Included => SourceCoverageStatus.ImportedContent,
+            _ => SourceCoverageStatus.ExplicitlyExcluded
         };
-
-        SourceCoverageStatus ClassifyFreeRegion(ImportPreviewItem item)
-        {
-            string value = source.Text.Substring(item.Span.StartUtf16, item.Span.LengthUtf16);
-            if (string.IsNullOrWhiteSpace(value)) return SourceCoverageStatus.SourceMetadata;
-            bool metadata = value.Split(["\r\n", "\n", "\r"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .All(line => line.StartsWith("作者", StringComparison.Ordinal) || line.StartsWith("书名", StringComparison.Ordinal) ||
-                             line.StartsWith("書名", StringComparison.Ordinal) || line.StartsWith("版权", StringComparison.Ordinal) ||
-                             line.StartsWith("版權", StringComparison.Ordinal));
-            return metadata ? SourceCoverageStatus.SourceMetadata : SourceCoverageStatus.Unresolved;
-        }
     }
 
     private static void ValidatePartition(RawSourceSnapshot source, ImmutableArray<SourceCoverageEntry> entries)

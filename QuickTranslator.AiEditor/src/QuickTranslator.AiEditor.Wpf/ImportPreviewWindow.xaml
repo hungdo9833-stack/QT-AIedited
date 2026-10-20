@@ -59,6 +59,11 @@
    </StackPanel></ScrollViewer></Border>
   </Grid>
   <Border Grid.Row="4" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Margin="0,10,0,0" Padding="0,10,0,0"><DockPanel>
+   <Border x:Name="BlockingBanner" DockPanel.Dock="Top" Visibility="Collapsed" Background="{DynamicResource DangerSubtleBrush}" BorderBrush="{DynamicResource DangerBrush}" BorderThickness="1" CornerRadius="4" Padding="12,8" Margin="0,0,0,10"><DockPanel>
+    <Button x:Name="GoToBlockingButton" DockPanel.Dock="Right" Content="Đi tới" ui:ButtonIcon.Glyph="&#xE72A;" Click="OnGoToBlocking" VerticalAlignment="Top" AutomationProperties.Name="Đi tới mục đang chặn nhập"/>
+    <TextBlock Text="&#xEA39;" Style="{StaticResource IconText}" Foreground="{DynamicResource DangerBrush}" VerticalAlignment="Top" Margin="0,2,10,0"/>
+    <TextBlock x:Name="BlockingText" TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}" AutomationProperties.LiveSetting="Assertive"/>
+   </DockPanel></Border>
    <TextBlock x:Name="FooterHintText" Text="Nguồn chỉ được đọc; mọi sửa trong preview không đổi file TXT." Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap"/>
    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button Content="Hủy" Click="OnCancel"/><Button x:Name="ConfirmButton" Content="Nhập" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE8B5;" Click="OnConfirm" IsEnabled="False"/><Button x:Name="ImportAndTranslateButton" Content="Nhập &amp; Dịch" ui:ButtonIcon.Glyph="&#xE768;" Click="OnConfirmAndTranslate" IsEnabled="False" ToolTip="Nhập các chương mới và bắt đầu dịch ngay"/></StackPanel>
   </DockPanel></Border>
