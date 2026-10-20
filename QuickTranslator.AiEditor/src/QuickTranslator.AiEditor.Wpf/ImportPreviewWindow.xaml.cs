@@ -501,17 +501,19 @@ public partial class ImportPreviewWindow : Window
         var numberInput = new TextBox { Text = suggestedNumber.ToString(), Margin = new Thickness(8) };
         var titleInput = new TextBox { Text = suggestedTitle, Margin = new Thickness(8) };
         var ok = new Button { Content = "Áp dụng", IsDefault = true }; var cancel = new Button { Content = "Hủy", IsCancel = true };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        buttons.Children.Add(cancel); buttons.Children.Add(ok);
-        var panel = new StackPanel { Margin = new Thickness(12) };
+        ok.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        var panel = new StackPanel { Margin = new Thickness(24) };
         var l1 = new TextBlock { Text = "Chọn dòng bắt đầu" }; l1.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         var l2 = new TextBlock { Text = "Số chương" }; l2.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         var l3 = new TextBlock { Text = "Tên chương" }; l3.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
         panel.Children.Add(l1); panel.Children.Add(lines);
         panel.Children.Add(l2); panel.Children.Add(numberInput);
-        panel.Children.Add(l3); panel.Children.Add(titleInput); panel.Children.Add(buttons);
-        var dialog = new Window { Owner = this, Title = title, Width = 620, SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = panel };
+        panel.Children.Add(l3); panel.Children.Add(titleInput);
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(ok, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(panel);
+        var dialog = new Window { Owner = this, Title = title, Width = 620, MinWidth = 420, SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root };
         dialog.SetResourceReference(BackgroundProperty, "PanelBrush");
         dialog.SetResourceReference(ForegroundProperty, "TextBrush");
         MainWindow.ClampWindowToWorkArea(dialog, 620, 460);

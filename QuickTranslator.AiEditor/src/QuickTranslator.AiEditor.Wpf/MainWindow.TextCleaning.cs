@@ -117,7 +117,7 @@ public partial class MainWindow
         tabs.Items.Add(new TabItem { Header = "Xem trước thay đổi", Content = previewGrid });
         tabs.Items.Add(new TabItem { Header = "Chữ Hán còn sót", Content = chineseGrid });
 
-        var findButton = new Button { Content = "Tìm tất cả / Xem trước", Style = (Style)FindResource("PrimaryButton") };
+        var findButton = new Button { Content = "Tìm tất cả / Xem trước" };
         var scanButton = new Button { Content = "Quét chữ Hán" };
         var retranslate = new Button
         {
@@ -127,7 +127,8 @@ public partial class MainWindow
         var cancelRetranslation = new Button { Content = "Hủy dịch lại", IsEnabled = false };
         var selectEligible = new Button { Content = "Chọn vị trí đủ điều kiện" };
         var applyCurrent = new Button { Content = "Thay vị trí đang chọn" };
-        var applySelected = new Button { Content = "Thay tất cả vị trí được chọn", Style = (Style)FindResource("PrimaryButton") };
+        var applySelected = new Button { Content = "Thay tất cả vị trí được chọn" };
+        applySelected.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var undo = new Button { Content = "Hoàn tác lần thay thế" };
         var keep = new Button { Content = "Đánh dấu giữ nguyên" };
         var addGlossary = new Button { Content = "Xác nhận vào Glossary…" };
@@ -146,17 +147,24 @@ public partial class MainWindow
         options.Children.Add(findButton); options.Children.Add(scanButton); top.Children.Add(options);
         var filter = new WrapPanel(); filter.Children.Add(LabelFor("Lọc", search)); filter.Children.Add(search);
         filter.Children.Add(classification); top.Children.Add(filter); top.Children.Add(progress); top.Children.Add(status);
-        var bottom = new WrapPanel();
-        foreach (var button in new[] { selectEligible, retranslate, cancelRetranslation, applyCurrent, applySelected,
-                     undo, keep, addGlossary, addCharacter, close }) bottom.Children.Add(button);
-        var root = new DockPanel { Margin = new Thickness(10) };
-        DockPanel.SetDock(top, Dock.Top); root.Children.Add(top);
-        DockPanel.SetDock(bottom, Dock.Bottom); root.Children.Add(bottom); root.Children.Add(tabs);
+        var bottom = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        foreach (var button in new[] { selectEligible, retranslate, cancelRetranslation, applyCurrent,
+                     undo, keep, addGlossary, addCharacter }) bottom.Children.Add(button);
+        applySelected.Margin = new Thickness(16, 3, 3, 3);
+        bottom.Children.Add(applySelected);
+        var body = new DockPanel { Margin = new Thickness(24) };
+        DockPanel.SetDock(top, Dock.Top); body.Children.Add(top);
+        DockPanel.SetDock(bottom, Dock.Bottom); body.Children.Add(bottom); body.Children.Add(tabs);
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(null, close);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(body);
         var window = new Window
         {
             Title = "Tìm & thay thế hàng loạt · Quét chữ Hán còn sót",
             Width = 1180, Height = 760, MinWidth = 850, MinHeight = 560, Content = root
         };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
         if (IsVisible) window.Owner = this;
         ClampWindowToWorkArea(window, 1180, 760);
 
@@ -667,11 +675,9 @@ public partial class MainWindow
         };
         method.SelectedIndex = 0;
         var create = new Button { Content = "Tạo preview", IsDefault = true, MinWidth = 110 };
-        if (owner.TryFindResource("PrimaryButton") is Style primary) create.Style = primary;
+        create.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var cancel = new Button { Content = "Hủy", IsCancel = true, MinWidth = 80 };
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        actions.Children.Add(create); actions.Children.Add(cancel);
-        var panel = new StackPanel { Margin = new Thickness(18) };
+        var panel = new StackPanel { Margin = new Thickness(24) };
         panel.Children.Add(new TextBlock
         {
             Text = selectedRows.Count == 1
@@ -687,26 +693,32 @@ public partial class MainWindow
         panel.Children.Add(mode);
         panel.Children.Add(new TextBlock { Text = "Phương pháp", Margin = new Thickness(0, 12, 0, 3) });
         panel.Children.Add(method);
-        panel.Children.Add(new TextBlock
+        var notice = new TextBlock
         {
             Text = selectedRows.Any(row => row.Item.Protected)
                 ? "Đoạn này có bản sửa hoặc Approval. Preview vẫn được tạo; khi áp dụng QT Studio sẽ yêu cầu xác nhận và giữ lịch sử cũ."
                 : "Toàn bộ dự án sẽ bỏ qua các cụm đã đánh dấu Giữ nguyên. Kết quả chỉ được đưa vào preview; dữ liệu chưa đổi cho tới khi xác nhận áp dụng.",
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 14, 0, 14),
-            Foreground = selectedRows.Any(row => row.Item.Protected) ? (Brush)owner.FindResource("WarningBrush") : (Brush)owner.FindResource("TextBrush")
-        });
-        panel.Children.Add(actions);
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 14, 0, 14)
+        };
+        notice.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, selectedRows.Any(row => row.Item.Protected) ? "WarningBrush" : "TextBrush");
+        panel.Children.Add(notice);
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(create, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(panel);
         var dialog = new Window
         {
             Owner = owner,
             Title = "Dịch lại nội dung còn chữ Hán",
             Width = 540,
             SizeToContent = SizeToContent.Height,
+            MinWidth = 420,
             MinHeight = 300,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             ResizeMode = ResizeMode.NoResize,
-            Content = panel
+            Content = root
         };
+        dialog.SetResourceReference(BackgroundProperty, "PanelBrush");
+        dialog.SetResourceReference(ForegroundProperty, "TextBrush");
         ChineseRetranslationChoice? result = null;
         create.Click += (_, _) =>
         {

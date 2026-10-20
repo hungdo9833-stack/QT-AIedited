@@ -247,8 +247,15 @@ public partial class MainWindow
                     ? "Không có quy tắc khóa phù hợp với nhân vật xuất hiện trong đoạn đang chọn."
                     : preview.PromptBlock,
                 IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(12) };
-            var dialog = new Window { Owner = this, Title = "Xem trước Character Consistency", Width = 760, Height = 520, Content = text };
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(24) };
+            var close = new Button { Content = "Đóng" };
+            var root = new DockPanel();
+            Border footer = ThemedDialog.Footer(null, close);
+            DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(text);
+            var dialog = new Window { Owner = this, Title = "Xem trước Character Consistency", Width = 760, Height = 520, Content = root };
+            dialog.SetResourceReference(BackgroundProperty, "PanelBrush");
+            dialog.SetResourceReference(ForegroundProperty, "TextBrush");
+            close.Click += (_, _) => dialog.Close();
             ClampWindowToWorkArea(dialog, 760, 520);
             _ = dialog.ShowDialog();
         }
@@ -360,7 +367,7 @@ public partial class MainWindow
 
     private CharacterProfile? ShowCharacterEditor(CharacterProfile profile)
     {
-        var panel = new StackPanel { Margin = new Thickness(12) };
+        var panel = new StackPanel { Margin = new Thickness(24) };
         TextBox Field(string label, string value, int height = 30)
         {
             panel.Children.Add(new TextBlock { Text = label, FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 6, 4, 2) });
@@ -475,6 +482,7 @@ public partial class MainWindow
         var relationButtons = new WrapPanel();
         var addRelation = new Button { Content = "Thêm quan hệ" };
         var removeRelation = new Button { Content = "Xóa quan hệ đã chọn" };
+        removeRelation.SetResourceReference(FrameworkElement.StyleProperty, "DangerButton");
         var createListenerBtn = new Button { Content = "+ Tạo nhân vật người nghe mới…" };
         relationButtons.Children.Add(addRelation);
         relationButtons.Children.Add(removeRelation);
@@ -525,12 +533,19 @@ public partial class MainWindow
         var notes = Field("Ghi chú đặc biệt về xưng hô", profile.AddressingNotes, 75);
         var enabled = new CheckBox { Content = "Bật chuẩn hóa cho nhân vật này", IsChecked = profile.NormalizationEnabled, Margin = new Thickness(4, 8, 4, 4) };
         panel.Children.Add(enabled);
-        var validation = new TextBlock { Foreground = (System.Windows.Media.Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        validation.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
         panel.Children.Add(validation);
-        var buttons = new WrapPanel(); var save = new Button { Content = "Lưu hồ sơ", Style = (Style)FindResource("PrimaryButton") }; var cancel = new Button { Content = "Hủy" };
-        buttons.Children.Add(save); buttons.Children.Add(cancel); panel.Children.Add(buttons);
+        var save = new Button { Content = "Lưu hồ sơ" }; save.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        var cancel = new Button { Content = "Hủy" };
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(save, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
+        root.Children.Add(new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         var window = new Window { Owner = this, Title = "Hồ sơ nhân vật", Width = 860, Height = Math.Min(860, SystemParameters.WorkArea.Height - 60), MinHeight = 560,
-            Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+            MinWidth = 420, Content = root };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
         ClampWindowToWorkArea(window, 860, 860);
 
         createListenerBtn.Click += (_, _) =>
@@ -647,7 +662,8 @@ public partial class MainWindow
         var genderBox = new ComboBox { ItemsSource = genderChoices, DisplayMemberPath = "Label", SelectedIndex = 0 };
         var primaryBox = new ComboBox { IsEditable = true, ItemsSource = new[] { "nàng", "hắn", "y", "người ấy" } };
         var normCheck = new CheckBox { Content = "Bật chuẩn hóa lời kể cho nhân vật này", IsChecked = false };
-        var errorText = new TextBlock { Foreground = (System.Windows.Media.Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        var errorText = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        errorText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
 
         genderBox.SelectionChanged += (_, _) =>
         {
@@ -671,10 +687,16 @@ public partial class MainWindow
             ("Đại từ trần thuật chính", primaryBox));
         panel.Children.Add(normCheck);
         panel.Children.Add(errorText);
-        var save = new Button { Content = "Tạo nhân vật hợp lệ", Style = (Style)FindResource("PrimaryButton") };
+        panel.Margin = new Thickness(24);
+        var save = new Button { Content = "Tạo nhân vật hợp lệ" };
+        save.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var cancel = new Button { Content = "Hủy" };
-        var buttons = new WrapPanel(); buttons.Children.Add(save); buttons.Children.Add(cancel); panel.Children.Add(buttons);
-        var dialog = new Window { Owner = owner, Title = "Tạo nhanh nhân vật người nghe", Width = 520, SizeToContent = SizeToContent.Height, Content = panel };
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(save, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(panel);
+        var dialog = new Window { Owner = owner, Title = "Tạo nhanh nhân vật người nghe", Width = 520, MinWidth = 420, SizeToContent = SizeToContent.Height, Content = root };
+        dialog.SetResourceReference(BackgroundProperty, "PanelBrush");
+        dialog.SetResourceReference(ForegroundProperty, "TextBrush");
         ClampWindowToWorkArea(dialog, 520, 480);
         CharacterProfile? created = null;
         save.Click += (_, _) =>

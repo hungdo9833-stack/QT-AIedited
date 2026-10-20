@@ -150,15 +150,20 @@ public partial class MainWindow
         public BulkImportProgressWindow()
         {
             Title = "QT Studio · Safe Bulk Import";
-            Width = 560; SizeToContent = SizeToContent.Height; WindowStartupLocation = WindowStartupLocation.CenterOwner;
-            SetResourceReference(BackgroundProperty, "AppBackgroundBrush");
+            Width = 560; MinWidth = 420; SizeToContent = SizeToContent.Height; WindowStartupLocation = WindowStartupLocation.CenterOwner;
+            SetResourceReference(BackgroundProperty, "PanelBrush");
             SetResourceReference(ForegroundProperty, "TextBrush");
-            var panel = new StackPanel { Margin = new Thickness(18) };
-            panel.Children.Add(new TextBlock { Text = "Đang nhập truyện", FontSize = 18, FontWeight = FontWeights.SemiBold });
+            var panel = new StackPanel { Margin = new Thickness(24) };
+            var heading = new TextBlock { Text = "Đang nhập truyện" };
+            heading.SetResourceReference(FrameworkElement.StyleProperty, "WindowTitle");
+            panel.Children.Add(heading);
             var subtitle = new TextBlock { Text = "Có thể hủy an toàn. Những chương đã nhập xong vẫn được giữ.", Margin = new Thickness(4, 5, 4, 0) };
             subtitle.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush");
             panel.Children.Add(subtitle);
-            panel.Children.Add(_bar); panel.Children.Add(_status); panel.Children.Add(_cancel); Content = panel;
+            panel.Children.Add(_bar); panel.Children.Add(_status);
+            var root = new DockPanel();
+            Border footer = ThemedDialog.Footer(null, _cancel);
+            DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(panel); Content = root;
             _cancel.Click += (_, _) => { _cancel.IsEnabled = false; _status.Text = "Đang dừng sau thao tác ghi hiện tại…"; _cancellation.Cancel(); };
             Closing += OnClosing;
         }

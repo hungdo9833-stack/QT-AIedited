@@ -655,9 +655,15 @@ public partial class MainWindow
 
     private bool ShowForm(string title, StackPanel panel)
     {
-        var save = new Button { Content = "Lưu", Style = (Style)FindResource("PrimaryButton") }; var cancel = new Button { Content = "Hủy" };
-        var buttons = new WrapPanel(); buttons.Children.Add(save); buttons.Children.Add(cancel); panel.Children.Add(buttons);
-        var window = new Window { Owner = this, Title = title, Width = 600, SizeToContent = SizeToContent.Height, MaxHeight = 800, Content = panel };
+        panel.Margin = new Thickness(24);
+        var save = new Button { Content = "Lưu" }; save.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        var cancel = new Button { Content = "Hủy" };
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(save, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(panel);
+        var window = new Window { Owner = this, Title = title, Width = 600, MinWidth = 420, SizeToContent = SizeToContent.Height, MaxHeight = 800, Content = root };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
         ClampWindowToWorkArea(window, 600, 800);
         save.Click += (_, _) => window.DialogResult = true; cancel.Click += (_, _) => window.DialogResult = false;
         return window.ShowDialog() == true;
