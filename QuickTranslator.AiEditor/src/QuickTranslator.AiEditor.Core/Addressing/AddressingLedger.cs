@@ -9,7 +9,11 @@ using QuickTranslator.AiEditor.Core.Translation;
 namespace QuickTranslator.AiEditor.Core.Addressing;
 
 public sealed record AddressingAttempt(Guid Id, string RequestId, IReadOnlyList<string> TaskIds, string Model, DateTimeOffset At, bool Succeeded,
-    string ErrorCode, int? InputTokens, int? OutputTokens);
+    string ErrorCode, int? InputTokens, int? OutputTokens)
+{
+    /// <summary>Where the reply broke the schema, by JSON path ("…at $.scenes[2].turns[0]: missing listener"); never source text.</summary>
+    public IReadOnlyList<string> SchemaIssues { get; init; } = [];
+}
 
 /// <summary>Append-only checkpoint of step 2. Stores refs, hypotheses and controlled codes; never prompts, raw replies or keys.</summary>
 public sealed class AddressingLedgerState
@@ -45,8 +49,11 @@ public sealed class AddressingLedgerState
     }
 
     /// <summary>Usable turns of verified scene proposals: evidence for planning pair tasks (step 2b), never profile data.</summary>
+    /// Only the latest answer to each scene counts: a scene asked again (a participant was added) supersedes the
+    /// earlier answer even where the new one leaves a quote blank or is rejected.
     public IReadOnlyList<AddressingTurn> SceneTurns() => Proposals
-        .Where(p => p.Kind == AddressingTaskKind.Scene && p.EvidenceValid && LatestReview(p.Id)?.Decision != AddressingDecision.Rejected)
+        .Where(p => p.Kind == AddressingTaskKind.Scene).GroupBy(p => p.TaskId, StringComparer.Ordinal).Select(g => g.Last())
+        .Where(p => p.EvidenceValid && LatestReview(p.Id)?.Decision != AddressingDecision.Rejected)
         .SelectMany(p => p.Turns.Where(t => t.IsUsable())).ToArray();
 }
 
@@ -106,7 +113,7 @@ public sealed class AddressingAiEngine(IJsonSchemaOllamaClient client)
             if (sent >= maximumRequests) { stoppedBy = "RequestBudget"; break; }
             if (request.EstimatedInputTokens + options.MaximumOutputTokens > options.ContextSize) { stoppedBy = "ContextBudgetExceeded"; break; }
             sent++;
-            IReadOnlyList<AddressingProposal>? proposals = null; string error = ""; int? input = null, output = null; bool stop = false;
+            IReadOnlyList<AddressingProposal>? proposals = null; IReadOnlyList<string> schemaIssues = []; string error = ""; int? input = null, output = null; bool stop = false;
             var stage = SemanticFailureStage.Provider;
             try
             {
@@ -116,7 +123,7 @@ public sealed class AddressingAiEngine(IJsonSchemaOllamaClient client)
                 stage = SemanticFailureStage.Completion;
                 if (completion.Done == false || completion.DoneReason is not (null or "stop")) throw new InvalidDataException("IncompleteProviderResponse");
                 stage = SemanticFailureStage.Parse;
-                proposals = AddressingAiSurvey.Verify(completion.Text, request);
+                var verified = AddressingAiSurvey.VerifyReply(completion.Text, request); proposals = verified.Proposals; schemaIssues = verified.SchemaIssues;
             }
             catch (GeminiSurveyBlockedException) { error = "ProviderRefusal"; }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { error = "Cancelled"; stop = true; }
@@ -125,11 +132,13 @@ public sealed class AddressingAiEngine(IJsonSchemaOllamaClient client)
             {
                 // Controlled codes only: never persist provider messages, prompts or source text.
                 var diagnostic = SemanticProviderDiagnostics.Classify(ex, stage); error = diagnostic.Code; stop = diagnostic.StopRun;
+                // Our own schema messages carry a JSON path only (never source text): keep where the reply broke.
+                if (ex is InvalidDataException && ex.Message.StartsWith("Addressing schema mismatch at ", StringComparison.Ordinal)) schemaIssues = [ex.Message];
             }
             state = await store.UpdateAsync(s =>
             {
                 s.Attempts.Add(new(Guid.NewGuid(), request.Id, request.Tasks.Select(t => t.TaskId).ToArray(), options.Model, DateTimeOffset.UtcNow,
-                    proposals is not null, error, input, output));
+                    proposals is not null, error, input, output) { SchemaIssues = schemaIssues.Take(20).ToArray() });
                 foreach (var p in proposals ?? []) if (!s.Proposals.Any(x => x.Id == p.Id)) s.Proposals.Add(p);
             }, CancellationToken.None).ConfigureAwait(false);
             progress?.Report(proposals is not null ? $"OK {request.Tasks.Count} tasks" : error);

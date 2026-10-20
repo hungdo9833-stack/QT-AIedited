@@ -136,6 +136,48 @@ public sealed class AddressingSceneTests : IDisposable
         Assert.EndsWith("事情。\n", context);
     }
 
+    // Live Gemini case: the mother 陆老夫人 was not a participant, so her lines were given to the listed father.
+    private const string FamilyDinner =
+        "    晚饭时，陆老夫人看着陆霆骁，满脸期待。\n" +
+        "    “你听到了没有？”\n" +
+        "    “嗯。”\n" +
+        "    陆老夫人一头雾水，“什么意思？”\n" +
+        "    陆景礼说道：“妈，您别管了。”\n";
+
+    [Fact]
+    public void Title_forms_are_listed_scene_participants_marked_as_titles()
+    {
+        string[] lu = ["陆霆骁", "陆景礼"];
+        var untitled = AddressingAiSurvey.PlanScenes(Book(FamilyDinner), lu).Single();
+        Assert.DoesNotContain("陆老夫人", untitled.Participants);
+        var titled = AddressingAiSurvey.PlanScenes(Book(FamilyDinner), lu, titleForms: ["陆老夫人", "陆霆骁"]).Single(); // A title that is already a name is ignored.
+        Assert.Equal(["陆老夫人", "陆霆骁", "陆景礼"], titled.Participants); Assert.Equal(["陆老夫人"], titled.TitleParticipants);
+        string prompt = Request(titled).Prompt;
+        Assert.Contains("PARTICIPANTS: 陆老夫人 (title), 陆霆骁, 陆景礼", prompt); Assert.Contains("marked (title)", prompt);
+        var answer = SceneAnswer(Request(titled), new Dictionary<string, (string, string)>
+            { ["你听到了没有？"] = ("陆老夫人", "陆霆骁"), ["嗯。"] = ("陆霆骁", "陆老夫人"), ["什么意思？"] = ("陆老夫人", "陆景礼"), ["妈，您别管了。"] = ("陆景礼", "陆老夫人") });
+        var proposal = AddressingAiSurvey.Verify(answer.ToJsonString(), Request(titled)).Single();
+        Assert.All(proposal.Turns, t => Assert.True(t.IsUsable(), t.QuoteId + string.Join(",", t.Issues))); // A title is a valid answer.
+
+        var id = Guid.NewGuid();
+        var census = AddressingAiSurvey.TitleForms(id, Book(Times(FamilyDinner, 3)), new ProjectResources { ProjectId = id, Characters = new() { Id = id } });
+        Assert.Contains("陆老夫人", census);
+    }
+
+    [Fact]
+    public void The_previous_scene_of_the_same_chapter_lends_its_people_to_a_scene_that_names_nobody()
+    {
+        const string before = "    陆霆骁看着宁夕，“走吧。”\n    “好。”\n";
+        const string after = "    夜深了，雨还在下。\n    男人站在窗边，一言不发。\n    “你还不睡？”\n    “睡不着。”\n";
+        var same = AddressingAiSurvey.PlanScenes(Book(before + after), ["陆霆骁", "宁夕"]);
+        Assert.Equal(2, same.Count);
+        Assert.Equal(["陆霆骁", "宁夕"], same[1].Participants); // 男人 is 陆霆骁; the CPU cannot know, the model can.
+        var split = AddressingAiSurvey.PlanScenes([new(Guid.NewGuid(), 1, before), new(Guid.NewGuid(), 2, after)], ["陆霆骁", "宁夕"]);
+        Assert.Single(split); // Never carried across chapters.
+    }
+
+    private static string Times(string text, int n) => string.Concat(Enumerable.Repeat(text, n));
+
     [Fact]
     public void Scene_selection_is_spread_over_chapters()
     {
@@ -280,6 +322,12 @@ public sealed class AddressingSceneTests : IDisposable
         var after = AddressingAiSurvey.PlanTasks(edited, Romantic, sceneTurns: turns)
             .Single(t => t.Kind == AddressingTaskKind.Pair && t.Subject == "宁夕" && t.Listener == "陆霆骁");
         Assert.Equal(7, after.Samples.Count); Assert.DoesNotContain(after.Samples, s => s.Text == "我没事。");
+        // The new answer supersedes the old one, even where it now leaves quotes blank.
+        var blank = new Mock(_ => SceneAnswer(AddressingAiSurvey.PlanRequests([widened[0]], AddressingAiSurveyTests.Options.Model).Single(),
+            new Dictionary<string, (string, string)> { ["你怎么来了？"] = ("宁夕", "陆霆骁") }).ToJsonString());
+        await new AddressingAiEngine(blank).RunAsync(store, widened, AddressingAiSurveyTests.Options, 5);
+        var superseded = (await store.LoadAsync()).SceneTurns();
+        Assert.Equal(16 - 5 + 1, superseded.Count); // Scene 1 of chapter 1: 5 old turns gone, 1 new one.
     }
 
     [Fact]

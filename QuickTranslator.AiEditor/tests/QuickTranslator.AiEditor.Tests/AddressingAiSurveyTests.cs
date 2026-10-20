@@ -135,18 +135,70 @@ public sealed class AddressingAiSurveyTests : IDisposable
     }
 
     [Fact]
-    public void Structural_violations_reject_the_whole_reply()
+    public void Root_damage_rejects_the_whole_reply()
     {
         var request = AddressingAiSurvey.PlanRequests(Tasks(), Options.Model).Single();
-        foreach (Action<JsonObject> change in new Action<JsonObject>[] {
-            n => n["pairs"]![0]!["task_id"] = "pair:unknown", n => ((JsonArray)n["pairs"]!).Add(n["pairs"]![0]!.DeepClone()),
-            n => n["pairs"]![0]!.AsObject().Remove("reason"), n => n["pairs"]![0]!["confirmed"] = true, n => n["characters"]![0]!["gender"] = "girl",
-            n => n["pairs"]![0]!["phases"]![0]!["from_chapter"] = "1", n => n.Remove("characters") })
+        foreach (Action<JsonObject> change in new Action<JsonObject>[] { n => n.Remove("characters"), n => n["extra"] = 1, n => n["pairs"] = "none" })
         {
             var node = Answer(request); change(node);
             Assert.Throws<InvalidDataException>(() => AddressingAiSurvey.Verify(node.ToJsonString(), request));
         }
         Assert.Throws<InvalidDataException>(() => AddressingAiSurvey.Verify("```json\n{}\n```", request));
+    }
+
+    public static TheoryData<string, string, string> ItemFaults => new()
+    {
+        // fault, expected issue code on the damaged task ("" = item ignored), expected JSON path in SchemaIssues
+        { "missing-field", "SchemaViolation", "$.pairs[0]: missing reason" },
+        { "extra-field", "SchemaViolation", "$.pairs[0].confirmed" },
+        { "unknown-enum", "SchemaViolation", "$.characters[0].gender: unknown enum value" },
+        { "wrong-type", "SchemaViolation", "$.pairs[0].phases[0].from_chapter: expected integer" },
+        { "answered-twice", "DuplicateTaskAnswer", "task answered twice" },
+        { "unknown-task", "", "$.pairs[0].task_id: unknown task" }
+    };
+
+    [Theory]
+    [MemberData(nameof(ItemFaults))]
+    public void A_malformed_task_item_invalidates_only_that_task_and_records_where(string fault, string code, string path)
+    {
+        // Live Gemini: 3 of 9 replies were lost whole for one malformed item. Only the damaged task may be lost.
+        var request = AddressingAiSurvey.PlanRequests(Tasks(), Options.Model).Single();
+        var node = Answer(request);
+        string damaged = (fault == "unknown-enum" ? node["characters"]! : node["pairs"]!)[0]!["task_id"]!.GetValue<string>();
+        switch (fault)
+        {
+            case "missing-field": node["pairs"]![0]!.AsObject().Remove("reason"); break;
+            case "extra-field": node["pairs"]![0]!["confirmed"] = true; break;
+            case "unknown-enum": node["characters"]![0]!["gender"] = "girl"; break;
+            case "wrong-type": node["pairs"]![0]!["phases"]![0]!["from_chapter"] = "1"; break;
+            case "answered-twice": ((JsonArray)node["pairs"]!).Add(node["pairs"]![0]!.DeepClone()); break;
+            case "unknown-task": node["pairs"]![0]!["task_id"] = "pair:unknown"; break;
+        }
+        var result = AddressingAiSurvey.VerifyReply(node.ToJsonString(), request);
+        Assert.Contains(result.SchemaIssues, x => x.Contains(path, StringComparison.Ordinal));
+        if (code.Length == 0) Assert.DoesNotContain(result.Proposals, p => p.TaskId == damaged); // Unanswered: resent later.
+        else Assert.Equal([code], result.Proposals.Single(p => p.TaskId == damaged).Issues);
+        Assert.DoesNotContain(result.Proposals, p => p.TaskId == damaged && p.EvidenceValid);
+        Assert.Equal(request.Tasks.Count - 1, result.Proposals.Count(p => p.TaskId != damaged && p.EvidenceValid)); // The rest stand.
+    }
+
+    [Fact]
+    public async Task Engine_records_schema_fault_locations_on_the_attempt_without_source_text()
+    {
+        var tasks = Tasks(); var store = await Store();
+        var client = new Fake(prompt =>
+        {
+            var node = Answer(AddressingAiSurvey.PlanRequests(tasks, Options.Model).Single()); node["pairs"]![0]!.AsObject().Remove("reason"); return node.ToJsonString();
+        });
+        var run = await new AddressingAiEngine(client).RunAsync(store, tasks, Options, maximumRequests: 1);
+        var attempt = run.State.Attempts.Single();
+        Assert.True(attempt.Succeeded); Assert.Equal(["Addressing schema mismatch at $.pairs[0]: missing reason"], attempt.SchemaIssues);
+        Assert.Equal(tasks.Count - 1, run.State.Proposals.Count(p => p.EvidenceValid));
+        var whole = new Fake(_ => """{"pairs":[],"characters":[]}""");
+        var failed = await new AddressingAiEngine(whole).RunAsync(await Store(), tasks, Options, maximumRequests: 1);
+        Assert.Equal("SemanticSchemaViolation", failed.State.Attempts.Single().ErrorCode);
+        Assert.Equal(["Addressing schema mismatch at $: missing scenes"], failed.State.Attempts.Single().SchemaIssues); // Root fault: whole reply, still located.
+        Assert.DoesNotContain("王秀兰看着", await File.ReadAllTextAsync(store.PathName));
     }
 
     [Fact]

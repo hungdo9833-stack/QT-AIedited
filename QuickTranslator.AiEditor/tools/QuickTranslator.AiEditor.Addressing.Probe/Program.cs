@@ -64,11 +64,12 @@ try
         $"names={report.CandidateNames.Count} pairs={report.Pairs.Count} -> {Path.GetFullPath(outDir)}");
     // Step 2b offline: contiguous dialogue scenes the CPU cannot attribute.
     var allScenes = AddressingDialogueSurvey.Scenes(sources, names);
-    var scenes = AddressingAiSurvey.PlanScenes(sources, names);
+    var titleForms = AddressingAiSurvey.TitleForms(session.Manifest.ProjectId, sources, resources, minimumMentions);
+    var scenes = AddressingAiSurvey.PlanScenes(sources, names, titleForms: titleForms);
     var sceneRequests = AddressingAiSurvey.PlanRequests(scenes, "gemini-3.6-flash");
     await File.WriteAllTextAsync(Path.Combine(outDir, "addressing-step2b-scenes.md"), SceneMarkdown(allScenes, scenes, sceneRequests), new UTF8Encoding(false));
     if (sceneRequests.Count > 0) await File.WriteAllTextAsync(Path.Combine(outDir, "addressing-step2b-first-prompt.txt"), sceneRequests[0].Prompt, new UTF8Encoding(false));
-    Console.WriteLine($"STEP2B offline: scenes={allScenes.Count} selected={scenes.Count} quotes={scenes.Sum(t => t.Samples.Count)} " +
+    Console.WriteLine($"STEP2B offline: titles={titleForms.Count} scenes={allScenes.Count} selected={scenes.Count} quotes={scenes.Sum(t => t.Samples.Count)} " +
         $"cpuExplicit={scenes.Sum(t => t.Samples.Count(s => s.CpuSpeaker is not null))} requests={sceneRequests.Count} " +
         $"estimatedInputTokens={sceneRequests.Sum(r => r.EstimatedInputTokens):N0} HTTP=0");
     if (mockScenes)
@@ -104,13 +105,17 @@ try
     string previous = Path.Combine(outDir, "addressing-ledger.v1.json");
     if (File.Exists(previous)) { Directory.CreateDirectory(Path.GetDirectoryName(ledger.PathName)!); File.Copy(previous, ledger.PathName, overwrite: true); }
     // Scenes first: their verified turns (from earlier runs) decide which quotes count for each pair task.
-    var liveTasks = scenes.Concat(AddressingAiSurvey.PlanTasks(sources, names, sceneTurns: (await ledger.LoadAsync()).SceneTurns())).ToArray();
+    var before = await ledger.LoadAsync();
+    var liveTasks = scenes.Concat(AddressingAiSurvey.PlanTasks(sources, names, sceneTurns: before.SceneTurns())).ToArray();
     var run = await new AddressingAiEngine(backend).RunAsync(ledger, liveTasks, options, maxRequests);
     File.Copy(ledger.PathName, Path.Combine(outDir, "addressing-ledger.v1.json"), overwrite: true);
-    await File.WriteAllTextAsync(Path.Combine(outDir, "addressing-step2-result.md"), ResultMarkdown(run), new UTF8Encoding(false));
+    var thisRun = run.State.Attempts.Skip(before.Attempts.Count).ToArray();
+    await File.WriteAllTextAsync(Path.Combine(outDir, "addressing-step2-result.md"), ResultMarkdown(run, thisRun), new UTF8Encoding(false));
     Console.WriteLine($"LIVE sent={run.RequestsSent} planned={run.Planned} stoppedBy={run.StoppedBy ?? "-"} proposals={run.State.Proposals.Count} " +
-        $"verified={run.State.Proposals.Count(p => p.EvidenceValid)} lastError={run.State.Attempts.LastOrDefault()?.ErrorCode ?? "-"}");
-    return run.State.Attempts.LastOrDefault()?.Succeeded == true ? 0 : 1;
+        $"verified={run.State.Proposals.Count(p => p.EvidenceValid)} thisRun: ok={thisRun.Count(a => a.Succeeded)} failed={thisRun.Count(a => !a.Succeeded)}" +
+        (thisRun.Any(a => !a.Succeeded) ? " (" + string.Join(",", thisRun.Where(a => !a.Succeeded).GroupBy(a => a.ErrorCode).Select(g => g.Key + "=" + g.Count())) + ")" : "") +
+        $" schemaIssues={thisRun.Sum(a => a.SchemaIssues.Count)}");
+    return thisRun.Length > 0 && thisRun.All(a => a.Succeeded) ? 0 : 1;
 }
 finally
 {
@@ -129,10 +134,16 @@ static void CopyDirectory(string from, string to)
     }
 }
 
-static string ResultMarkdown(AddressingRunResult run)
+static string ResultMarkdown(AddressingRunResult run, IReadOnlyList<AddressingAttempt> thisRun)
 {
     var md = new StringBuilder("# Sổ xưng hô · Bước 2 · kết quả AI (chưa duyệt)\n\n");
     md.AppendLine($"Đã gửi {run.RequestsSent}/{run.Planned} request; dừng bởi: {run.StoppedBy ?? "—"}. Đề xuất chỉ là giả thuyết đã kiểm chứng cơ học, **chưa được duyệt**.").AppendLine();
+    md.AppendLine("## Các request của lần chạy này").AppendLine();
+    md.AppendLine("| # | Kết quả | Mã lỗi | Số nhiệm vụ | Token vào/ra | Lỗi cấu trúc (vị trí JSON) |").AppendLine("|---:|---|---|---:|---|---|");
+    foreach (var (a, i) in thisRun.Select((a, i) => (a, i + 1)))
+        md.AppendLine($"| {i} | {(a.Succeeded ? "✅" : "❌")} | {(a.ErrorCode.Length == 0 ? "—" : a.ErrorCode)} | {a.TaskIds.Count} | {a.InputTokens?.ToString() ?? "?"}/{a.OutputTokens?.ToString() ?? "?"} | " +
+            $"{(a.SchemaIssues.Count == 0 ? "—" : string.Join("<br>", a.SchemaIssues.Select(x => x.Replace("|", "\\|"))))} |");
+    md.AppendLine().AppendLine("## Đề xuất").AppendLine();
     md.AppendLine("| Loại | Chủ thể | Trạng thái | Kiểm chứng | Cách gọi | Lỗi |").AppendLine("|---|---|---|---|---|---|");
     foreach (var p in run.State.Proposals)
     {

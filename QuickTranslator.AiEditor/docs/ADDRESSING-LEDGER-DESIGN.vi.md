@@ -103,7 +103,7 @@ Dùng cho truyện viết đối đáp liên tục mà CPU không gán được 
   - Ngữ cảnh trước cảnh: phần dẫn của lời thoại đầu cùng tối đa 2 đoạn kể trước đó (≤240 ký tự). Phần này được cắt ở ranh giới câu và không bao giờ lấn sang lời thoại của cảnh trước.
 - **Chọn cảnh** (`AddressingAiSurvey.PlanScenes`):
   - Chỉ chọn cảnh có ít nhất 2 lời thoại CPU chưa gán được người nói và ít nhất 2 người tham gia.
-  - Người tham gia là tên có trong cảnh hoặc ngữ cảnh. Biến thể tên được quy về tên đầy đủ, tối đa 8 người.
+  - Người tham gia là tên có trong cảnh hoặc ngữ cảnh, rồi tới người của cảnh liền trước trong cùng chương, rồi tới danh xưng (`(title)`). Biến thể tên được quy về tên đầy đủ, tối đa 8 người.
   - Cảnh được trải đều theo chương (xoay vòng), mỗi lần chạy tối đa 40 cảnh (`MaximumScenes`).
 - **AI nhận:**
   - nguyên văn cả cảnh, mỗi lời thoại có nhãn `⟦Qn⟧` (nhãn có sẵn trong văn bản gốc bị xóa nên không giả mạo được);
@@ -173,6 +173,31 @@ Mới 6 cảnh, chưa đủ để kết luận về độ chính xác.
    - Đồ vật cũng đứng ở vị trí này (`被包臀裙`, `跟高跟鞋`). Vì vậy, một tên chỉ thấy sau giới từ phải **mở đầu mệnh đề ít nhất một lần** trong cả truyện, ví dụ `”常莉作为…`. Dòng bị ngắt cứng (hard wrap) không tính là mở đầu mệnh đề.
    - Đo trên hai truyện: 隐婚100分 chỉ thêm đúng 常莉; test cpu không đổi. Bảy danh từ (高跟鞋, 包臀裙, 解开…) mà bản nháp đầu tiên của quy tắc nhận nhầm đều bị loại.
    - Danh sách người tham gia đổi thì cảnh đó được hỏi lại (`AddressingLedgerState.Done(task)`); các cảnh khác không bị gửi lại.
+
+**Lần chạy thứ hai: 9 request (2026-10-20, `gemini-3.5-flash-lite`, 隐婚100分).** Tất cả 9 request đều nhận được trả lời, nhưng 3 request bị loại **cả request** vì JSON sai cấu trúc. Trong 86 lượt nói đã qua kiểm chứng, đối chiếu tay với nguyên văn:
+
+- **77 lượt đúng (~90%)**.
+- **8 lượt sai nhưng vẫn lọt qua kiểm chứng.** 7 trong 8 lỗi có cùng nguyên nhân: 陆老夫人 (bà mẹ) không có trong danh sách người tham gia, vì CPU xếp `họ + 老夫人` vào loại danh xưng. Bản Lite gán câu của bà cho 陆老爷子, người có trong danh sách. Lỗi còn lại là một câu của 陆霆骁 bị gán cho 宁夕.
+- 1 lượt không xác định được từ văn bản.
+- Bộ kiểm chứng chặn đúng 2 cảnh. Một cảnh dùng tên không có trong danh sách; cảnh kia có người chỉ được gọi là `男人` / `亲哥`.
+
+**Ba chỉnh sửa sau lần chạy này:**
+
+1. **Danh xưng thành người tham gia** (`AddressingAiSurvey.TitleForms`, tham số `titleForms` của `PlanScenes`).
+   - CPU tìm các dạng "họ + danh xưng" (`陆老夫人`, `叶经理`, `秦老太爷`…) xuất hiện ít nhất 3 lần và chưa phải tên ứng viên. Các dạng này được dùng như tên khi nhận diện, và được ghi `(title)` trong danh sách.
+   - Prompt yêu cầu AI trả lời bằng chính danh xưng đó, trừ khi văn bản cho thấy rõ đó là một người có tên trong danh sách (ví dụ `陆先生` = 陆霆骁). AI không được gán câu của người này cho người khác chỉ vì người nói thật không có trong danh sách.
+   - Danh xưng chỉ dùng cho nhiệm vụ theo cảnh. Nó không bao giờ tự gộp vào ai, và không tự sinh hồ sơ nhân vật, vì một danh xưng có thể là người riêng (bà mẹ) hoặc một người đã có tên (`宁小姐` có thể là cả hai chị em).
+2. **Một nhiệm vụ sai cấu trúc không làm hỏng cả request** (`AddressingAiSurvey.VerifyReply`).
+   - Nếu gốc JSON hỏng (không phải JSON, thiếu hoặc thừa một mảng gốc), vẫn loại cả request như trước.
+   - Nếu một nhiệm vụ thiếu hoặc thừa trường, sai kiểu dữ liệu hay sai giá trị enum, chỉ nhiệm vụ đó thành đề xuất không hợp lệ (`SchemaViolation`).
+   - Một nhiệm vụ được trả lời hai lần: không tin lần nào (`DuplicateTaskAnswer`). Một mục nhắc tới nhiệm vụ không có trong request thì bị bỏ qua.
+   - Vị trí lỗi được ghi theo đường dẫn JSON, ví dụ `$.scenes[2].turns[0]: missing listener`, vào `AddressingAttempt.SchemaIssues`. Chỉ ghi đường dẫn, không ghi nguyên văn. Nếu cả request hỏng thì lỗi đầu tiên vẫn được ghi lại.
+   - Dòng tóm tắt và báo cáo của probe giờ đếm đủ mọi request lỗi trong lần chạy, không chỉ request cuối.
+3. **Người của cảnh liền trước.** Danh sách người tham gia của một cảnh có thêm những người xuất hiện trong cảnh ngay trước nó trong cùng chương, kể cả khi cảnh hiện tại chỉ gọi họ là `男人` / `亲哥`. Danh sách không mang sang chương khác.
+
+Danh sách người tham gia đổi thì cảnh đó được hỏi lại. Khi một cảnh được hỏi lại, chỉ **câu trả lời mới nhất** được tính (`SceneTurns`). Lượt cũ bị bỏ, kể cả ở những câu mà câu trả lời mới để trống, nên các lượt đã gán nhầm cho 陆老爷子 không còn được dùng.
+
+Lần chạy kế tiếp trên 隐婚100分 (kiểm tra offline với sổ hiện có): còn 41 nhiệm vụ, khoảng 7 request. Trong đó có 11 cảnh hỏi lại vì danh sách người tham gia đã đổi, và 10 nhiệm vụ theo cặp mới.
 
 **Chưa làm:**
 
