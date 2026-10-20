@@ -676,7 +676,7 @@ public static class AddressingAiSurvey
     /// <summary>
     /// One pair task → a proposal per direction (the reverse only when the task had R samples). Each direction is checked
     /// against its own samples like before; then the CPU cross-checks the two: what A calls themself must not contradict what
-    /// B calls A, nor what A calls B what B calls themself (ReciprocalMismatch on both). Neutral forms are not compared.
+    /// B calls A, nor what A calls B what B calls themself. A clearly better-attested direction is not rejected by the weaker one.
     /// </summary>
     private static IReadOnlyList<AddressingProposal> VerifyPair(Node f, AddressingTask task, string requestId)
     {
@@ -712,7 +712,11 @@ public static class AddressingAiSurvey
         bool Rule(string status) => status is "Consistent" or "Changes";
         if (task.ReverseSamples.Count > 0 && Rule(forward.Status) && Rule(reverse.Status) && Contradicts(forward.Phases, reverse.Phases))
         {
-            forward.Issues.Add("ReciprocalMismatch"); reverse.Issues.Add("ReciprocalMismatch");
+            int forwardCount = task.Samples.Count, reverseCount = task.ReverseSamples.Count;
+            // A sparse, possibly misattributed direction must not veto one with at least three times as much evidence.
+            if (forwardCount >= 3 && forwardCount >= 3 * reverseCount) reverse.Issues.Add("ReciprocalMismatch");
+            else if (reverseCount >= 3 && reverseCount >= 3 * forwardCount) forward.Issues.Add("ReciprocalMismatch");
+            else { forward.Issues.Add("ReciprocalMismatch"); reverse.Issues.Add("ReciprocalMismatch"); }
         }
         var result = new List<AddressingProposal> { Proposal(task, requestId, forward.Status, forward.Relationship, "unknown", forward.Phases, [], reason, forward.Issues) };
         if (task.ReverseSamples.Count > 0)
@@ -751,16 +755,24 @@ public static class AddressingAiSurvey
     private static readonly HashSet<string> NeutralTerms = new(["tôi", "ta", "mình", "tao", "tớ", "ngươi", "mày", "bạn", "cậu", "ngài", "các hạ", "người", "chúng tôi", "bản thân"],
         StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>True when, in overlapping chapters, A's self term vs B's address term (or A's address term vs B's self term) are both role terms and share no form.</summary>
+    /// <summary>True when overlapping role terms share neither a form nor a contiguous sequence of whole words.</summary>
     internal static bool Contradicts(IReadOnlyList<AddressingPhase> forward, IReadOnlyList<AddressingPhase> reverse)
     {
         static string[] Forms(string value) => value.Split(['/', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(x => x.ToLowerInvariant()).ToArray();
+        static bool ContainsWords(string phrase, string form)
+        {
+            var words = phrase.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            var part = form.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; part.Length > 0 && i <= words.Length - part.Length; i++)
+                if (words.AsSpan(i, part.Length).SequenceEqual(part)) return true;
+            return false;
+        }
         static bool Clash(string a, string b)
         {
             var (x, y) = (Forms(a), Forms(b));
             if (x.Length == 0 || y.Length == 0 || x.Any(NeutralTerms.Contains) || y.Any(NeutralTerms.Contains)) return false;
-            return !x.Intersect(y).Any();
+            return !x.Any(p => y.Any(q => ContainsWords(p, q) || ContainsWords(q, p)));
         }
         static bool Overlap(AddressingPhase p, AddressingPhase q) =>
             p.FromChapter <= (q.ToChapter == 0 ? int.MaxValue : q.ToChapter) && q.FromChapter <= (p.ToChapter == 0 ? int.MaxValue : p.ToChapter);

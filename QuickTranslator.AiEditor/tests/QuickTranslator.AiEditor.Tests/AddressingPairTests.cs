@@ -72,6 +72,13 @@ public sealed class AddressingPairTests
         { "anh", "em", "anh", "em", true },
         { "sư phụ", "đồ nhi", "đồ nhi", "sư phụ", false },
         { "anh", "em", "em/con", "anh", false },   // Several forms: one shared is enough.
+        { "tôi", "bố mẹ", "mẹ", "con", false },
+        { "con", "bố mẹ", "mẹ", "con", false },
+        { "sư phụ", "đồ nhi", "sư huynh", "sư phụ", true },
+        { "con", "anh em", "anh", "con", false },
+        { "con", "  BỐ   MẸ ", "mẹ", "con", false },
+        { "con", "bố và mẹ", "bố mẹ", "con", true }, // Words must be contiguous.
+        { "con", "thầy", "ầy", "con", true },     // No substring matches inside a word.
         { "mẹ", "con", "con", "dì", true }         // A calls herself mother, B calls her aunt.
     };
 
@@ -105,5 +112,30 @@ public sealed class AddressingPairTests
         var proposals = Verify(r, Direction(pair.Samples, (1, 0, "chị", "em")), Direction(pair.ReverseSamples, (1, 0, "em", "chị")));
         Assert.Equal(["林青", "王秀兰"], proposals.Select(p => p.Subject).Order());
         Assert.Equal(proposals[0].TaskId, proposals[1].TaskId); Assert.NotEqual(proposals[0].Id, proposals[1].Id);
+    }
+
+    [Theory]
+    [InlineData(3, 1, false, true)]
+    [InlineData(3, 1, true, true)]
+    [InlineData(6, 2, false, true)]
+    [InlineData(2, 1, false, false)]
+    [InlineData(3, 2, false, false)]
+    [InlineData(5, 2, false, false)]
+    public void A_contradiction_holds_only_the_sparse_direction_when_the_other_has_three_times_the_evidence(int forward, int reverse, bool swap, bool dominant)
+    {
+        string text = string.Concat(Enumerable.Repeat("    王秀兰看着林青说道：「林青，吃饭了。」\n", forward)) +
+            string.Concat(Enumerable.Repeat("    林青看着王秀兰说道：「秀兰姐，我来了。」\n", reverse));
+        var task = AddressingAiSurvey.PlanTasks([new(Guid.NewGuid(), 1, text)], AddressingAiSurveyTests.Names, new(MinimumPairLines: 1)).Single(t => t.Kind == AddressingTaskKind.Pair);
+        Assert.Equal(forward, task.Samples.Count); Assert.Equal(reverse, task.ReverseSamples.Count);
+        if (swap) task = task with { Subject = task.Listener!, Listener = task.Subject, Samples = task.ReverseSamples, ReverseSamples = task.Samples };
+        var r = AddressingAiSurvey.PlanRequests([task], "mock").Single();
+        var clash = Verify(r, Direction(task.Samples, (1, 0, "chị", "em")), Direction(task.ReverseSamples, (1, 0, "anh", "em")));
+        var a = clash.Single(p => p.Subject == task.Subject); var b = clash.Single(p => p.Subject == task.Listener);
+        Assert.Equal(dominant && !swap, a.EvidenceValid); Assert.Equal(dominant && swap, b.EvidenceValid);
+        Assert.Equal(!a.EvidenceValid, a.Issues.Contains("ReciprocalMismatch")); Assert.Equal(!b.EvidenceValid, b.Issues.Contains("ReciprocalMismatch"));
+        // More samples waive only reciprocal mismatch, never the checks on the direction's own evidence.
+        var bad = Direction(task.Samples, (1, 0, "chị", "em")).Also(d => d["phases"]![0]!["self_zh"] = new JsonArray("无证词"));
+        var invalid = Verify(r, bad, Direction(task.ReverseSamples, (1, 0, "anh", "em"))).Single(p => p.Subject == task.Subject);
+        Assert.False(invalid.EvidenceValid); Assert.Contains("UnquotedChineseTerm", invalid.Issues);
     }
 }

@@ -1,7 +1,10 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using QuickTranslator.AiEditor.Core.Addressing;
 using QuickTranslator.AiEditor.Core.BookIntelligence;
+using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
 
@@ -81,6 +84,59 @@ public sealed class AddressingIdentityTests : IDisposable
         Assert.Contains("MissingOrOverlongVietnameseName", Verify("same", "小宝", "").Issues);
         var different = Verify("different", "", "");
         Assert.False(different.EvidenceValid); Assert.Empty(different.Issues); Assert.Equal("Different", different.Status);
+    }
+
+    private sealed class IdentityMock(IReadOnlyList<AddressingTask> tasks, string verdict) : IJsonSchemaOllamaClient
+    {
+        public int Calls { get; private set; }
+        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+        {
+            Calls++; Assert.Equal(AddressingAiSurvey.Schema.GetRawText(), schema.GetRawText());
+            var sent = AddressingAiSurvey.TasksInPrompt(prompt, tasks); Assert.NotEmpty(sent);
+            var reply = Reply(AddressingAiSurvey.PlanRequests(sent, options.Model).Single(), verdict, "", "");
+            for (int i = 0; i < sent.Count; i++) reply["identities"]![i]!["task_id"] = "T" + (i + 1);
+            return Task.FromResult(new OllamaCompletion(reply.ToJsonString(), true, "stop", new GenerationMetrics { InputTokens = 100, OutputTokens = 30 }));
+        }
+    }
+
+    [Theory]
+    [InlineData("different", 0)]
+    [InlineData("unclear", 1)]
+    public async Task Identity_resume_keeps_different_final_but_asks_unclear_once_more(string verdict, int secondRequests)
+    {
+        var task = Candidate(AddressingAiSurvey.PlanIdentities(Book(Chapter), Names), "小宝", "小包子")!;
+        var session = await new ProjectRepository().CreateAsync(Path.Combine(_root, Guid.NewGuid().ToString("N")), "Synthetic identity resume");
+        var client = new IdentityMock([task], verdict); var options = AddressingAiSurveyTests.Options;
+        var first = await new AddressingAiEngine(client).RunAsync(new(session), [task], options, 1);
+        Assert.Equal(1, first.Planned); Assert.Equal(1, first.RequestsSent); Assert.Equal(1, client.Calls);
+        var proposal = Assert.Single(first.State.Proposals); Assert.False(proposal.EvidenceValid); Assert.Empty(proposal.Issues);
+        Assert.Equal(verdict == "different" ? "Different" : "Unclear", proposal.Status);
+        // A fresh store/engine reloads the checkpoint; no in-memory "done" flag can hide a resend.
+        var second = await new AddressingAiEngine(client).RunAsync(new(session), [task], options, 1);
+        Assert.Equal(secondRequests, second.Planned); Assert.Equal(secondRequests, second.RequestsSent); Assert.Equal(1 + secondRequests, client.Calls);
+        Assert.Equal(1 + secondRequests, second.State.Attempts.Count);
+        Assert.Equal(JsonSerializer.Serialize(first.State.Attempts[0]), JsonSerializer.Serialize(second.State.Attempts[0]));
+        Assert.Equal(proposal.Id, Assert.Single(second.State.Proposals).Id);
+        var third = await new AddressingAiEngine(client).RunAsync(new(session), [task], options, 1);
+        Assert.Equal(0, third.Planned); Assert.Equal(0, third.RequestsSent); Assert.Equal(1 + secondRequests, client.Calls);
+        Assert.Empty((await new ProjectResourceStore(session).LoadAsync()).Characters.Profiles);
+    }
+
+    [Theory]
+    [InlineData(AddressingTaskKind.Identity)]
+    [InlineData(AddressingTaskKind.Pair)]
+    [InlineData(AddressingTaskKind.Character)]
+    [InlineData(AddressingTaskKind.Scene)]
+    public void Different_is_final_only_for_an_issue_free_identity_with_the_same_task_id(AddressingTaskKind kind)
+    {
+        var proposal = Same("小包子", "小宝", "", "") with { Status = "Different", EvidenceValid = false, NameForms = [] };
+        var task = new AddressingTask(proposal.TaskId, kind, proposal.Subject, proposal.Listener, 1, 1, []);
+        var state = new AddressingLedgerState { Proposals = [proposal] };
+        Assert.Equal(kind == AddressingTaskKind.Identity, state.Done(task)); Assert.False(state.Done(task.TaskId));
+        Assert.False(state.Done(task with { TaskId = "other-task" }));
+        state.Proposals[0] = proposal with { Issues = ["MissingOrForeignSample"] }; Assert.False(state.Done(task));
+        state.Proposals[0] = proposal with { Kind = AddressingTaskKind.Pair }; Assert.False(state.Done(task));
     }
 
     // ---------- "Hoàn thành" ----------

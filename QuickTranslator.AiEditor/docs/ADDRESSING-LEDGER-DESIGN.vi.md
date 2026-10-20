@@ -273,6 +273,7 @@ Schema chỉ dùng `type/properties/required/items/enum` chuỗi (an toàn với
 
 Checkpoint theo request (`Settings/addressing-ledger.v1.json`, chỉ ghi thêm). Một nhiệm vụ là xong khi:
 - đã có một đề xuất qua kiểm chứng; hoặc
+- riêng câu hỏi Identity: đã có câu trả lời `Different` cùng nhiệm vụ, không có lỗi kiểm chứng (không gộp gì); hoặc
 - đã được trả lời 2 lần mà vẫn không qua kiểm chứng (không gửi lại mãi); hoặc
 - bị provider từ chối (không bao giờ tự gửi lại, để người dùng xem tay).
 
@@ -373,11 +374,14 @@ Công cụ probe vẫn dùng được để thử offline hoặc chạy bằng d
 - **AI trả lời trong cùng một object:** `forward` và `reverse`, mỗi chiều có `status`, `relationship` (nhìn từ phía người nói) và `phases`. Prompt yêu cầu hai chiều phải khớp nhau: anh/em ↔ em/anh, bố/con ↔ con/bố, sư phụ/đồ nhi ↔ đồ nhi/sư phụ. Một bên dùng dạng trung tính như tôi, ta, ngươi, bạn thì vẫn hợp lệ.
 - **Kiểm chứng:**
   - Mỗi chiều được kiểm như trước, nhưng **phải trích đúng mẫu của chiều đó**: chiều ngược không được mượn mẫu `S`.
-  - Sau đó CPU kiểm tra chéo (`Contradicts`). Trong các chương mà hai chiều cùng áp dụng, chương trình so cách A tự xưng với cách B gọi A, và cách A gọi B với cách B tự xưng. Nếu cả hai đều là từ chỉ vai/tuổi mà không có dạng nào trùng nhau → `ReciprocalMismatch` cho **cả hai chiều**, và Hoàn thành giữ chúng lại.
+  - Sau đó CPU kiểm tra chéo (`Contradicts`). Trong các chương mà hai chiều cùng áp dụng, chương trình so cách A tự xưng với cách B gọi A, và cách A gọi B với cách B tự xưng. Hai dạng khớp khi bằng nhau hoặc một dạng chứa trọn dạng kia theo **dãy từ liền nhau**, không so chuỗi con: `bố mẹ` khớp `mẹ`, `anh em` khớp `anh`; `sư phụ` không khớp `sư huynh`.
+  - Nếu vẫn mâu thuẫn, chiều có **ít nhất 3 mẫu và ít nhất gấp 3 lần chiều kia** được giữ nếu không có lỗi riêng; chỉ chiều yếu bị `ReciprocalMismatch`. Quy tắc đối xứng cho cả hai chiều. Không đủ chênh lệch (kể cả 6:6) thì giữ lại cả hai như trước. Số mẫu là mẫu của nhiệm vụ, không phải số từ AI khai; mọi kiểm chứng mẫu/chương/nguyên văn/tiếng Việt vẫn giữ nguyên.
   - Dạng trung tính (tôi, ta, mình, tao, tớ, ngươi, mày, bạn, cậu, ngài, các hạ…) không đem ra so. Ví dụ "anh trai xưng tôi với em" vẫn hợp lệ.
 - **Kết quả vẫn là hai đề xuất có hướng** (A → B và B → A, cùng `TaskId`). Vì vậy Hoàn thành, cửa sổ duyệt và bản dịch không phải đổi gì. Cửa sổ duyệt hiển thị mẫu `R` khi bạn xem chiều ngược.
 - `PromptVersion` lên `addressing-ledger-6`. Mã nhiệm vụ cặp đổi, nên lần khảo sát sau sẽ hỏi lại các cặp, theo dạng mới.
 - **Đo offline trên test cpu:** trước đây có 13 nhiệm vụ một chiều. Giờ còn **8 nhiệm vụ hai chiều, phủ 16 chiều**: chiều nào cũng có mẫu, kể cả những chiều chỉ có 2 lời. Ước tính token gần như không đổi (~24 nghìn).
+
+**Sổ đã có:** không sửa hoặc kiểm chứng lại đề xuất cũ vì sổ không lưu response thô. Nhiệm vụ chưa xong mới bị giữ một lần sẽ được hỏi lại khi bấm **Khảo sát / chạy tiếp**, tối đa 2 lần trả lời thành công mỗi nhiệm vụ; không tự gọi lại ngay. Nhiệm vụ đã xong không được gửi lại chỉ vì đổi quy tắc kiểm chứng. Người dùng có thể chỉnh/chấp nhận tay trong Sổ xưng hô qua các kiểm chứng duyệt hiện có.
 
 **Giai đoạn D: hỏi "cùng một người?" rồi gộp tên phụ (đã triển khai, mới test bằng mock).**
 
@@ -391,7 +395,7 @@ Công cụ probe vẫn dùng được để thử offline hoặc chạy bằng d
   Tối đa 20 cặp; mẫu là những đoạn có cả hai tên, trải đều theo chương. CPU cố ý đề xuất rộng tay: những cặp như `小宝 ? 陆景礼` để AI trả "different" thì rất rẻ, và không bao giờ bị gộp.
 - **AI trả lời** (`identities`): `verdict` (same / different / unclear), `primary` (tên giữ làm hồ sơ chính), `secondary_vi` (tên Việt của tên kia), và `sample_ids`.
   - Chỉ "same" là có tác dụng, và chỉ khi `primary` đúng là một trong hai tên, mẫu trích là mẫu của chính nhiệm vụ, và `secondary_vi` là tiếng Việt, không có chữ Hán.
-  - "different" / "unclear" là câu trả lời hợp lệ, không gộp gì và không bị liệt kê.
+  - "different" / "unclear" là câu trả lời hợp lệ, không gộp gì và không bị liệt kê. `Different` không có lỗi được coi là xong ngay, kể cả sau khi mở lại Project, dù `EvidenceValid=false`; không tốn thêm request chỉ vì không có phép gộp. `Unclear` vẫn được hỏi lại một lần ở lần bấm sau, rồi dừng theo giới hạn 2 lần. Không đổi cách hoàn tất Pair, Character hoặc Scene, không xóa lịch sử và không ghi lại sổ cũ.
 - **Hoàn thành gộp** khi AI nói "same" **và** CPU kiểm tra lại lúc ghi vẫn đồng ý. Thứ tự áp dụng:
   1. Ghi hồ sơ nhân vật; tên phụ được gộp thì không có hồ sơ riêng.
   2. Thêm tên phụ đó, cùng các cách gọi rõ ràng của nó, vào bí danh và glossary của hồ sơ chính.

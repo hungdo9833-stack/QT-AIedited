@@ -39,10 +39,12 @@ public sealed class AddressingLedgerState
 
     /// <summary>
     /// A scene's id is its quotes. If every earlier answer had another participant list (a name discovered since),
-    /// the question changed: ask again. Other kinds use <see cref="Done(string)"/>.
+    /// the question changed: ask again. An issue-free "Different" identity answer is also final without merging anything.
     /// </summary>
     public bool Done(AddressingTask task)
     {
+        if (task.Kind == AddressingTaskKind.Identity && Proposals.Any(p => p.Kind == AddressingTaskKind.Identity &&
+            p.TaskId == task.TaskId && p.Status == "Different" && p.Issues.Count == 0)) return true;
         if (task.Kind != AddressingTaskKind.Scene) return Done(task.TaskId);
         var answered = Proposals.Where(p => p.TaskId == task.TaskId).ToArray();
         return (answered.Length == 0 || answered.Any(p => p.Subject == task.Subject)) && Done(task.TaskId);
