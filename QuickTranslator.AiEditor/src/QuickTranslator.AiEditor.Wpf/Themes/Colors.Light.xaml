@@ -1,0 +1,32 @@
+<!-- "Ink" Light palette. Keys are the brush keys in Brushes.xaml; ThemeManager copies each Color into that brush.
+     Text pairs are checked for WCAG AA: Text 16.6:1, Muted 7.3:1, Subtle 5.0:1 on AppBackgroundBrush; white on PrimaryBrush 5.2:1. -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Color x:Key="AppBackgroundBrush">#F5F6F8</Color>
+    <Color x:Key="PanelBrush">#FFFFFF</Color>
+    <Color x:Key="SurfaceBrush">#FFFFFF</Color>
+    <Color x:Key="PanelAltBrush">#F0F2F5</Color>
+    <Color x:Key="EditorSurfaceBrush">#FFFFFF</Color>
+    <Color x:Key="ControlBrush">#FFFFFF</Color>
+    <Color x:Key="HoverBrush">#E8EBEF</Color>
+    <Color x:Key="PressedBrush">#DCE0E6</Color>
+    <Color x:Key="TextBrush">#1B1F24</Color>
+    <Color x:Key="MutedBrush">#4F5763</Color>
+    <Color x:Key="SubtleBrush">#636B78</Color>
+    <Color x:Key="BorderBrush">#DCE0E6</Color>
+    <Color x:Key="BorderStrongBrush">#C3C9D2</Color>
+    <Color x:Key="PrimaryBrush">#2563EB</Color>
+    <Color x:Key="PrimaryHoverBrush">#1D4ED8</Color>
+    <Color x:Key="PrimaryPressedBrush">#1E40AF</Color>
+    <Color x:Key="OnPrimaryBrush">#FFFFFF</Color>
+    <Color x:Key="AccentTextBrush">#1D4ED8</Color>
+    <Color x:Key="FocusBrush">#1D4ED8</Color>
+    <Color x:Key="SelectionBrush">#DBE7FE</Color>
+    <Color x:Key="SuccessBrush">#1A7F37</Color>
+    <Color x:Key="WarningBrush">#9A6700</Color>
+    <Color x:Key="DangerBrush">#C62828</Color>
+    <Color x:Key="SuccessSubtleBrush">#DFF5E3</Color>
+    <Color x:Key="WarningSubtleBrush">#FFF6DB</Color>
+    <Color x:Key="DangerSubtleBrush">#FDECEC</Color>
+    <Color x:Key="ScrollThumbBrush">#C3C9D2</Color>
+    <Color x:Key="ScrollThumbHoverBrush">#A3ABB8</Color>
+</ResourceDictionary>

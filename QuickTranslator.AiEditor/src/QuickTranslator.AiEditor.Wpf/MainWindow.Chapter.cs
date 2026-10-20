@@ -451,10 +451,10 @@ public partial class MainWindow
         string key = status switch
         {
             SegmentStatus.Approved => "SuccessBrush",
-            SegmentStatus.AwaitingReview => "PrimaryBrush",
+            SegmentStatus.AwaitingReview => "AccentTextBrush",
             SegmentStatus.InspectionRequired => "WarningBrush",
             SegmentStatus.Error => "DangerBrush",
-            SegmentStatus.Translating => "PrimaryBrush",
+            SegmentStatus.Translating => "AccentTextBrush",
             _ => "MutedBrush"
         };
         return Application.Current?.TryFindResource(key) as Brush ?? Brushes.Gray;

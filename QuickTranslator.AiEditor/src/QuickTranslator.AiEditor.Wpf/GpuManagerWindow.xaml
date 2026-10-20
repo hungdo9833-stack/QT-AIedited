@@ -18,7 +18,7 @@
     <ListBox x:Name="ProfileList" SelectionChanged="OnProfileSelected" BorderThickness="0" Background="Transparent">
      <ListBox.ItemTemplate><DataTemplate><Border Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="9" Margin="1,3"><StackPanel>
       <DockPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock DockPanel.Dock="Right" Text="{Binding Kind}" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"/></DockPanel>
-      <TextBlock Text="{Binding Runtime.ModelOptions.Model}" Foreground="{DynamicResource PrimaryBrush}" TextTrimming="CharacterEllipsis"/>
+      <TextBlock Text="{Binding Runtime.ModelOptions.Model}" Foreground="{DynamicResource AccentTextBrush}" TextTrimming="CharacterEllipsis"/>
      </StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
     </ListBox>
    </DockPanel>

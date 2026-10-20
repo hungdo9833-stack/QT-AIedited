@@ -211,30 +211,10 @@ public partial class MainWindow
 
     private void ApplyShellTheme(ShellTheme theme)
     {
-        bool dark = theme == ShellTheme.Dark;
-        SetBrush("AppBackgroundBrush", dark ? "#07111F" : "#F4F7FB");
-        SetBrush("PanelBrush", dark ? "#0E1B2D" : "#FFFFFF");
-        SetBrush("PanelAltBrush", dark ? "#12243A" : "#EAF0F7");
-        SetBrush("EditorSurfaceBrush", dark ? "#0A1626" : "#FFFFFF");
-        SetBrush("TextBrush", dark ? "#E8EEF7" : "#142033");
-        SetBrush("BorderBrush", dark ? "#263D59" : "#CBD5E1");
-        SetBrush("MutedBrush", dark ? "#91A4BC" : "#5B6B7F");
-        SetBrush("SurfaceBrush", dark ? "#0E1B2D" : "#F7F9FC");
-        SetBrush("SelectionBrush", dark ? "#193B63" : "#D9EAFE");
-        SetBrush("DangerBrush", dark ? "#F97066" : "#B42318");
-        SetBrush("SuccessBrush", dark ? "#32D583" : "#067647");
-        SetBrush("WarningBrush", dark ? "#FDB022" : "#B54708");
-        ThemeToggleButton.Content = dark ? "Light" : "Dark";
+        ThemeManager.Apply(theme);
+        ThemeToggleButton.Content = theme == ShellTheme.Dark ? "Light" : "Dark";
         Background = (Brush)FindResource("AppBackgroundBrush");
         Foreground = (Brush)FindResource("TextBrush");
-    }
-
-    private static void SetBrush(string key, string color)
-    {
-        ResourceDictionary resources = Application.Current.Resources;
-        if (resources[key] is SolidColorBrush brush && !brush.IsFrozen)
-            brush.Color = (Color)ColorConverter.ConvertFromString(color);
-        else resources[key] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
     }
 
     private async void OnShellNavigate(object sender, RoutedEventArgs e)
