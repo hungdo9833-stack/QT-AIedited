@@ -267,6 +267,9 @@ public partial class MainWindow
 
     private void OnShowTwoPane(object sender, RoutedEventArgs e) => ShowTranslationWorkspace(false);
 
+    // A command chosen from the "Thêm" popup closes it.
+    private void OnCommandOverflowClick(object sender, RoutedEventArgs e) { CommandOverflowToggle.IsChecked = false; StructureOverflowToggle.IsChecked = false; }
+
     // Only in-window workspaces are destinations; the other navigation items open separate windows.
     private void MarkActiveNavigation(Button active)
     {
