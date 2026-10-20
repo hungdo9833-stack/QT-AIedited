@@ -398,7 +398,7 @@ public partial class MainWindow : Window
     {
         if (AutosaveStatusText is null) return;
         AutosaveStatusText.Text = text;
-        AutosaveStatusText.Foreground = (Brush)FindResource(pending ? "WarningBrush" : "SuccessBrush");
+        AutosaveStatusText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, pending ? "WarningBrush" : "SuccessBrush");
     }
 
     private async void OnSaveProgress(object sender, RoutedEventArgs e)
@@ -680,7 +680,7 @@ public partial class MainWindow : Window
     private void SetStatus(string text)
     {
         StatusText.Text = text;
-        StatusText.Foreground = (Brush)FindResource("TextBrush");
+        StatusText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextBrush");
     }
 
     private bool BeginUiOperation(bool allowDuringTranslation = false)
@@ -711,7 +711,7 @@ public partial class MainWindow : Window
             (error is IOException or UnauthorizedAccessException
                 ? " Tác vụ chưa hoàn tất; hãy giữ ứng dụng mở, kiểm tra dung lượng/quyền ghi và thử lại thao tác lưu."
                 : _service?.HasUnsavedChanges == true ? " Có thay đổi chưa lưu; hãy giữ ứng dụng mở và thử Lưu tiến độ." : "");
-        StatusText.Foreground = (Brush)FindResource("DangerBrush");
+        StatusText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
     }
 
     private async void OnWindowClosing(object? sender, CancelEventArgs e)

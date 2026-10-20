@@ -5,8 +5,9 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 /// <summary>
 /// Applies the Dark/Light palette. Colors live in Themes/Colors.*.xaml, keyed by the brush keys of Brushes.xaml.
-/// Each brush is recolored in place rather than replaced: code that took a brush with FindResource keeps the same
-/// instance, so it follows the theme like every DynamicResource reference does.
+/// Each brush is replaced, not recolored: WPF freezes brushes that style and template triggers use, so an instance
+/// cannot be recolored in place. Everything that must follow the theme therefore refers to the key (DynamicResource
+/// in XAML, SetResourceReference in code); a brush taken with FindResource keeps the colors of the theme it was taken in.
 /// </summary>
 internal static class ThemeManager
 {
@@ -21,9 +22,7 @@ internal static class ThemeManager
         };
         foreach (object key in palette.Keys)
         {
-            if (palette[key] is not Color color) continue;
-            if (resources[key] is SolidColorBrush brush && !brush.IsFrozen) brush.Color = color;
-            else resources[key] = new SolidColorBrush(color);
+            if (palette[key] is Color color) resources[key] = new SolidColorBrush(color);
         }
         Current = theme;
     }

@@ -213,8 +213,8 @@ public partial class MainWindow
     {
         ThemeManager.Apply(theme);
         ThemeToggleButton.Content = theme == ShellTheme.Dark ? "Light" : "Dark";
-        Background = (Brush)FindResource("AppBackgroundBrush");
-        Foreground = (Brush)FindResource("TextBrush");
+        SetResourceReference(BackgroundProperty, "AppBackgroundBrush");
+        SetResourceReference(ForegroundProperty, "TextBrush");
     }
 
     private async void OnShellNavigate(object sender, RoutedEventArgs e)

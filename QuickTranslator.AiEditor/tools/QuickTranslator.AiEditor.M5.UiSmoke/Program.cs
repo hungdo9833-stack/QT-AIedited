@@ -36,6 +36,9 @@ internal static class Program
         App.SuppressStartup = true; // Synthetic Project only; never the user's real stores/Project.
         var application = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.InitializeComponent();
+        // --theme light|dark: the palette every window is rendered with (MainWindow re-applies it below, after its own startup theme).
+        ShellTheme theme = string.Equals(ValueAfter(args, "--theme"), "light", StringComparison.OrdinalIgnoreCase) ? ShellTheme.Light : ShellTheme.Dark;
+        ThemeManager.Apply(theme);
         if (string.Equals(mode, "queue-benchmark", StringComparison.OrdinalIgnoreCase))
         {
             int count = (int)(NumberAfter(args, "--count") ?? 1000);
@@ -64,6 +67,7 @@ internal static class Program
                 Invoke(window, "ShowReaderWorkspace");
             else
                 Invoke(window, "ShowTranslationWorkspace", string.Equals(mode, "four", StringComparison.OrdinalIgnoreCase));
+            Invoke(window, "ApplyShellTheme", theme);
         }
 
         if (!string.IsNullOrWhiteSpace(capturePath))

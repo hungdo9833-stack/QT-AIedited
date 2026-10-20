@@ -342,9 +342,9 @@ public partial class MainWindow
         bool active = ReaderModeButton.IsChecked == true;
         if (!active)
         {
-            ChapterWorkspace.Background = (Brush)FindResource("AppBackgroundBrush");
-            ChapterModeBar.Background = (Brush)FindResource("AppBackgroundBrush");
-            ChapterModeHint.Foreground = (Brush)FindResource("MutedBrush");
+            ChapterWorkspace.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "AppBackgroundBrush");
+            ChapterModeBar.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "AppBackgroundBrush");
+            ChapterModeHint.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
             return;
         }
         bool dark = active && _readerPreferences.Theme == ReaderTheme.Dark;

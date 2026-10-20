@@ -114,14 +114,24 @@ public sealed class ProductionShellUiTests
         var library = new ProjectLibraryWindow(cards, cards[0].ProjectId);
         try
         {
+            // A brush taken in code while Dark (status text, dialogs) must follow the switch, not keep the Dark color.
+            fixture.Call("ApplyShellTheme", ShellTheme.Dark);
+            fixture.Call("SetStatus", "Trạng thái trước khi đổi theme");
+            var status = (TextBlock)fixture.Window.FindName("StatusText");
+
             fixture.Call("ApplyShellTheme", ShellTheme.Light);
-            Assert.Equal(Color.FromRgb(244, 247, 251), ((SolidColorBrush)fixture.Window.Background).Color);
-            Assert.Equal(Color.FromRgb(244, 247, 251), ((SolidColorBrush)library.Background).Color);
+            Assert.Equal(Color.FromRgb(245, 246, 248), ((SolidColorBrush)fixture.Window.Background).Color);
+            Assert.Equal(Color.FromRgb(245, 246, 248), ((SolidColorBrush)library.Background).Color);
+            Assert.Equal(Color.FromRgb(27, 31, 36), ((SolidColorBrush)status.Foreground).Color);
             Assert.Equal("Dark", ((Button)fixture.Window.FindName("ThemeToggleButton")).Content);
 
             fixture.Call("ApplyShellTheme", ShellTheme.Dark);
-            Assert.Equal(Color.FromRgb(7, 17, 31), ((SolidColorBrush)fixture.Window.Background).Color);
-            Assert.Equal(Color.FromRgb(7, 17, 31), ((SolidColorBrush)library.Background).Color);
+            Assert.Equal(Color.FromRgb(15, 17, 21), ((SolidColorBrush)fixture.Window.Background).Color);
+            Assert.Equal(Color.FromRgb(15, 17, 21), ((SolidColorBrush)library.Background).Color);
+            Assert.Equal(Color.FromRgb(230, 233, 238), ((SolidColorBrush)status.Foreground).Color);
+            // Switching twice in a row must not fail on brushes WPF froze for trigger use.
+            fixture.Call("ApplyShellTheme", ShellTheme.Light);
+            fixture.Call("ApplyShellTheme", ShellTheme.Dark);
         }
         finally
         {

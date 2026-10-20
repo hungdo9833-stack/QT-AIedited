@@ -51,8 +51,7 @@ public partial class ProjectPublicationWindow : Window
             InspectionText.Text = _inspection.RequiresConfirmation
                 ? $"{_inspection.IncompleteChapterCount} chưa hoàn tất · {_inspection.InspectionChapterCount} cần kiểm tra"
                 : "Sẵn sàng · mọi chương đều có bản dịch hợp lệ";
-            InspectionText.Foreground = (System.Windows.Media.Brush)FindResource(
-                _inspection.RequiresConfirmation ? "WarningBrush" : "SuccessBrush");
+            InspectionText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, _inspection.RequiresConfirmation ? "WarningBrush" : "SuccessBrush");
             AllowIncompleteInput.Visibility = _inspection.RequiresConfirmation ? Visibility.Visible : Visibility.Collapsed;
             IReadOnlyList<ProjectPublicationIssueChapter> issues = _inspection.IssueChapters ?? [];
             IssueChaptersList.ItemsSource = issues;
@@ -184,7 +183,7 @@ public partial class ProjectPublicationWindow : Window
     private void ShowError(Exception ex)
     {
         ProgressText.Text = "Lỗi: " + ex.Message;
-        ProgressText.Foreground = (System.Windows.Media.Brush)FindResource("DangerBrush");
+        ProgressText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
         MessageBox.Show(this, ex.Message, "Xuất bản", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 

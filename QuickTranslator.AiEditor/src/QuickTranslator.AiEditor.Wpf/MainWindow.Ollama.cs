@@ -135,7 +135,7 @@ public partial class MainWindow
             MaximumInput.Text = runtime.SegmentationOptions.MaximumHanCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture);
             ApplyOllamaKindUi(profile.Kind);
             OllamaConnectionStatus.Text = profile.Id == _ollamaBackends.ActiveProfile.Id ? "Đang sử dụng" : "Đã lưu";
-            OllamaConnectionStatus.Foreground = (Brush)FindResource("MutedBrush");
+            OllamaConnectionStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
         }
         finally { _syncingOllamaProfile = false; }
     }
@@ -260,7 +260,7 @@ public partial class MainWindow
     {
         if (!BeginUiOperation(allowDuringTranslation: true)) return;
         OllamaConnectionStatus.Text = refreshModels ? "Đang đọc /api/tags…" : "Đang kiểm tra…";
-        OllamaConnectionStatus.Foreground = (Brush)FindResource("MutedBrush");
+        OllamaConnectionStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
         try
         {
             OllamaBackendProfile profile = ReadOllamaProfileEditor();
@@ -272,12 +272,12 @@ public partial class MainWindow
             OllamaConnectionStatus.Text = refreshModels
                 ? $"Đã tìm thấy {models.Count:N0} model cục bộ trên server"
                 : "Đã kết nối · model sẵn sàng";
-            OllamaConnectionStatus.Foreground = (Brush)FindResource("SuccessBrush");
+            OllamaConnectionStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "SuccessBrush");
         }
         catch (Exception ex)
         {
             OllamaConnectionStatus.Text = "Không sẵn sàng";
-            OllamaConnectionStatus.Foreground = (Brush)FindResource("DangerBrush");
+            OllamaConnectionStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
             ShowError(ex);
         }
         finally { EndUiOperation(); }
@@ -305,7 +305,7 @@ public partial class MainWindow
         if (_projectOllamaProfileMissing)
         {
             OllamaBackendStatus.Text = "Ollama · thiếu profile Project";
-            OllamaBackendStatus.Foreground = (Brush)FindResource("DangerBrush");
+            OllamaBackendStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
             return;
         }
         OllamaBackendProfile profile = _ollamaBackends.ActiveProfile;
@@ -313,7 +313,7 @@ public partial class MainWindow
             ? (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).ModelOptions.Model
             : ModelInput.Text.Trim();
         OllamaBackendStatus.Text = $"{BackendLabel(profile)} · {model}";
-        OllamaBackendStatus.Foreground = (Brush)FindResource("MutedBrush");
+        OllamaBackendStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
     }
 
     private static string BackendLabel(OllamaBackendProfile profile) =>

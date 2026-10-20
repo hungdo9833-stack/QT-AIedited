@@ -259,7 +259,7 @@ public partial class MainWindow
                     (allowProtected.IsChecked == true ? ", bao gồm nội dung được bảo vệ." : " và không được bảo vệ.");
                 tabs.SelectedIndex = 0; ApplyFilter();
             }
-            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = (Brush)FindResource("DangerBrush"); }
+            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush"); }
             finally { SetWorking(false); }
         }
 
@@ -276,12 +276,12 @@ public partial class MainWindow
                 chineseRows.Clear();
                 foreach (var item in report.Occurrences)
                     chineseRows.Add(new(item, counts[item.Text]));
-                status.Foreground = (Brush)FindResource("TextBrush");
+                status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextBrush");
                 status.Text = $"Có {report.TotalOccurrences} vị trí · chưa biết {report.UnknownOccurrences} · xung đột {report.ConflictOccurrences}. " +
                     "Nhấp đúp để mở đúng segment; ứng dụng không suy đoán tên chưa xác nhận.";
                 tabs.SelectedIndex = 1; ApplyFilter();
             }
-            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = (Brush)FindResource("DangerBrush"); }
+            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush"); }
             finally { SetWorking(false); }
         }
 
@@ -343,7 +343,7 @@ public partial class MainWindow
             bool allowProtectedChanges = allowProtected.IsChecked == true;
             if (protectedText && !allowProtectedChanges)
             {
-                status.Foreground = (Brush)FindResource("WarningBrush");
+                status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "WarningBrush");
                 status.Text = "Có nội dung đã sửa/duyệt được bảo vệ. Hãy bật “Cho phép thay nội dung đã sửa/duyệt” rồi chọn lại các dòng cần thay.";
                 return;
             }
@@ -383,7 +383,7 @@ public partial class MainWindow
                 SetWorking(false);
                 await ScanAsync();
             }
-            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.Foreground = (Brush)FindResource("DangerBrush"); }
+            catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush"); }
             finally { SetWorking(false); }
         }
 
@@ -456,12 +456,12 @@ public partial class MainWindow
             }
             catch (OperationCanceledException)
             {
-                status.Foreground = (Brush)FindResource("TextBrush");
+                status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextBrush");
                 status.Text = $"Đã hủy dịch lại sau {previewRows.Count:N0} preview; nội dung chapter chưa thay đổi.";
             }
             catch (Exception ex)
             {
-                status.Foreground = (Brush)FindResource("DangerBrush");
+                status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
                 status.Text = $"Lỗi dịch lại sau {previewRows.Count:N0} preview: {ex.Message} Nội dung chapter chưa thay đổi.";
             }
             finally
@@ -477,14 +477,14 @@ public partial class MainWindow
         {
             foreach (BatchPreviewRow row in previewRows.Where(row => row.Item.Protected))
                 row.IsSelected = row.Item.RuleConfirmed && !row.Item.Conflict;
-            status.Foreground = (Brush)FindResource("WarningBrush");
+            status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "WarningBrush");
             status.Text = $"Đã bật thay nội dung được bảo vệ và chọn {previewRows.Count(row => row.Item.Protected && row.IsSelected):N0} vị trí. " +
                           "Khi áp dụng vẫn phải xác nhận lần cuối; Approval và lịch sử cũ được giữ.";
         };
         allowProtected.Unchecked += (_, _) =>
         {
             foreach (BatchPreviewRow row in previewRows.Where(row => row.Item.Protected)) row.IsSelected = false;
-            status.Foreground = (Brush)FindResource("TextBrush");
+            status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextBrush");
             status.Text = "Đã bật lại cơ chế bảo vệ; các vị trí đã sửa/duyệt được bỏ chọn.";
         };
         selectEligible.Click += (_, _) =>
@@ -515,7 +515,7 @@ public partial class MainWindow
             {
                 status.Text = "Chưa hoàn tất: " + ex.Message +
                     " Thay đổi trong bộ nhớ được giữ; kiểm tra quyền ghi/dung lượng rồi bấm lại thao tác để thử lưu.";
-                status.Foreground = (Brush)FindResource("DangerBrush");
+                status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
                 ShowError(ex);
                 return false;
             }
