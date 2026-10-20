@@ -36,7 +36,7 @@ public sealed class AddressingLedgerUiTests
                         ["secondary_vi"] = "", ["sample_ids"] = ids }), ["reason"] = "Mock" });
             }
         }
-        return new JsonObject { ["pairs"] = pairs, ["characters"] = characters }.ToJsonString();
+        return new JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = new JsonArray() }.ToJsonString();
     }
 
     [Fact]

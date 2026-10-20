@@ -32,6 +32,11 @@ public sealed class AddressingLedgerState
         // Count answered attempts, not proposals: identical invalid answers share one proposal id.
         Attempts.Count(a => a.Succeeded && a.TaskIds.Contains(taskId)) >= 2 ||
         Attempts.Any(a => a.ErrorCode == "ProviderRefusal" && a.TaskIds.Contains(taskId));
+
+    /// <summary>Usable turns of verified scene proposals: evidence for planning pair tasks (step 2b), never profile data.</summary>
+    public IReadOnlyList<AddressingTurn> SceneTurns() => Proposals
+        .Where(p => p.Kind == AddressingTaskKind.Scene && p.EvidenceValid && LatestReview(p.Id)?.Decision != AddressingDecision.Rejected)
+        .SelectMany(p => p.Turns.Where(t => t.IsUsable())).ToArray();
 }
 
 public sealed class AddressingLedgerStore(ProjectSession session)

@@ -119,7 +119,9 @@ public sealed class AddressingLedgerWindow : Window
             // Re-plan locally (CPU, no AI) only to show the samples each task was sent with.
             var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(_session, _repository);
             var names = AddressingAiSurvey.CandidateNames(_session.Manifest.ProjectId, sources, CurrentResources);
-            _tasks = (await Task.Run(() => AddressingAiSurvey.PlanTasks(sources, names))).ToDictionary(t => t.TaskId, StringComparer.Ordinal);
+            // Verified scene turns change which quotes count for each pair, so they are part of the plan.
+            var turns = State.SceneTurns();
+            _tasks = (await Task.Run(() => AddressingAiSurvey.PlanTasks(sources, names, sceneTurns: turns))).ToDictionary(t => t.TaskId, StringComparer.Ordinal);
             _updatingLock = true; _lock.IsChecked = CurrentResources.Characters.ConsistencyLockEnabled; _updatingLock = false;
             Refresh();
         }, "Đã nạp sổ xưng hô.");
@@ -144,10 +146,14 @@ public sealed class AddressingLedgerWindow : Window
             grid.ItemsSource = rows;
             grid.SelectedItem = rows.FirstOrDefault(r => r.Proposal.Id == keep);
         }
-        int pending = State.Proposals.Count(p => p.EvidenceValid && State.LatestReview(p.Id) is null);
-        _summary.Text = $"{State.Proposals.Count} đề xuất ({State.Proposals.Count(p => p.EvidenceValid)} đã kiểm chứng, {pending} chờ duyệt) · {State.Reviews.Count} quyết định · " +
+        // Scene proposals are evidence for pair tasks only; they are counted apart and never reviewed here.
+        var reviewable = State.Proposals.Where(p => p.Kind != AddressingTaskKind.Scene).ToArray();
+        int pending = reviewable.Count(p => p.EvidenceValid && State.LatestReview(p.Id) is null);
+        int scenes = State.Proposals.Count(p => p.Kind == AddressingTaskKind.Scene && p.EvidenceValid);
+        _summary.Text = $"{reviewable.Length} đề xuất ({reviewable.Count(p => p.EvidenceValid)} đã kiểm chứng, {pending} chờ duyệt) · {State.Reviews.Count} quyết định · " +
+            (scenes > 0 ? $"{scenes} cảnh đã xác định lượt nói ({State.SceneTurns().Count} lượt) · " : "") +
             $"hồ sơ: {CurrentResources?.Characters.Profiles.Count ?? 0} nhân vật · khóa nhất quán {(CurrentResources?.Characters.ConsistencyLockEnabled == true ? "BẬT" : "TẮT")}." +
-            (State.Proposals.Count == 0 ? " Chưa có đề xuất: chạy khảo sát AI Bước 2 trước." : "");
+            (reviewable.Length == 0 ? " Chưa có đề xuất: chạy khảo sát AI Bước 2 trước." : "");
         ShowSelection();
     }
 

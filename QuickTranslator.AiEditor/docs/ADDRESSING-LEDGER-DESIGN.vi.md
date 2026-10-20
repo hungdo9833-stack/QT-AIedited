@@ -91,7 +91,72 @@ Truyện ngôn tình đô thị *隐婚100分* (20 chương đầu): lời tho�
 | Người nói `PreviousNarration` | — → 25 | — → 16 |
 | Nhiệm vụ AI (cặp / nhân vật) | 13 / 11 → 13 / 12 | 0 / 7 → 1 / 8 |
 
-**Giới hạn còn lại.** Với truyện viết theo kiểu đối đáp liên tục, không có động từ dẫn thoại (như 隐婚100分), CPU không gán được người nói cho đa số lời thoại. Hướng đúng là một loại nhiệm vụ AI thứ ba **theo cảnh**: gửi cả một đoạn hội thoại liền mạch kèm câu kể xung quanh, để AI xác định lượt nói. Các bước kiểm chứng giữ nguyên (câu trích nguyên văn, người nói phải là nhân vật có trong danh sách). Hướng này chưa triển khai.
+**Giới hạn còn lại.** Với truyện viết theo kiểu đối đáp liên tục, không có động từ dẫn thoại (như 隐婚100分), CPU không gán được người nói cho đa số lời thoại. Bước 2b dưới đây xử lý trường hợp này.
+
+### Bước 2b — AI theo cảnh: xác định lượt nói (đã triển khai, mới test bằng mock)
+
+Dùng cho truyện viết đối đáp liên tục mà CPU không gán được người nói.
+
+- **CPU dựng cảnh** (`AddressingDialogueSurvey.Scenes`): các lời thoại liên tiếp trong cùng chương.
+  - Hai lời thoại thuộc cùng cảnh khi giữa chúng có tối đa **một** đoạn kể, dài tối đa 160 ký tự. Mỗi cảnh tối đa 10 lời thoại và khoảng 1.400 ký tự.
+  - Giữ nguyên dấu xuống đoạn, vì xuống đoạn thường là đổi người nói.
+  - Ngữ cảnh trước cảnh: phần dẫn của lời thoại đầu cùng tối đa 2 đoạn kể trước đó (≤240 ký tự). Phần này được cắt ở ranh giới câu và không bao giờ lấn sang lời thoại của cảnh trước.
+- **Chọn cảnh** (`AddressingAiSurvey.PlanScenes`):
+  - Chỉ chọn cảnh có ít nhất 2 lời thoại CPU chưa gán được người nói và ít nhất 2 người tham gia.
+  - Người tham gia là tên có trong cảnh hoặc ngữ cảnh. Biến thể tên được quy về tên đầy đủ, tối đa 8 người.
+  - Cảnh được trải đều theo chương (xoay vòng), mỗi lần chạy tối đa 40 cảnh (`MaximumScenes`).
+- **AI nhận:**
+  - nguyên văn cả cảnh, mỗi lời thoại có nhãn `⟦Qn⟧` (nhãn có sẵn trong văn bản gốc bị xóa nên không giả mạo được);
+  - danh sách người tham gia, kèm biến thể tên do CPU tìm được.
+- **AI trả lời từng lời thoại:**
+  - người nói và người nghe, viết đúng một tên **trong danh sách**;
+  - `""` nếu văn bản không đủ rõ hoặc người nói là nhân vật phụ không tên;
+  - từ tự xưng và từ gọi tiếng Trung, chép nguyên văn từ chính câu đó.
+- **Kiểm chứng CPU theo từng lượt.** Lượt sai bị loại và ghi mã lỗi; các lượt khác vẫn dùng được.
+  - `UnknownQuote` / `DuplicateQuote`: `quote_id` không có thật, hoặc một lời thoại được trả lời hai lần.
+  - `UnlistedParticipant`: tên không có trong danh sách người tham gia.
+  - `SpeakerIsListener`: người nói trùng người nghe.
+  - `UnquotedChineseTerm`: từ tiếng Trung không có nguyên văn trong câu.
+  - `SpeakerNamedInOwnQuote`: người nói bị gọi tên ngay trong câu của mình.
+  - `ListenerConflictsWithVocative`: người nghe không phải người được gọi tên trong câu.
+  - `ConflictsWithCpuSpeaker`: trái với người nói `Explicit` mà CPU đã tìm ra.
+  - `TooManyRejectedTurns`: số lượt bị loại nhiều hơn số lượt dùng được, nên **bỏ cả cảnh**, vì có thể AI đã đọc sai cảnh.
+- **Lượt đã qua kiểm chứng** (`AddressingLedgerState.SceneTurns`) trở thành bằng chứng `AiScene` khi lập lại nhiệm vụ theo cặp.
+  - Lượt chỉ bổ sung chỗ CPU còn trống. Nó không thay người nói `Explicit` và không thay người nghe `Vocative`/`Clause`.
+  - Lượt được khớp theo chương, offset **và hash nguyên văn lời thoại**. Nếu bạn sửa câu gốc, câu trả lời cũ không còn được áp dụng.
+  - Mẫu cặp lấy từ cảnh được gắn `FROM-SCENE` trong prompt, và AI theo cặp được dặn trả `NotThisPair` nếu văn bản mâu thuẫn.
+  - Cặp mới tiếp tục đi qua nhiệm vụ theo cặp (Bước 2) để quyết định xưng hô tiếng Việt, rồi tới bạn duyệt ở Bước 3 như bình thường.
+- Cảnh **không** ghi trực tiếp vào hồ sơ nhân vật. Cửa sổ duyệt chỉ đếm số cảnh và số lượt, không cho duyệt từng cảnh.
+- `PromptVersion` tăng lên `addressing-ledger-3`; schema có thêm mảng `scenes` (vẫn chỉ dùng tập con Gemini chấp nhận).
+
+**Chạy thử bằng mock trên hai truyện (2026-10-20, HTTP = 0).** Mock là bộ giả lập tất định, không phải AI:
+
+- nó giữ người nói CPU đã biết, luân phiên 2 người ở mỗi lần xuống đoạn, và trả `""` khi cảnh có hơn 2 người;
+- nó cố ý cài lỗi: cứ 13 lượt có một tên lạ, cứ 17 lượt có một từ không có trong câu.
+
+Số liệu dưới đây chỉ chứng minh đường đi và bộ kiểm chứng chạy đúng trên văn bản thật. **Không** đo độ chính xác của AI.
+
+| | test cpu (19 ch.) | 隐婚100分 (20 ch.) |
+|---|---:|---:|
+| Cảnh liền mạch / được chọn | 316 / 40 | 136 / 40 |
+| Lời thoại trong cảnh được chọn (CPU đã biết người nói) | 266 (69) | 166 (6) |
+| Request dự kiến · token input ước tính | 7 · ~34,6 nghìn | 7 · ~20,8 nghìn |
+| Cảnh qua kiểm chứng (mock) | 33/40 | 20/40 |
+| Lượt dùng được / tổng | 98/266 | 52/166 |
+| Lượt bị loại: tên lạ · từ không có · tự gọi tên mình · người nghe trái hô gọi | 20 · 14 · 12 · 12 | 12 · 9 · 1 · 1 |
+| Nhiệm vụ cặp trước → sau | 13 → 13 | 1 → 8 |
+
+Nhận xét:
+
+- Mọi lỗi cài sẵn đều bị bắt.
+- Ở test cpu, bộ kiểm chứng còn bắt 12 lượt mà cách luân phiên máy móc gán sai, vì người nói bị gọi tên trong chính câu của mình. Đây đúng là loại lỗi một mô hình thật có thể mắc.
+- Với 隐婚100分, chỉ cần lượt nói theo cảnh là đã mở được 7 cặp mới (宁夕 ↔ 陆霆骁, 宁夕 ↔ 宁雪落, 陆霆骁 → 陆景礼…). Trước đó CPU chỉ lập được 1 cặp.
+- test cpu là truyện có nội dung người lớn, nên Gemini có thể từ chối (`ProviderRefusal`) như lần chạy Bước 2 trước. Nhiệm vụ theo cảnh không thay đổi điều đó.
+
+**Chưa làm:**
+
+- Chưa đo độ chính xác lượt nói với AI thật.
+- Mẫu "Tên + hành động：「…」" không có động từ nói, rất phổ biến trong 隐婚100分, hiện CPU vẫn để trống người nói; AI theo cảnh phải tự xác định.
 
 ### Bước 1b — CPU: cách lời kể gọi nhân vật (ngôi thứ 3)
 

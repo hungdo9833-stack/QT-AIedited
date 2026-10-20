@@ -1,8 +1,8 @@
-# Sổ xưng hô · Bước 1 (CPU)
+# Sổ xưng hô · công cụ thử (Bước 1, 2, 2b)
 
 Thiết kế: [docs/ADDRESSING-LEDGER-DESIGN.vi.md](../../docs/ADDRESSING-LEDGER-DESIGN.vi.md).
 
-Công cụ chỉ dùng CPU: **không gọi AI, không ghi vào Project**. Nó sao chép thư mục Project sang `%TEMP%`, chỉ mở bản sao, rồi xóa bản sao khi xong. Báo cáo được ghi vào thư mục `--out`.
+Mặc định công cụ chỉ dùng CPU: **không gọi AI, không ghi vào Project**. Nó sao chép thư mục Project sang `%TEMP%`, chỉ mở bản sao, rồi xóa bản sao khi xong. Báo cáo được ghi vào thư mục `--out`.
 
 ```powershell
 dotnet build tools/QuickTranslator.AiEditor.Addressing.Probe -c Release
@@ -17,6 +17,20 @@ Tùy chọn: `--samples 12` (số mẫu thoại mỗi cặp), `--min-mentions 3`
 - `addressing-step1.json`: cùng dữ liệu, dạng máy đọc, dùng cho Bước 2.
 
 - `addressing-step2-plan.md`: kế hoạch Bước 2 **offline** (HTTP=0): biến thể tên, tín hiệu 他/她 cho lời kể, danh sách cặp, số request và ước tính token. `addressing-step2-first-prompt.txt` là prompt của request đầu tiên để bạn xem trước.
+
+- `addressing-step2b-scenes.md`: Bước 2b **offline**. Gồm các cảnh hội thoại liền mạch, những cảnh được chọn để AI xác định lượt nói, số request và ước tính token. `addressing-step2b-first-prompt.txt` là prompt của request cảnh đầu tiên.
+
+### Bước 2b chạy thử bằng mock (không gọi AI)
+
+```powershell
+dotnet run --project tools/QuickTranslator.AiEditor.Addressing.Probe -c Release --no-build -- --project "D:\Truyen\Ten\Ten.qtproj" --out artifacts\addressing\ten --mock-scenes
+```
+
+Lệnh này chạy đủ chuỗi lập kế hoạch → trả lời → kiểm chứng → sổ → lập lại nhiệm vụ cặp trên bản sao Project, với HTTP=0.
+
+- Câu trả lời đến từ một bộ giả lập tất định: nó luân phiên hai người tham gia và cố ý cài lỗi để thử bộ kiểm chứng. Đó **không phải** kết quả AI.
+- Báo cáo nằm trong `addressing-step2b-mock-result.md`. Sổ mock được lưu riêng ở `addressing-ledger.mock.json` và không bao giờ trộn vào sổ của lần chạy thật.
+- Không dùng chung `--mock-scenes` với `--live`.
 
 ### Bước 2 với AI thật (chỉ khi bạn chủ động chạy)
 
@@ -34,7 +48,12 @@ finally {
 }
 ```
 
-Phải gõ đúng `SEND ADDRESSING SURVEY`, nếu không sẽ hủy với HTTP=0. Mỗi lần gửi tối đa `--max-requests` request (mặc định 1), mỗi request thử một lần, không retry hay fallback. Lệnh chạy trên bản sao, nên Project thật không bị ghi. Kết quả nằm trong `addressing-step2-result.md` và `addressing-ledger.v1.json`. Lần chạy sau dùng lại ledger này để không gửi lại nhiệm vụ đã xong. Đề xuất chưa được duyệt; Bước 3 (duyệt và ghi vào hồ sơ nhân vật) chưa làm.
+Phải gõ đúng `SEND ADDRESSING SURVEY`, nếu không sẽ hủy với HTTP=0. Mỗi lần gửi tối đa `--max-requests` request (mặc định 1), mỗi request thử một lần, không retry hay fallback. Lệnh chạy trên bản sao, nên Project thật không bị ghi. Kết quả nằm trong `addressing-step2-result.md` và `addressing-ledger.v1.json`. Lần chạy sau dùng lại ledger này để không gửi lại nhiệm vụ đã xong.
+
+- Nhiệm vụ theo cảnh được gửi **trước**.
+- Lượt nói đã qua kiểm chứng ở các lần chạy trước được dùng để lập nhiệm vụ theo cặp.
+
+Đề xuất chưa được duyệt; bạn duyệt trong cửa sổ Sổ xưng hô (Bước 3).
 
 Báo cáo chứa trích đoạn nguyên văn. Đừng commit nó; `artifacts/` đã nằm trong `.gitignore`.
 

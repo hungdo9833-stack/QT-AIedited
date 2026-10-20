@@ -4,9 +4,21 @@ using QuickTranslator.AiEditor.Core.BookIntelligence;
 
 namespace QuickTranslator.AiEditor.Core.Addressing;
 
-/// <summary>Explicit: lead clause or same-paragraph verb. PreviousNarration (weaker): a standalone quote paragraph whose preceding narration sentence opens with this name.</summary>
-public enum SpeakerEvidence { Explicit, Pronoun, Unattributed, PreviousNarration }
-public enum ListenerEvidence { Vocative, Clause, Scene, Unknown }
+/// <summary>
+/// Explicit: lead clause or same-paragraph verb. PreviousNarration (weaker): a standalone quote paragraph whose preceding
+/// narration sentence opens with this name. AiScene: a scene-task turn that passed CPU verification (never set by step 1).
+/// </summary>
+public enum SpeakerEvidence { Explicit, Pronoun, Unattributed, PreviousNarration, AiScene }
+public enum ListenerEvidence { Vocative, Clause, Scene, Unknown, AiScene }
+
+/// <summary>One quote of a dialogue scene with the narration since the previous quote (paragraph breaks kept as '\n').</summary>
+public sealed record SceneQuote(DialogueLine Line, string Before);
+
+/// <summary>
+/// Consecutive quotes of one chapter separated by at most one short narration paragraph. Names lists every candidate
+/// name seen in the scene or its context, in order of first appearance (surface forms, not merged).
+/// </summary>
+public sealed record DialogueScene(Guid ChapterId, int ChapterNumber, IReadOnlyList<SceneQuote> Quotes, string Trailer, IReadOnlyList<string> Names);
 
 /// <summary>One quoted utterance with CPU-only, evidence-graded attribution. Offsets are UTF-16 in the original chapter text.</summary>
 public sealed record DialogueLine(Guid ChapterId, int ChapterNumber, int QuoteStartUtf16, int QuoteLengthUtf16, string Quote, string LeadClause,
@@ -87,6 +99,87 @@ public static class AddressingDialogueSurvey
     {
         var matcher = new NameMatcher(names);
         return sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId).SelectMany(x => Extract(x, matcher, cancellationToken)).ToArray();
+    }
+
+    private const int SceneGapCharacters = 160, SceneContextCharacters = 240, SceneTrailerCharacters = 80;
+    private static readonly Regex RepeatedBreaks = Rule(@"\n{2,}");
+
+    /// <summary>
+    /// Step 2b input: contiguous dialogue runs. A run ends at the chapter end, when more than one narration paragraph
+    /// (or a long one) separates two quotes, or at the size limits. Paragraph breaks are kept: they mark turn changes.
+    /// </summary>
+    public static IReadOnlyList<DialogueScene> Scenes(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
+        int maximumQuotes = 10, int maximumCharacters = 1_400, CancellationToken cancellationToken = default)
+    {
+        var matcher = new NameMatcher(names);
+        var result = new List<DialogueScene>();
+        foreach (var source in sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var text = NormalizedText.From(source.OriginalText);
+            string value = text.Value;
+            var run = new List<(DialogueLine Line, int Open, int Close)>();
+            int size = 0, floor = 0;
+            void Flush(int limit)
+            {
+                if (run.Count == 0) return;
+                var quotes = new List<SceneQuote>();
+                for (int i = 0; i < run.Count; i++)
+                    quotes.Add(new(run[i].Line, i == 0 ? Context(value, floor, run[0].Open) : Tidy(value[(run[i - 1].Close + 1)..run[i].Open])));
+                int close = run[^1].Close, end = value.IndexOf('\n', close + 1);
+                end = Math.Min(Math.Min(end < 0 ? value.Length : end, limit), close + 1 + SceneTrailerCharacters);
+                string trailer = Tidy(value[(close + 1)..Math.Max(close + 1, end)]);
+                var seen = matcher.Find(string.Concat(quotes.Select(q => q.Before + "\n" + q.Line.Quote + "\n")) + trailer)
+                    .Select(h => h.Name).Distinct(StringComparer.Ordinal).ToArray();
+                result.Add(new(source.ChapterId, source.ChapterNumber, quotes, trailer, seen));
+                floor = close + 1; run.Clear(); size = 0;
+            }
+            foreach (var line in Extract(source, matcher, cancellationToken))
+            {
+                int open = Array.BinarySearch(text.Map, line.QuoteStartUtf16) - 1;
+                if (open < 0 || !Brackets.Any(b => b.Open == value[open])) continue;
+                int close = open + 1 + line.Quote.Length;
+                if (run.Count > 0)
+                {
+                    string gap = value[(run[^1].Close + 1)..open];
+                    bool joins = gap.Trim().Length <= SceneGapCharacters && gap.Split('\n').Count(p => p.Trim().Length > 0) <= 1 &&
+                        run.Count < maximumQuotes && size + gap.Length + line.Quote.Length <= maximumCharacters;
+                    if (!joins) Flush(open);
+                    else size += gap.Length;
+                }
+                if (run.Count == 0) size = Math.Min(SceneContextCharacters, open - floor);
+                run.Add((line, open, close)); size += line.Quote.Length;
+            }
+            Flush(value.Length);
+        }
+        return result;
+    }
+
+    /// <summary>Narration before a scene: the lead of its first quote plus up to two previous paragraphs, never an earlier quote.</summary>
+    private static string Context(string text, int floor, int open)
+    {
+        int start = open, breaks = 0;
+        while (start > floor) { if (text[start - 1] == '\n' && ++breaks == 3) break; start--; }
+        string context = text[start..open];
+        if (context.Length > SceneContextCharacters)
+        {
+            // Long paragraphs: start at a sentence boundary instead of mid-word.
+            context = context[^SceneContextCharacters..];
+            int boundary = context.IndexOfAny(['。', '！', '？', '!', '?', '…', '\n']);
+            if (boundary >= 0 && boundary + 1 < context.Length) context = context[(boundary + 1)..].TrimStart('…');
+        }
+        return Tidy(context).TrimStart('\n');
+    }
+
+    // Indentation and blank lines removed, one '\n' per paragraph break; scene labels cannot be forged by source text.
+    private static string Tidy(string text) =>
+        RepeatedBreaks.Replace(string.Join('\n', text.Split('\n').Select(l => l.Trim(' ', '　', '\t', '\r'))), "\n").Replace("⟦", "").Replace("⟧", "");
+
+    /// <summary>Names (from <paramref name="names"/>) used as a vocative inside the quote: "宁夕，你…", "…啊，陆霆骁！".</summary>
+    internal static IReadOnlyList<string> VocativeNames(string quote, IReadOnlyCollection<string> names)
+    {
+        var matcher = new NameMatcher(names);
+        return Vocatives(quote, matcher.Find(quote)).Distinct(StringComparer.Ordinal).ToArray();
     }
 
     private static IReadOnlyList<DialogueLine> Extract(CensusSource source, NameMatcher names, CancellationToken cancellationToken)

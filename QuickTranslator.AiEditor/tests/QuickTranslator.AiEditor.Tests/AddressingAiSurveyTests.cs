@@ -31,10 +31,15 @@ public sealed class AddressingAiSurveyTests : IDisposable
     /// <summary>A well-formed reply that cites the task's own samples and quoted terms.</summary>
     internal static JsonObject Answer(AddressingRequestPlan request, Func<AddressingTask, JsonObject?>? overrideTask = null)
     {
-        var pairs = new JsonArray(); var characters = new JsonArray();
+        var pairs = new JsonArray(); var characters = new JsonArray(); var scenes = new JsonArray();
         foreach (var task in request.Tasks)
         {
             var custom = overrideTask?.Invoke(task);
+            if (task.Kind == AddressingTaskKind.Scene)
+            {
+                scenes.Add(custom ?? new JsonObject { ["task_id"] = task.TaskId, ["turns"] = new JsonArray(), ["reason"] = "Không rõ." });
+                continue;
+            }
             if (task.Kind == AddressingTaskKind.Pair)
             {
                 bool sister = task.Subject == "王秀兰";
@@ -67,7 +72,7 @@ public sealed class AddressingAiSurveyTests : IDisposable
                 });
             }
         }
-        return new JsonObject { ["pairs"] = pairs, ["characters"] = characters };
+        return new JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = scenes };
     }
 
     [Fact]
