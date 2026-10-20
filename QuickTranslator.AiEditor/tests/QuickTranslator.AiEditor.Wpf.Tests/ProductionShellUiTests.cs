@@ -105,6 +105,23 @@ public sealed class ProductionShellUiTests
     });
 
     [Fact]
+    public Task Navigation_marks_the_workspace_that_is_shown() => StaHost.Run(() =>
+    {
+        using var fixture = new WorkspaceFixture();
+        Button Nav(string name) => (Button)fixture.Window.FindName(name);
+        fixture.Call("ShowReaderWorkspace");
+        Assert.True(NavState.GetIsActive(Nav("ReaderNavButton")));
+        Assert.False(NavState.GetIsActive(Nav("TranslateNavButton")));
+        fixture.Call("ShowSettingsWorkspace", (string?)null);
+        Assert.True(NavState.GetIsActive(Nav("SettingsNavButton")));
+        Assert.False(NavState.GetIsActive(Nav("ReaderNavButton")));
+        fixture.Call("ShowTranslationWorkspace", false);
+        Assert.True(NavState.GetIsActive(Nav("TranslateNavButton")));
+        Assert.False(NavState.GetIsActive(Nav("SettingsNavButton")));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
     public Task Dark_and_light_themes_update_shell_and_child_windows() => StaHost.Run(() =>
     {
         using var fixture = new WorkspaceFixture();

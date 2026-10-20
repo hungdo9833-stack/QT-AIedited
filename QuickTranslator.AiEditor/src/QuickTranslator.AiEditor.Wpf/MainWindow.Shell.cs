@@ -256,6 +256,7 @@ public partial class MainWindow
         Refresh();
         _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(fourPane));
         _ = SaveWorkspaceLayoutAsync();
+        MarkActiveNavigation(TranslateNavButton);
     }
 
     private void OnEditorLayoutChanged(object sender, RoutedEventArgs e)
@@ -266,17 +267,26 @@ public partial class MainWindow
 
     private void OnShowTwoPane(object sender, RoutedEventArgs e) => ShowTranslationWorkspace(false);
 
+    // Only in-window workspaces are destinations; the other navigation items open separate windows.
+    private void MarkActiveNavigation(Button active)
+    {
+        foreach (Button button in new[] { TranslateNavButton, ReaderNavButton, SettingsNavButton })
+            NavState.SetIsActive(button, ReferenceEquals(button, active));
+    }
+
     private void ShowReaderWorkspace()
     {
         EditorTabs.SelectedIndex = 0;
         ReaderModeButton.IsChecked = true;
         SetTranslationInspectorVisibility(false);
         ChapterModeHint.Text = "Đọc bản dịch · chọn đoạn để mở đúng vị trí trong Editor";
+        MarkActiveNavigation(ReaderNavButton);
     }
 
     private void ShowSettingsWorkspace(string? section = null)
     {
         EditorTabs.SelectedIndex = 2;
+        MarkActiveNavigation(SettingsNavButton);
         SetTranslationInspectorVisibility(false);
         if (section is not null)
             SettingsNavigation.SelectedItem = SettingsNavigation.Items.OfType<ListBoxItem>()

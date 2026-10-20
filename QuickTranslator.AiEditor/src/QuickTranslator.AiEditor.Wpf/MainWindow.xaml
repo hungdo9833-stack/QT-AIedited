@@ -40,7 +40,7 @@
                     <Button x:Name="ShellQueueButton" Content="Hàng đợi · chưa chạy" Click="OnOpenQueueStatus" ToolTip="Mở Queue Progress"/>
                     <Button x:Name="ProjectSidebarToggleButton" Content="Ẩn mục lục" Click="OnToggleProjectSidebar" ToolTip="Ẩn/Hiện mục lục chương (Ctrl+B)"/>
                     <Button x:Name="InspectorToggleButton" Content="Ẩn Inspector" Click="OnToggleInspector" ToolTip="Ẩn/Hiện Inspector (Ctrl+Shift+I)"/>
-                    <Button x:Name="ThemeToggleButton" Content="Light" Click="OnToggleShellTheme" ToolTip="Chuyển giao diện Dark / Light"/>
+                    <Button x:Name="ThemeToggleButton" Content="Light" ui:ButtonIcon.Glyph="&#xE793;" Click="OnToggleShellTheme" ToolTip="Chuyển sang giao diện này (Dark / Light)"/>
                     <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" Style="{StaticResource PrimaryButton}" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)"/>
                 </StackPanel>
                 <DockPanel>
@@ -61,7 +61,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
                     <TextBlock x:Name="AutosaveStatusText" Text="✓ Đã tự lưu" TextWrapping="NoWrap" Foreground="{DynamicResource SuccessBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,14,0"/>
-                    <TextBlock x:Name="OllamaBackendStatus" Text="Local · Ollama Local · translategemma:12b" TextWrapping="NoWrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)"/>
+                    <Button Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)" AutomationProperties.Name="Backend dịch · mở Quản lý GPU"><TextBlock x:Name="OllamaBackendStatus" Text="Local · Ollama Local · translategemma:12b" TextWrapping="NoWrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
                     <TextBlock x:Name="SavePathText" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="14,0,0,0" MaxWidth="420"/>
                 </StackPanel>
                 <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap"/>
@@ -71,7 +71,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Bottom">
                     <Separator Margin="8"/>
-                    <Button Content="Thiết lập" ui:ButtonIcon.Glyph="&#xE713;" Tag="Settings" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
+                    <Button x:Name="SettingsNavButton" Content="Thiết lập" ui:ButtonIcon.Glyph="&#xE713;" Tag="Settings" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
                     <Button x:Name="NavRailToggleButton" Content="«" Click="OnToggleNavRail" Style="{StaticResource NavigationButton}" HorizontalContentAlignment="Center" ToolTip="Thu gọn / Mở rộng thanh điều hướng"/>
                 </StackPanel>
                 <StackPanel>
@@ -82,7 +82,7 @@
                     <Button Content="Hàng đợi" ui:ButtonIcon.Glyph="&#xE9D5;" Tag="Queue" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Hàng đợi dịch nhiều chương"/>
                     <Button Content="Thư viện" ui:ButtonIcon.Glyph="&#xE8F1;" Tag="Library" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Thư viện Project"/>
                     <Button x:Name="PublishNavButton" Content="Xuất bản" ui:ButtonIcon.Glyph="&#xEDE1;" Tag="Publish" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Xuất bản toàn bộ truyện TXT / PDF"/>
-                    <Button Content="Đọc" ui:ButtonIcon.Glyph="&#xE736;" Tag="Reader" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Chế độ đọc toàn chương"/>
+                    <Button x:Name="ReaderNavButton" Content="Đọc" ui:ButtonIcon.Glyph="&#xE736;" Tag="Reader" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Chế độ đọc toàn chương"/>
                 </StackPanel>
             </DockPanel>
         </Border>
