@@ -414,9 +414,23 @@ Công cụ probe vẫn dùng được để thử offline hoặc chạy bằng d
   - Hoàn thành ghi 22 mục; `小宝 = Tiểu Bảo` có thêm tên phụ `小包子 = Tiểu Bao Tử`; còn 8 hồ sơ thay vì 9.
   - Hoàn tác khôi phục đúng như trước.
 
+**Giai đoạn E: người chỉ có danh xưng (`陆老夫人`) tự có hồ sơ khi bằng chứng mạnh (đã triển khai, mới test bằng mock).**
+
+Trước đây một cặp có người chỉ biết bằng danh xưng bị giữ: "Chưa có hồ sơ 陆老夫人. Hãy duyệt nhân vật này trước." (4/23 cặp trong lần chạy thật trên 隐婚100分). Giờ Hoàn thành tự tạo hồ sơ **tối thiểu** cho người đó khi mọi điều kiện sau đều đúng; thiếu một điều kiện thì vẫn giữ như cũ, kèm lý do.
+
+- **Áp dụng cho:** tên mà `ChineseMentionDiscovery.IsTitleForm` nhận là "họ + danh xưng" (không code cứng 老夫人 hay họ nào), chưa thuộc hồ sơ hay bí danh nào. Tên không phải danh xưng mà chưa có hồ sơ vẫn bị giữ như trước.
+- **Bằng chứng do CPU kiểm chứng:** ít nhất **3 lượt thoại** của người đó (làm người nói hoặc người nghe) trong các lượt cảnh đã qua kiểm chứng (`AddressingLedgerState.SceneTurns`: khớp chương, offset và hash nguyên văn), trải trên **ít nhất 2 chương**.
+- **Không phải danh xưng chung:** tên không được xuất hiện trong `name_forms` của một nhân vật khác (như `宁小姐` do AI gán cho một chị em nhưng gọi cả hai) và không nằm trong tập tên bị hai nhân vật cùng nhận. Gặp các trường hợp đó thì giữ lại.
+- **Tên Việt chỉ lấy từ hai nguồn:** glossary của người dùng (ưu tiên), hoặc câu trả lời nhân vật đã kiểm chứng của chính tên đó. Không bịa. Tên Việt có chữ Hán, quá dài, hoặc trùng tên Việt của hồ sơ khác thì giữ lại. Chưa có nguồn nào thì giữ lại.
+- **Hồ sơ tạo ra chỉ có tên (và giới tính nếu AI đã trả lời):** không có đại từ kể, không khóa đại từ, `NormalizationEnabled = false`, vì quy tắc xưng hô theo cặp không chứng minh đại từ kể. Nếu có câu trả lời nhân vật hợp lệ cho tên đó thì đi đường nhân vật thông thường (có đại từ), nhưng cũng qua cùng các điều kiện trên.
+- **Không ghi đè:** chỉ tạo khi tên chưa có hồ sơ/bí danh; hồ sơ đã khóa của người dùng, quy tắc đã có, quyết định bác bỏ vẫn được tôn trọng như trước. Mô tả "Tạo hồ sơ danh xưng …" nằm trong chi tiết của mục cặp đã ghi.
+- **Hoàn tác:** nằm trong cùng một lần lưu và cùng bản chụp `AddressingApplyStore`, nên Hoàn tác xóa hồ sơ vừa tạo. Hoàn tác giờ còn **giữ lại mục glossary người dùng có từ trước** (kho tài nguyên tự bỏ mục glossary phản chiếu hồ sơ khi hồ sơ biến mất).
+- **Khảo sát hỏi tên Việt:** `PlanTasks` giờ cũng lập nhiệm vụ nhân vật cho người chỉ có danh xưng nếu họ xuất hiện trong dòng thoại đã kiểm chứng (lượt cảnh), để AI trả `name_forms` có tên Việt của chính họ.
+- **Giới hạn đã biết:** dấu hiệu "danh xưng chung" chỉ dựa trên `name_forms` của AI. Nếu AI không gán `宁小姐` cho ai và hai chị em cùng được gọi như vậy, CPU chưa phân biệt được; chỉ phòng bằng ngưỡng 3 lượt/2 chương và tên Việt phải có nguồn. Chưa chạy với AI thật.
+
 **Còn lại (các giai đoạn sau):**
 
-- Người chỉ có danh xưng (`陆老夫人`) chưa có hồ sơ, nên các cặp của bà chưa được ghi.
+- Đo lại trên sổ thật của 隐婚100分 bằng AI thật (4 cặp của 陆老夫人) khi người dùng cho phép gọi AI.
 
 ### Bước 3 · duyệt từng mục (tùy chọn)
 

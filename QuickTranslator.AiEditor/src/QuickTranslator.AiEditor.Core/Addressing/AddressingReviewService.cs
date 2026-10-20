@@ -101,6 +101,14 @@ public sealed class AddressingReviewService(ProjectSession session)
             throw new AddressingUndoConflictException("Hồ sơ nhân vật đã được sửa sau khi Hoàn thành. Hoàn tác sẽ bỏ cả những sửa đổi đó.");
         var restored = record.Before!.Clone(); restored.Revision = current.Revision;
         var saved = await _resources.SaveAsync(restored, ct).ConfigureAwait(false);
+        // The store drops the glossary entry that mirrors a profile when that profile disappears. A rendering the user had
+        // before "Hoàn thành" (the source of a title-only person's name) must survive its undo.
+        var lost = record.Before!.Terms.Where(t => saved.Terms.All(x => x.Chinese != t.Chinese)).ToArray();
+        if (lost.Length > 0)
+        {
+            var repaired = saved.Clone(); repaired.Terms.AddRange(lost);
+            saved = await _resources.SaveAsync(repaired, ct).ConfigureAwait(false);
+        }
         await _applies.MarkUndoneAsync(record.Id, ct).ConfigureAwait(false);
         await _ledger.UpdateAsync(s =>
         {
@@ -153,8 +161,13 @@ public sealed class AddressingReviewService(ProjectSession session)
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or InvalidDataException) { held.Add(Item(p, ex.Message)); return false; }
         }
+        var claimed = ClaimedForms(characters.Select(x => x.Latest));
+        var turns = state.SceneTurns();
         bool Character(AddressingProposal p, AddressingProposal[] all) => Apply(p, all, trial =>
         {
+            // A person known only by a title (陆老夫人) gets a profile of their own only on strong, CPU-verified evidence.
+            if (Find(trial.Characters.Profiles, p.Subject) is null && BookIntelligence.ChineseMentionDiscovery.IsTitleForm(p.Subject) &&
+                TitleBlock(p.Subject, trial, turns, shared, claimed, characters.Select(x => x.Latest)) is { } block) throw new InvalidOperationException(block);
             var (edit, dropped) = AutoCharacter(trial, p, shared);
             string text = ApplyCharacter(trial, p, edit, automatic: true);
             held.AddRange(dropped.Select(d => Item(p, d)));
@@ -179,11 +192,71 @@ public sealed class AddressingReviewService(ProjectSession session)
         foreach (var (p, all) in pairs.OrderBy(x => merges.ContainsKey(x.Latest.Subject) || merges.ContainsKey(x.Latest.Listener!)))
         {
             var phase = p.Phases.FirstOrDefault();
-            Apply(p, all, trial => ApplyPair(trial, p, new(phase?.SelfVi ?? "", phase?.AddressVi ?? "", p.Relationship, 0), automatic: true));
+            Apply(p, all, trial =>
+            {
+                var created = new[] { p.Subject, p.Listener! }.Distinct().Select(n => EnsureTitleProfile(trial, n, turns, shared, claimed, characters.Select(x => x.Latest))).OfType<string>().ToArray();
+                string text = ApplyPair(trial, p, new(phase?.SelfVi ?? "", phase?.AddressVi ?? "", p.Relationship, 0), automatic: true);
+                return created.Length > 0 ? string.Join("; ", created) + "; " + text : text;
+            });
         }
         // "Hoàn thành" means: translate with these rules. The lock is part of what undo restores.
         if (applied.Count > 0) resources.Characters.ConsistencyLockEnabled = true;
         return (applied, held, resources);
+    }
+
+    // ---------- a person known only by a title (陆老夫人) ----------
+
+    /// <summary>Verified scene turns needed before a title-only person gets a profile, and the chapters they must span.</summary>
+    internal const int TitleMinimumTurns = 3, TitleMinimumChapters = 2;
+
+    /// <summary>Forms that character answers claim for a subject other than themselves: 宁小姐 claimed for one sister may name both.</summary>
+    private static HashSet<string> ClaimedForms(IEnumerable<AddressingProposal> characters) => characters.Where(c => c.EvidenceValid)
+        .SelectMany(c => c.NameForms.Select(f => f.Zh).Where(z => z != c.Subject)).ToHashSet(StringComparer.Ordinal);
+
+    private static string? TitleBlock(string name, ProjectResources resources, IReadOnlyList<AddressingTurn> turns, IReadOnlySet<string> shared,
+        IReadOnlySet<string> claimed, IEnumerable<AddressingProposal> characters) => TitleProfile(name, resources, turns, shared, claimed, characters, out _);
+
+    /// <summary>
+    /// Why a title-only name must not get an automatic profile, or null (and the minimal profile) when the evidence is strong:
+    /// no profile or alias owns it, no character answer claims it as another person's form, it is not a form shared by several
+    /// people, the CPU located at least <see cref="TitleMinimumTurns"/> verified scene turns of it in at least
+    /// <see cref="TitleMinimumChapters"/> chapters, and a Vietnamese name exists (the user's glossary first, else the verified
+    /// character answer for this very name) that no other profile already uses.
+    /// </summary>
+    private static string? TitleProfile(string name, ProjectResources resources, IReadOnlyList<AddressingTurn> turns, IReadOnlySet<string> shared,
+        IReadOnlySet<string> claimed, IEnumerable<AddressingProposal> characters, out CharacterProfile? profile)
+    {
+        profile = null;
+        string Hold(string why) => $"Chưa tự tạo hồ sơ danh xưng {name} ({why}). Hãy duyệt nhân vật này trước.";
+        if (shared.Contains(name) || claimed.Contains(name)) return Hold("có thể là nhiều nhân vật hoặc là cách gọi của người khác");
+        var mine = turns.Where(t => t.Speaker == name || t.Listener == name).ToArray();
+        int chapters = mine.Select(t => t.ChapterNumber).Distinct().Count();
+        if (mine.Length < TitleMinimumTurns || chapters < TitleMinimumChapters)
+            return Hold($"mới có {mine.Length} lượt thoại đã kiểm chứng trong {chapters} chương; cần ≥{TitleMinimumTurns} lượt, ≥{TitleMinimumChapters} chương");
+        var answer = characters.LastOrDefault(c => c.Subject == name && c.EvidenceValid);
+        string vi = resources.Terms.FirstOrDefault(t => t.Chinese == name)?.Vietnamese.Trim()
+            ?? answer?.NameForms.FirstOrDefault(f => f.Zh == name)?.Vi.Trim() ?? "";
+        if (vi.Length == 0) return Hold("chưa có tên tiếng Việt từ glossary hoặc từ AI đã kiểm chứng");
+        if (vi.Length > 200 || AddressingAiSurvey.HasHan(vi)) return Hold("tên tiếng Việt không hợp lệ hoặc có chữ Hán");
+        var twin = resources.Characters.Profiles.FirstOrDefault(p => string.Equals(p.VietnameseName, vi, StringComparison.OrdinalIgnoreCase));
+        if (twin is not null) return Hold($"trùng tên Việt với hồ sơ {twin.ChineseName}");
+        profile = new CharacterProfile
+        {
+            ChineseName = name, VietnameseName = vi, NormalizationEnabled = false, // Only a name: pair evidence says nothing about the narrative pronoun.
+            Gender = answer?.Gender switch { "male" => CharacterGender.Male, "female" => CharacterGender.Female, _ => CharacterGender.Unknown },
+            AddressingNotes = AutoNote + " · danh xưng"
+        };
+        return null;
+    }
+
+    /// <summary>Creates the title-only person's minimal profile (name and gender) when the evidence is strong; null when nothing is created, throws (so the pair is held) when it is weak.</summary>
+    private static string? EnsureTitleProfile(ProjectResources resources, string name, IReadOnlyList<AddressingTurn> turns, IReadOnlySet<string> shared,
+        IReadOnlySet<string> claimed, IEnumerable<AddressingProposal> characters)
+    {
+        if (Find(resources.Characters.Profiles, name) is not null || !BookIntelligence.ChineseMentionDiscovery.IsTitleForm(name)) return null;
+        if (TitleProfile(name, resources, turns, shared, claimed, characters, out var profile) is { } why) throw new InvalidOperationException(why);
+        resources.Characters.Profiles.Add(profile!);
+        return $"Tạo hồ sơ danh xưng {name}={profile!.VietnameseName} ({profile.Gender}; chỉ tên, chưa có đại từ kể)";
     }
 
     private sealed record IdentityMerge(AddressingProposal Proposal, string Primary, string Secondary, string SecondaryVi);

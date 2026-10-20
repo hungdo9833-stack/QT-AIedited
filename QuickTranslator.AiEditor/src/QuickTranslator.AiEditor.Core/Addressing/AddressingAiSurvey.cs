@@ -210,7 +210,10 @@ public static class AddressingAiSurvey
         }
         var groups = variants.ToDictionary(v => v.FullName, StringComparer.Ordinal);
         // Narration of every spelling counts for its single CPU owner (秀兰…她 is evidence for 王秀兰).
-        var narration = NarrativeReferenceSurvey.Analyze(sources, allNames, int.MaxValue, cancellationToken)
+        // A title-only person (陆老夫人) who speaks or is spoken to in verified lines is asked about too, so the AI can give the Vietnamese name "Hoàn thành" needs.
+        var titlePeople = directed.Keys.SelectMany(k => new[] { k.Speaker, k.Listener }).Where(n => ChineseMentionDiscovery.IsTitleForm(n) && !allNames.Contains(n, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal).ToArray();
+        var narration = NarrativeReferenceSurvey.Analyze(sources, [.. allNames, .. titlePeople], int.MaxValue, cancellationToken)
             .GroupBy(x => Canonical(x.Name), StringComparer.Ordinal)
             .Select(g => new NarrativeCharacter(g.Key, g.Sum(x => x.NarrationMentions), g.Sum(x => x.He), g.Sum(x => x.She), g.Sum(x => x.It),
                 g.Min(x => x.FirstChapter), g.Max(x => x.LastChapter), NarrativeReferenceSurvey.Spread(g.SelectMany(x => x.Samples).ToArray(), settings.SamplesPerTask)))
