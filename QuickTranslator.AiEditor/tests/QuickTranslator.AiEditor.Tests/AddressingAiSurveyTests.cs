@@ -118,7 +118,8 @@ public sealed class AddressingAiSurveyTests : IDisposable
         Assert.Equal(2, requests.Count);
         Assert.Equal(requests.Select(r => r.Id), AddressingAiSurvey.PlanRequests(Tasks(), Options.Model, new(TasksPerRequest: 2)).Select(r => r.Id)); // Deterministic.
         string all = string.Concat(requests.Select(r => r.Prompt));
-        foreach (var task in Tasks()) Assert.Contains("TASK " + task.TaskId, all, StringComparison.Ordinal);
+        Assert.Equal(Tasks().Select(t => t.TaskId).Order(), requests.SelectMany(r => AddressingAiSurvey.TasksInPrompt(r.Prompt, Tasks())).Select(t => t.TaskId).Order());
+        Assert.All(requests, r => Assert.Matches(@"(?m)^TASK T1 ", r.Prompt)); Assert.DoesNotContain("TASK pair:", all); // Short ids only.
         Assert.Contains("NAME CANDIDATES:", all, StringComparison.Ordinal); Assert.Contains("CPU NAME HYPOTHESIS", all, StringComparison.Ordinal);
         Assert.Contains("narrative_vi", all, StringComparison.Ordinal); Assert.Contains("Never add a form", all, StringComparison.Ordinal);
     }
@@ -180,6 +181,28 @@ public sealed class AddressingAiSurveyTests : IDisposable
         else Assert.Equal([code], result.Proposals.Single(p => p.TaskId == damaged).Issues);
         Assert.DoesNotContain(result.Proposals, p => p.TaskId == damaged && p.EvidenceValid);
         Assert.Equal(request.Tasks.Count - 1, result.Proposals.Count(p => p.TaskId != damaged && p.EvidenceValid)); // The rest stand.
+    }
+
+    [Fact]
+    public void Replies_use_the_short_task_ids_of_the_prompt()
+    {
+        var request = AddressingAiSurvey.PlanRequests(Tasks(), Options.Model).Single();
+        var node = Answer(request);
+        foreach (var item in new[] { "pairs", "characters" }.SelectMany(k => node[k]!.AsArray()))
+            item!["task_id"] = "T" + (request.Tasks.ToList().FindIndex(t => t.TaskId == item["task_id"]!.GetValue<string>()) + 1);
+        var short_ = AddressingAiSurvey.VerifyReply(node.ToJsonString(), request);
+        Assert.Empty(short_.SchemaIssues); Assert.Equal(request.Tasks.Count, short_.Proposals.Count(p => p.EvidenceValid));
+        Assert.Equal(request.Tasks.Select(t => t.TaskId).Order(), short_.Proposals.Select(p => p.TaskId).Order()); // Mapped back to stable ids.
+
+        var mixed = node.DeepClone().AsObject(); // Short id and full id of one task: answered twice, neither trusted.
+        var first = mixed["pairs"]![0]!; var copy = first.DeepClone();
+        copy["task_id"] = request.Tasks[int.Parse(first["task_id"]!.GetValue<string>()[1..]) - 1].TaskId; ((JsonArray)mixed["pairs"]!).Add(copy);
+        Assert.Contains("DuplicateTaskAnswer", AddressingAiSurvey.Verify(mixed.ToJsonString(), request).SelectMany(p => p.Issues));
+        var wrongArray = node.DeepClone().AsObject(); ((JsonArray)wrongArray["characters"]!).Add(wrongArray["pairs"]![0]!.DeepClone());
+        var issues = AddressingAiSurvey.VerifyReply(wrongArray.ToJsonString(), request).SchemaIssues;
+        Assert.Contains(issues, x => x.Contains("$.characters[") && x.EndsWith("task in the wrong array"));
+        var miscopied = node.DeepClone().AsObject(); miscopied["pairs"]![0]!["task_id"] = "T 1";
+        Assert.Contains(AddressingAiSurvey.VerifyReply(miscopied.ToJsonString(), request).SchemaIssues, x => x.EndsWith("unknown task"));
     }
 
     [Fact]
@@ -253,8 +276,7 @@ public sealed class AddressingAiSurveyTests : IDisposable
     }
     private static Func<string, string> Replies(IReadOnlyList<AddressingTask> tasks, AddressingSettings settings) => prompt =>
     {
-        var ids = Regex.Matches(prompt, @"(?m)^TASK (\S+) ").Select(m => m.Groups[1].Value).ToArray();
-        var request = AddressingAiSurvey.PlanRequests(tasks.Where(t => ids.Contains(t.TaskId)).ToArray(), Options.Model, settings).Single();
+        var request = AddressingAiSurvey.PlanRequests(AddressingAiSurvey.TasksInPrompt(prompt, tasks), Options.Model, settings).Single();
         return Answer(request).ToJsonString();
     };
 

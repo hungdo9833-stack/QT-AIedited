@@ -179,6 +179,34 @@ public sealed class AddressingSceneTests : IDisposable
     private static string Times(string text, int n) => string.Concat(Enumerable.Repeat(text, n));
 
     [Fact]
+    public void A_title_in_the_vocative_may_be_the_listed_listener()
+    {
+        // Live Gemini case: 「陆先生，非常感谢您…」 answered 宁夕 → 陆霆骁 (right) was rejected because 陆先生 ≠ 陆霆骁.
+        const string text = "    宁夕看着陆霆骁，满脸抱歉。\n    “陆先生，谢谢您。”\n    “不客气。”\n";
+        var task = AddressingAiSurvey.PlanScenes(Book(text), ["宁夕", "陆霆骁"], titleForms: ["陆先生"]).Single();
+        var request = Request(task);
+        var answer = SceneAnswer(request, new Dictionary<string, (string, string)> { ["陆先生，谢谢您。"] = ("宁夕", "陆霆骁"), ["不客气。"] = ("陆霆骁", "宁夕") });
+        var proposal = AddressingAiSurvey.Verify(answer.ToJsonString(), request).Single();
+        Assert.All(proposal.Turns, t => Assert.True(t.IsUsable(), string.Join(",", t.Issues)));
+        var named = AddressingAiSurvey.PlanScenes(Book(text.Replace("陆先生", "宁夕")), ["宁夕", "陆霆骁"]).Single(); // A name, not a title: still checked.
+        var wrong = SceneAnswer(Request(named), new Dictionary<string, (string, string)> { ["宁夕，谢谢您。"] = ("陆霆骁", "宁雪落") });
+        Assert.Contains("UnlistedParticipant", AddressingAiSurvey.Verify(wrong.ToJsonString(), Request(named)).Single().Issues);
+        var conflict = SceneAnswer(Request(named), new Dictionary<string, (string, string)> { ["宁夕，谢谢您。"] = ("", "陆霆骁") });
+        Assert.Contains("ListenerConflictsWithVocative", AddressingAiSurvey.Verify(conflict.ToJsonString(), Request(named)).Single().Issues);
+    }
+
+    [Fact]
+    public void Names_up_to_800_characters_before_a_scene_are_participants()
+    {
+        // Live Gemini case: 陆霆骁 is only 男人/冰雕男 inside the scene and was named a few paragraphs earlier.
+        string Filler(int paragraphs) => Times("    " + Times("窗外的雨下个不停，屋子里很安静，只有时钟滴答作响。", 6) + "\n", paragraphs); // ~150 characters each.
+        const string scene = "    男人看着她，“你来了？”\n    宁夕笑了。\n    “嗯。”\n";
+        var near = AddressingAiSurvey.PlanScenes(Book("    陆霆骁走进了房间。\n" + Filler(3) + scene), ["宁夕", "陆霆骁"]).Single();
+        Assert.Equal(["宁夕", "陆霆骁"], near.Participants);
+        Assert.Empty(AddressingAiSurvey.PlanScenes(Book("    陆霆骁走进了房间。\n" + Filler(7) + scene), ["宁夕", "陆霆骁"])); // ~1,050 characters away: not used.
+    }
+
+    [Fact]
     public void Scene_selection_is_spread_over_chapters()
     {
         var tasks = AddressingAiSurvey.PlanScenes(Book(Romance, 3), Romantic, new(MaximumScenes: 3));
@@ -296,8 +324,7 @@ public sealed class AddressingSceneTests : IDisposable
         var scenes = AddressingAiSurvey.PlanScenes(sources, Romantic);
         var client = new Mock(prompt =>
         {
-            var ids = Regex.Matches(prompt, @"(?m)^TASK (\S+) ").Select(m => m.Groups[1].Value).ToHashSet();
-            return SceneAnswer(AddressingAiSurvey.PlanRequests(scenes.Where(t => ids.Contains(t.TaskId)).ToArray(), AddressingAiSurveyTests.Options.Model).Single(), RomanceTruth).ToJsonString();
+            return SceneAnswer(AddressingAiSurvey.PlanRequests(AddressingAiSurvey.TasksInPrompt(prompt, scenes), AddressingAiSurveyTests.Options.Model).Single(), RomanceTruth).ToJsonString();
         });
         var session = await new ProjectRepository().CreateAsync(Path.Combine(_root, "p"), "Synthetic scenes");
         var store = new AddressingLedgerStore(session);

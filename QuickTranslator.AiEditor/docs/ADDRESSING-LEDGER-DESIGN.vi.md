@@ -103,7 +103,7 @@ Dùng cho truyện viết đối đáp liên tục mà CPU không gán được 
   - Ngữ cảnh trước cảnh: phần dẫn của lời thoại đầu cùng tối đa 2 đoạn kể trước đó (≤240 ký tự). Phần này được cắt ở ranh giới câu và không bao giờ lấn sang lời thoại của cảnh trước.
 - **Chọn cảnh** (`AddressingAiSurvey.PlanScenes`):
   - Chỉ chọn cảnh có ít nhất 2 lời thoại CPU chưa gán được người nói và ít nhất 2 người tham gia.
-  - Người tham gia là tên có trong cảnh hoặc ngữ cảnh, rồi tới người của cảnh liền trước trong cùng chương, rồi tới danh xưng (`(title)`). Biến thể tên được quy về tên đầy đủ, tối đa 8 người.
+  - Người tham gia: tên có trong cảnh hoặc ngữ cảnh, rồi người của cảnh liền trước trong cùng chương, rồi tên trong 800 ký tự trước cảnh, rồi danh xưng (`(title)`). Biến thể tên được quy về tên đầy đủ, tối đa 8 người.
   - Cảnh được trải đều theo chương (xoay vòng), mỗi lần chạy tối đa 40 cảnh (`MaximumScenes`).
 - **AI nhận:**
   - nguyên văn cả cảnh, mỗi lời thoại có nhãn `⟦Qn⟧` (nhãn có sẵn trong văn bản gốc bị xóa nên không giả mạo được);
@@ -198,6 +198,26 @@ Mới 6 cảnh, chưa đủ để kết luận về độ chính xác.
 Danh sách người tham gia đổi thì cảnh đó được hỏi lại. Khi một cảnh được hỏi lại, chỉ **câu trả lời mới nhất** được tính (`SceneTurns`). Lượt cũ bị bỏ, kể cả ở những câu mà câu trả lời mới để trống, nên các lượt đã gán nhầm cho 陆老爷子 không còn được dùng.
 
 Lần chạy kế tiếp trên 隐婚100分 (kiểm tra offline với sổ hiện có): còn 41 nhiệm vụ, khoảng 7 request. Trong đó có 11 cảnh hỏi lại vì danh sách người tham gia đã đổi, và 10 nhiệm vụ theo cặp mới.
+
+**Lần chạy thứ ba: 7 request (2026-10-20, `gemini-3.5-flash-lite`).**
+
+- Trong 35 lượt nói mới qua kiểm chứng, **không có lượt nào gán sai người nói**.
+- 9 lượt AI trả lời đúng vẫn bị loại:
+  - 8 lượt vì 陆霆骁 chỉ được gọi là `男人` / `冰雕男` / `亲哥` nên không có trong danh sách người tham gia;
+  - 1 lượt vì người được gọi trong câu là danh xưng `陆先生`, mà bộ kiểm chứng coi đó là một người khác với 陆霆骁.
+- 3/7 request mất cả request. Vị trí lỗi vừa được ghi lại cho thấy lý do: `$.scenes[0].task_id: unknown task`, tức AI chép sai mã nhiệm vụ dài 16 ký tự hex.
+
+**Ba chỉnh sửa sau lần chạy này:**
+
+1. **Mã nhiệm vụ ngắn.** Trong mỗi request, prompt gọi các nhiệm vụ là `T1`, `T2`…. Bộ kiểm chứng đổi lại mã thật theo thứ tự nhiệm vụ trong request (`AddressingAiSurvey.Alias`), nên mã ổn định không bao giờ ra khỏi chương trình.
+   - Mã đầy đủ vẫn được chấp nhận. Một nhiệm vụ trả lời bằng cả `T1` lẫn mã đầy đủ bị tính là trả lời hai lần.
+   - Báo cáo lỗi giờ phân biệt `unknown task` (mã không có trong request) với `task in the wrong array` (đặt nhiệm vụ vào sai mảng).
+   - `PromptVersion` tăng lên `addressing-ledger-4`.
+   - Mock và các công cụ replay tìm nhiệm vụ theo nội dung khối trong prompt (`TasksInPrompt`).
+2. **Danh xưng có thể là người đã có tên.** Nếu trong câu, người được gọi là một danh xưng (`陆先生`), bộ kiểm chứng không coi câu trả lời có người nghe là một người khác trong danh sách là mâu thuẫn. Với tên thật thì vẫn kiểm chứng như cũ.
+3. **Tên trong 800 ký tự trước cảnh** (`DialogueScene.NearbyNames`, tên gần nhất xếp trước) được thêm vào danh sách người tham gia. Thứ tự ưu tiên là: tên trong cảnh → người của cảnh liền trước → tên ngay trước cảnh. Tối đa 8 người.
+
+Hệ quả: danh sách người tham gia của nhiều cảnh thay đổi, nên lần chạy kế tiếp sẽ hỏi lại 22 cảnh. Tổng cộng còn khoảng 39 nhiệm vụ, tức 7 request (kiểm tra offline với sổ hiện có). Mock của probe chỉ trả lời cảnh có đúng 2 người, nên giờ để trống gần hết; điều này không phản ánh một model thật.
 
 **Chưa làm:**
 

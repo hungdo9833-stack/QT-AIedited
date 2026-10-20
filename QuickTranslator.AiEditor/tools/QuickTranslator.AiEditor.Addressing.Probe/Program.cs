@@ -294,9 +294,9 @@ sealed class MockSceneClient(IReadOnlyList<AddressingTask> tasks) : IJsonSchemaO
     public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, QuickTranslator.AiEditor.Core.Models.ModelOptions options, JsonElement schema, CancellationToken ct = default)
     {
         var scenes = new JsonArray();
-        foreach (Match m in Regex.Matches(prompt, @"(?m)^TASK (\S+) SCENE "))
+        var inPrompt = AddressingAiSurvey.TasksInPrompt(prompt, _byId.Values);
+        foreach (var (task, index) in inPrompt.Select((t, i) => (t, i)).Where(x => x.t.Kind == AddressingTaskKind.Scene))
         {
-            var task = _byId[m.Groups[1].Value];
             var turns = new JsonArray(); string? previous = null;
             foreach (var s in task.Samples)
             {
@@ -314,7 +314,7 @@ sealed class MockSceneClient(IReadOnlyList<AddressingTask> tasks) : IJsonSchemaO
                     ["self_zh"] = new JsonArray(s.Text.Contains('我') ? ["我"] : Array.Empty<JsonNode>()), ["address_zh"] = address
                 });
             }
-            scenes.Add(new JsonObject { ["task_id"] = task.TaskId, ["turns"] = turns, ["reason"] = "MOCK" });
+            scenes.Add(new JsonObject { ["task_id"] = "T" + (index + 1), ["turns"] = turns, ["reason"] = "MOCK" }); // Short id, as the prompt asks.
         }
         string json = new JsonObject { ["pairs"] = new JsonArray(), ["characters"] = new JsonArray(), ["scenes"] = scenes }.ToJsonString();
         return Task.FromResult(new OllamaCompletion(json, true, "stop", new QuickTranslator.AiEditor.Core.Models.GenerationMetrics()));

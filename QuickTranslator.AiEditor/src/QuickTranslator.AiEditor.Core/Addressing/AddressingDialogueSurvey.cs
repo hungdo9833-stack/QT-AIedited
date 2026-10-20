@@ -18,7 +18,11 @@ public sealed record SceneQuote(DialogueLine Line, string Before);
 /// Consecutive quotes of one chapter separated by at most one short narration paragraph. Names lists every candidate
 /// name seen in the scene or its context, in order of first appearance (surface forms, not merged).
 /// </summary>
-public sealed record DialogueScene(Guid ChapterId, int ChapterNumber, IReadOnlyList<SceneQuote> Quotes, string Trailer, IReadOnlyList<string> Names);
+public sealed record DialogueScene(Guid ChapterId, int ChapterNumber, IReadOnlyList<SceneQuote> Quotes, string Trailer, IReadOnlyList<string> Names)
+{
+    /// <summary>Names in the text up to 800 characters before the scene, most recent first: people present but called 男人/冰雕男 here.</summary>
+    public IReadOnlyList<string> NearbyNames { get; init; } = [];
+}
 
 /// <summary>One quoted utterance with CPU-only, evidence-graded attribution. Offsets are UTF-16 in the original chapter text.</summary>
 public sealed record DialogueLine(Guid ChapterId, int ChapterNumber, int QuoteStartUtf16, int QuoteLengthUtf16, string Quote, string LeadClause,
@@ -101,7 +105,7 @@ public static class AddressingDialogueSurvey
         return sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId).SelectMany(x => Extract(x, matcher, cancellationToken)).ToArray();
     }
 
-    private const int SceneGapCharacters = 160, SceneContextCharacters = 240, SceneTrailerCharacters = 80;
+    private const int SceneGapCharacters = 160, SceneContextCharacters = 240, SceneTrailerCharacters = 80, SceneNearbyCharacters = 800;
     private static readonly Regex RepeatedBreaks = Rule(@"\n{2,}");
 
     /// <summary>
@@ -131,7 +135,9 @@ public static class AddressingDialogueSurvey
                 string trailer = Tidy(value[(close + 1)..Math.Max(close + 1, end)]);
                 var seen = matcher.Find(string.Concat(quotes.Select(q => q.Before + "\n" + q.Line.Quote + "\n")) + trailer)
                     .Select(h => h.Name).Distinct(StringComparer.Ordinal).ToArray();
-                result.Add(new(source.ChapterId, source.ChapterNumber, quotes, trailer, seen));
+                int from = Math.Max(0, run[0].Open - SceneNearbyCharacters);
+                var nearby = matcher.Find(value[from..run[0].Open]).Select(h => h.Name).Reverse().Distinct(StringComparer.Ordinal).ToArray();
+                result.Add(new(source.ChapterId, source.ChapterNumber, quotes, trailer, seen) { NearbyNames = nearby });
                 floor = close + 1; run.Clear(); size = 0;
             }
             foreach (var line in Extract(source, matcher, cancellationToken))
