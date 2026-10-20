@@ -158,7 +158,7 @@ public sealed class AddressingSceneTests : IDisposable
     {
         { "invented-name", "UnlistedParticipant" }, { "speaker-addressed-in-own-quote", "SpeakerNamedInOwnQuote" },
         { "speaker-is-listener", "SpeakerIsListener" }, { "listener-not-the-one-addressed", "ListenerConflictsWithVocative" },
-        { "unquoted-term", "UnquotedChineseTerm" }, { "duplicate-quote", "DuplicateQuote" }, { "unknown-quote", "UnknownQuote" }
+        { "unquoted-term", "DroppedUnquotedTerm" }, { "duplicate-quote", "DuplicateQuote" }, { "unknown-quote", "UnknownQuote" }
     };
 
     [Theory]
@@ -185,6 +185,25 @@ public sealed class AddressingSceneTests : IDisposable
         Assert.True(proposal.EvidenceValid, string.Join(",", proposal.Issues)); // The other turns stand.
         Assert.InRange(proposal.Turns.Count(t => t.IsUsable()), 3, 5);
         Assert.DoesNotContain(proposal.Turns, t => t.IsUsable() && t.Issues.Count > 0);
+    }
+
+    [Fact]
+    public void An_invented_chinese_term_is_dropped_from_a_correct_turn_but_still_rejects_a_wrong_one()
+    {
+        // Live Gemini case: right speaker, but self_zh 我 added to a quote that has no 我.
+        var task = AddressingAiSurvey.PlanScenes(Book(Xianxia), Cultivators).Single(); var request = Request(task);
+        var answer = SceneAnswer(request, XianxiaTruth, (_, t) =>
+        {
+            t[1]!["self_zh"] = new JsonArray("我"); t[1]!["address_zh"] = new JsonArray("你");     // Q2 就凭你？: 我 invented, 你 verbatim.
+            t[2]!["speaker"] = "林动"; t[2]!["address_zh"] = new JsonArray("老夫");                // Q3: wrong speaker and invented term.
+        });
+        var proposal = AddressingAiSurvey.Verify(answer.ToJsonString(), request).Single();
+        var kept = proposal.Turns[1];
+        Assert.True(kept.IsUsable()); Assert.Equal("林动", kept.Speaker);
+        Assert.Empty(kept.SelfZh); Assert.Equal(["你"], kept.AddressZh); Assert.Equal(["我"], kept.DroppedTerms);
+        var rejected = proposal.Turns[2];
+        Assert.False(rejected.IsUsable()); Assert.Contains("UnquotedChineseTerm", rejected.Issues); Assert.Contains("SpeakerNamedInOwnQuote", rejected.Issues);
+        Assert.Contains("DroppedUnquotedTerm", proposal.Issues); Assert.True(proposal.EvidenceValid);
     }
 
     [Fact]
@@ -243,6 +262,10 @@ public sealed class AddressingSceneTests : IDisposable
         var run = await new AddressingAiEngine(client).RunAsync(store, scenes, AddressingAiSurveyTests.Options, maximumRequests: 5);
         Assert.Equal(1, client.Calls); Assert.All(run.State.Proposals, p => Assert.True(p.EvidenceValid));
         Assert.Equal(0, (await new AddressingAiEngine(client).RunAsync(store, scenes, AddressingAiSurveyTests.Options, 5)).Planned); // Resolved: never resent.
+        // A name discovered later (常莉 in the real book) changes the participant list: only that scene is asked again.
+        var widened = scenes.Select((t, i) => i == 0 ? t with { Subject = t.Subject + "、常莉", Participants = [.. t.Participants, "常莉"] } : t).ToArray();
+        var state = await store.LoadAsync();
+        Assert.False(state.Done(widened[0])); Assert.All(widened.Skip(1), t => Assert.True(state.Done(t)));
 
         var turns = (await store.LoadAsync()).SceneTurns(); // Survives the JSON round trip.
         Assert.Equal(16, turns.Count);

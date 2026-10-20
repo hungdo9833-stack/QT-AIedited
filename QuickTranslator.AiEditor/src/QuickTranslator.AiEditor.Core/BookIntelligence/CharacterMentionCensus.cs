@@ -62,6 +62,7 @@ public static class CharacterMentionCensus
             hashes.Add(source.ChapterId, CorpusIntegrityAuditor.SourceHash(source.OriginalText));
             ChineseMentionDiscovery.Discover(source.OriginalText, names, cancellationToken);
         }
+        foreach (var source in sources) ChineseMentionDiscovery.MarkClauseStarts(source.OriginalText, names, cancellationToken);
         var trie = new Node();
         foreach (string name in names.Keys)
         {

@@ -53,6 +53,22 @@ public sealed class AddressingGenreRobustnessTests
         Assert.Equal(MentionCandidateCategory.PersonCandidate, census["简宁"]);
     }
 
+    [Fact]
+    public void A_name_seen_after_prepositions_is_a_person_when_it_also_opens_a_clause()
+    {
+        // Real-corpus miss: the manager 常莉 appears 14 times, always after 被/让/了 or after a closing quote.
+        var census = Census(Times("    她被常莉拉着走了。\n    宁夕让常莉给她倒水。\n    “走吧。”常莉作为经纪人，脾气很差。\n", 2));
+        Assert.Equal(MentionCandidateCategory.PersonCandidate, census["常莉"]);
+    }
+
+    [Fact]
+    public void Objects_after_prepositions_are_not_people_even_across_a_soft_line_wrap()
+    {
+        // 被高跟鞋的…: same position as a name, but the noun never opens a clause; a hard-wrapped line start is not one.
+        var census = Census(Times("    她被高跟鞋的鞋跟绊倒了，低头看着那双红色\n高跟鞋的鞋跟。\n", 4));
+        Assert.NotEqual(MentionCandidateCategory.PersonCandidate, census.GetValueOrDefault("高跟鞋", MentionCandidateCategory.NoiseOrUncertain));
+    }
+
     [Theory]
     [InlineData("陆氏集团", true)]
     [InlineData("天剑宗", true)]

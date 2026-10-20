@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
 [Flags]
-internal enum MentionSignal { None = 0, Known = 1, Introduction = 2, Subject = 4, FamilyRole = 8, Vocative = 16, Object = 32, Boundary = 64, Alias = 128, Title = 256, Addressing = 512, ReviewSeed = 1024 }
+internal enum MentionSignal { None = 0, Known = 1, Introduction = 2, Subject = 4, FamilyRole = 8, Vocative = 16, Object = 32, Boundary = 64, Alias = 128, Title = 256, Addressing = 512, ReviewSeed = 1024, Coverb = 2048, ClauseStart = 4096 }
 public enum MentionCandidateCategory { PersonCandidate, AliasCandidate, TitleCandidate, AddressingTerm, NoiseOrUncertain }
 
 /// <summary>Lexical/context hypotheses, not a Chinese word segmenter or an identity resolver.</summary>
@@ -28,6 +28,10 @@ internal static class ChineseMentionDiscovery
         (Rule(Roles + @"[：:\s、]*(?<name>" + Family + Han + @"{1,3}?)(?:" + End + @"|(?=(?:" + Modifiers + @"){0,2}" + Action + @"))"), MentionSignal.FamilyRole),
         (Rule(@"[“「『""，：:](?<name>" + Family + Han + @"{1,3}?|[小阿老]" + Han + @"{1,2}?)(?=[，、！!？?你您])"), MentionSignal.Vocative),
         (Rule(@"(?:你好|谢谢|叫住|叫来|喊来|喊了|看见|看到|见到|遇到|认识|通知|联系|告诉|望着|拉着|跟着|对着|等着|交给|递给|等)[，：:\s]*(?<name>" + Family + Han + @"{1,3}?|[小阿老]" + Han + @"{1,2}?)" + End), MentionSignal.Object),
+        // Every genre puts names right after a preposition/coverb (被常莉拉着, 让常莉给她, 和林动一起): a Han character on
+        // the left, so the boundary rules above never see them. Objects follow coverbs too (被包臀裙, 跟高跟鞋), so a
+        // name seen only here must also open a clause somewhere (MarkClauseStarts). 把/同 mostly take things: excluded.
+        (Rule(@"(?:被|让|和|跟|与|替|帮|陪|请|求|找|对|向|朝|冲|给)(?<name>" + Family + Han + @"{1,2}?)(?:" + End + @"|(?=(?:" + Modifiers + @"){0,2}" + Action + @"))"), MentionSignal.Coverb),
         (Rule(LeftBoundary + @"(?<name>" + Family + Han + @"{1,3}?)(?=的)"), MentionSignal.Boundary),
         (Rule(LeftBoundary + @"(?<name>[小阿老]" + Han + @"{1,2}?)" + End), MentionSignal.Alias),
         (Rule(LeftBoundary + @"(?<name>[小阿老]" + Han + @"{1,2}?)(?=(?:" + Modifiers + @"){0,2}" + Action + @")"), MentionSignal.Alias),
@@ -63,6 +67,29 @@ internal static class ChineseMentionDiscovery
                 if (ContinuesLine(source, end, 1) ||
                     (signal is MentionSignal.Subject or MentionSignal.Boundary or MentionSignal.Alias or MentionSignal.Title && ContinuesLine(source, start - 1, -1))) continue;
                 names[name] = names.GetValueOrDefault(name) | signal;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Second pass over every chapter: a name found only after a coverb gets ClauseStart when it also opens a clause
+    /// (after ，。！？；：…, a closing quote or a paragraph break) anywhere in the book: "”常莉作为…", "，常莉一副…".
+    /// </summary>
+    public static void MarkClauseStarts(string source, Dictionary<string, MentionSignal> names, CancellationToken cancellationToken)
+    {
+        foreach (string name in names.Where(x => x.Value.HasFlag(MentionSignal.Coverb) && !x.Value.HasFlag(MentionSignal.ClauseStart)).Select(x => x.Key).ToArray())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            for (int i = source.IndexOf(name, StringComparison.Ordinal); i >= 0; i = source.IndexOf(name, i + 1, StringComparison.Ordinal))
+            {
+                int p = i - 1; bool newline = false;
+                while (p >= 0 && char.IsWhiteSpace(source[p])) { newline |= source[p] is '\r' or '\n'; p--; }
+                // A soft-wrapped line (Han before the break) continues the sentence; it is not a clause start.
+                if (p < 0 || "，。！？；：…,.!?;:”」』\"".Contains(source[p]) || newline && source[p] is not (>= '一' and <= '鿿'))
+                {
+                    names[name] |= MentionSignal.ClauseStart;
+                    break;
+                }
             }
         }
     }
@@ -111,6 +138,9 @@ internal static class ChineseMentionDiscovery
         if (ChineseSurnames.HasExtendedSurnameOnly(name) && !signals.HasFlag(MentionSignal.Known) &&
             (signals & (MentionSignal.Introduction | MentionSignal.FamilyRole)) == 0 &&
             !(signals.HasFlag(MentionSignal.Subject) && signals.HasFlag(MentionSignal.Vocative)))
+            return MentionCandidateCategory.NoiseOrUncertain;
+        // Seen only after coverbs: objects (被包臀裙, 跟高跟鞋) look the same, so it must also open a clause somewhere.
+        if ((signals & ~(MentionSignal.Coverb | MentionSignal.ClauseStart)) == 0 && !signals.HasFlag(MentionSignal.ClauseStart))
             return MentionCandidateCategory.NoiseOrUncertain;
         if (strong || frequency >= 3 || signals.HasFlag(MentionSignal.Known)) return MentionCandidateCategory.PersonCandidate;
         return MentionCandidateCategory.NoiseOrUncertain;

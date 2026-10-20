@@ -33,6 +33,17 @@ public sealed class AddressingLedgerState
         Attempts.Count(a => a.Succeeded && a.TaskIds.Contains(taskId)) >= 2 ||
         Attempts.Any(a => a.ErrorCode == "ProviderRefusal" && a.TaskIds.Contains(taskId));
 
+    /// <summary>
+    /// A scene's id is its quotes. If every earlier answer had another participant list (a name discovered since),
+    /// the question changed: ask again. Other kinds use <see cref="Done(string)"/>.
+    /// </summary>
+    public bool Done(AddressingTask task)
+    {
+        if (task.Kind != AddressingTaskKind.Scene) return Done(task.TaskId);
+        var answered = Proposals.Where(p => p.TaskId == task.TaskId).ToArray();
+        return (answered.Length == 0 || answered.Any(p => p.Subject == task.Subject)) && Done(task.TaskId);
+    }
+
     /// <summary>Usable turns of verified scene proposals: evidence for planning pair tasks (step 2b), never profile data.</summary>
     public IReadOnlyList<AddressingTurn> SceneTurns() => Proposals
         .Where(p => p.Kind == AddressingTaskKind.Scene && p.EvidenceValid && LatestReview(p.Id)?.Decision != AddressingDecision.Rejected)
@@ -87,7 +98,7 @@ public sealed class AddressingAiEngine(IJsonSchemaOllamaClient client)
         options.Validate();
         if (maximumRequests is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(maximumRequests));
         var state = await store.LoadAsync(ct).ConfigureAwait(false);
-        var plan = AddressingAiSurvey.PlanRequests(tasks.Where(t => !state.Done(t.TaskId)).ToArray(), options.Model, settings);
+        var plan = AddressingAiSurvey.PlanRequests(tasks.Where(t => !state.Done(t)).ToArray(), options.Model, settings);
         int sent = 0; string? stoppedBy = null;
         foreach (var request in plan)
         {

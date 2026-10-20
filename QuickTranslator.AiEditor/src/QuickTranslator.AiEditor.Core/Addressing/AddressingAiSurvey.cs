@@ -63,6 +63,8 @@ public sealed record AddressingTurn(string QuoteId, int ChapterNumber, int Start
     IReadOnlyList<string> SelfZh, IReadOnlyList<string> AddressZh, IReadOnlyList<string> Issues)
 {
     public bool IsUsable() => Speaker.Length > 0 && Issues.Count == 0;
+    /// <summary>Chinese terms the model wrote that are not in the quote; removed from SelfZh/AddressZh when nothing else was wrong.</summary>
+    public IReadOnlyList<string> DroppedTerms { get; init; } = [];
 }
 
 /// <summary>An unconfirmed AI hypothesis after mechanical verification. Never applied without human review.</summary>
@@ -404,9 +406,10 @@ public static class AddressingAiSurvey
 
     /// <summary>
     /// Per-turn and fail-closed. A turn is rejected (kept with its codes, never used as evidence) when its quote is
-    /// unknown or answered twice, a name is not a listed participant, speaker = listener, a Chinese term is not verbatim
-    /// in that quote, the speaker is addressed by name in their own quote, it contradicts an explicit CPU speaker, or the
-    /// listener is not among the names addressed in the quote. When rejected turns outnumber usable ones, the whole
+    /// unknown or answered twice, a name is not a listed participant, speaker = listener, the speaker is addressed by
+    /// name in their own quote, it contradicts an explicit CPU speaker, or the listener is not among the names addressed
+    /// in the quote. A Chinese term that is not verbatim in the quote is dropped (DroppedUnquotedTerm) when the turn is
+    /// otherwise clean, and adds UnquotedChineseTerm to a rejected turn. When rejected turns outnumber usable ones, the whole
     /// scene is rejected: the model most likely misread it.
     /// </summary>
     private static AddressingProposal VerifyScene(Dictionary<string, JsonElement> f, AddressingTask task, string requestId)
@@ -440,8 +443,17 @@ public static class AddressingAiSurvey
                 if (speaker.Length > 0 && addressed.Contains(speaker)) codes.Add("SpeakerNamedInOwnQuote");
                 if (listener.Length > 0 && addressed.Count > 0 && !addressed.Contains(listener)) codes.Add("ListenerConflictsWithVocative");
             }
-            if (self.Concat(address).Any(t => t.Length is 0 or > 8 || !sample.Text.Contains(t, StringComparison.Ordinal))) codes.Add("UnquotedChineseTerm");
-            turns.Add(new(id, sample.ChapterNumber, sample.StartUtf16, sample.QuoteHash, speaker, listener, self, address, codes.ToArray()));
+            static bool Unquoted(string term, string quote) => term.Length is 0 or > 8 || !quote.Contains(term, StringComparison.Ordinal);
+            string[] dropped = self.Concat(address).Where(t => Unquoted(t, sample.Text)).Distinct(StringComparer.Ordinal).ToArray();
+            if (dropped.Length > 0 && codes.Count > 0) codes.Add("UnquotedChineseTerm");
+            else if (dropped.Length > 0)
+            {
+                // Speaker/listener passed every check; an invented word is removed so only verbatim terms remain.
+                self = self.Where(t => !Unquoted(t, sample.Text)).ToArray(); address = address.Where(t => !Unquoted(t, sample.Text)).ToArray();
+                issues.Add("DroppedUnquotedTerm");
+            }
+            turns.Add(new(id, sample.ChapterNumber, sample.StartUtf16, sample.QuoteHash, speaker, listener, self, address, codes.ToArray())
+                { DroppedTerms = codes.Count == 0 ? dropped : [] });
             issues.AddRange(codes);
         }
         int usable = turns.Count(t => t.IsUsable());

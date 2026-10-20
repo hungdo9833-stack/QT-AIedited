@@ -93,7 +93,7 @@ Truyện ngôn tình đô thị *隐婚100分* (20 chương đầu): lời tho�
 
 **Giới hạn còn lại.** Với truyện viết theo kiểu đối đáp liên tục, không có động từ dẫn thoại (như 隐婚100分), CPU không gán được người nói cho đa số lời thoại. Bước 2b dưới đây xử lý trường hợp này.
 
-### Bước 2b — AI theo cảnh: xác định lượt nói (đã triển khai, mới test bằng mock)
+### Bước 2b — AI theo cảnh: xác định lượt nói (đã triển khai; mock + 1 lần chạy AI thật)
 
 Dùng cho truyện viết đối đáp liên tục mà CPU không gán được người nói.
 
@@ -116,7 +116,7 @@ Dùng cho truyện viết đối đáp liên tục mà CPU không gán được 
   - `UnknownQuote` / `DuplicateQuote`: `quote_id` không có thật, hoặc một lời thoại được trả lời hai lần.
   - `UnlistedParticipant`: tên không có trong danh sách người tham gia.
   - `SpeakerIsListener`: người nói trùng người nghe.
-  - `UnquotedChineseTerm`: từ tiếng Trung không có nguyên văn trong câu.
+  - `UnquotedChineseTerm`: từ tiếng Trung không có nguyên văn trong câu. Nếu đó là lỗi duy nhất, chỉ bỏ từ đó (`DroppedUnquotedTerm`), giữ người nói.
   - `SpeakerNamedInOwnQuote`: người nói bị gọi tên ngay trong câu của mình.
   - `ListenerConflictsWithVocative`: người nghe không phải người được gọi tên trong câu.
   - `ConflictsWithCpuSpeaker`: trái với người nói `Explicit` mà CPU đã tìm ra.
@@ -153,9 +153,30 @@ Nhận xét:
 - Với 隐婚100分, chỉ cần lượt nói theo cảnh là đã mở được 7 cặp mới (宁夕 ↔ 陆霆骁, 宁夕 ↔ 宁雪落, 陆霆骁 → 陆景礼…). Trước đó CPU chỉ lập được 1 cặp.
 - test cpu là truyện có nội dung người lớn, nên Gemini có thể từ chối (`ProviderRefusal`) như lần chạy Bước 2 trước. Nhiệm vụ theo cảnh không thay đổi điều đó.
 
+**Lần chạy AI thật đầu tiên (2026-10-20, `gemini-3.5-flash-lite`, 1 request, 隐婚100分).** `gemini-3.6-flash` trả HTTP 503 (quá tải), nên lần này dùng bản Lite. Kết quả: 6 cảnh, 35 lời thoại, so tay với nguyên văn:
+
+- AI chọn người nói cho 28 lượt và **cả 28 đều đúng**, kể cả câu không có động từ dẫn thoại và câu `「宁夕！你做什么——」叱责声从耳后响起` (người nói 苏衍 chỉ lộ ra ở đoạn sau).
+- 7 lượt để trống, cả 7 đều đúng là nên để trống:
+  - câu của 常莉 (cô quản lý mà CPU khi đó chưa đưa vào danh sách) — AI không gán bừa cho 宁雪落;
+  - câu của 酒吧老板, nhân vật phụ không tên;
+  - tiếng động `「砰」`.
+- Không có lượt nào sai người nói.
+- Bộ kiểm chứng loại 2 lượt, cả hai đều đúng người nói. Lý do loại là AI tự thêm từ tự xưng `我` vào câu không có chữ này.
+
+Mới 6 cảnh, chưa đủ để kết luận về độ chính xác.
+
+**Hai chỉnh sửa sau lần chạy này:**
+
+1. **Từ tiếng Trung bịa không còn làm mất người nói đúng.** Nếu lỗi duy nhất của một lượt là từ không có trong câu, từ đó bị bỏ (`DroppedTerms`, mã `DroppedUnquotedTerm`), còn người nói và người nghe vẫn được dùng. Nếu lượt có thêm lỗi về người nói hay người nghe thì vẫn bị loại, kèm thêm mã `UnquotedChineseTerm`. Sau khi bỏ, mọi từ còn lại vẫn là nguyên văn.
+2. **CPU tìm được tên đứng sau giới từ.** Trước đây 常莉 xuất hiện 14 lần mà không được nhận, vì tên luôn đứng ngay sau giới từ hoặc trợ động từ (`被常莉拉着`, `让常莉给她`).
+   - Quy tắc mới: tên đứng sau `被/让/和/跟/与/替/帮/陪/请/求/找/对/向/朝/冲/给` được tính là ứng viên. `把` và `同` bị loại vì hầu như chỉ đi với đồ vật.
+   - Đồ vật cũng đứng ở vị trí này (`被包臀裙`, `跟高跟鞋`). Vì vậy, một tên chỉ thấy sau giới từ phải **mở đầu mệnh đề ít nhất một lần** trong cả truyện, ví dụ `”常莉作为…`. Dòng bị ngắt cứng (hard wrap) không tính là mở đầu mệnh đề.
+   - Đo trên hai truyện: 隐婚100分 chỉ thêm đúng 常莉; test cpu không đổi. Bảy danh từ (高跟鞋, 包臀裙, 解开…) mà bản nháp đầu tiên của quy tắc nhận nhầm đều bị loại.
+   - Danh sách người tham gia đổi thì cảnh đó được hỏi lại (`AddressingLedgerState.Done(task)`); các cảnh khác không bị gửi lại.
+
 **Chưa làm:**
 
-- Chưa đo độ chính xác lượt nói với AI thật.
+- Chưa đo độ chính xác lượt nói trên số lượng lớn với AI thật.
 - Mẫu "Tên + hành động：「…」" không có động từ nói, rất phổ biến trong 隐婚100分, hiện CPU vẫn để trống người nói; AI theo cảnh phải tự xác định.
 
 ### Bước 1b — CPU: cách lời kể gọi nhân vật (ngôi thứ 3)
