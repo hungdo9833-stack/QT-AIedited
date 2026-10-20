@@ -29,6 +29,9 @@ Codex làm phần đọc code, sửa và chạy test.
 - Prompt viết vào file trong scratchpad, theo mẫu: mục tiêu, file được sửa, file KHÔNG được động vào,
   lệnh kiểm chứng (build + test), và trả về tóm tắt ngắn. Dặn Codex KHÔNG chạy git commit/add:
   sandbox của Codex luôn khóa `.git`, nên lệnh commit sẽ báo Permission denied.
+- Chọn model: mặc định không truyền gì (config của mỗi workspace: `gpt-5.6-sol`, effort `medium`).
+  Chỉ khi Codex làm sai lần đầu mới giao lại với `-Effort high` hoặc `-Model <slug>` mạnh hơn.
+  Không cân nhắc model mỗi lần giao việc. Task nào tốn quota bất thường thì báo user chọn model.
 - Không dùng `--dangerously-bypass-approvals-and-sandbox`. Claude không bao giờ tự đăng nhập Codex.
 - Review: `git -C <worktree> diff`, tự chạy test; đạt thì Claude commit lên nhánh `codex/<tên>` rồi merge.
 - Codex CLI phải được cài ngoài sandbox của Claude (npm global trong AppData thật), vì file Claude cài
