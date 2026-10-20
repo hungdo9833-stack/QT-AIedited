@@ -46,7 +46,7 @@ public sealed class AddressingPackingTests : IDisposable
     public void The_expected_output_budget_follows_the_model_output_limit_so_a_reply_cannot_be_cut_off()
     {
         var tasks = Characters(30);
-        var gemini = new ModelOptions { Model = "g", ContextSize = 65536, MaximumOutputTokens = 16384 };
+        var gemini = new ModelOptions { Model = "g", ContextSize = 65536, MaximumOutputTokens = 10_240 };
         Assert.All(AddressingAiSurvey.PlanRequests(tasks, "g", null, gemini).Take(1), r => Assert.Equal(16, r.Tasks.Count));
         var small = new ModelOptions { Model = "l", ContextSize = 32768, MaximumOutputTokens = 2_000 }; // 60% = 1200 → 3 tasks of 350.
         var requests = AddressingAiSurvey.PlanRequests(tasks, "l", null, small);
@@ -56,6 +56,18 @@ public sealed class AddressingPackingTests : IDisposable
         var tightContext = new ModelOptions { Model = "c", ContextSize = 4_096, MaximumOutputTokens = 1_024 }; // Input must fit beside the output.
         Assert.All(AddressingAiSurvey.PlanRequests(Characters(20), "c", null, tightContext).Where(r => r.Tasks.Count > 1),
             r => Assert.True(r.EstimatedInputTokens + 1_024 <= 4_096));
+    }
+
+    [Fact]
+    public void Gemini_budget_packs_240_regular_tasks_into_the_15_request_target()
+    {
+        var gemini = new ModelOptions { Model = "gemini-3.8-flash", ContextSize = 65_536, MaximumOutputTokens = 10_240 };
+        var requests = AddressingAiSurvey.PlanRequests(Characters(240), gemini.Model, null, gemini);
+
+        Assert.Equal(15, requests.Count);
+        Assert.All(requests, request => Assert.Equal(16, request.Tasks.Count));
+        Assert.All(requests, request => Assert.True(request.EstimatedInputTokens <= 24_000));
+        Assert.All(requests, request => Assert.True(request.EstimatedInputTokens + gemini.MaximumOutputTokens < gemini.ContextSize));
     }
 
     [Fact]

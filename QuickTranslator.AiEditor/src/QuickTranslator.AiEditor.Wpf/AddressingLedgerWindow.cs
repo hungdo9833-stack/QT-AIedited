@@ -422,8 +422,9 @@ public sealed class AddressingLedgerWindow : Window
         var options = runtime with
         {
             Model = model.Trim(), ContextSize = gemini ? Math.Max(65536, runtime.ContextSize) : runtime.ContextSize,
-            // 16 tasks of ~350 tokens are planned into ~6K; the rest is headroom so a long answer is never cut off.
-            MaximumOutputTokens = gemini ? Math.Max(16384, runtime.MaximumOutputTokens) : runtime.MaximumOutputTokens
+            // Sixteen tasks expect at most ~5.6K output tokens. 10K leaves safe structured-output headroom
+            // without reserving an unnecessarily large share of Gemini's 65K survey context for the answer.
+            MaximumOutputTokens = gemini ? Math.Max(10_240, runtime.MaximumOutputTokens) : runtime.MaximumOutputTokens
         };
         options.Validate(); return options;
     }

@@ -121,7 +121,11 @@ public sealed class AddressingLedgerUiTests
             var work = AddressingSurveyRunner.Plan(fixture.Project.Manifest.ProjectId, sources, resources, store.LoadAsync().GetAwaiter().GetResult());
             return [.. work.Scenes, .. work.Tasks];
         });
-        var window = new AddressingLedgerWindow(fixture.Project, fixture.Repository, _ => { }, []) { BackendFactory = (_, _, _) => client };
+        ModelOptions? sentOptions = null;
+        var window = new AddressingLedgerWindow(fixture.Project, fixture.Repository, _ => { }, [])
+        {
+            BackendFactory = (_, options, _) => { sentOptions = options; return client; }
+        };
         try
         {
             await window.LoadAsync(); Assert.Null(window.LastError);
@@ -135,6 +139,7 @@ public sealed class AddressingLedgerUiTests
             string? asked = null; window.ConfirmSend = m => { asked = m; return true; };
             await window.SurveyAsync(); Assert.Null(window.LastError);
             Assert.Contains("gemini-3.6-flash", asked); Assert.Contains("tối đa 5 request", asked, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(65_536, sentOptions!.ContextSize); Assert.Equal(10_240, sentOptions.MaximumOutputTokens);
             Assert.True(client.Calls >= 1); Assert.Null(window.LastSurvey!.StoppedBy);
             Assert.True(window.Work!.Complete); Assert.Contains("Đã khảo sát xong", window.SurveyStatus);
             Assert.NotEmpty((await store.LoadAsync()).Proposals); // Written to the Project's own ledger.

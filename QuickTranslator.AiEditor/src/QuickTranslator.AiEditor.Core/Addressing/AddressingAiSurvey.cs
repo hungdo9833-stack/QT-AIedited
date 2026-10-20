@@ -49,7 +49,7 @@ public sealed record AddressingVerification(IReadOnlyList<AddressingProposal> Pr
 
 public sealed record AddressingSettings(int MinimumPairLines = 3, int MaximumPairs = 120, int MinimumNarrationMentions = 3, int MaximumCharacters = 60,
     int SamplesPerTask = 8, int TasksPerRequest = 16, int MaximumSampleLength = 160, int MaximumScenes = 40, int SceneQuotes = 10, int SceneCharacters = 1_400,
-    int InputTokensPerRequest = 12_000, int OutputTokensPerTask = 350, int OutputTokensPerRequest = 6_000)
+    int InputTokensPerRequest = 24_000, int OutputTokensPerTask = 350, int OutputTokensPerRequest = 6_000)
 {
     public void Validate()
     {
