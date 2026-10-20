@@ -70,12 +70,12 @@ public sealed class AddressingLedgerWindow : Window
         IReadOnlyList<OllamaBackendProfile>? profiles = null)
     {
         _session = session; _repository = repository; _applyResources = applyResources; _service = new AddressingReviewService(session);
-        _profiles = [BookIntelligenceReviewWindow.CreateGeminiFlashPoolProfile(), .. (profiles ?? []).Where(p => p.Id != BookIntelligenceReviewWindow.GeminiFlashPoolProfileId)];
+        _profiles = [GeminiSurveyProfile.Create(), .. (profiles ?? []).Where(p => p.Id != GeminiSurveyProfile.Id)];
         ConfirmSend = message => MessageBox.Show(this, message, "Sổ xưng hô · khảo sát", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
         BackendFactory = (profile, options, maximumRequests) =>
         {
             var budget = new SemanticSurveyBudget(maximumRequests, 100_000_000);
-            if (profile.Id != BookIntelligenceReviewWindow.GeminiFlashPoolProfileId) return SemanticSurveyBackend.Ollama(profile, options, budget);
+            if (profile.Id != GeminiSurveyProfile.Id) return SemanticSurveyBackend.Ollama(profile, options, budget);
             string key = GeminiApiKeyVault.ResolveForSurvey();
             if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Nhập Gemini key trong Cài đặt → AI & hiệu năng trước khi khảo sát.");
             return SemanticSurveyBackend.Gemini(key, GeminiSurveyProjectScope.Resolve(key, Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_PROJECT_ID")), options, budget);
@@ -294,7 +294,7 @@ public sealed class AddressingLedgerWindow : Window
     private void PopulateModels()
     {
         if (_backend.SelectedItem is not OllamaBackendProfile profile) return;
-        _model.ItemsSource = profile.Id == BookIntelligenceReviewWindow.GeminiFlashPoolProfileId
+        _model.ItemsSource = profile.Id == GeminiSurveyProfile.Id
             ? new[] { "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite" } : new[] { profile.Model };
         _model.SelectedIndex = 0;
     }
@@ -303,7 +303,7 @@ public sealed class AddressingLedgerWindow : Window
     private static ModelOptions SurveyOptions(OllamaBackendProfile profile, string model)
     {
         var runtime = (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).ModelOptions;
-        bool gemini = profile.Id == BookIntelligenceReviewWindow.GeminiFlashPoolProfileId;
+        bool gemini = profile.Id == GeminiSurveyProfile.Id;
         var options = runtime with
         {
             Model = model.Trim(), ContextSize = gemini ? Math.Max(65536, runtime.ContextSize) : runtime.ContextSize,
@@ -345,7 +345,7 @@ public sealed class AddressingLedgerWindow : Window
         try { options = SurveyOptions(profile, _model.Text); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { LastError = ex.Message; _surveyStatus.Text = ex.Message; return; }
         if (Work is { Complete: true }) { ShowWork(Work); return; }
-        string where = profile.Id == BookIntelligenceReviewWindow.GeminiFlashPoolProfileId ? "Google Gemini (dịch vụ trên mạng)" : profile.Name;
+        string where = profile.Id == GeminiSurveyProfile.Id ? "Google Gemini (dịch vụ trên mạng)" : profile.Name;
         if (!ConfirmSend($"Gửi trích đoạn nguyên tác tới {where}, model {options.Model}? Tối đa {maximum} request lần này, mỗi request thử một lần. " +
                          "Kết quả chỉ ghi vào sổ khảo sát của Project; hồ sơ nhân vật chỉ đổi khi bạn bấm Hoàn thành.")) return;
         _surveyCancel = new(); var ct = _surveyCancel.Token;
