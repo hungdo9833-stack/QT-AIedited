@@ -14,7 +14,20 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow
 {
-    private bool _settingsDirty;
+    private bool _settingsDirtyValue;
+    // Every assignment also updates the footer indicator, so each settings page shows unsaved changes the same way.
+    private bool _settingsDirty
+    {
+        get => _settingsDirtyValue;
+        set { _settingsDirtyValue = value; UpdateSettingsDirtyIndicator(); }
+    }
+
+    private void UpdateSettingsDirtyIndicator()
+    {
+        if (SettingsDirtyText is null) return;
+        SettingsDirtyText.Text = _settingsDirtyValue ? "Có thay đổi chưa lưu" : "Mọi thay đổi đã được lưu";
+        SettingsDirtyText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, _settingsDirtyValue ? "WarningBrush" : "MutedBrush");
+    }
     private bool _syncingGlossary;
     private readonly ObservableCollection<GlossaryRow> _glossaryRows = [];
 
@@ -40,6 +53,7 @@ public partial class MainWindow
         SettingsDictionaryPanel.Visibility = selected == "Dictionary" ? Visibility.Visible : Visibility.Collapsed;
         SettingsCharactersPanel.Visibility = selected == "Characters" ? Visibility.Visible : Visibility.Collapsed;
         SettingsQualityPanel.Visibility = selected == "Quality" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsAppearancePanel.Visibility = selected == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         if (_settingsDirty && _initialized) SetStatus("Thiết lập có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
     }
 

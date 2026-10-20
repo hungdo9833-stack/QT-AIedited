@@ -1,4 +1,5 @@
 using System.Windows;
+using System.IO;
 using System.Windows.Media;
 
 namespace QuickTranslator.AiEditor.Wpf;
@@ -11,10 +12,24 @@ namespace QuickTranslator.AiEditor.Wpf;
 /// </summary>
 internal static class ThemeManager
 {
+    /// <summary>The palette on screen: always Dark or Light, also when the user chose "Theo Windows".</summary>
     internal static ShellTheme Current { get; private set; } = ShellTheme.Dark;
+
+    /// <summary>Dark or Light for a choice; System reads Windows' "app mode" (AppsUseLightTheme), Dark if it cannot be read.</summary>
+    internal static ShellTheme Resolve(ShellTheme theme)
+    {
+        if (theme != ShellTheme.System) return theme;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return key?.GetValue("AppsUseLightTheme") is int light && light != 0 ? ShellTheme.Light : ShellTheme.Dark;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException) { return ShellTheme.Dark; }
+    }
 
     internal static void Apply(ShellTheme theme)
     {
+        theme = Resolve(theme);
         ResourceDictionary resources = Application.Current.Resources;
         var palette = new ResourceDictionary
         {

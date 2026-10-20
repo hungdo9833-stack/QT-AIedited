@@ -40,6 +40,9 @@ public partial class MainWindow
             ShowTranslationWorkspace(_workspaceLayout.FourPaneMode);
             UpdateShellChrome();
         };
+        // SystemEvents holds its handlers statically: subscribe while shown only.
+        Loaded += (_, _) => Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnWindowsPreferenceChanged;
+        Closed += (_, _) => Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnWindowsPreferenceChanged;
     }
 
     private void ApplyWorkspaceLayout()
@@ -204,7 +207,8 @@ public partial class MainWindow
 
     private async void OnToggleShellTheme(object sender, RoutedEventArgs e)
     {
-        _workspaceLayout.Theme = _workspaceLayout.Theme == ShellTheme.Dark ? ShellTheme.Light : ShellTheme.Dark;
+        // The toggle switches what is on screen; it leaves "Theo Windows" for an explicit choice.
+        _workspaceLayout.Theme = ThemeManager.Current == ShellTheme.Dark ? ShellTheme.Light : ShellTheme.Dark;
         ApplyShellTheme(_workspaceLayout.Theme);
         await SaveWorkspaceLayoutAsync();
     }
@@ -216,7 +220,8 @@ public partial class MainWindow
         if (_service is not null)
             foreach (var segment in _service.GetSnapshot().Segments)
                 _chapterBlocks.FirstOrDefault(b => b.Id == segment.Id)?.UpdateMetadataOnly(segment, segment.Id == _selectedId);
-        ThemeToggleButton.Content = theme == ShellTheme.Dark ? "Light" : "Dark";
+        ThemeToggleButton.Content = ThemeManager.Current == ShellTheme.Dark ? "Light" : "Dark";
+        SyncThemeChoice(theme);
         SetResourceReference(BackgroundProperty, "AppBackgroundBrush");
         SetResourceReference(ForegroundProperty, "TextBrush");
     }
@@ -266,6 +271,37 @@ public partial class MainWindow
     }
 
     private void OnShowTwoPane(object sender, RoutedEventArgs e) => ShowTranslationWorkspace(false);
+
+    private bool _syncingThemeChoice;
+
+    // Settings › Giao diện shows the saved choice (Theo Windows / Sáng / Tối), not the resolved palette.
+    private void SyncThemeChoice(ShellTheme choice)
+    {
+        if (ThemeSystemRadio is null) return;
+        _syncingThemeChoice = true;
+        try
+        {
+            ThemeSystemRadio.IsChecked = choice == ShellTheme.System;
+            ThemeLightRadio.IsChecked = choice == ShellTheme.Light;
+            ThemeDarkRadio.IsChecked = choice == ShellTheme.Dark;
+        }
+        finally { _syncingThemeChoice = false; }
+    }
+
+    private async void OnThemeChoiceChanged(object sender, RoutedEventArgs e)
+    {
+        if (_syncingThemeChoice || sender is not RadioButton { IsChecked: true, Tag: string tag } || !Enum.TryParse(tag, out ShellTheme choice)) return;
+        _workspaceLayout.Theme = choice;
+        ApplyShellTheme(choice);
+        await SaveWorkspaceLayoutAsync();
+    }
+
+    // "Theo Windows" follows a Windows theme change while the app is open.
+    private void OnWindowsPreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category != Microsoft.Win32.UserPreferenceCategory.General || _workspaceLayout.Theme != ShellTheme.System) return;
+        Dispatcher.BeginInvoke(() => { if (!_closing) ApplyShellTheme(ShellTheme.System); });
+    }
 
     // A command chosen from the "Thêm" popup closes it.
     private void OnCommandOverflowClick(object sender, RoutedEventArgs e) { CommandOverflowToggle.IsChecked = false; StructureOverflowToggle.IsChecked = false; }

@@ -105,6 +105,35 @@ public sealed class ProductionShellUiTests
     });
 
     [Fact]
+    public Task Appearance_choice_follows_windows_and_settings_show_one_unsaved_indicator() => StaHost.Run(() =>
+    {
+        using var fixture = new WorkspaceFixture();
+        T Find<T>(string name) => (T)fixture.Window.FindName(name);
+        try
+        {
+            // "Theo Windows" shows whatever Windows uses; the toggle then names the other palette.
+            Find<RadioButton>("ThemeSystemRadio").IsChecked = true;
+            ShellTheme windows = ThemeManager.Resolve(ShellTheme.System);
+            Assert.NotEqual(ShellTheme.System, windows);
+            Assert.Equal(windows, ThemeManager.Current);
+            Assert.Equal(windows == ShellTheme.Dark ? "Light" : "Dark", Find<Button>("ThemeToggleButton").Content);
+            Assert.Equal(ShellTheme.System, ((WorkspaceLayoutPreferences)typeof(MainWindow).GetField("_workspaceLayout", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(fixture.Window)!).Theme);
+            Find<RadioButton>("ThemeLightRadio").IsChecked = true;
+            Assert.Equal(ShellTheme.Light, ThemeManager.Current);
+            Assert.False(Find<RadioButton>("ThemeSystemRadio").IsChecked);
+
+            void SetDirty(bool value) => typeof(MainWindow).GetProperty("_settingsDirty", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(fixture.Window, value);
+            var dirty = Find<TextBlock>("SettingsDirtyText");
+            SetDirty(true);
+            Assert.Equal("Có thay đổi chưa lưu", dirty.Text);
+            SetDirty(false);
+            Assert.Equal("Mọi thay đổi đã được lưu", dirty.Text);
+        }
+        finally { fixture.Call("ApplyShellTheme", ShellTheme.Dark); }
+        return Task.CompletedTask;
+    });
+
+    [Fact]
     public Task Navigation_marks_the_workspace_that_is_shown() => StaHost.Run(() =>
     {
         using var fixture = new WorkspaceFixture();

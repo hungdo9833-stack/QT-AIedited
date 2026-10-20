@@ -4,7 +4,8 @@ using QuickTranslator.AiEditor.Core.Persistence;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
-internal enum ShellTheme { Dark, Light }
+// System follows the Windows app theme (Settings › Personalization › Colors). New values go last: the layout file stores the number.
+internal enum ShellTheme { Dark, Light, System }
 
 internal sealed class WorkspaceLayoutPreferences
 {

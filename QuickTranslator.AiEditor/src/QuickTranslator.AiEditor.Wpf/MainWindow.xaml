@@ -591,8 +591,10 @@
                             <ListBoxItem Tag="Dictionary">Từ điển &amp; ngữ cảnh</ListBoxItem>
                             <ListBoxItem Tag="Characters">Nhân vật &amp; xưng hô</ListBoxItem>
                             <ListBoxItem Tag="Quality">Chất lượng bản dịch</ListBoxItem>
+                            <ListBoxItem Tag="Appearance">Giao diện</ListBoxItem>
                         </ListBox>
                         <Grid Grid.Column="1" Margin="16,0,0,0">
+                            <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <ScrollViewer x:Name="SettingsAiPanel">
                                 <StackPanel>
                                     <TextBlock Text="AI &amp; hiệu năng" Style="{StaticResource SectionTitle}"/>
@@ -682,7 +684,6 @@
                                                 <TextBox x:Name="MaximumInput" Text="500" Width="80"/>
                                             </WrapPanel>
                                         </Border>
-                                        <Button Content="Lưu thiết lập dịch" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" HorizontalAlignment="Left" Style="{StaticResource PrimaryButton}"/>
                                     </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>
@@ -735,7 +736,6 @@
                                             <TextBlock x:Name="ContextCountText" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}"/>
                                         </StackPanel>
                                     </Border>
-                                    <Button Content="Lưu từ điển và ngữ cảnh" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" HorizontalAlignment="Left" Style="{StaticResource PrimaryButton}"/>
                                 </StackPanel>
                             </ScrollViewer>
                             <ScrollViewer x:Name="SettingsCharactersPanel" Visibility="Collapsed">
@@ -823,6 +823,29 @@
                                     </Border>
                                 </StackPanel>
                             </ScrollViewer>
+                            <ScrollViewer x:Name="SettingsAppearancePanel" Visibility="Collapsed">
+                                <StackPanel Margin="0,0,0,16">
+                                    <TextBlock Text="Giao diện" Style="{StaticResource SectionTitle}"/>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <TextBlock Text="Theme" Style="{StaticResource FieldLabel}"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,4,0,8">
+                                                <RadioButton x:Name="ThemeSystemRadio" GroupName="ShellThemeChoice" Tag="System" Content="Theo Windows" Style="{StaticResource ModeButton}" Checked="OnThemeChoiceChanged"/>
+                                                <RadioButton x:Name="ThemeLightRadio" GroupName="ShellThemeChoice" Tag="Light" Content="Sáng" Style="{StaticResource ModeButton}" Checked="OnThemeChoiceChanged"/>
+                                                <RadioButton x:Name="ThemeDarkRadio" GroupName="ShellThemeChoice" Tag="Dark" Content="Tối" Style="{StaticResource ModeButton}" Checked="OnThemeChoiceChanged"/>
+                                            </StackPanel>
+                                            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Text="Theo Windows dùng chế độ sáng/tối của Windows (Cài đặt › Cá nhân hóa › Màu) và tự đổi khi Windows đổi. Nút Light/Dark trên thanh đầu chọn thẳng Sáng hoặc Tối. Trang Đọc có bảng màu riêng trong Kiểu đọc."/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                            <!-- One save for every settings page, always in the same place. API key and GPU profiles keep their own buttons (stored separately). -->
+                            <Border Grid.Row="1" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,8" Margin="0,8,0,0">
+                                <DockPanel>
+                                    <Button x:Name="SettingsSaveButton" DockPanel.Dock="Right" Content="Lưu thiết lập" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu thiết lập dịch, từ điển, ngữ cảnh và hồ sơ nhân vật"/>
+                                    <TextBlock x:Name="SettingsDirtyText" Text="Mọi thay đổi đã được lưu" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
+                                </DockPanel>
+                            </Border>
                         </Grid>
                     </Grid>
                 </TabItem>
