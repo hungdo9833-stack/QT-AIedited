@@ -56,7 +56,7 @@ try
     Console.WriteLine($"STEP2 offline: tasks={tasks.Count} (pairs={tasks.Count(t => t.Kind == AddressingTaskKind.Pair)}, characters={tasks.Count(t => t.Kind == AddressingTaskKind.Character)}) " +
         $"requests={requests.Count} estimatedInputTokens={requests.Sum(r => r.EstimatedInputTokens):N0} HTTP=0");
     Console.WriteLine($"OK chapters={report.Chapters} dialogue={report.DialogueLines} explicitSpeaker={report.ExplicitSpeakerLines} " +
-        $"pronoun={report.PronounSpeakerLines} unattributed={report.UnattributedLines} listenerKnown={report.ListenerKnownLines} " +
+        $"narration={report.NarrationSpeakerLines} pronoun={report.PronounSpeakerLines} unattributed={report.UnattributedLines} listenerKnown={report.ListenerKnownLines} " +
         $"names={report.CandidateNames.Count} pairs={report.Pairs.Count} -> {Path.GetFullPath(outDir)}");
     if (!live) return 0; // Offline: no key read, no provider constructed.
 
@@ -145,6 +145,7 @@ static string Markdown(string title, AddressingSurveyReport r)
     md.AppendLine($"| Chương | {r.Chapters} |").AppendLine($"| Ký tự nguyên văn | {r.SourceUtf16:N0} |");
     md.AppendLine($"| Lời thoại tách được | {r.DialogueLines} |");
     md.AppendLine($"| Người nói rõ ràng (Explicit) | {r.ExplicitSpeakerLines} ({Pct(r.ExplicitSpeakerLines, r.DialogueLines)}) |");
+    md.AppendLine($"| Người nói theo câu kể ngay trước (yếu hơn) | {r.NarrationSpeakerLines} ({Pct(r.NarrationSpeakerLines, r.DialogueLines)}) |");
     md.AppendLine($"| Người nói là đại từ (chỉ ứng viên) | {r.PronounSpeakerLines} ({Pct(r.PronounSpeakerLines, r.DialogueLines)}) |");
     md.AppendLine($"| Không xác định người nói | {r.UnattributedLines} ({Pct(r.UnattributedLines, r.DialogueLines)}) |");
     md.AppendLine($"| Có ứng viên người nghe | {r.ListenerKnownLines} ({Pct(r.ListenerKnownLines, r.DialogueLines)}) |");

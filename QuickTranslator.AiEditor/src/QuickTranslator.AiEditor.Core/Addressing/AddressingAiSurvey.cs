@@ -65,11 +65,24 @@ public static class AddressingAiSurvey
     {
         var census = CharacterMentionCensus.Scan(projectId, 0, sources, resources, new BookIntelligenceState { ProjectId = projectId });
         return census.Candidates
-            .Where(c => c.Category is MentionCandidateCategory.PersonCandidate or MentionCandidateCategory.AliasCandidate && c.Frequency >= minimumMentions)
+            .Where(c => c.Category is MentionCandidateCategory.PersonCandidate or MentionCandidateCategory.AliasCandidate && c.Frequency >= minimumMentions &&
+                !IsOrganizationOrPlace(c.ChineseName))
             .Select(c => c.ChineseName)
             .Concat(resources.Characters.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases)))
             .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.Ordinal).ToArray();
     }
+
+    // Organisations, clans and places across genres (urban, xianxia, historical). Only suffixes that almost never end a
+    // person's name: 国/城/山/宫/谷/楼/氏 are excluded on purpose (张建国, 花满楼, 王氏 = Mrs Wang in historical novels). Existing profile names are never filtered.
+    private static readonly string[] OrganizationSuffixes =
+    [
+        "集团", "公司", "企业", "实业", "银行", "基金", "传媒", "影视", "娱乐", "科技", "工作室", "事务所", "研究所", "研究院", "医院", "诊所",
+        "学校", "大学", "学院", "中学", "小学", "幼儿园", "酒店", "酒吧", "饭店", "会所", "俱乐部", "大厦", "广场", "小区", "别墅", "庄园", "山庄",
+        "警局", "公安局", "派出所", "法院", "政府", "委员会", "电视台", "杂志社", "孤儿院", "家族", "府",
+        "宗", "门派", "派", "阁", "殿", "教", "盟", "商会", "学府", "书院", "王朝", "帝国", "王国", "皇朝", "部落", "宗门", "圣地", "秘境"
+    ];
+    internal static bool IsOrganizationOrPlace(string name) =>
+        name.Length >= 2 && OrganizationSuffixes.Any(s => name.EndsWith(s, StringComparison.Ordinal) && name.Length > s.Length);
 
     public static IReadOnlyList<AddressingTask> PlanTasks(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
         AddressingSettings? settings = null, CancellationToken cancellationToken = default)
@@ -84,7 +97,9 @@ public static class AddressingAiSurvey
         var owner = variants.SelectMany(g => g.Variants.Select(v => (v.Form, g.FullName))).ToDictionary(x => x.Form, x => x.FullName, StringComparer.Ordinal);
         string Canonical(string name) => owner.GetValueOrDefault(name, name);
         var tasks = new List<AddressingTask>();
-        foreach (var pair in lines.Where(x => x.Speaker is not null && x.Listener is not null && x.SpeakerEvidence == SpeakerEvidence.Explicit &&
+        // Narration-only guesses are right about half the time on real novels; they need a vocative listener as corroboration.
+        foreach (var pair in lines.Where(x => x.Speaker is not null && x.Listener is not null &&
+                         (x.SpeakerEvidence == SpeakerEvidence.Explicit || x.SpeakerEvidence == SpeakerEvidence.PreviousNarration && x.ListenerEvidence == ListenerEvidence.Vocative) &&
                          Canonical(x.Speaker!) != Canonical(x.Listener!))
                      .GroupBy(x => (Canonical(x.Speaker!), Canonical(x.Listener!))).Where(g => g.Count() >= settings.MinimumPairLines)
                      .OrderByDescending(g => g.Count()).ThenBy(g => g.Key.Item1, StringComparer.Ordinal).ThenBy(g => g.Key.Item2, StringComparer.Ordinal)
@@ -127,7 +142,8 @@ public static class AddressingAiSurvey
     /// </summary>
     private static IReadOnlyList<DialogueLine> SpreadLines(IReadOnlyList<DialogueLine> lines, int count)
     {
-        static int Score(DialogueLine x) => x.ListenerEvidence switch { ListenerEvidence.Vocative => 3, ListenerEvidence.Clause => 2, ListenerEvidence.Scene => 1, _ => 0 } +
+        static int Score(DialogueLine x) => (x.SpeakerEvidence == SpeakerEvidence.Explicit ? 2 : 0) +
+            x.ListenerEvidence switch { ListenerEvidence.Vocative => 3, ListenerEvidence.Clause => 2, ListenerEvidence.Scene => 1, _ => 0 } +
             (x.VocativeTerms.Count > 0 ? 2 : 0) + (x.SelfTerms.Any(t => t != "我") ? 1 : 0);
         IEnumerable<DialogueLine> RoundRobin(IEnumerable<DialogueLine> pool, int quota)
         {

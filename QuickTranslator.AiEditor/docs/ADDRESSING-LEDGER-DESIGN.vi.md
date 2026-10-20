@@ -67,6 +67,32 @@ Giới hạn quan sát được, để Bước 2–3 xử lý:
 - Bí danh được báo riêng (`柳轻锋 → 小影姐` và `柳轻锋 → 柳月影` là hai dòng) cho tới khi người dùng duyệt gộp. Biến thể khác chữ (`小峰`) không có gợi ý.
 - Tự xưng bằng danh xưng thân tộc (`陪陪姐姐`, người nói tự gọi mình là 姐姐) được ghi là "nhắc tới", không phải hô gọi; Bước 2 cần nhận diện kiểu tự xưng này vì nó quyết định cách dịch "chị/em".
 
+### Bước 1 · kiểm chứng trên truyện thứ hai, khác thể loại và văn phong (2026-10-20)
+
+Truyện ngôn tình đô thị *隐婚100分* (20 chương đầu): lời thoại dùng `“”`, không ngắt dòng cứng, và hay viết "câu kể → lời thoại đứng riêng một đoạn". Bản Bước 1 đầu tiên bỏ sót nữ chính 宁夕 (họ `宁` không có trong danh sách họ) và chỉ gán được người nói cho 10/300 lời thoại. Các sửa đổi đều theo hướng chung cho mọi thể loại, không chỉnh riêng cho truyện này:
+
+- **Danh sách họ hai tầng** (`ChineseSurnames`):
+  - Thêm khoảng 400 họ đơn và hơn 60 họ kép (võ hiệp, cổ đại).
+  - Các chữ chủ yếu là hư từ (和 / 时 / 于 / 向 / 全 / 那 / 但 / 由 / 来 / 都) bị loại hẳn.
+  - Họ **tầng mở rộng** (连 / 简 / 修 / 车 / 尤 / 丰 / 冷 / 花…) mở đầu nhiều từ thường (连忙, 简单, 修长, 车子…). Tên có họ này chỉ được nhận là người khi có bằng chứng chỉ người mới có: được giới thiệu tên, vai thân tộc, hoặc vừa làm chủ ngữ vừa được gọi tên trong thoại.
+- **Nhiễu từ vựng:** thán từ (哈哈, 呵呵), cụm chỉ nơi chốn (沙发上, 车窗外), và một số từ thường mở đầu bằng họ tầng phổ biến (明白, 麻烦, 宁可, 岳父…).
+- **Tổ chức, địa danh** bị lọc khỏi ứng viên: 集团 / 公司 / 酒店 / 宗 / 门派 / 阁 / 王朝….
+  - Không lọc theo `国 / 城 / 山 / 宫 / 谷 / 楼 / 氏`, vì các chữ này kết thúc tên người: 张建国, 花满楼, 王氏 (= bà Vương trong truyện cổ đại).
+- **Mức bằng chứng mới `PreviousNarration`** (yếu hơn `Explicit`):
+  - Áp dụng khi lời thoại đứng riêng một đoạn ngay sau một đoạn kể thuần. Người nói là chủ ngữ là tên ở câu kể cuối.
+  - Kiểm tay trên hai truyện: chỉ đúng khoảng một nửa. CPU không theo dõi được lượt đối đáp.
+  - Vì vậy suy đoán bị **bỏ** nếu câu thoại gọi tên chính người được đoán là người nói, và lời thoại chỉ là tiếng động (砰, 啪…) thì không có người nói.
+  - Dòng `PreviousNarration` chỉ vào nhiệm vụ AI theo cặp khi có người nghe được gọi tên trong thoại.
+
+| Chỉ số | test cpu trước → sau | 隐婚100分 trước → sau |
+|---|---|---|
+| Tên ứng viên (sau lọc) | 19 → 20 (đều là tên thật) | 10 → 10 (thêm 宁夕, 宁雪落, 孟长歌; bỏ 陆氏集团 và nhiễu) |
+| Người nói `Explicit` | 423 → 423 | 10 → 20 |
+| Người nói `PreviousNarration` | — → 25 | — → 16 |
+| Nhiệm vụ AI (cặp / nhân vật) | 13 / 11 → 13 / 12 | 0 / 7 → 1 / 8 |
+
+**Giới hạn còn lại.** Với truyện viết theo kiểu đối đáp liên tục, không có động từ dẫn thoại (như 隐婚100分), CPU không gán được người nói cho đa số lời thoại. Hướng đúng là một loại nhiệm vụ AI thứ ba **theo cảnh**: gửi cả một đoạn hội thoại liền mạch kèm câu kể xung quanh, để AI xác định lượt nói. Các bước kiểm chứng giữ nguyên (câu trích nguyên văn, người nói phải là nhân vật có trong danh sách). Hướng này chưa triển khai.
+
 ### Bước 1b — CPU: cách lời kể gọi nhân vật (ngôi thứ 3)
 
 Xưng hô trong thoại chưa đủ: lời kể ngôi thứ 3 phải gọi một nhân vật nhất quán (hắn / nàng / y / cô ấy / lão…), đúng giới tính, và có thể đổi theo truyện. Trình dịch đã có chỗ chứa: đại từ kể chuyện có khóa (`PrimaryNarrativePronoun`, `NarrativePronounLocked`) trong hồ sơ nhân vật.

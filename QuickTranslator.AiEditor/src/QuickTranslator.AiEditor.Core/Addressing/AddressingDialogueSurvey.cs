@@ -4,7 +4,8 @@ using QuickTranslator.AiEditor.Core.BookIntelligence;
 
 namespace QuickTranslator.AiEditor.Core.Addressing;
 
-public enum SpeakerEvidence { Explicit, Pronoun, Unattributed }
+/// <summary>Explicit: lead clause or same-paragraph verb. PreviousNarration (weaker): a standalone quote paragraph whose preceding narration sentence opens with this name.</summary>
+public enum SpeakerEvidence { Explicit, Pronoun, Unattributed, PreviousNarration }
 public enum ListenerEvidence { Vocative, Clause, Scene, Unknown }
 
 /// <summary>One quoted utterance with CPU-only, evidence-graded attribution. Offsets are UTF-16 in the original chapter text.</summary>
@@ -26,6 +27,8 @@ public sealed record AddressingSurveyReport(int Chapters, long SourceUtf16, int 
 {
     /// <summary>Surface alias hints (小锋 ≈ 柳轻锋). Only used to avoid self-pairs; identities are never merged here.</summary>
     public IReadOnlyDictionary<string, string> AliasHints { get; init; } = new Dictionary<string, string>();
+    /// <summary>Lines attributed from the preceding narration sentence (weaker than Explicit).</summary>
+    public int NarrationSpeakerLines { get; init; }
 }
 
 /// <summary>
@@ -73,7 +76,7 @@ public static class AddressingDialogueSurvey
         return new(sources.Count, sources.Sum(x => (long)x.OriginalText.Length), lines.Count,
             lines.Count(x => x.SpeakerEvidence == SpeakerEvidence.Explicit), lines.Count(x => x.SpeakerEvidence == SpeakerEvidence.Pronoun),
             lines.Count(x => x.SpeakerEvidence == SpeakerEvidence.Unattributed), lines.Count(x => x.Listener is not null),
-            matcher.Names, pairs) { AliasHints = matcher.AliasHints };
+            matcher.Names, pairs) { AliasHints = matcher.AliasHints, NarrationSpeakerLines = lines.Count(x => x.SpeakerEvidence == SpeakerEvidence.PreviousNarration) };
     }
 
     public static IReadOnlyList<DialogueLine> Extract(CensusSource source, IReadOnlyCollection<string> names) =>
@@ -108,6 +111,20 @@ public static class AddressingDialogueSurvey
             string lead = LeadClause(text.Value, open, previousQuoteEnd);
             string after = text.Value[(close + 1)..Math.Min(text.Value.Length, close + 24)];
             var (speaker, speakerEvidence, listenerFromClause) = Attribute(lead, after, names);
+            // Style common in romance/urban novels: a narration paragraph, then the quote alone in its own paragraph.
+            if (speakerEvidence == SpeakerEvidence.Unattributed && lead.Length == 0 && OpensParagraph(text.Value, open) &&
+                !IsSoundOnly(quote) && PreviousNarrationSentence(text.Value, open) is { } narration)
+            {
+                var guess = FromNarration(narration, names);
+                // People rarely say their own name: if the quote names the guessed speaker, the narration subject is
+                // more likely the one being answered. Drop the guess instead of recording a wrong speaker.
+                if (guess.Speaker is null || !names.Find(quote).Any(h => names.SamePerson(h.Name, guess.Speaker)))
+                {
+                    (speaker, speakerEvidence, listenerFromClause) = guess;
+                    lead = narration; // The AI and the reviewer see the sentence the guess came from.
+                }
+            }
+            if (IsSoundOnly(quote)) { speaker = null; speakerEvidence = SpeakerEvidence.Unattributed; listenerFromClause = null; }
             string? candidate = null;
             if (speakerEvidence == SpeakerEvidence.Pronoun) candidate = recentExplicit.LastOrDefault();
             // Vocative names inside the utterance are the strongest listener evidence.
@@ -170,6 +187,49 @@ public static class AddressingDialogueSurvey
         var tail = SpeechVerbAfterQuote.Match(after);
         if (tail.Success && names.Find(tail.Groups["rest"].Value) is { Count: > 0 } named && tail.Groups["rest"].Value.StartsWith(named[0].Name, StringComparison.Ordinal))
             return (named[0].Name, SpeakerEvidence.Explicit, null);
+        return (null, SpeakerEvidence.Unattributed, null);
+    }
+
+    /// <summary>Sound effects in quotes (“砰！”, “啪啪”, “轰隆……”) are not speech by anyone.</summary>
+    internal static bool IsSoundOnly(string quote)
+    {
+        var han = quote.Where(c => c is >= '一' and <= '鿿').ToArray();
+        if (han.Length == 0) return !quote.Any(char.IsLetter); // "……" is not speech; "OK" is.
+        return han.Length <= 6 && han.All(c => "砰啪咚嘭哗轰隆咔嚓叮当嘀嗒呼哒噗嗖嗡吱咣铛滴答扑通".Contains(c));
+    }
+
+    private static bool OpensParagraph(string text, int position)
+    {
+        int i = position - 1;
+        while (i >= 0 && text[i] is ' ' or '　' or '\t') i--;
+        return i < 0 || text[i] == '\n';
+    }
+
+    /// <summary>Last sentence of the paragraph just before, only when that paragraph is pure narration (no quotes).</summary>
+    private static string? PreviousNarrationSentence(string text, int position)
+    {
+        int lineStart = text.LastIndexOf('\n', Math.Max(0, position - 1));
+        if (lineStart <= 0) return null;
+        int previousStart = text.LastIndexOf('\n', lineStart - 1) + 1;
+        string previous = text[previousStart..lineStart].Trim();
+        if (previous.Length == 0 || Brackets.Any(b => previous.IndexOf(b.Open) >= 0 || previous.IndexOf(b.Close) >= 0)) return null;
+        string? last = previous.Split(['。', '！', '？', '!', '?', '…'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+        return string.IsNullOrEmpty(last) ? null : last.Length <= MaximumLeadClause ? last : last[^MaximumLeadClause..];
+    }
+
+    /// <summary>Same subject rule as a lead clause, but graded PreviousNarration (weaker than an explicit speech verb).</summary>
+    private static (string? Speaker, SpeakerEvidence Evidence, string? ClauseListener) FromNarration(string sentence, NameMatcher names)
+    {
+        foreach (string part in sentence.Split('，', ',').Reverse())
+        {
+            string clause = Subject(part);
+            if (clause.Length == 0) continue;
+            if (clause[0] is '他' or '她' or '它') return (null, SpeakerEvidence.Pronoun, null);
+            var opening = names.Find(clause).FirstOrDefault(x => x.Start == 0);
+            if (opening is null) continue;
+            var others = names.Find(sentence).Select(x => x.Name).Where(x => !names.SamePerson(x, opening.Name)).Distinct().ToArray();
+            return (opening.Name, SpeakerEvidence.PreviousNarration, others.Length == 1 ? others[0] : null);
+        }
         return (null, SpeakerEvidence.Unattributed, null);
     }
 

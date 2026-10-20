@@ -11,8 +11,8 @@ internal static class ChineseMentionDiscovery
 {
     private const string Han = @"[\p{IsCJKUnifiedIdeographs}]";
     private const string LeftBoundary = @"(?<![\p{IsCJKUnifiedIdeographs}])";
-    // Common surname lexicon, not story-specific names. Compound surnames precede single surnames.
-    internal const string Family = @"(?:欧阳|司马|上官|诸葛|慕容|东方|南宫|夏侯|皇甫|尉迟|公孙|独孤|令狐|[赵钱孙李周吴郑王刘冯陈褚卫蒋沈韩杨朱秦许何吕施张孔曹严华金魏陶姜谢邹苏潘葛范彭鲁韦马苗方俞任袁柳唐罗薛雷贺倪汤殷郝毕安常傅卞齐康伍余顾孟黄萧尹姚邵汪祁毛禹狄米贝明臧计伏成戴宋茅庞熊纪舒屈项祝董梁杜阮蓝闵席季麻强贾路娄江童颜郭梅盛林钟徐邱骆高夏蔡田胡霍万管卢莫房裘解应宗丁邓洪包左石崔龚程陆翁段靳诸楚闫温庄白廖曾谭叶易黎龙侯武洪江])";
+    // Surname lexicon shared with the addressing ledger; see ChineseSurnames for what is (deliberately) not included.
+    internal static readonly string Family = ChineseSurnames.Pattern;
     private const string Modifiers = @"(?:正在|已经|忽然|突然|连忙|立刻|轻轻|慢慢|刚刚|刚才|似乎|终于|只是|竟然|仍然|便|却|又|也|还|就|才|已|正|先|都)";
     private const string Action = @"(?:说道|问道|答道|喊道|叫道|笑道|说|问|答|喊|叫|笑|看|望|听|想|走|跑|站|坐|起身|转身|回头|点头|摇头|皱眉|抬头|低头|伸手|拿|取|递|放|推|拉|摸|抱|牵|拍|打|喝|吃|打开|关上|离开|回来|回到|进入|来到|发现|感觉|觉得|知道|认识|准备|决定|同意|拒绝|回答|解释|提醒|告诉|问起|停下|愣住|穿着|穿过|赶到|赶来|点燃|掏出|攥紧|抿嘴|眨眼)";
     private const string Roles = @"(?:父亲|母亲|爸爸|妈妈|哥哥|姐姐|弟弟|妹妹|儿子|女儿|丈夫|妻子|老公|老婆|表哥|表姐|表弟|表妹|堂哥|堂姐|堂弟|堂妹|叔叔|舅舅|阿姨|姑姑|小姨|小舅|小叔|大伯|二叔|伯父|伯母|大哥|二哥|三哥|大姐|二姐|三姐|大嫂|二嫂|嫂子|大姨|二姨|大舅|二舅|闺蜜|同学|同事|朋友|老师|师父)";
@@ -43,6 +43,8 @@ internal static class ChineseMentionDiscovery
     private static readonly HashSet<string> AddressWords = new(Addressing, StringComparer.Ordinal);
     private static readonly HashSet<string> Noise = new(StringComparer.Ordinal)
     {
+        // Common words whose first character is a common-tier surname (genre independent).
+        "明白", "麻烦", "宁可", "宁愿", "宁静", "宁死", "岳父", "岳母", "常常", "成功", "成为", "史上", "欧洲", "穆然",
         "自己", "他们", "我们", "你们", "这个", "那个", "一个", "什么", "怎么", "不是", "就是", "原来", "突然", "然后", "于是",
         "周围", "周围人", "周围的", "林中", "林间", "林间人", "王国", "王国人", "王朝", "张口", "张开", "张嘴", "白天", "白云", "白衣", "李子", "夏天", "方才", "方向", "何必", "何人", "其他", "所有人", "众人", "一群人", "那个人",
         "房门", "房间", "温柔", "严肃", "安慰", "解释", "郑重", "马路", "安静", "金项链", "高兴", "普通人", "年轻人", "小心", "小声", "小路", "小孩", "老人", "老实", "老家", "老头", "大小", "毛病", "毛衣", "刘海", "高山", "方法", "方位", "门口",
@@ -98,10 +100,18 @@ internal static class ChineseMentionDiscovery
             (!signals.HasFlag(MentionSignal.Introduction) &&
                 (GrammarFragment.IsMatch(name) || Noise.Contains(name) || PredicateTail.IsMatch(name) || CommonNounPrefix.IsMatch(name))))
             return MentionCandidateCategory.NoiseOrUncertain;
+        // Genre-independent lexical noise: laughter/interjections (哈哈, 呵呵) and locative phrases (沙发上, 车窗外).
+        if (name.All(c => "哈呵嘿嘻哼啊呀哦嗯呜咦唉哎噢喔嗷咯".Contains(c)) || name.Length >= 3 && "上下里内外边旁".Contains(name[^1]))
+            return MentionCandidateCategory.NoiseOrUncertain;
         if (TitleForm.IsMatch(name)) return MentionCandidateCategory.TitleCandidate;
         if (AliasForm.IsMatch(name)) return name.Length == 2 || strong || frequency >= 3 && signals.HasFlag(MentionSignal.Vocative)
             ? MentionCandidateCategory.AliasCandidate : MentionCandidateCategory.NoiseOrUncertain;
         if (signals.HasFlag(MentionSignal.Alias)) return MentionCandidateCategory.AliasCandidate;
+        // Extended-tier surnames start ordinary words (连忙, 简单, 修长…): require evidence that only people get.
+        if (ChineseSurnames.HasExtendedSurnameOnly(name) && !signals.HasFlag(MentionSignal.Known) &&
+            (signals & (MentionSignal.Introduction | MentionSignal.FamilyRole)) == 0 &&
+            !(signals.HasFlag(MentionSignal.Subject) && signals.HasFlag(MentionSignal.Vocative)))
+            return MentionCandidateCategory.NoiseOrUncertain;
         if (strong || frequency >= 3 || signals.HasFlag(MentionSignal.Known)) return MentionCandidateCategory.PersonCandidate;
         return MentionCandidateCategory.NoiseOrUncertain;
     }
