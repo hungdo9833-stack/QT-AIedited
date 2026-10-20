@@ -138,14 +138,18 @@ public partial class ChapterManagerWindow : Window
         var title = new TextBox { Text = row.VietnameseTitle, MinWidth = 430 };
         var chinese = new TextBox { Text = row.ChineseTitle, MinWidth = 430 };
         var save = new Button { Content = "Lưu tên", IsDefault = true };
+        save.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var cancel = new Button { Content = "Hủy", IsCancel = true };
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        buttons.Children.Add(cancel); buttons.Children.Add(save);
-        var panel = new StackPanel { Margin = new Thickness(16) };
+        var panel = new StackPanel { Margin = new Thickness(24) };
         panel.Children.Add(new TextBlock { Text = "Tên tiếng Việt", Margin = new Thickness(4) }); panel.Children.Add(title);
-        panel.Children.Add(new TextBlock { Text = "Tên tiếng Trung", Margin = new Thickness(4) }); panel.Children.Add(chinese); panel.Children.Add(buttons);
-        var dialog = new Window { Owner = this, Title = "Đổi tên chương", Width = 560, SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Background = Background, Foreground = Foreground, Content = panel };
+        panel.Children.Add(new TextBlock { Text = "Tên tiếng Trung", Margin = new Thickness(4) }); panel.Children.Add(chinese);
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(save, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(panel);
+        var dialog = new Window { Owner = this, Title = "Đổi tên chương", Width = 560, MinWidth = 420, SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, Content = root };
+        dialog.SetResourceReference(BackgroundProperty, "PanelBrush");
+        dialog.SetResourceReference(ForegroundProperty, "TextBrush");
         MainWindow.ClampWindowToWorkArea(dialog, 560, 320);
         save.Click += (_, _) => { if (!string.IsNullOrWhiteSpace(title.Text)) dialog.DialogResult = true; };
         if (dialog.ShowDialog() != true) return;

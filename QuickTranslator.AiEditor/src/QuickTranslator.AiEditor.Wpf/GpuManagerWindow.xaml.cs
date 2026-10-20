@@ -328,9 +328,11 @@ public partial class GpuManagerWindow : Window
             Title = "Mật khẩu sudo · Ubuntu",
             Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner,
             SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize,
-            MinWidth = 380
+            MinWidth = 420
         };
-        var stack = new StackPanel { Margin = new Thickness(16) };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
+        var stack = new StackPanel { Margin = new Thickness(24) };
         stack.Children.Add(new TextBlock
         {
             Text = "Ubuntu yêu cầu xác thực để cài/khởi động Ollama.\nDùng mật khẩu SSH hoặc nhập mật khẩu sudo riêng:",
@@ -341,13 +343,15 @@ public partial class GpuManagerWindow : Window
         if (profile.Ssh?.Authentication == SshAuthenticationKind.Password)
             input.Password = profile.Ssh.Password ?? "";
         stack.Children.Add(input);
-        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Hủy", MinWidth = 76, Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
         var confirm = new Button { Content = "Tiếp tục", MinWidth = 92, IsDefault = true };
+        confirm.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         cancel.Click += (_, _) => window.DialogResult = false;
         confirm.Click += (_, _) => window.DialogResult = true;
-        buttons.Children.Add(cancel); buttons.Children.Add(confirm); stack.Children.Add(buttons);
-        window.Content = stack;
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(confirm, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(stack);
+        window.Content = root;
         if (window.ShowDialog() != true) { input.Clear(); return null; }
         string password = input.Password;
         input.Clear();

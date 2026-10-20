@@ -388,11 +388,16 @@ public partial class MainWindow
         var right = new TextBox { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         void ShowParts() { if (selector.SelectedItem is not BoundaryChoice choice) return; int offset = choice.Offset; left.Text = text[..offset]; right.Text = text[offset..]; }
         selector.SelectionChanged += (_, _) => ShowParts(); ShowParts();
-        var content = new DockPanel(); content.Children.Add(selector); DockPanel.SetDock(selector, Dock.Top);
-        var buttons = new WrapPanel(); var accept = new Button { Content = "Áp dụng ranh giới" }; var cancel = new Button { Content = "Hủy" };
-        buttons.Children.Add(accept); buttons.Children.Add(cancel); content.Children.Add(buttons); DockPanel.SetDock(buttons, Dock.Bottom);
+        var content = new DockPanel { Margin = new Thickness(24) }; content.Children.Add(selector); DockPanel.SetDock(selector, Dock.Top);
+        var accept = new Button { Content = "Áp dụng ranh giới" }; accept.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        var cancel = new Button { Content = "Hủy" };
         var grid = new Grid(); grid.ColumnDefinitions.Add(new()); grid.ColumnDefinitions.Add(new()); grid.Children.Add(left); grid.Children.Add(right); Grid.SetColumn(right, 1); content.Children.Add(grid);
-        var window = new Window { Owner = this, Title = "Chọn cuối câu — xem trước hai đoạn", Width = 900, Height = 600, Content = content };
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(accept, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(content);
+        var window = new Window { Owner = this, Title = "Chọn cuối câu — xem trước hai đoạn", Width = 900, Height = 600, MinWidth = 420, Content = root };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
         ClampWindowToWorkArea(window, 900, 600);
         accept.Click += (_, _) => window.DialogResult = true; cancel.Click += (_, _) => window.DialogResult = false;
         return window.ShowDialog() == true && selector.SelectedItem is BoundaryChoice choice ? choice.Offset : null;
@@ -429,11 +434,19 @@ public partial class MainWindow
     };
     private void ShowTextWindow(string title, string text)
     {
+        var close = new Button { Content = "Đóng" };
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(null, close);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer);
+        root.Children.Add(new TextBox { Text = text, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(24) });
         var window = new Window
         {
             Owner = this, Title = title, Width = 900, Height = 650,
-            Content = new TextBox { Text = text, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(10) }
+            Content = root
         };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
+        close.Click += (_, _) => window.Close();
         ClampWindowToWorkArea(window, 900, 650);
         window.ShowDialog();
     }

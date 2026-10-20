@@ -156,14 +156,20 @@ public partial class MainWindow
     {
         var chinese = new TextBox { Text = source?.Chinese ?? chineseSeed ?? "" };
         var vietnamese = new TextBox { Text = source?.Vietnamese ?? "" };
-        var validation = new TextBlock { Foreground = (Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap };
-        var panel = new StackPanel { Margin = new Thickness(14) };
+        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        validation.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
+        var panel = new StackPanel { Margin = new Thickness(24) };
         panel.Children.Add(new TextBlock { Text = "Tiếng Trung", FontWeight = FontWeights.SemiBold }); panel.Children.Add(chinese);
         panel.Children.Add(new TextBlock { Text = "Tiếng Việt đã xác nhận", FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0) }); panel.Children.Add(vietnamese);
         panel.Children.Add(validation);
-        var buttons = new WrapPanel(); var save = new Button { Content = "Lưu", Style = (Style)FindResource("PrimaryButton") }; var cancel = new Button { Content = "Hủy" };
-        buttons.Children.Add(save); buttons.Children.Add(cancel); panel.Children.Add(buttons);
-        var window = new Window { Owner = this, Title = source is null ? "Thêm thuật ngữ" : "Sửa thuật ngữ", Width = 540, SizeToContent = SizeToContent.Height, Content = panel };
+        var save = new Button { Content = "Lưu" }; save.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        var cancel = new Button { Content = "Hủy" };
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(save, cancel);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(panel);
+        var window = new Window { Owner = this, Title = source is null ? "Thêm thuật ngữ" : "Sửa thuật ngữ", Width = 540, MinWidth = 420, SizeToContent = SizeToContent.Height, Content = root };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
         ClampWindowToWorkArea(window, 540, 420);
         GlossaryRow? result = null;
         save.Click += (_, _) =>
@@ -199,7 +205,8 @@ public partial class MainWindow
             var description = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 64 };
             var template = new TextBox { AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
-            var validation = new TextBlock { Foreground = (Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+            var validation = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+            validation.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
             bool dirty = false, loading = false;
 
             void RefreshList(Guid? select = null)
@@ -233,21 +240,26 @@ public partial class MainWindow
 
             var leftButtons = new WrapPanel();
             var create = new Button { Content = "Tạo" }; var duplicate = new Button { Content = "Nhân bản" }; var delete = new Button { Content = "Xóa" };
+            delete.SetResourceReference(FrameworkElement.StyleProperty, "DangerButton");
             leftButtons.Children.Add(create); leftButtons.Children.Add(duplicate); leftButtons.Children.Add(delete);
             create.Click += (_, _) => { if (dirty && !SaveEditor()) return; var p = working.Create("Preset mới"); RefreshList(p.Id); };
             duplicate.Click += (_, _) => { if (dirty && !SaveEditor()) return; var p = working.Duplicate(working.Selected.Id, working.Selected.Name + " (bản sao)"); RefreshList(p.Id); };
             delete.Click += (_, _) => { try { working.Delete(working.Selected.Id); RefreshList(); } catch (Exception ex) { validation.Text = ex.Message; } };
 
-            var save = new Button { Content = "Lưu thay đổi", Style = (Style)FindResource("PrimaryButton") };
+            var save = new Button { Content = "Lưu thay đổi" }; save.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
             var restore = new Button { Content = "Khôi phục prompt mặc định" }; var close = new Button { Content = "Đóng" };
-            var bottom = new WrapPanel(); bottom.Children.Add(save); bottom.Children.Add(restore); bottom.Children.Add(close);
-            var editor = new Grid(); editor.RowDefinitions.Add(new() { Height = GridLength.Auto }); editor.RowDefinitions.Add(new() { Height = GridLength.Auto }); editor.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) }); editor.RowDefinitions.Add(new() { Height = GridLength.Auto }); editor.RowDefinitions.Add(new() { Height = GridLength.Auto });
+            var editor = new Grid(); editor.RowDefinitions.Add(new() { Height = GridLength.Auto }); editor.RowDefinitions.Add(new() { Height = GridLength.Auto }); editor.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) }); editor.RowDefinitions.Add(new() { Height = GridLength.Auto });
             var namePanel = new DockPanel(); namePanel.Children.Add(new TextBlock { Text = "Tên preset", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center }); namePanel.Children.Add(name); DockPanel.SetDock(namePanel.Children[0], Dock.Left); editor.Children.Add(namePanel);
             var descriptionPanel = new DockPanel(); descriptionPanel.Children.Add(new TextBlock { Text = "Mô tả", FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(4, 10, 4, 0) }); descriptionPanel.Children.Add(description); DockPanel.SetDock(descriptionPanel.Children[0], Dock.Left); Grid.SetRow(descriptionPanel, 1); editor.Children.Add(descriptionPanel);
-            Grid.SetRow(template, 2); editor.Children.Add(template); Grid.SetRow(validation, 3); editor.Children.Add(validation); Grid.SetRow(bottom, 4); editor.Children.Add(bottom);
-            var grid = new Grid { Margin = new Thickness(12) }; grid.ColumnDefinitions.Add(new() { Width = new GridLength(270) }); grid.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+            Grid.SetRow(template, 2); editor.Children.Add(template); Grid.SetRow(validation, 3); editor.Children.Add(validation);
+            var grid = new Grid { Margin = new Thickness(24) }; grid.ColumnDefinitions.Add(new() { Width = new GridLength(270) }); grid.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
             var left = new DockPanel(); DockPanel.SetDock(leftButtons, Dock.Bottom); left.Children.Add(leftButtons); left.Children.Add(list); grid.Children.Add(left); Grid.SetColumn(editor, 1); grid.Children.Add(editor);
-            var window = new Window { Owner = this, Title = "Quản lý Prompt Preset", Width = 1050, Height = 720, MinWidth = 800, MinHeight = 520, Content = grid };
+            var root = new DockPanel();
+            Border footer = ThemedDialog.Footer(save, close, restore);
+            DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(grid);
+            var window = new Window { Owner = this, Title = "Quản lý Prompt Preset", Width = 1050, Height = 720, MinWidth = 800, MinHeight = 520, Content = root };
+            window.SetResourceReference(BackgroundProperty, "PanelBrush");
+            window.SetResourceReference(ForegroundProperty, "TextBrush");
             ClampWindowToWorkArea(window, 1050, 720);
             save.Click += (_, _) => SaveEditor();
             restore.Click += (_, _) => { template.Text = PromptPreset.DefaultTemplate; dirty = true; validation.Text = "Đã nạp nội dung mặc định; bấm Lưu thay đổi để xác nhận."; };

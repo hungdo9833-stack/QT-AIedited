@@ -220,8 +220,9 @@ public partial class MainWindow
             ToolTip = "Chọn mẫu xưng hô nhanh (tự điền Tự xưng / Gọi đối phương)"
         };
         var scan = new CheckBox { Content = "Quét lại bản dịch hiện có và chỉ xem trước đề xuất", IsChecked = true };
-        var validation = new TextBlock { Foreground = (Brush)FindResource("DangerBrush"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
-        var panel = new StackPanel { Margin = new Thickness(14) };
+        var validation = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
+        validation.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
+        var panel = new StackPanel { Margin = new Thickness(24) };
         void Add(string label, Control field) { panel.Children.Add(new TextBlock { Text = label, FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 2) }); panel.Children.Add(field); }
         // IMPORTANT: Keep Chinese TextBox first and Vietnamese TextBox second so AsyncSafetyTests Descendants<TextBox>(dialog).Skip(1).First() always targets `vietnamese`.
         Add("Tên tiếng Trung đã chọn", new TextBox { Text = chinese, IsReadOnly = true });
@@ -236,10 +237,14 @@ public partial class MainWindow
             Add("Mẫu xưng hô hội thoại (tùy chọn)", quickPresetCombo);
         }
         panel.Children.Add(scan); panel.Children.Add(validation);
-        var buttons = new WrapPanel(); var save = new Button { Content = "Thêm nhân vật", Style = (Style)FindResource("PrimaryButton") };
+        var save = new Button { Content = "Thêm nhân vật" }; save.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var advanced = new Button { Content = "Hồ sơ nâng cao…" }; var cancel = new Button { Content = "Hủy" };
-        buttons.Children.Add(save); buttons.Children.Add(advanced); buttons.Children.Add(cancel); panel.Children.Add(buttons);
-        var window = new Window { Owner = this, Title = "Thêm nhanh nhân vật", Width = 620, SizeToContent = SizeToContent.Height, Content = panel };
+        var root = new DockPanel();
+        Border footer = ThemedDialog.Footer(save, cancel, advanced);
+        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(panel);
+        var window = new Window { Owner = this, Title = "Thêm nhanh nhân vật", Width = 620, MinWidth = 420, SizeToContent = SizeToContent.Height, Content = root };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
         ClampWindowToWorkArea(window, 620, 680);
         CharacterProfile? result = null;
         CharacterProfile Build()
@@ -371,11 +376,15 @@ public partial class MainWindow
         else
             foreach (int start in SourceContextActions.FindOccurrences(ChapterInput.Text, selected))
                 items.Add(new(null, start, $"Vị trí {start + 1} · {OccurrencePreview(ChapterInput.Text, start, selected.Length)}"));
-        var list = new ListBox { ItemsSource = items, DisplayMemberPath = "Label", Margin = new Thickness(8) };
-        var open = new Button { Content = "Mở vị trí", Style = (Style)FindResource("PrimaryButton") };
-        var close = new Button { Content = "Đóng" }; var buttons = new WrapPanel(); buttons.Children.Add(open); buttons.Children.Add(close);
-        var panel = new DockPanel(); DockPanel.SetDock(buttons, Dock.Bottom); panel.Children.Add(buttons); panel.Children.Add(list);
+        var list = new ListBox { ItemsSource = items, DisplayMemberPath = "Label", Margin = new Thickness(24) };
+        var open = new Button { Content = "Mở vị trí" }; open.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
+        var close = new Button { Content = "Đóng" };
+        var panel = new DockPanel();
+        Border footer = ThemedDialog.Footer(open, close);
+        DockPanel.SetDock(footer, Dock.Bottom); panel.Children.Add(footer); panel.Children.Add(list);
         var window = new Window { Title = $"{items.Count} vị trí có “{selected}”", Width = 760, Height = 520, Content = panel };
+        window.SetResourceReference(BackgroundProperty, "PanelBrush");
+        window.SetResourceReference(ForegroundProperty, "TextBrush");
         if (IsVisible) window.Owner = this;
         ClampWindowToWorkArea(window, 760, 520);
         void Open()
