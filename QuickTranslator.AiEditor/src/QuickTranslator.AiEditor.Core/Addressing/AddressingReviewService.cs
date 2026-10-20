@@ -64,7 +64,10 @@ public sealed class AddressingReviewService(ProjectSession session)
         profile.NarrativePronounLocked = true;
         foreach (var form in forms.Where(f => f.Zh != profile.ChineseName && !profile.Aliases.Contains(f.Zh, StringComparer.Ordinal))) profile.Aliases.Add(form.Zh);
         foreach (var form in forms.Where(f => f.Zh != profile.ChineseName && resources.Terms.All(t => t.Chinese != f.Zh))) resources.Terms.Add(new(form.Zh, form.Vi));
-        profile.AddressingNotes = Notes(profile.AddressingNotes, OtherPhases(proposal, edit.PhaseIndex, p => p.NarrativeVi));
+        // Several phases become chapter-ranged narrative pronouns; the reviewed phase uses the edited values and is also the default.
+        profile.NarrativePhases = proposal.Phases.Count < 2 ? [] : proposal.Phases.Select((p, i) => i == edit.PhaseIndex
+            ? new NarrativePronounPhase(p.FromChapter, p.ToChapter == 0 ? null : p.ToChapter, narrative, secondary)
+            : new NarrativePronounPhase(p.FromChapter, p.ToChapter == 0 ? null : p.ToChapter, Term(p.NarrativeVi, "Đại từ kể của giai đoạn"), p.SecondaryVi.Trim())).ToList();
         if (created) profiles.Add(profile);
 
         string applied = $"{(created ? "Tạo" : "Cập nhật")} hồ sơ {proposal.Subject}={vietnamese}; {edit.Gender}; kể: {narrative}" + (secondary.Length > 0 ? "/" + secondary : "") +
@@ -78,7 +81,7 @@ public sealed class AddressingReviewService(ProjectSession session)
         string self = Term(edit.SelfReference, "Tự xưng"), address = Term(edit.AddresseeReference, "Gọi người");
         string relationship = edit.Relationship.Trim().Length > 0 ? edit.Relationship.Trim() : "Xưng hô";
         if (relationship.Length > 200) throw new InvalidOperationException("Nhãn quan hệ quá dài.");
-        var phase = Phase(proposal, edit.PhaseIndex);
+        _ = Phase(proposal, edit.PhaseIndex); // Validates the reviewed phase index.
         var resources = await Fresh(expectedResourceRevision, ct).ConfigureAwait(false);
         var speaker = Find(resources.Characters.Profiles, proposal.Subject) ?? throw new InvalidOperationException($"Chưa có hồ sơ {proposal.Subject}. Hãy duyệt nhân vật này trước.");
         var listener = Find(resources.Characters.Profiles, proposal.Listener!) ?? throw new InvalidOperationException($"Chưa có hồ sơ {proposal.Listener}. Hãy duyệt nhân vật này trước.");
@@ -88,13 +91,22 @@ public sealed class AddressingReviewService(ProjectSession session)
         if (locked is not null)
             throw new InvalidOperationException($"{speaker.VietnameseName} → {listener.VietnameseName} đã có quy tắc khóa ({locked.SelfReference}/{locked.AddresseeReference}); không ghi đè. Mở khóa trong hồ sơ nếu muốn thay.");
         speaker.Relationships.RemoveAll(r => existing.Contains(r));
-        speaker.Relationships.Add(new CharacterRelationship
+        // One phase = a whole-book rule. Several phases = one chapter-ranged rule per phase (reviewed phase uses the edits).
+        var rules = proposal.Phases.Select((p, i) => (p, i)).Where(x => proposal.Phases.Count > 1 || x.i == edit.PhaseIndex).Select(x =>
         {
-            TargetCharacterId = listener.Id, ListenerCharacterId = listener.Id, SpeakerCharacterId = speaker.Id, Relationship = relationship,
-            SelfReference = self, AddresseeReference = address, Enabled = true, Locked = true,
-            AddressingNotes = Notes("Sổ xưng hô (đã duyệt), áp dụng mặc định từ ch." + phase.FromChapter, OtherPhases(proposal, edit.PhaseIndex, p => p.SelfVi + "/" + p.AddressVi))
-        });
-        string applied = $"{proposal.Subject} → {proposal.Listener}: xưng {self} / gọi {address} ({relationship}, khóa)";
+            bool reviewed = x.i == edit.PhaseIndex;
+            return new CharacterRelationship
+            {
+                TargetCharacterId = listener.Id, ListenerCharacterId = listener.Id, SpeakerCharacterId = speaker.Id, Relationship = relationship,
+                SelfReference = reviewed ? self : Term(x.p.SelfVi, "Tự xưng của giai đoạn"), AddresseeReference = reviewed ? address : Term(x.p.AddressVi, "Gọi người của giai đoạn"),
+                Enabled = true, Locked = true, AddressingNotes = "Sổ xưng hô (đã duyệt)",
+                EffectiveFromChapter = proposal.Phases.Count > 1 ? x.p.FromChapter : null,
+                EffectiveToChapter = proposal.Phases.Count > 1 && x.p.ToChapter != 0 ? x.p.ToChapter : null
+            };
+        }).ToArray();
+        speaker.Relationships.AddRange(rules);
+        string applied = $"{proposal.Subject} → {proposal.Listener}: " + string.Join("; ", rules.Select(r =>
+            (r.EffectiveFromChapter is null ? "" : $"ch.{r.EffectiveFromChapter}–{(r.EffectiveToChapter?.ToString() ?? "…")} ") + $"xưng {r.SelfReference} / gọi {r.AddresseeReference}")) + $" ({relationship}, khóa)";
         return await SaveAndRecord(resources, proposal, applied, edit.Note, ct).ConfigureAwait(false);
     }
 
@@ -148,14 +160,6 @@ public sealed class AddressingReviewService(ProjectSession session)
         profiles.FirstOrDefault(p => p.ChineseName == name) ?? profiles.FirstOrDefault(p => p.Aliases.Contains(name, StringComparer.Ordinal));
     private static AddressingPhase Phase(AddressingProposal proposal, int index) =>
         index >= 0 && index < proposal.Phases.Count ? proposal.Phases[index] : throw new InvalidOperationException("Giai đoạn không hợp lệ.");
-    private static string OtherPhases(AddressingProposal proposal, int chosen, Func<AddressingPhase, string> describe) => string.Join("; ", proposal.Phases
-        .Where((_, i) => i != chosen).Select(p => $"ch.{p.FromChapter}–{(p.ToChapter == 0 ? "…" : p.ToChapter)}: {describe(p)}"));
-    private static string Notes(string current, string otherPhases)
-    {
-        if (otherPhases.Length == 0) return current;
-        string text = (current.Length > 0 ? current + "\n" : "") + "Giai đoạn khác (sổ xưng hô, chưa áp dụng theo chương): " + otherPhases;
-        return text.Length <= 2000 ? text : text[..2000];
-    }
     private static string Term(string value, string label)
     {
         string trimmed = value.Trim();

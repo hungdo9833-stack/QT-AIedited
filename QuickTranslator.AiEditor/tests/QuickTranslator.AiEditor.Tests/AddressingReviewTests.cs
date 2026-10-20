@@ -117,7 +117,7 @@ public sealed class AddressingReviewTests : IDisposable
     }
 
     [Fact]
-    public async Task Chosen_phase_is_applied_and_other_phases_are_kept_in_notes_for_chapter_aware_step_4()
+    public async Task All_phases_become_chapter_ranged_narrative_pronouns_and_the_reviewed_phase_is_the_default()
     {
         var (session, service, ledger) = await Seed(_root, t => t.Kind != AddressingTaskKind.Character || t.Subject != "林青" ? null : new JsonObject
         {
@@ -131,6 +131,7 @@ public sealed class AddressingReviewTests : IDisposable
         var saved = await service.AcceptCharacterAsync(hero.Id, Hero(hero) with { PhaseIndex = 1 }, await Revision(session));
         var profile = saved.Characters.Profiles.Single();
         Assert.Equal("hắn", profile.PrimaryNarrativePronoun);
-        Assert.Contains("ch.1–1: cậu", profile.AddressingNotes);
+        Assert.Equal([new NarrativePronounPhase(1, 1, "cậu", ""), new NarrativePronounPhase(2, null, "hắn", "hắn ta")], profile.NarrativePhases);
+        Assert.Equal("cậu", profile.NarrativePronounFor(1)); Assert.Equal("hắn", profile.NarrativePronounFor(9)); Assert.Equal("hắn", profile.NarrativePronounFor(null));
     }
 }

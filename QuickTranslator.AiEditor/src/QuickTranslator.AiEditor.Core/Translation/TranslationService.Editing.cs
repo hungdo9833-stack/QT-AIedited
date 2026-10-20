@@ -60,13 +60,18 @@ public sealed partial class TranslationService
     {
         var chapter = GetOperationSnapshot();
         var segment = chapter.Segments.Single(s => s.Id == segmentId);
-        return _characterConsistency.Select(chapter.CharacterProject, segment.SourceText);
+        return _characterConsistency.Select(chapter.CharacterProject, segment.SourceText, chapter.ChapterNumber, SceneText(chapter, segment));
     }
+
+    /// <summary>Source of the two segments before this one: who is "in the scene" for dialogue rules.</summary>
+    internal static string SceneText(ChapterDocument chapter, TranslationSegment segment) => string.Join("\n",
+        chapter.Segments.Where(s => s.Order < segment.Order).OrderByDescending(s => s.Order).Take(2).OrderBy(s => s.Order).Select(s => s.SourceText));
 
     private string BuildPrompt(ChapterDocument chapter, TranslationSegment segment, IReadOnlyList<GlossaryEntry> external,
         string memory, PromptPreset preset, ModelOptions options, BookKnowledgeContextSnapshot? knowledge = null)
     {
-        CharacterConsistencySelection consistency = _characterConsistency.Select(chapter.CharacterProject, segment.SourceText);
+        CharacterConsistencySelection consistency = _characterConsistency.Select(chapter.CharacterProject, segment.SourceText,
+            chapter.ChapterNumber, SceneText(chapter, segment));
         var confirmed = chapter.ConfirmedTerms.Where(t => segment.SourceText.Contains(t.Chinese, StringComparison.Ordinal) &&
                 !consistency.CoveredChineseTerms.Contains(t.Chinese))
             .Select(t => new GlossaryEntry(t.Chinese, t.Vietnamese)).ToArray();

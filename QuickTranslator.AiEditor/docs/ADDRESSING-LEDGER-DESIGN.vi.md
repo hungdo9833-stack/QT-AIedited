@@ -151,11 +151,21 @@ Không bao giờ ghi đè dữ liệu người dùng đã khóa hoặc đã có:
 
 **Khóa nhất quán Project** (để trình dịch dùng hồ sơ) được bật bằng một ô chọn riêng, không tự bật khi chấp nhận.
 
-### Bước 4 — Nối vào dịch (chưa làm)
+### Bước 4 — Nối vào dịch (đang triển khai)
 
-- Bổ sung mốc chương (`EffectiveFromChapter`/`EffectiveToChapter`) cho quy tắc xưng hô; chỉ chèn quy tắc đúng chương.
-- Chọn quy tắc theo **nhân vật có mặt trong cảnh/chương**, không chỉ trong đoạn; nếu Bước 1 gán được người nói cho lời thoại của đoạn thì ưu tiên cặp đó.
-- Mở rộng kiểm tra sau dịch: đánh dấu lời thoại có cách gọi lệch sổ.
+- **Mốc chương (đã làm).** Các trường mới đều tùy chọn; dữ liệu cũ không có chúng vẫn hoạt động như trước.
+  - `CharacterRelationship` có thêm `EffectiveFromChapter`/`EffectiveToChapter`. Không có mốc thì quy tắc áp dụng cả truyện.
+  - `CharacterProfile` có thêm `NarrativePhases`: đại từ kể theo khoảng chương. `PrimaryNarrativePronoun` vẫn là giá trị mặc định.
+  - Khi dịch, bộ chọn quy tắc dùng số chương của chương đang dịch:
+    - quy tắc có mốc chỉ áp dụng trong khoảng của nó, và không bao giờ áp dụng khi không biết số chương;
+    - cùng một hướng nói, quy tắc có mốc được ưu tiên hơn quy tắc cả truyện.
+  - Bước 3 ghi mọi giai đoạn AI đề xuất thành quy tắc có mốc chương. Giai đoạn được duyệt dùng giá trị bạn đã sửa.
+- **Nhân vật trong cảnh (đã làm).**
+  - Cảnh = 2 đoạn ngay trước trong cùng chương. Nhân vật được gọi tên ở đó là "có mặt trong cảnh".
+  - Quy tắc thoại áp dụng khi đoạn đang dịch có lời thoại, và người nói cùng người nghe đều có mặt trong đoạn hoặc trong cảnh. Trước đây cả hai tên phải nằm trong chính đoạn 300–500 chữ, nên thoại nối tiếp không có quy tắc.
+  - Nhân vật chỉ có mặt trong cảnh được ghi chú "(in scene, not named in this passage)". Hướng dẫn cho AI dịch vẫn yêu cầu chỉ dùng quy tắc khi vai trò rõ ràng.
+- **Trình sửa hồ sơ** hiển thị và giữ nguyên khoảng chương (cột "Từ ch." / "Đến ch."). Sao chép hồ sơ và cơ chế bảo vệ quy tắc khóa đều giữ các giai đoạn đại từ kể.
+- **Chưa làm:** đánh dấu sau dịch các lời thoại có cách gọi lệch sổ. Bộ chuẩn hóa đại từ sau dịch vẫn dùng đại từ kể mặc định, chưa theo chương.
 
 ### Bước 5 — Đo bằng dữ liệu thật (chưa làm)
 

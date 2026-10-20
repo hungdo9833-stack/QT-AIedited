@@ -18,6 +18,7 @@ public static class CharacterConsistencyProtection
             if (sourceOwner.NarrativePronounLocked)
             {
                 targetOwner.PrimaryNarrativePronoun = sourceOwner.PrimaryNarrativePronoun;
+                targetOwner.NarrativePhases = [.. sourceOwner.NarrativePhases]; // Chapter phases are part of the locked rule.
                 targetOwner.NarrativePronounLocked = true;
             }
 

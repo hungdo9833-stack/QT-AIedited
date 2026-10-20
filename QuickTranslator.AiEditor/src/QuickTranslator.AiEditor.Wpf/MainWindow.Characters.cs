@@ -418,6 +418,8 @@ public partial class MainWindow
                 AddresseeReference = r.AddresseeReference,
                 Enabled = r.Enabled,
                 Locked = r.Locked,
+                FromChapter = r.EffectiveFromChapter,
+                ToChapter = r.EffectiveToChapter,
                 SyncReverse = false,
                 ReverseRelationship = existingReverse?.Relationship ?? "",
                 ReverseSelfReference = existingReverse?.SelfReference ?? "",
@@ -445,6 +447,9 @@ public partial class MainWindow
         relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Gọi đối phương", Binding = new Binding(nameof(RelationshipEditorRow.AddresseeReference)), Width = new DataGridLength(0.85, DataGridLengthUnitType.Star) });
         relationshipGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Bật", Binding = new Binding(nameof(RelationshipEditorRow.Enabled)), Width = 48 });
         relationshipGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Khóa", Binding = new Binding(nameof(RelationshipEditorRow.Locked)), Width = 52 });
+        // Optional chapter range (sổ xưng hô); empty = whole book.
+        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Từ ch.", Binding = new Binding(nameof(RelationshipEditorRow.FromChapter)) { TargetNullValue = "" }, Width = 56 });
+        relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "Đến ch.", Binding = new Binding(nameof(RelationshipEditorRow.ToChapter)) { TargetNullValue = "" }, Width = 60 });
         relationshipGrid.Columns.Add(new DataGridCheckBoxColumn { Header = "Xác nhận B→A", Binding = new Binding(nameof(RelationshipEditorRow.SyncReverse)), Width = 92 });
         relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "B tự xưng", Binding = new Binding(nameof(RelationshipEditorRow.ReverseSelfReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star) });
         relationshipGrid.Columns.Add(new DataGridTextColumn { Header = "B gọi A", Binding = new Binding(nameof(RelationshipEditorRow.ReverseAddresseeReference)), Width = new DataGridLength(0.75, DataGridLengthUnitType.Star) });
@@ -578,7 +583,7 @@ public partial class MainWindow
                         ListenerCharacterId = directional ? row.TargetCharacterId : Guid.Empty,
                         Relationship = row.Relationship.Trim(), AddressingNotes = row.AddressingNotes.Trim(),
                         SelfReference = row.SelfReference.Trim(), AddresseeReference = row.AddresseeReference.Trim(),
-                        Enabled = row.Enabled, Locked = row.Locked };
+                        Enabled = row.Enabled, Locked = row.Locked, EffectiveFromChapter = row.FromChapter, EffectiveToChapter = row.ToChapter };
                 }).ToList();
                 profile.Validate();
 
@@ -727,7 +732,8 @@ public partial class MainWindow
         PrimaryNarrativePronoun = source.PrimaryNarrativePronoun, SecondaryNarrativePronoun = source.SecondaryNarrativePronoun,
         DisallowedNarrativePronouns = [.. source.DisallowedNarrativePronouns], AddressingNotes = source.AddressingNotes,
         NormalizationEnabled = source.NormalizationEnabled,
-        NarrativePronounLocked = source.NarrativePronounLocked
+        NarrativePronounLocked = source.NarrativePronounLocked,
+        NarrativePhases = [.. source.NarrativePhases]
     };
 
     private static string SafeFileName(string name) => string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
@@ -747,6 +753,8 @@ public partial class MainWindow
         public string AddresseeReference { get; set; } = "";
         public bool Enabled { get; set; }
         public bool Locked { get; set; }
+        public int? FromChapter { get; set; }
+        public int? ToChapter { get; set; }
         public bool SyncReverse { get; set; }
         public string ReverseRelationship { get; set; } = "";
         public string ReverseSelfReference { get; set; } = "";

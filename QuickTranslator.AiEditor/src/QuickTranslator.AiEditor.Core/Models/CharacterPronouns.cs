@@ -17,9 +17,16 @@ public sealed record CharacterRelationship
     public string AddresseeReference { get; init; } = "";
     public bool Enabled { get; init; }
     public bool Locked { get; init; }
+    // Optional chapter range (Addressing Ledger step 4). Null = the whole book, as before.
+    public int? EffectiveFromChapter { get; init; }
+    public int? EffectiveToChapter { get; init; }
 
     [JsonIgnore]
     public Guid EffectiveListenerCharacterId => ListenerCharacterId == Guid.Empty ? TargetCharacterId : ListenerCharacterId;
+
+    /// <summary>True when the rule has no range, or the (known) chapter lies inside it. A ranged rule never applies to an unknown chapter.</summary>
+    public bool AppliesTo(int? chapter) => EffectiveFromChapter is null && EffectiveToChapter is null ||
+        chapter is int c && c >= (EffectiveFromChapter ?? 1) && c <= (EffectiveToChapter ?? int.MaxValue);
 
     public Guid EffectiveSpeakerCharacterId(Guid ownerCharacterId) =>
         SpeakerCharacterId == Guid.Empty ? ownerCharacterId : SpeakerCharacterId;
@@ -121,6 +128,9 @@ public static class CharacterRelationshipSync
     }
 }
 
+/// <summary>Narrative pronoun valid from a chapter (inclusive) to an optional end chapter (inclusive; null = open).</summary>
+public sealed record NarrativePronounPhase(int FromChapter, int? ToChapter, string Primary, string Secondary);
+
 public sealed class CharacterProfile
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -135,6 +145,12 @@ public sealed class CharacterProfile
     public string AddressingNotes { get; set; } = "";
     public bool NormalizationEnabled { get; set; } = true;
     public bool NarrativePronounLocked { get; set; }
+    /// <summary>Optional chapter-specific narrative pronouns; Primary/SecondaryNarrativePronoun stay the default.</summary>
+    public List<NarrativePronounPhase> NarrativePhases { get; set; } = [];
+
+    /// <summary>Narrative pronoun for a chapter: the phase covering it, otherwise the default primary pronoun.</summary>
+    public string NarrativePronounFor(int? chapter) =>
+        (chapter is int c ? NarrativePhases.FirstOrDefault(p => c >= p.FromChapter && c <= (p.ToChapter ?? int.MaxValue))?.Primary : null) ?? PrimaryNarrativePronoun;
     [JsonIgnore]
     public string GenderLabel => Gender switch
     {
@@ -200,6 +216,13 @@ public sealed class CharacterProfile
             throw new ArgumentException($"Bí danh, đại từ hoặc quan hệ của {VietnameseName} không hợp lệ.");
         if (NarrativePronounLocked && string.IsNullOrWhiteSpace(PrimaryNarrativePronoun))
             throw new ArgumentException($"Nhân vật {VietnameseName} cần đại từ trần thuật chính trước khi khóa.");
+        NarrativePhases ??= [];
+        if (NarrativePhases.Count > 20 || NarrativePhases.Any(p => p is null || p.FromChapter < 1 || p.ToChapter < p.FromChapter ||
+                string.IsNullOrWhiteSpace(p.Primary) || p.Primary.Length > 80 || p.Secondary is null || p.Secondary.Length > 80) ||
+            NarrativePhases.OrderBy(p => p.FromChapter).Zip(NarrativePhases.OrderBy(p => p.FromChapter).Skip(1), (a, b) => a.ToChapter is null || a.ToChapter >= b.FromChapter).Any(x => x))
+            throw new ArgumentException($"Giai đoạn đại từ kể của {VietnameseName} không hợp lệ hoặc chồng lấn.");
+        if (Relationships.Any(r => r.EffectiveFromChapter < 1 || r.EffectiveToChapter < 1 || r.EffectiveToChapter < r.EffectiveFromChapter))
+            throw new ArgumentException($"Khoảng chương của quan hệ {VietnameseName} không hợp lệ.");
     }
 }
 

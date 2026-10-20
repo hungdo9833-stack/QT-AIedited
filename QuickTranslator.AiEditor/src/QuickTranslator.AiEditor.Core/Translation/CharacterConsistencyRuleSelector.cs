@@ -27,19 +27,31 @@ public sealed class CharacterConsistencyRuleSelector(
     private int _cachedProfileCount = -1;
     private NameOwner[] _cachedNames = [];
 
-    public CharacterConsistencySelection Select(CharacterProject project, string sourceText)
+    /// <param name="chapterNumber">Chapter being translated; ranged rules/phases apply only inside their range and never to an unknown chapter.</param>
+    /// <param name="sceneText">
+    /// Source just before the segment (same chapter). Characters named there are scene participants: a dialogue rule
+    /// applies when speaker and listener are both in the segment or the scene, and the segment contains dialogue.
+    /// </param>
+    public CharacterConsistencySelection Select(CharacterProject project, string sourceText, int? chapterNumber = null, string sceneText = "")
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(sourceText);
+        ArgumentNullException.ThrowIfNull(sceneText);
         if (!project.ConsistencyLockEnabled || sourceText.Length == 0) return CharacterConsistencySelection.Empty;
         if (maximumCharacters <= 0 || maximumDialogueRules < 0 || maximumBlockCharacters < 320)
             throw new InvalidOperationException("Giới hạn Character Consistency không hợp lệ.");
 
         var occurrences = FindUnambiguousOccurrences(project, sourceText);
-        var relevant = occurrences.GroupBy(item => item.Profile.Id)
+        var inSegment = occurrences.GroupBy(item => item.Profile.Id)
             .Select(group => new RelevantCharacter(group.First().Profile, group.Min(item => item.Start)))
-            .OrderBy(item => item.FirstOffset).ThenBy(item => item.Profile.Id)
-            .Take(maximumCharacters).ToArray();
+            .OrderBy(item => item.FirstOffset).ThenBy(item => item.Profile.Id).ToArray();
+        // Scene participants rank after every segment character (offset shifted past any segment offset).
+        var segmentIds = inSegment.Select(x => x.Profile.Id).ToHashSet();
+        var inScene = sceneText.Length == 0 ? [] : FindUnambiguousOccurrences(project, sceneText)
+            .Where(item => !segmentIds.Contains(item.Profile.Id)).GroupBy(item => item.Profile.Id)
+            .Select(group => new RelevantCharacter(group.First().Profile, int.MaxValue / 2 + group.Min(item => item.Start)))
+            .OrderBy(item => item.FirstOffset).ToArray();
+        var relevant = inSegment.Concat(inScene).Take(maximumCharacters).ToArray();
         var relevantIds = relevant.Select(item => item.Profile.Id).ToHashSet();
 
         bool hasDialogueEvidence = sourceText.IndexOfAny(['“', '”', '「', '」', '『', '』', '"']) >= 0;
@@ -47,22 +59,26 @@ public sealed class CharacterConsistencyRuleSelector(
             ? relevant.SelectMany(owner => owner.Profile.Relationships.Select(relation => new DialogueRule(owner.Profile, relation)))
                 .Where(item => item.Relation.Enabled && relevantIds.Contains(item.Relation.EffectiveListenerCharacterId) &&
                     item.Relation.EffectiveSpeakerCharacterId(item.Owner.Id) == item.Owner.Id &&
+                    item.Relation.AppliesTo(chapterNumber) &&
                     !string.IsNullOrWhiteSpace(item.Relation.SelfReference) &&
                     !string.IsNullOrWhiteSpace(item.Relation.AddresseeReference))
+                // A chapter-ranged rule is more specific than a whole-book rule for the same direction.
+                .GroupBy(item => (item.Owner.Id, item.Relation.EffectiveListenerCharacterId))
+                .Select(g => g.OrderBy(item => item.Relation.EffectiveFromChapter is null && item.Relation.EffectiveToChapter is null).First())
                 .OrderBy(item => relevant.First(r => r.Profile.Id == item.Owner.Id).FirstOffset)
                 .ThenBy(item => relevant.First(r => r.Profile.Id == item.Relation.EffectiveListenerCharacterId).FirstOffset)
                 .ThenBy(item => item.Owner.Id).ThenBy(item => item.Relation.EffectiveListenerCharacterId)
                 .Take(maximumDialogueRules).ToArray()
             : [];
         var narrative = relevant.Where(item => item.Profile.NarrativePronounLocked &&
-            !string.IsNullOrWhiteSpace(item.Profile.PrimaryNarrativePronoun)).ToArray();
+            !string.IsNullOrWhiteSpace(item.Profile.NarrativePronounFor(chapterNumber))).ToArray();
         if (narrative.Length == 0 && dialogueRules.Length == 0) return CharacterConsistencySelection.Empty;
 
         var requiredProfiles = narrative.Select(item => item.Profile.Id)
             .Concat(dialogueRules.SelectMany(item => new[] { item.Owner.Id, item.Relation.EffectiveListenerCharacterId }))
             .ToHashSet();
         var builder = new StringBuilder("CHARACTER CONSISTENCY (confirmed project rules):\n");
-        int omitted = Math.Max(0, occurrences.Select(item => item.Profile.Id).Distinct().Count() - relevant.Length);
+        int omitted = Math.Max(0, inSegment.Length + inScene.Length - relevant.Length);
         var includedIds = new List<Guid>();
         var covered = new HashSet<string>(StringComparer.Ordinal);
         int narrativeCount = 0;
@@ -72,7 +88,8 @@ public sealed class CharacterConsistencyRuleSelector(
         {
             string identity = $"- CHARACTER {DisplaySourceName(item.Profile)} = {item.Profile.VietnameseName}";
             if (item.Profile.NarrativePronounLocked)
-                identity += $"; narrative pronoun = {item.Profile.PrimaryNarrativePronoun} (LOCKED)";
+                identity += $"; narrative pronoun = {item.Profile.NarrativePronounFor(chapterNumber)} (LOCKED)";
+            if (!segmentIds.Contains(item.Profile.Id)) identity += " (in scene, not named in this passage)";
             if (!TryAppendRule(builder, identity)) { omitted++; continue; }
             includedIds.Add(item.Profile.Id);
             if (item.Profile.NarrativePronounLocked) narrativeCount++;
