@@ -88,6 +88,63 @@ public sealed class AddressingLedgerUiTests
         finally { window.Close(); }
     });
 
+    /// <summary>A provider stand-in that reads the prompt it is sent (tasks found by their prompt block) and answers them.</summary>
+    private sealed class PromptMock(Func<IReadOnlyList<AddressingTask>> candidates) : IJsonSchemaOllamaClient
+    {
+        public int Calls { get; private set; }
+        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, System.Text.Json.JsonElement schema, CancellationToken ct = default)
+        {
+            Calls++;
+            var request = AddressingAiSurvey.PlanRequests(AddressingAiSurvey.TasksInPrompt(prompt, candidates()), "mock").Single();
+            return Task.FromResult(new OllamaCompletion(Reply(request), true, "stop", new GenerationMetrics()));
+        }
+    }
+
+    [Fact]
+    public Task Survey_button_asks_first_runs_the_pipeline_into_the_project_ledger_then_Complete_writes_it() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture(); await fixture.CreateProjectAsync();
+        for (int n = 1; n <= 2; n++)
+            await fixture.Repository.AddChapterAsync(fixture.Project, TranslationService.CreateChapter("Chương " + n, string.Concat(Enumerable.Repeat(Block, 3))), n);
+        var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(fixture.Project, fixture.Repository);
+        var resources = await new ProjectResourceStore(fixture.Project).LoadAsync();
+        var store = new AddressingLedgerStore(fixture.Project);
+        var client = new PromptMock(() =>
+        {
+            var work = AddressingSurveyRunner.Plan(fixture.Project.Manifest.ProjectId, sources, resources, store.LoadAsync().GetAwaiter().GetResult());
+            return [.. work.Scenes, .. work.Tasks];
+        });
+        var window = new AddressingLedgerWindow(fixture.Project, fixture.Repository, _ => { }, []) { BackendFactory = (_, _, _) => client };
+        try
+        {
+            await window.LoadAsync(); Assert.Null(window.LastError);
+            Assert.False(window.Work!.Complete); Assert.Contains("Còn", window.SurveyStatus);
+            Assert.Empty(window.Preview!.Applied); // Nothing surveyed yet: nothing to complete.
+
+            window.ConfirmSend = _ => false; window.SetSurveyInputs(0, "gemini-3.6-flash", 5);
+            await window.SurveyAsync();
+            Assert.Equal(0, client.Calls); // Declined: no source text leaves the computer.
+
+            string? asked = null; window.ConfirmSend = m => { asked = m; return true; };
+            await window.SurveyAsync(); Assert.Null(window.LastError);
+            Assert.Contains("gemini-3.6-flash", asked); Assert.Contains("tối đa 5 request", asked, StringComparison.OrdinalIgnoreCase);
+            Assert.True(client.Calls >= 1); Assert.Null(window.LastSurvey!.StoppedBy);
+            Assert.True(window.Work!.Complete); Assert.Contains("Đã khảo sát xong", window.SurveyStatus);
+            Assert.NotEmpty((await store.LoadAsync()).Proposals); // Written to the Project's own ledger.
+            Assert.Empty((await new ProjectResourceStore(fixture.Project).LoadAsync()).Characters.Profiles); // Profiles only change on "Hoàn thành".
+
+            int calls = client.Calls;
+            await window.SurveyAsync(); Assert.Equal(calls, client.Calls); // Already complete: no request.
+            Assert.NotEmpty(window.Preview!.Applied);
+            await window.CompleteAsync(); Assert.Null(window.LastError);
+            var saved = await new ProjectResourceStore(fixture.Project).LoadAsync();
+            Assert.Contains(saved.Characters.Profiles, p => p.ChineseName == "王秀兰" && p.NarrativePronounLocked);
+            Assert.True(saved.Characters.ConsistencyLockEnabled);
+        }
+        finally { window.Close(); }
+    });
+
     [Fact]
     public Task One_click_Complete_writes_everything_turns_translation_on_and_can_be_undone() => StaHost.Run(async () =>
     {

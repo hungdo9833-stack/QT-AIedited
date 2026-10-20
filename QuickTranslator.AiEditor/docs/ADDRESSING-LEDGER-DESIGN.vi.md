@@ -341,9 +341,31 @@ Bản đếm đầu tiên cho 柳轻锋 (nam chính) ra 他 190 / 她 99. Bản 
 - Khối quy tắc trình dịch nhận ở ch.18 có đủ đại từ kể của 陆霆骁 / 小宝 / 陆景礼 / 陆老爷子 và 4 quy tắc xưng hô.
 - Hoàn tác khôi phục đúng như trước.
 
+**Giai đoạn B: nút Khảo sát ngay trong phần mềm (đã triển khai, mới test bằng mock).** Trong cửa sổ Sổ xưng hô, mục ① có:
+
+- danh sách chọn AI: Gemini Flash Pool hoặc một backend Ollama đã cấu hình;
+- danh sách chọn model;
+- ô **"Tối đa request mỗi lần"** (mặc định 10);
+- hai nút **Khảo sát / chạy tiếp** và **Dừng**.
+
+Khi bấm Khảo sát (`AddressingSurveyRunner.RunAsync`):
+
+1. **Hỏi xác nhận** trước khi gửi trích đoạn nguyên tác ra ngoài: hiện nơi nhận, tên model và số request tối đa.
+2. **CPU lập kế hoạch** cho cả truyện, đối chiếu với sổ hiện có (`AddressingSurveyRunner.Plan`): tên ứng viên và danh xưng (quét census một lần), cảnh, nhân vật, cặp.
+3. **Cảnh trước.** Sau khi xong các cảnh, chương trình **lập lại kế hoạch** nhân vật và cặp với các lượt nói vừa có, nên những cặp nhờ cảnh mới lộ ra cũng được hỏi. Một cặp mà CPU đã thấy từ đầu cũng chỉ được hỏi **một lần**, sau khi xong cảnh.
+4. **Giới hạn và lỗi:**
+   - Mỗi request chỉ thử một lần; trong một lần bấm, mỗi nhiệm vụ được gửi tối đa một lần.
+   - Câu trả lời không hợp lệ chỉ được hỏi lại ở lần bấm sau (mã `RetryNextRun`).
+   - Sổ được lưu sau mỗi request.
+   - Lần bấm dừng khi: đủ số request (`RequestBudget`), bấm Dừng, gặp lỗi dịch vụ đầu tiên (`Http503`…), hoặc AI từ chối nội dung (`ProviderRefusal`).
+5. **Chạy tiếp:** bấm lại thì tiếp tục đúng chỗ dừng; phần đã xong không gửi lại.
+6. **Kết quả được ghi vào sổ của chính Project** (`Settings/addressing-ledger.v1.json`), không đụng hồ sơ nhân vật. Hồ sơ chỉ đổi khi bấm **Hoàn thành**.
+7. **Dòng trạng thái** cho biết còn bao nhiêu cảnh, nhân vật, cặp chưa khảo sát và ước tính số request. Khi xong, nó báo "Đã khảo sát xong" và nhắc bấm Hoàn thành.
+
+Công cụ probe vẫn dùng được để thử offline hoặc chạy bằng dòng lệnh.
+
 **Còn lại (các giai đoạn sau):**
 
-- **B:** chạy toàn bộ khảo sát ngay trong phần mềm (hiện vẫn dùng probe).
 - **C:** hỏi mỗi cặp theo cả hai chiều trong một nhiệm vụ và kiểm tra chéo cho khớp (ví dụ `陆霆骁 → 小宝: tôi / con` lẽ ra phải là `ba / con`).
 - **D:** gộp danh tính (`小包子` và `小宝` hiện là hai hồ sơ).
 - Người chỉ có danh xưng (`陆老夫人`) chưa có hồ sơ, nên các cặp của bà chưa được ghi.

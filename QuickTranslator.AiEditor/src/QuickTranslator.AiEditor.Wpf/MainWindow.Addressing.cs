@@ -10,12 +10,12 @@ public partial class MainWindow
     {
         if (_projectSession is null || _projectResources is null)
         {
-            ShowError(new InvalidOperationException("Hãy mở một Project trước khi duyệt sổ xưng hô."));
+            ShowError(new InvalidOperationException("Hãy mở một Project trước khi mở sổ xưng hô."));
             return;
         }
         if (_addressingLedgerWindow is { IsVisible: true }) { _addressingLedgerWindow.Activate(); return; }
         // Accepted rules are committed by the review service; this only refreshes the in-memory editor state.
-        _addressingLedgerWindow = new AddressingLedgerWindow(_projectSession, _projectRepository, ApplyBookIntelligenceResources)
+        _addressingLedgerWindow = new AddressingLedgerWindow(_projectSession, _projectRepository, ApplyBookIntelligenceResources, _ollamaBackends.Profiles)
             { Owner = IsVisible ? this : null };
         _addressingLedgerWindow.Closed += (_, _) => _addressingLedgerWindow = null;
         _addressingLedgerWindow.Show();

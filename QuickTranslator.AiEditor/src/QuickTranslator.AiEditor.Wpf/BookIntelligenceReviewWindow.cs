@@ -411,7 +411,7 @@ public sealed class BookIntelligenceReviewWindow : Window
         catch (Exception ex) { ShowFailure(ex); }
     }
 
-    private static OllamaBackendProfile CreateGeminiFlashPoolProfile()
+    internal static OllamaBackendProfile CreateGeminiFlashPoolProfile()
     {
         const string model = "gemini-3.8-flash";
         return new OllamaBackendProfile

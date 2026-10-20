@@ -99,14 +99,24 @@ public static class AddressingAiSurvey
     /// <paramref name="minimumMentions"/> times plus existing profile names and aliases. Same inputs → same task ids.
     /// </summary>
     public static IReadOnlyList<string> CandidateNames(Guid projectId, IReadOnlyList<CensusSource> sources, Projects.ProjectResources resources, int minimumMentions = 3)
+        => SurveyNames(projectId, sources, resources, minimumMentions).Names;
+
+    /// <summary>Candidate names and title forms from one census pass (see <see cref="CandidateNames"/> and <see cref="TitleForms"/>).</summary>
+    public static (IReadOnlyList<string> Names, IReadOnlyList<string> Titles) SurveyNames(Guid projectId, IReadOnlyList<CensusSource> sources,
+        Projects.ProjectResources resources, int minimumMentions = 3)
     {
         var census = CharacterMentionCensus.Scan(projectId, 0, sources, resources, new BookIntelligenceState { ProjectId = projectId });
-        return census.Candidates
+        var names = census.Candidates
             .Where(c => c.Category is MentionCandidateCategory.PersonCandidate or MentionCandidateCategory.AliasCandidate && c.Frequency >= minimumMentions &&
                 !IsOrganizationOrPlace(c.ChineseName))
             .Select(c => c.ChineseName)
             .Concat(resources.Characters.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases)))
             .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.Ordinal).ToArray();
+        var known = names.ToHashSet(StringComparer.Ordinal);
+        var titles = census.Candidates.Where(c => c.Category == MentionCandidateCategory.TitleCandidate && c.Frequency >= minimumMentions &&
+                !known.Contains(c.ChineseName) && !IsOrganizationOrPlace(c.ChineseName))
+            .OrderByDescending(c => c.Frequency).ThenBy(c => c.ChineseName, StringComparer.Ordinal).Select(c => c.ChineseName).ToArray();
+        return (names, titles);
     }
 
     /// <summary>
@@ -115,13 +125,7 @@ public static class AddressingAiSurvey
     /// listed one (陆先生 = 陆霆骁, 宁小姐 = either sister), so it is never merged or turned into a profile here.
     /// </summary>
     public static IReadOnlyList<string> TitleForms(Guid projectId, IReadOnlyList<CensusSource> sources, Projects.ProjectResources resources, int minimumMentions = 3)
-    {
-        var census = CharacterMentionCensus.Scan(projectId, 0, sources, resources, new BookIntelligenceState { ProjectId = projectId });
-        var names = CandidateNames(projectId, sources, resources, minimumMentions).ToHashSet(StringComparer.Ordinal);
-        return census.Candidates.Where(c => c.Category == MentionCandidateCategory.TitleCandidate && c.Frequency >= minimumMentions &&
-                !names.Contains(c.ChineseName) && !IsOrganizationOrPlace(c.ChineseName))
-            .OrderByDescending(c => c.Frequency).ThenBy(c => c.ChineseName, StringComparer.Ordinal).Select(c => c.ChineseName).ToArray();
-    }
+        => SurveyNames(projectId, sources, resources, minimumMentions).Titles;
 
     // Organisations, clans and places across genres (urban, xianxia, historical). Only suffixes that almost never end a
     // person's name: 国/城/山/宫/谷/楼/氏 are excluded on purpose (张建国, 花满楼, 王氏 = Mrs Wang in historical novels). Existing profile names are never filtered.

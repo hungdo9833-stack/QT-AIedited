@@ -6,6 +6,7 @@ using QuickTranslator.AiEditor.Core.Addressing;
 using QuickTranslator.AiEditor.Core.BookIntelligence;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -41,6 +42,23 @@ public sealed class AddressingLedgerWindow : Window
     private readonly TextBox _completion = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 140, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) };
     internal AddressingCompletion? Preview { get; private set; }
     internal string CompletionText => _completion.Text;
+    // Survey (step 2/2b): one button runs the whole pipeline into the Project's ledger; nothing is written to profiles.
+    private readonly IReadOnlyList<OllamaBackendProfile> _profiles;
+    private readonly ComboBox _backend = new() { Width = 190, DisplayMemberPath = nameof(OllamaBackendProfile.Name) };
+    private readonly ComboBox _model = new() { Width = 190, IsEditable = true, Margin = new Thickness(6, 0, 0, 0) };
+    private readonly TextBox _maxRequests = new() { Text = "10", Width = 45, Margin = new Thickness(4, 0, 0, 0), VerticalContentAlignment = VerticalAlignment.Center };
+    private readonly Button _survey = new() { Content = "▶ Khảo sát / chạy tiếp", FontWeight = FontWeights.SemiBold, Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) };
+    private readonly Button _stop = new() { Content = "Dừng", Margin = new Thickness(6, 0, 0, 0), IsEnabled = false };
+    private readonly TextBlock _surveyStatus = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
+    private CancellationTokenSource? _surveyCancel;
+    private IReadOnlyList<CensusSource> _sources = [];
+    internal AddressingSurveyWork? Work { get; private set; }
+    internal AddressingSurveyResult? LastSurvey { get; private set; }
+    internal string SurveyStatus => _surveyStatus.Text;
+    /// <summary>Asked before any source text leaves the computer; tests answer it.</summary>
+    internal Func<string, bool> ConfirmSend { get; set; }
+    /// <summary>Builds the provider for one click with its request limit (Gemini via the key vault, or the selected Ollama profile).</summary>
+    internal Func<OllamaBackendProfile, ModelOptions, int, IJsonSchemaOllamaClient> BackendFactory { get; set; }
     private Dictionary<string, AddressingTask> _tasks = [];
     private bool _updatingLock;
     internal AddressingLedgerState State { get; private set; } = new();
@@ -48,9 +66,20 @@ public sealed class AddressingLedgerWindow : Window
     internal string? LastError { get; private set; }
     internal AddressingProposal? Selected => (_tabs.SelectedIndex == 0 ? _characters : _pairs).SelectedItem is AddressingRow row ? row.Proposal : null;
 
-    public AddressingLedgerWindow(ProjectSession session, ProjectRepository repository, Action<ProjectResources> applyResources)
+    public AddressingLedgerWindow(ProjectSession session, ProjectRepository repository, Action<ProjectResources> applyResources,
+        IReadOnlyList<OllamaBackendProfile>? profiles = null)
     {
         _session = session; _repository = repository; _applyResources = applyResources; _service = new AddressingReviewService(session);
+        _profiles = [BookIntelligenceReviewWindow.CreateGeminiFlashPoolProfile(), .. (profiles ?? []).Where(p => p.Id != BookIntelligenceReviewWindow.GeminiFlashPoolProfileId)];
+        ConfirmSend = message => MessageBox.Show(this, message, "Sổ xưng hô · khảo sát", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+        BackendFactory = (profile, options, maximumRequests) =>
+        {
+            var budget = new SemanticSurveyBudget(maximumRequests, 100_000_000);
+            if (profile.Id != BookIntelligenceReviewWindow.GeminiFlashPoolProfileId) return SemanticSurveyBackend.Ollama(profile, options, budget);
+            string key = GeminiApiKeyVault.ResolveForSurvey();
+            if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Nhập Gemini key trong Cài đặt → AI & hiệu năng trước khi khảo sát.");
+            return SemanticSurveyBackend.Gemini(key, GeminiSurveyProjectScope.Resolve(key, Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_PROJECT_ID")), options, budget);
+        };
         Title = "QT Studio · Sổ xưng hô"; Width = 1200; Height = 760; MinWidth = 820; MinHeight = 520;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         SetResourceReference(BackgroundProperty, "AppBackgroundBrush"); SetResourceReference(ForegroundProperty, "TextBrush");
@@ -74,9 +103,15 @@ public sealed class AddressingLedgerWindow : Window
         var root = new DockPanel { Margin = new Thickness(12) };
         var top = new StackPanel(); DockPanel.SetDock(top, Dock.Top);
         top.Children.Add(new TextBlock { Text = "Sổ xưng hô · kết quả khảo sát", FontSize = 20 });
-        top.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "Bấm Hoàn thành để ghi toàn bộ nhân vật (tên Việt, tên phụ, đại từ ngôi thứ 3) và xưng hô theo cặp đã qua kiểm chứng vào hồ sơ, " +
-            "rồi dịch ngay. Hồ sơ hoặc quy tắc bạn đã khóa / đã có sẵn không bao giờ bị ghi đè; những mục không tự quyết được chỉ được liệt kê, không chặn Hoàn thành. " +
-            "Có thể hoàn tác. Duyệt từng mục bên dưới là tùy chọn." });
+        top.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "① Khảo sát: CPU tìm nhân vật, lời thoại và cảnh, rồi AI xác định người nói, đại từ kể, tên phụ và xưng hô theo cặp; " +
+            "mọi câu trả lời được kiểm chứng với nguyên văn. Mỗi lần bấm gửi tối đa số request đã đặt; bấm lại để chạy tiếp, phần đã xong không gửi lại. " +
+            "② Hoàn thành: ghi toàn bộ kết quả đã kiểm chứng vào hồ sơ rồi dịch ngay. Hồ sơ hoặc quy tắc bạn đã khóa / đã có sẵn không bao giờ bị ghi đè; " +
+            "mục không tự quyết được chỉ được liệt kê, không chặn Hoàn thành. Có thể hoàn tác. Duyệt từng mục bên dưới là tùy chọn." });
+        var survey = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+        foreach (var e in new UIElement[] { new TextBlock { Text = "AI:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) }, _backend, _model,
+                     new TextBlock { Text = "Tối đa request mỗi lần:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) }, _maxRequests, _survey, _stop })
+            survey.Children.Add(e);
+        top.Children.Add(survey); top.Children.Add(_surveyStatus);
         var finish = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
         finish.Children.Add(_complete); finish.Children.Add(_undo); top.Children.Add(finish); top.Children.Add(_completion);
         var bar = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
@@ -117,6 +152,11 @@ public sealed class AddressingLedgerWindow : Window
         _lock.Click += async (_, _) => await SetLockAsync(_lock.IsChecked == true);
         _complete.Click += async (_, _) => await CompleteAsync();
         _undo.Click += async (_, _) => await UndoAsync(discardLaterEdits: false);
+        _backend.ItemsSource = _profiles;
+        _backend.SelectionChanged += (_, _) => PopulateModels();
+        _backend.SelectedIndex = 0;
+        _survey.Click += async (_, _) => await SurveyAsync();
+        _stop.Click += (_, _) => _surveyCancel?.Cancel();
         ShowSelection();
         return root;
     }
@@ -127,12 +167,12 @@ public sealed class AddressingLedgerWindow : Window
         {
             State = await _service.LoadAsync();
             CurrentResources = await new ProjectResourceStore(_session).LoadAsync();
-            // Re-plan locally (CPU, no AI) only to show the samples each task was sent with.
-            var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(_session, _repository);
-            var names = AddressingAiSurvey.CandidateNames(_session.Manifest.ProjectId, sources, CurrentResources);
-            // Verified scene turns change which quotes count for each pair, so they are part of the plan.
-            var turns = State.SceneTurns();
-            _tasks = (await Task.Run(() => AddressingAiSurvey.PlanTasks(sources, names, sceneTurns: turns))).ToDictionary(t => t.TaskId, StringComparer.Ordinal);
+            // Re-plan locally (CPU, no AI): what is left to survey, and the samples each task was sent with.
+            _sources = await EntityMemoryProjectInputs.LoadSourcesAsync(_session, _repository);
+            var (state, resources, sources) = (State, CurrentResources, _sources);
+            Work = await Task.Run(() => AddressingSurveyRunner.Plan(_session.Manifest.ProjectId, sources, resources, state));
+            _tasks = Work.Scenes.Concat(Work.Tasks).GroupBy(t => t.TaskId).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+            ShowWork(Work);
             _updatingLock = true; _lock.IsChecked = CurrentResources.Characters.ConsistencyLockEnabled; _updatingLock = false;
             await RefreshCompletionAsync();
             Refresh();
@@ -247,6 +287,89 @@ public sealed class AddressingLedgerWindow : Window
             var saved = await _service.SetConsistencyLockAsync(enabled, CurrentResources.Revision);
             CurrentResources = saved; _applyResources(saved); Refresh();
         }, enabled ? "Đã bật khóa nhất quán: trình dịch sẽ dùng hồ sơ nhân vật." : "Đã tắt khóa nhất quán.");
+    }
+
+    private void PopulateModels()
+    {
+        if (_backend.SelectedItem is not OllamaBackendProfile profile) return;
+        _model.ItemsSource = profile.Id == BookIntelligenceReviewWindow.GeminiFlashPoolProfileId
+            ? new[] { "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite" } : new[] { profile.Model };
+        _model.SelectedIndex = 0;
+    }
+
+    /// <summary>Same model options as the other survey windows: Gemini gets a large context and output budget.</summary>
+    private static ModelOptions SurveyOptions(OllamaBackendProfile profile, string model)
+    {
+        var runtime = (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).ModelOptions;
+        bool gemini = profile.Id == BookIntelligenceReviewWindow.GeminiFlashPoolProfileId;
+        var options = runtime with
+        {
+            Model = model.Trim(), ContextSize = gemini ? Math.Max(65536, runtime.ContextSize) : runtime.ContextSize,
+            MaximumOutputTokens = gemini ? Math.Max(8192, runtime.MaximumOutputTokens) : runtime.MaximumOutputTokens
+        };
+        options.Validate(); return options;
+    }
+
+    private void ShowWork(AddressingSurveyWork work) => _surveyStatus.Text = work.Complete
+        ? $"Đã khảo sát xong: {work.Scenes.Count} cảnh, {work.Tasks.Count(t => t.Kind == AddressingTaskKind.Character)} nhân vật, {work.Tasks.Count(t => t.Kind == AddressingTaskKind.Pair)} cặp. Bấm Hoàn thành để ghi vào hồ sơ."
+        : $"Còn {work.PendingScenes.Count} cảnh, {work.PendingCharacters} nhân vật, {work.PendingPairs} cặp chưa khảo sát (khoảng {work.EstimatedRequests} request; cặp mới có thể xuất hiện sau khi xong các cảnh).";
+
+    private static string StopReason(string? code) => code switch
+    {
+        null => "",
+        "RequestBudget" => "Đã dùng hết số request của lần này: bấm Khảo sát lần nữa để chạy tiếp.",
+        "RetryNextRun" => "Một số câu trả lời không qua kiểm chứng: bấm Khảo sát lần nữa để hỏi lại (mỗi nhiệm vụ tối đa 2 lần).",
+        "Cancelled" => "Đã dừng theo yêu cầu. Phần đã xong được giữ lại.",
+        "ProviderRefusal" => "AI từ chối nội dung của một request (thường do nội dung nhạy cảm). Phần đó được giữ lại, không gửi lại; thử Ollama cục bộ cho truyện này.",
+        "ContextBudgetExceeded" => "Request lớn hơn context của model: chọn model có context lớn hơn.",
+        _ => $"Dừng vì lỗi {code}. Phần đã xong được giữ lại; thử lại sau hoặc đổi model."
+    };
+
+    internal void SetSurveyInputs(int backendIndex, string model, int maximumRequests)
+    {
+        _backend.SelectedIndex = backendIndex; _model.Text = model; _maxRequests.Text = maximumRequests.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// One click: plan (CPU) → scenes → characters and pairs (planned again with the scene turns), into the Project's
+    /// ledger. Asks before sending; stops at the request limit, on Dừng, or on the first service error.
+    /// </summary>
+    internal async Task SurveyAsync()
+    {
+        if (CurrentResources is null || _backend.SelectedItem is not OllamaBackendProfile profile || _surveyCancel is not null) return;
+        LastError = null;
+        if (!int.TryParse(_maxRequests.Text, out int maximum) || maximum is < 1 or > 1000) { LastError = "Số request phải từ 1 đến 1000."; _surveyStatus.Text = LastError; return; }
+        ModelOptions options;
+        try { options = SurveyOptions(profile, _model.Text); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { LastError = ex.Message; _surveyStatus.Text = ex.Message; return; }
+        if (Work is { Complete: true }) { ShowWork(Work); return; }
+        string where = profile.Id == BookIntelligenceReviewWindow.GeminiFlashPoolProfileId ? "Google Gemini (dịch vụ trên mạng)" : profile.Name;
+        if (!ConfirmSend($"Gửi trích đoạn nguyên tác tới {where}, model {options.Model}? Tối đa {maximum} request lần này, mỗi request thử một lần. " +
+                         "Kết quả chỉ ghi vào sổ khảo sát của Project; hồ sơ nhân vật chỉ đổi khi bạn bấm Hoàn thành.")) return;
+        _surveyCancel = new(); var ct = _surveyCancel.Token;
+        foreach (var c in new UIElement[] { _survey, _complete, _undo, _reload, _accept, _reject, _defer, _lock, _backend, _model, _maxRequests }) c.IsEnabled = false;
+        _stop.IsEnabled = true;
+        try
+        {
+            var client = BackendFactory(profile, options, maximum);
+            using var lifetime = client as IDisposable;
+            var progress = new Progress<AddressingSurveyProgress>(p => _surveyStatus.Text = $"{p.Stage} · {p.RequestsSent}/{p.MaximumRequests} request · {p.Message}");
+            LastSurvey = await new AddressingSurveyRunner(client).RunAsync(_session, _sources, CurrentResources, options, maximum, progress: progress, ct: ct);
+        }
+        catch (OperationCanceledException) { LastSurvey = null; }
+        catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or IOException or ArgumentException)
+        {
+            LastError = ex.Message;
+            if (IsVisible) MessageBox.Show(this, ex.Message, "Sổ xưng hô", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            _surveyCancel.Dispose(); _surveyCancel = null; _stop.IsEnabled = false;
+            foreach (var c in new UIElement[] { _survey, _reload, _accept, _reject, _defer, _lock, _backend, _model, _maxRequests }) c.IsEnabled = true;
+        }
+        string sent = LastSurvey is null ? "" : $"Lần này đã gửi {LastSurvey.RequestsSent} request. {StopReason(LastSurvey.StoppedBy)}";
+        await LoadAsync(); // Shows what is left and what "Hoàn thành" would write.
+        _surveyStatus.Text = (LastError is null ? sent : "Không khảo sát được: " + LastError) + " " + _surveyStatus.Text;
     }
 
     /// <summary>What "Hoàn thành" would write now, shown above the lists; nothing is written.</summary>
