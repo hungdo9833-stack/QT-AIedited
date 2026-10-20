@@ -61,19 +61,22 @@ internal static class Program
             Invoke(window, "UpdateResponsiveShell", requestedWidth.Value);
         application.MainWindow = window;
         window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        if (window is MainWindow)
+        void ApplyRequestedView()
         {
+            if (window is not MainWindow) return;
             if (string.Equals(mode, "reader", StringComparison.OrdinalIgnoreCase))
                 Invoke(window, "ShowReaderWorkspace");
             else
                 Invoke(window, "ShowTranslationWorkspace", string.Equals(mode, "four", StringComparison.OrdinalIgnoreCase));
             Invoke(window, "ApplyShellTheme", theme);
         }
+        ApplyRequestedView();
 
         if (!string.IsNullOrWhiteSpace(capturePath))
         {
             PrepareCaptureLayout(window);
-            Capture(window, capturePath, captureDpi);
+            // Showing the window runs its startup (saved layout and theme); apply the requested view again afterwards.
+            Capture(window, capturePath, captureDpi, ApplyRequestedView);
             AllowClose(window);
             window.Close();
             application.Shutdown();
@@ -472,24 +475,29 @@ internal static class Program
         return window;
     }
 
-    private static void Capture(Window window, string path, double dpi)
+    private static void Capture(Window window, string path, double dpi, Action afterShown)
     {
-        FrameworkElement visual = window.Content as FrameworkElement ?? window;
-        var available = new Size(window.Width, window.Height);
-        visual.Measure(available);
-        visual.Arrange(new Rect(0, 0, available.Width, available.Height));
-        visual.UpdateLayout();
-        // Star-sized DataGrid columns settle after their parent has an actual size.
-        // Run a second layout pass so off-screen acceptance captures match a shown window.
-        visual.InvalidateMeasure();
-        visual.Measure(available);
-        visual.Arrange(new Rect(0, 0, available.Width, available.Height));
-        visual.UpdateLayout();
+        // Show the real window far off-screen and render the whole window, not only its Content: a never-shown
+        // window paints no background (white PNG) and its text loses the window's inherited Foreground.
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Left = -30000;
+        window.Top = 0;
+        window.ShowActivated = false;
+        window.ShowInTaskbar = false;
+        window.Show();
+        PumpDispatcher(TimeSpan.FromMilliseconds(700));
+        afterShown();
+        PumpDispatcher(TimeSpan.FromMilliseconds(200));
+        // Star-sized DataGrid columns settle after their parent has an actual size: one more layout pass.
+        FrameworkElement content = window.Content as FrameworkElement ?? window;
+        content.InvalidateMeasure();
+        window.UpdateLayout();
+        PumpDispatcher(TimeSpan.FromMilliseconds(200));
         double scale = dpi / 96d;
-        int width = Math.Max(1, (int)Math.Ceiling(available.Width * scale));
-        int height = Math.Max(1, (int)Math.Ceiling(available.Height * scale));
+        int width = Math.Max(1, (int)Math.Ceiling(content.ActualWidth * scale));
+        int height = Math.Max(1, (int)Math.Ceiling(content.ActualHeight * scale));
         var bitmap = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
+        bitmap.Render(window);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
