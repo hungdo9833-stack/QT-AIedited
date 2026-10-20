@@ -25,6 +25,8 @@ internal sealed class ThemedDialog : Window
     internal ThemedDialog(Window? owner, string message, string caption, MessageBoxButton buttons, MessageBoxImage image,
         MessageBoxResult defaultResult)
     {
+        // WPF makes the first window created the application's MainWindow; a dialog shown before the shell exists must not take that role.
+        if (Application.Current is { } app && ReferenceEquals(app.MainWindow, this)) app.MainWindow = null;
         Message = message;
         Title = string.IsNullOrEmpty(caption) ? "QT Studio" : caption;
         if (owner is { IsLoaded: true }) { Owner = owner; WindowStartupLocation = WindowStartupLocation.CenterOwner; }

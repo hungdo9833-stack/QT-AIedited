@@ -290,6 +290,9 @@ internal static class Program
                 return CreateAddressingReview(session);
             case "reader":
                 return CreateReader(session, root);
+            case "dialog":
+                return new ThemedDialog(null, "Chương này có bản dịch chưa lưu. Đóng Project sẽ bỏ các thay đổi đó.\nTiếp tục đóng?",
+                    "Đóng Project", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.None);
             default:
                 return CreateEditor(session, root, fourPane: false);
         }
@@ -493,9 +496,11 @@ internal static class Program
         content.InvalidateMeasure();
         window.UpdateLayout();
         PumpDispatcher(TimeSpan.FromMilliseconds(200));
+        // The window's root visual is its client area, margins included (Content.ActualWidth leaves them out).
+        var client = VisualTreeHelper.GetChildrenCount(window) > 0 && VisualTreeHelper.GetChild(window, 0) is FrameworkElement root ? root : content;
         double scale = dpi / 96d;
-        int width = Math.Max(1, (int)Math.Ceiling(content.ActualWidth * scale));
-        int height = Math.Max(1, (int)Math.Ceiling(content.ActualHeight * scale));
+        int width = Math.Max(1, (int)Math.Ceiling(client.ActualWidth * scale));
+        int height = Math.Max(1, (int)Math.Ceiling(client.ActualHeight * scale));
         var bitmap = new RenderTargetBitmap(width, height, dpi, dpi, PixelFormats.Pbgra32);
         bitmap.Render(window);
         var encoder = new PngBitmapEncoder();

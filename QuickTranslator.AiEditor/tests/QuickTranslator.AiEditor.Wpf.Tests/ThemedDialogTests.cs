@@ -52,6 +52,7 @@ public sealed class ThemedDialogTests
         // Closing with the title bar's X (no button pressed) reports the negative answer, as the system dialog does.
         var yesNo = new ThemedDialog(null, "?", "", MessageBoxButton.YesNoCancel, MessageBoxImage.None, MessageBoxResult.None);
         Assert.Equal(MessageBoxResult.Cancel, yesNo.Result);
+        Assert.NotSame(yesNo, Application.Current.MainWindow); // A dialog never becomes the app's main window.
         yesNo.Answer(MessageBoxResult.No);
         Assert.Equal(MessageBoxResult.No, yesNo.Result);
         return Task.CompletedTask;

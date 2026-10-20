@@ -483,7 +483,7 @@ public partial class MainWindow
         var addRelation = new Button { Content = "Thêm quan hệ" };
         var removeRelation = new Button { Content = "Xóa quan hệ đã chọn" };
         removeRelation.SetResourceReference(FrameworkElement.StyleProperty, "DangerButton");
-        var createListenerBtn = new Button { Content = "+ Tạo nhân vật người nghe mới…" };
+        var createListenerBtn = new Button { Content = "Tạo nhân vật người nghe mới…" }; ButtonIcon.SetGlyph(createListenerBtn, Glyphs.Add);
         relationButtons.Children.Add(addRelation);
         relationButtons.Children.Add(removeRelation);
         relationButtons.Children.Add(createListenerBtn);

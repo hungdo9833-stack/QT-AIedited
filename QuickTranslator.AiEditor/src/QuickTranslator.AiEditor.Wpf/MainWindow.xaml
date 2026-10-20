@@ -111,7 +111,7 @@
                         <ComboBoxItem Tag="Updated">Mới sửa trước</ComboBoxItem>
                     </ComboBox>
                     <WrapPanel>
-                        <Button Content="+ TXT" Click="OnAddChapterFromText"/>
+                        <Button Content="TXT" ui:ButtonIcon.Glyph="&#xE710;" Click="OnAddChapterFromText" ToolTip="ThÃªm chÆ°Æ¡ng tá»« tá»p TXT"/>
                         <Button Content="Quản lý chương" Click="OnOpenChapterManager"/>
                         <Button Content="Đổi tên" Click="OnRenameProjectChapter"/>
                         <Button Content="Nhân bản" Click="OnDuplicateProjectChapter"/>
@@ -148,7 +148,7 @@
                                         <TextBlock x:Name="InspectorLiveSelectionText" TextWrapping="Wrap" Margin="0,4,0,6"/>
                                         <WrapPanel>
                                             <Button x:Name="InspectorQuickAddCharacterButton" Content="Nhân vật" ui:ButtonIcon.Glyph="&#xE710;" Click="OnInspectorQuickAddCharacter" Padding="8,4"/>
-                                            <Button x:Name="InspectorQuickAddGlossaryButton" Content="+ Glossary" Click="OnInspectorQuickAddGlossary" Padding="8,4"/>
+                                            <Button x:Name="InspectorQuickAddGlossaryButton" Content="Glossary" ui:ButtonIcon.Glyph="&#xE710;" Click="OnInspectorQuickAddGlossary" Padding="8,4"/>
                                         </WrapPanel>
                                     </StackPanel>
                                 </Border>
@@ -413,7 +413,7 @@
                                                             <Border Grid.Column="1" Width="4" CornerRadius="2" Background="{Binding StatusBrush}" Margin="2,4"/>
                                                             <StackPanel Grid.Column="2" Margin="4,0,0,0">
                                                                 <DockPanel LastChildFill="False" Margin="4,0,4,2">
-                                                                    <Button DockPanel.Dock="Right" Content="✓ Duyệt" Tag="{Binding Id}" Click="OnApproveBlockButtonClicked" Padding="7,2" MinHeight="22" FontSize="12" ToolTip="Duyệt đoạn này (Ctrl+Enter)"/>
+                                                                    <Button DockPanel.Dock="Right" Content="Duyệt" ui:ButtonIcon.Glyph="&#xE73E;" Tag="{Binding Id}" Click="OnApproveBlockButtonClicked" Padding="7,2" MinHeight="22" FontSize="12" ToolTip="Duyệt đoạn này (Ctrl+Enter)"/>
                                                                     <TextBlock DockPanel.Dock="Left" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding StatusBrush}" VerticalAlignment="Center"/>
                                                                 </DockPanel>
                                                                 <TextBox Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Tag="{Binding Id}" AcceptsReturn="True" IsUndoEnabled="True" TextWrapping="Wrap" FontSize="16" MinHeight="46" BorderThickness="1" GotKeyboardFocus="OnChapterBlockFocused" SelectionChanged="OnChapterBlockSelectionChanged"/>
@@ -460,7 +460,7 @@
                             </Grid.ColumnDefinitions>
                             <DockPanel Grid.Column="0">
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                                    <Button x:Name="NextIssueSegmentButton" DockPanel.Dock="Right" Content="⚡ Lỗi kế" Click="OnJumpToNextIssueSegment" Padding="8,4" ToolTip="Nhảy tới đoạn lỗi / cần kiểm tra kế tiếp (F8)"/>
+                                    <Button x:Name="NextIssueSegmentButton" DockPanel.Dock="Right" Content="Lỗi kế" ui:ButtonIcon.Glyph="&#xE7BA;" Click="OnJumpToNextIssueSegment" Padding="8,4" ToolTip="Nhảy tới đoạn lỗi / cần kiểm tra kế tiếp (F8)"/>
                                     <ComboBox x:Name="SegmentStateFilter" SelectionChanged="OnSegmentFilterChanged" ToolTip="Lọc nhanh đoạn theo trạng thái">
                                         <ComboBoxItem Tag="All" IsSelected="True">Tất cả đoạn</ComboBoxItem>
                                         <ComboBoxItem Tag="Untranslated">○ Chưa dịch</ComboBoxItem>

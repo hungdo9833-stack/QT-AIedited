@@ -8,7 +8,7 @@
   <Border Style="{StaticResource Card}" Margin="0">
    <DockPanel>
     <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-     <Button Content="＋ Thêm GPU Remote" Click="OnNewProfile" ui:ButtonIcon.Glyph="&#xE710;"/>
+     <Button Content="Thêm GPU Remote" Click="OnNewProfile" ui:ButtonIcon.Glyph="&#xE710;"/>
      <Button Content="Xóa profile" Click="OnDeleteProfile" Style="{StaticResource DangerButton}" ui:ButtonIcon.Glyph="&#xE74D;"/>
     </StackPanel>
     <StackPanel DockPanel.Dock="Top">
