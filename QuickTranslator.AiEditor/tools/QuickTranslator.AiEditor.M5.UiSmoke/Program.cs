@@ -320,10 +320,17 @@ internal static class Program
         {
             var ids = new System.Text.Json.Nodes.JsonArray(t.Samples.Select(s => (System.Text.Json.Nodes.JsonNode)s.SampleId).ToArray());
             if (t.Kind == AddressingTaskKind.Pair)
-                pairs.Add(new System.Text.Json.Nodes.JsonObject { ["task_id"] = t.TaskId, ["status"] = "Consistent", ["relationship"] = "(mock) chị em",
-                    ["phases"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 0,
-                        ["self_vi"] = "chị", ["address_vi"] = "em", ["self_zh"] = new System.Text.Json.Nodes.JsonArray(), ["address_zh"] = new System.Text.Json.Nodes.JsonArray(), ["sample_ids"] = ids }),
+            {
+                static System.Text.Json.Nodes.JsonObject Direction(IReadOnlyList<AddressingTaskSample> samples, string self, string address) => samples.Count == 0
+                    ? new() { ["status"] = "Ambiguous", ["relationship"] = "", ["phases"] = new System.Text.Json.Nodes.JsonArray() }
+                    : new() { ["status"] = "Consistent", ["relationship"] = "(mock) chị em", ["phases"] = new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["from_chapter"] = 1, ["to_chapter"] = 0, ["self_vi"] = self, ["address_vi"] = address, ["self_zh"] = new System.Text.Json.Nodes.JsonArray(),
+                        ["address_zh"] = new System.Text.Json.Nodes.JsonArray(), ["sample_ids"] = new System.Text.Json.Nodes.JsonArray(samples.Select(s => (System.Text.Json.Nodes.JsonNode)s.SampleId).ToArray())
+                    }) };
+                pairs.Add(new System.Text.Json.Nodes.JsonObject { ["task_id"] = t.TaskId, ["forward"] = Direction(t.Samples, "chị", "em"), ["reverse"] = Direction(t.ReverseSamples, "em", "chị"),
                     ["reason"] = "Đề xuất MẪU để xem giao diện, không phải kết quả AI." });
+            }
             else
                 characters.Add(new System.Text.Json.Nodes.JsonObject { ["task_id"] = t.TaskId, ["status"] = "Consistent", ["gender"] = t.SourceGender,
                     ["name_forms"] = new System.Text.Json.Nodes.JsonArray(t.NameCandidates.Select(v => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["zh"] = v.Form, ["vi"] = "(mock)" }).ToArray()),

@@ -24,9 +24,15 @@ public sealed class AddressingLedgerUiTests
         {
             var ids = new JsonArray(t.Samples.Select(s => (JsonNode)s.SampleId).ToArray());
             if (t.Kind == AddressingTaskKind.Pair)
-                pairs.Add(new JsonObject { ["task_id"] = t.TaskId, ["status"] = "Consistent", ["relationship"] = "chị em",
-                    ["phases"] = new JsonArray(new JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 0, ["self_vi"] = "chị", ["address_vi"] = "em",
-                        ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray(), ["sample_ids"] = ids }), ["reason"] = "Mock" });
+            {
+                // Both directions in one answer, consistent with each other: chị/em one way, em/chị back.
+                static JsonObject Direction(IReadOnlyList<AddressingTaskSample> samples, string self, string address) => samples.Count == 0
+                    ? new JsonObject { ["status"] = "Ambiguous", ["relationship"] = "", ["phases"] = new JsonArray() }
+                    : new JsonObject { ["status"] = "Consistent", ["relationship"] = "chị em", ["phases"] = new JsonArray(new JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 0,
+                        ["self_vi"] = self, ["address_vi"] = address, ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray(),
+                        ["sample_ids"] = new JsonArray(samples.Select(s => (JsonNode)s.SampleId).ToArray()) }) };
+                pairs.Add(new JsonObject { ["task_id"] = t.TaskId, ["forward"] = Direction(t.Samples, "chị", "em"), ["reverse"] = Direction(t.ReverseSamples, "em", "chị"), ["reason"] = "Mock" });
+            }
             else
             {
                 bool female = t.SourceGender == "female";
@@ -162,7 +168,7 @@ public sealed class AddressingLedgerUiTests
         try
         {
             await window.LoadAsync(); Assert.Null(window.LastError);
-            Assert.Equal(request.Tasks.Count, window.Preview!.Applied.Count); Assert.Contains("Hoàn thành sẽ ghi", window.CompletionText);
+            Assert.Equal(request.Tasks.Sum(t => t.Kind == AddressingTaskKind.Pair && t.ReverseSamples.Count > 0 ? 2 : 1), window.Preview!.Applied.Count); Assert.Contains("Hoàn thành sẽ ghi", window.CompletionText);
             await window.CompleteAsync(); Assert.Null(window.LastError);
             var saved = await new ProjectResourceStore(fixture.Project).LoadAsync();
             Assert.True(saved.Characters.ConsistencyLockEnabled); Assert.Equal(saved.Revision, applied!.Revision);
@@ -174,7 +180,7 @@ public sealed class AddressingLedgerUiTests
             await window.UndoAsync(discardLaterEdits: false); Assert.Null(window.LastError);
             var restored = await new ProjectResourceStore(fixture.Project).LoadAsync();
             Assert.Empty(restored.Characters.Profiles); Assert.False(restored.Characters.ConsistencyLockEnabled); Assert.Equal(restored.Revision, applied!.Revision);
-            Assert.Equal(request.Tasks.Count, window.Preview!.Applied.Count); // Pending again.
+            Assert.Equal(request.Tasks.Sum(t => t.Kind == AddressingTaskKind.Pair && t.ReverseSamples.Count > 0 ? 2 : 1), window.Preview!.Applied.Count); // Pending again.
             Assert.Equal(0, fixture.Client.Calls);
         }
         finally { window.Close(); }

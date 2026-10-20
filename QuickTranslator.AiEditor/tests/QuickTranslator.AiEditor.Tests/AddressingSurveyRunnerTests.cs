@@ -64,9 +64,17 @@ public sealed class AddressingSurveyRunnerTests : IDisposable
                             ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray() };
                     }).ToArray()) });
                 else if (t.Kind == AddressingTaskKind.Pair)
-                    pairs.Add(new JsonObject { ["task_id"] = id, ["status"] = "Consistent", ["relationship"] = "người yêu", ["reason"] = "Mẫu.",
-                        ["phases"] = new JsonArray(new JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 0, ["self_vi"] = AnswerBadly(t) ? "我" : t.Subject == "宁夕" ? "em" : "anh",
-                            ["address_vi"] = t.Subject == "宁夕" ? "anh" : "em", ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray(), ["sample_ids"] = ids }) });
+                {
+                    JsonObject Direction(string speaker, IReadOnlyList<AddressingTaskSample> samples) => samples.Count == 0
+                        ? new JsonObject { ["status"] = "Ambiguous", ["relationship"] = "", ["phases"] = new JsonArray() }
+                        : new JsonObject { ["status"] = "Consistent", ["relationship"] = "người yêu", ["phases"] = new JsonArray(new JsonObject
+                        {
+                            ["from_chapter"] = 1, ["to_chapter"] = 0, ["self_vi"] = AnswerBadly(t) ? "我" : speaker == "宁夕" ? "em" : "anh",
+                            ["address_vi"] = speaker == "宁夕" ? "anh" : "em", ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray(),
+                            ["sample_ids"] = new JsonArray(samples.Select(s => (JsonNode)s.SampleId).ToArray())
+                        }) };
+                    pairs.Add(new JsonObject { ["task_id"] = id, ["forward"] = Direction(t.Subject, t.Samples), ["reverse"] = Direction(t.Listener!, t.ReverseSamples), ["reason"] = "Mẫu." });
+                }
                 else
                     characters.Add(new JsonObject { ["task_id"] = id, ["status"] = "Consistent", ["gender"] = t.SourceGender, ["reason"] = "Mẫu.",
                         ["name_forms"] = new JsonArray(new JsonObject { ["zh"] = t.Subject, ["vi"] = t.Subject == "宁夕" ? "Ninh Tịch" : "Lục Đình Kiêu" }),

@@ -25,7 +25,11 @@ public sealed class AddressingAiSurveyTests : IDisposable
     internal static readonly ModelOptions Options = new() { Model = "mock-addressing", ContextSize = 32768, MaximumOutputTokens = 4096 };
 
     private static IReadOnlyList<AddressingTask> Tasks() => AddressingAiSurvey.PlanTasks(Sources, Names);
-    private static AddressingTask Pair(IReadOnlyList<AddressingTask> tasks, string speaker, string listener) => tasks.Single(t => t.Kind == AddressingTaskKind.Pair && t.Subject == speaker && t.Listener == listener);
+    // One task per pair of characters, both directions: find it whichever way round it was planned.
+    private static AddressingTask Pair(IReadOnlyList<AddressingTask> tasks, string a, string b) =>
+        tasks.Single(t => t.Kind == AddressingTaskKind.Pair && (t.Subject == a && t.Listener == b || t.Subject == b && t.Listener == a));
+    /// <summary>A pair task yields one proposal per direction that has samples.</summary>
+    internal static int ProposalsFor(IEnumerable<AddressingTask> tasks) => tasks.Sum(t => t.Kind == AddressingTaskKind.Pair && t.ReverseSamples.Count > 0 ? 2 : 1);
     private static AddressingTask Character(IReadOnlyList<AddressingTask> tasks, string name) => tasks.Single(t => t.Kind == AddressingTaskKind.Character && t.Subject == name);
 
     /// <summary>A well-formed reply that cites the task's own samples and quoted terms.</summary>
@@ -42,16 +46,9 @@ public sealed class AddressingAiSurveyTests : IDisposable
             }
             if (task.Kind == AddressingTaskKind.Pair)
             {
-                bool sister = task.Subject == "王秀兰";
                 pairs.Add(custom ?? new JsonObject
                 {
-                    ["task_id"] = task.TaskId, ["status"] = "Consistent", ["relationship"] = sister ? "chị → em" : "em → chị",
-                    ["phases"] = new JsonArray(new JsonObject
-                    {
-                        ["from_chapter"] = 1, ["to_chapter"] = 0, ["self_vi"] = sister ? "chị" : "em", ["address_vi"] = sister ? "em" : "chị",
-                        ["self_zh"] = new JsonArray(sister ? "姐姐" : "我"), ["address_zh"] = new JsonArray(sister ? "林青" : "秀兰姐"),
-                        ["sample_ids"] = new JsonArray(task.Samples.Select(s => (JsonNode)s.SampleId).ToArray())
-                    }),
+                    ["task_id"] = task.TaskId, ["forward"] = Direction(task.Subject, task.Samples), ["reverse"] = Direction(task.Listener!, task.ReverseSamples),
                     ["reason"] = "Lời thoại trực tiếp."
                 });
             }
@@ -75,19 +72,38 @@ public sealed class AddressingAiSurveyTests : IDisposable
         return new JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = scenes };
     }
 
+    /// <summary>One direction of a pair answer: the sister says 姐姐 and calls him 林青; he says 我 and calls her 秀兰姐.</summary>
+    internal static JsonObject Direction(string speaker, IReadOnlyList<AddressingTaskSample> samples)
+    {
+        if (samples.Count == 0) return new JsonObject { ["status"] = "Ambiguous", ["relationship"] = "", ["phases"] = new JsonArray() };
+        bool sister = speaker == "王秀兰";
+        return new JsonObject
+        {
+            ["status"] = "Consistent", ["relationship"] = sister ? "chị → em" : "em → chị",
+            ["phases"] = new JsonArray(new JsonObject
+            {
+                ["from_chapter"] = 1, ["to_chapter"] = 0, ["self_vi"] = sister ? "chị" : "em", ["address_vi"] = sister ? "em" : "chị",
+                ["self_zh"] = new JsonArray(sister ? "姐姐" : "我"), ["address_zh"] = new JsonArray(sister ? "林青" : "秀兰姐"),
+                ["sample_ids"] = new JsonArray(samples.Select(s => (JsonNode)s.SampleId).ToArray())
+            })
+        };
+    }
+
     [Fact]
     public void Plans_pair_and_character_tasks_with_variants_merged_to_their_single_owner_and_verbatim_samples()
     {
         var tasks = Tasks();
-        var sister = Pair(tasks, "王秀兰", "林青"); var brother = Pair(tasks, "林青", "王秀兰"); // 秀兰姐 vocative counted for 王秀兰.
-        Assert.Equal(6, sister.Samples.Count); Assert.Equal(6, brother.Samples.Count);
-        Assert.Contains(sister.Samples, s => s.ChapterNumber == 1); Assert.Contains(sister.Samples, s => s.ChapterNumber == 2); // Spread over the story.
-        Assert.Contains(brother.NameCandidates, v => v.Form == "秀兰姐");
+        // One task for the pair, both directions: 王秀兰 → 林青 (S, she speaks first) and 林青 → 王秀兰 (R; 秀兰姐 counted for 王秀兰).
+        var pair = Pair(tasks, "王秀兰", "林青");
+        Assert.Equal("王秀兰", pair.Subject); Assert.Equal(6, pair.Samples.Count); Assert.Equal(6, pair.ReverseSamples.Count);
+        Assert.All(pair.Samples, s => Assert.StartsWith("S", s.SampleId)); Assert.All(pair.ReverseSamples, s => Assert.StartsWith("R", s.SampleId));
+        Assert.Contains(pair.Samples, s => s.ChapterNumber == 1); Assert.Contains(pair.Samples, s => s.ChapterNumber == 2); // Spread over the story.
+        Assert.Contains(pair.ReverseSamples, s => s.Text.Contains("秀兰姐")); Assert.Contains(pair.NameCandidates, v => v.Form == "秀兰姐");
         var heroine = Character(tasks, "王秀兰"); var hero = Character(tasks, "林青");
         Assert.Equal("female", heroine.SourceGender); Assert.Equal("male", hero.SourceGender);
         Assert.Contains(heroine.NameCandidates, v => v.Form == "秀兰姐"); Assert.Contains(heroine.NameCandidates, v => v.Form == "小兰");
         Assert.DoesNotContain(tasks, t => t.Subject is "秀兰姐" or "小兰"); // No separate identity for a variant.
-        foreach (var sample in tasks.SelectMany(t => t.Samples))
+        foreach (var sample in tasks.SelectMany(t => t.Samples.Concat(t.ReverseSamples)))
         {
             var normalized = Sources.Single(s => s.ChapterNumber == sample.ChapterNumber).OriginalText.Replace("\n", "");
             Assert.Contains(sample.Text, normalized, StringComparison.Ordinal);
@@ -129,7 +145,7 @@ public sealed class AddressingAiSurveyTests : IDisposable
     {
         var request = AddressingAiSurvey.PlanRequests(Tasks(), Options.Model).Single();
         var proposals = AddressingAiSurvey.Verify(Answer(request).ToJsonString(), request);
-        Assert.Equal(request.Tasks.Count, proposals.Count);
+        Assert.Equal(ProposalsFor(request.Tasks), proposals.Count);
         Assert.All(proposals, p => Assert.True(p.EvidenceValid, p.TaskId + ":" + string.Join(",", p.Issues)));
         var heroine = proposals.Single(p => p.Kind == AddressingTaskKind.Character && p.Subject == "王秀兰");
         Assert.Equal("nàng", heroine.Phases.Single().NarrativeVi); Assert.Contains(heroine.NameForms, f => f.Zh == "小兰" && f.Vi == "Tiểu Lan");
@@ -153,7 +169,7 @@ public sealed class AddressingAiSurveyTests : IDisposable
         { "missing-field", "SchemaViolation", "$.pairs[0]: missing reason" },
         { "extra-field", "SchemaViolation", "$.pairs[0].confirmed" },
         { "unknown-enum", "SchemaViolation", "$.characters[0].gender: unknown enum value" },
-        { "wrong-type", "SchemaViolation", "$.pairs[0].phases[0].from_chapter: expected integer" },
+        { "wrong-type", "SchemaViolation", "$.pairs[0].forward.phases[0].from_chapter: expected integer" },
         { "answered-twice", "DuplicateTaskAnswer", "task answered twice" },
         { "unknown-task", "", "$.pairs[0].task_id: unknown task" }
     };
@@ -171,16 +187,20 @@ public sealed class AddressingAiSurveyTests : IDisposable
             case "missing-field": node["pairs"]![0]!.AsObject().Remove("reason"); break;
             case "extra-field": node["pairs"]![0]!["confirmed"] = true; break;
             case "unknown-enum": node["characters"]![0]!["gender"] = "girl"; break;
-            case "wrong-type": node["pairs"]![0]!["phases"]![0]!["from_chapter"] = "1"; break;
+            case "wrong-type": node["pairs"]![0]!["forward"]!["phases"]![0]!["from_chapter"] = "1"; break;
             case "answered-twice": ((JsonArray)node["pairs"]!).Add(node["pairs"]![0]!.DeepClone()); break;
             case "unknown-task": node["pairs"]![0]!["task_id"] = "pair:unknown"; break;
         }
         var result = AddressingAiSurvey.VerifyReply(node.ToJsonString(), request);
         Assert.Contains(result.SchemaIssues, x => x.Contains(path, StringComparison.Ordinal));
         if (code.Length == 0) Assert.DoesNotContain(result.Proposals, p => p.TaskId == damaged); // Unanswered: resent later.
-        else Assert.Equal([code], result.Proposals.Single(p => p.TaskId == damaged).Issues);
+        else
+        {
+            var hit = result.Proposals.Where(p => p.TaskId == damaged).ToArray(); // A pair: both directions.
+            Assert.NotEmpty(hit); Assert.All(hit, p => Assert.Equal([code], p.Issues));
+        }
         Assert.DoesNotContain(result.Proposals, p => p.TaskId == damaged && p.EvidenceValid);
-        Assert.Equal(request.Tasks.Count - 1, result.Proposals.Count(p => p.TaskId != damaged && p.EvidenceValid)); // The rest stand.
+        Assert.Equal(ProposalsFor(request.Tasks.Where(t => t.TaskId != damaged)), result.Proposals.Count(p => p.TaskId != damaged && p.EvidenceValid)); // The rest stand.
     }
 
     [Fact]
@@ -191,8 +211,8 @@ public sealed class AddressingAiSurveyTests : IDisposable
         foreach (var item in new[] { "pairs", "characters" }.SelectMany(k => node[k]!.AsArray()))
             item!["task_id"] = "T" + (request.Tasks.ToList().FindIndex(t => t.TaskId == item["task_id"]!.GetValue<string>()) + 1);
         var short_ = AddressingAiSurvey.VerifyReply(node.ToJsonString(), request);
-        Assert.Empty(short_.SchemaIssues); Assert.Equal(request.Tasks.Count, short_.Proposals.Count(p => p.EvidenceValid));
-        Assert.Equal(request.Tasks.Select(t => t.TaskId).Order(), short_.Proposals.Select(p => p.TaskId).Order()); // Mapped back to stable ids.
+        Assert.Empty(short_.SchemaIssues); Assert.Equal(ProposalsFor(request.Tasks), short_.Proposals.Count(p => p.EvidenceValid));
+        Assert.Equal(request.Tasks.Select(t => t.TaskId).Order(), short_.Proposals.Select(p => p.TaskId).Distinct().Order()); // Mapped back to stable ids.
 
         var mixed = node.DeepClone().AsObject(); // Short id and full id of one task: answered twice, neither trusted.
         var first = mixed["pairs"]![0]!; var copy = first.DeepClone();
@@ -231,11 +251,11 @@ public sealed class AddressingAiSurveyTests : IDisposable
         var sister = request.Tasks.Single(t => t.Kind == AddressingTaskKind.Pair && t.Subject == "王秀兰");
         var heroine = request.Tasks.Single(t => t.Kind == AddressingTaskKind.Character && t.Subject == "王秀兰");
         string Issues(Func<AddressingTask, JsonObject?> edit, AddressingTask target) =>
-            string.Join(",", AddressingAiSurvey.Verify(Answer(request, edit).ToJsonString(), request).Single(p => p.TaskId == target.TaskId).Issues);
+            string.Join(",", AddressingAiSurvey.Verify(Answer(request, edit).ToJsonString(), request).Single(p => p.TaskId == target.TaskId && p.Subject == target.Subject).Issues); // Pairs: the forward direction.
         JsonObject PairWith(AddressingTask t, Action<JsonObject> phase)
         {
             var node = Answer(request)["pairs"]!.AsArray().Single(x => x!["task_id"]!.GetValue<string>() == t.TaskId)!.DeepClone().AsObject();
-            phase(node["phases"]![0]!.AsObject()); return node;
+            phase(node["forward"]!["phases"]![0]!.AsObject()); return node;
         }
         JsonObject CharacterWith(AddressingTask t, Action<JsonObject> edit)
         {
@@ -254,15 +274,15 @@ public sealed class AddressingAiSurveyTests : IDisposable
         const string han = "ChineseInVietnameseField";
         Assert.Contains(han, Issues(t => t == sister ? PairWith(t, p => p["address_vi"] = "Lục先生") : null, sister));
         Assert.Contains(han, Issues(t => t == sister ? PairWith(t, p => p["self_vi"] = "姐") : null, sister));
-        Assert.Contains(han, Issues(t => t == sister ? PairWith(t, _ => { }).Also(n => n["relationship"] = "王秀兰 → 林青") : null, sister));
+        Assert.Contains(han, Issues(t => t == sister ? PairWith(t, _ => { }).Also(n => n["forward"]!["relationship"] = "王秀兰 → 林青") : null, sister));
         Assert.Contains(han, Issues(t => t == heroine ? CharacterWith(t, c => c["phases"]![0]!["narrative_vi"] = "她") : null, heroine));
         Assert.Contains(han, Issues(t => t == heroine ? CharacterWith(t, c => c["phases"]![0]!["secondary_vi"] = "nàng/她") : null, heroine));
         Assert.Contains(han, Issues(t => t == heroine ? CharacterWith(t, c => c["name_forms"]![0]!["vi"] = "Vương 秀兰") : null, heroine));
         Assert.DoesNotContain(han, Issues(t => t == sister ? PairWith(t, p => p["address_vi"] = "Lục tiên sinh") : null, sister)); // Diacritics are fine.
         Assert.True(AddressingAiSurvey.HasHan("𠀀")); Assert.False(AddressingAiSurvey.HasHan("Đình Kiêu → chị/em, ông, bà"));
         // Ambiguous is a valid answer but never a rule.
-        var ambiguous = AddressingAiSurvey.Verify(Answer(request, t => t == sister ? PairWith(t, _ => { }).Also(n => n["status"] = "Ambiguous") : null).ToJsonString(), request)
-            .Single(p => p.TaskId == sister.TaskId);
+        var ambiguous = AddressingAiSurvey.Verify(Answer(request, t => t == sister ? PairWith(t, _ => { }).Also(n => n["forward"]!["status"] = "Ambiguous") : null).ToJsonString(), request)
+            .Single(p => p.TaskId == sister.TaskId && p.Subject == sister.Subject);
         Assert.False(ambiguous.EvidenceValid); Assert.Empty(ambiguous.Issues);
     }
 
@@ -297,13 +317,13 @@ public sealed class AddressingAiSurveyTests : IDisposable
         var client = new Fake(Replies(tasks, settings));
         var first = await new AddressingAiEngine(client).RunAsync(store, tasks, Options, maximumRequests: 1, settings);
         Assert.Equal(1, client.Calls); Assert.Equal("RequestBudget", first.StoppedBy); Assert.Equal(2, first.Planned);
-        Assert.Equal(2, first.State.Proposals.Count); Assert.All(first.State.Proposals, p => Assert.True(p.EvidenceValid));
+        Assert.Equal(ProposalsFor(tasks.Take(2)), first.State.Proposals.Count); Assert.All(first.State.Proposals, p => Assert.True(p.EvidenceValid));
         var rest = await new AddressingAiEngine(client).RunAsync(store, tasks, Options, maximumRequests: 5, settings);
         Assert.Equal(2, client.Calls); Assert.Equal(1, rest.Planned); Assert.Null(rest.StoppedBy);
         var again = await new AddressingAiEngine(client).RunAsync(store, tasks, Options, maximumRequests: 5, settings);
         Assert.Equal(2, client.Calls); Assert.Equal(0, again.Planned); // Everything verified: nothing is resent.
         var reloaded = await store.LoadAsync();
-        Assert.Equal(4, reloaded.Proposals.Count); Assert.Equal(2, reloaded.Attempts.Count); Assert.All(reloaded.Attempts, a => Assert.True(a.Succeeded));
+        Assert.Equal(ProposalsFor(tasks), reloaded.Proposals.Count); Assert.Equal(2, reloaded.Attempts.Count); Assert.All(reloaded.Attempts, a => Assert.True(a.Succeeded));
         Assert.DoesNotContain("TASK ", await File.ReadAllTextAsync(store.PathName)); // No prompt or source text is persisted.
     }
 
@@ -331,7 +351,9 @@ public sealed class AddressingAiSurveyTests : IDisposable
         var client = new Fake(prompt =>
         {
             var request = AddressingAiSurvey.PlanRequests(tasks, Options.Model).Single();
-            var node = Answer(request); node["pairs"]![0]!["phases"]![0]!["address_zh"] = new JsonArray("哥哥"); return node.ToJsonString();
+            var node = Answer(request); // Both directions wrong, so no verified proposal exists for the task.
+            foreach (var d in new[] { "forward", "reverse" }) node["pairs"]![0]![d]!["phases"]![0]!["address_zh"] = new JsonArray("哥哥");
+            return node.ToJsonString();
         });
         for (int i = 0; i < 3; i++) await new AddressingAiEngine(client).RunAsync(store, tasks, Options, maximumRequests: 5);
         Assert.Equal(2, client.Calls); // Answered twice without a verified proposal: no endless resend.

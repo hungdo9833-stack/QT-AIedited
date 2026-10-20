@@ -364,9 +364,23 @@ Khi bấm Khảo sát (`AddressingSurveyRunner.RunAsync`):
 
 Công cụ probe vẫn dùng được để thử offline hoặc chạy bằng dòng lệnh.
 
+**Giai đoạn C: một nhiệm vụ cho mỗi cặp, hỏi cả hai chiều, kèm kiểm tra chéo (đã triển khai, mới test bằng mock).**
+
+- **Lập kế hoạch:**
+  - Mỗi cặp nhân vật {A, B} là **một** nhiệm vụ, gồm mẫu A → B (`S1…`) và mẫu B → A (`R1…`). A là chiều có nhiều lời thoại hơn; nếu bằng nhau thì là chiều xuất hiện trước.
+  - Cặp được hỏi khi một chiều có đủ số lời tối thiểu. Chiều kia đi kèm nếu có ít nhất một lời, nên chiều ít lời cũng được hỏi.
+  - Chiều không có lời nào thì không tạo quy tắc đoán mò.
+- **AI trả lời trong cùng một object:** `forward` và `reverse`, mỗi chiều có `status`, `relationship` (nhìn từ phía người nói) và `phases`. Prompt yêu cầu hai chiều phải khớp nhau: anh/em ↔ em/anh, bố/con ↔ con/bố, sư phụ/đồ nhi ↔ đồ nhi/sư phụ. Một bên dùng dạng trung tính như tôi, ta, ngươi, bạn thì vẫn hợp lệ.
+- **Kiểm chứng:**
+  - Mỗi chiều được kiểm như trước, nhưng **phải trích đúng mẫu của chiều đó**: chiều ngược không được mượn mẫu `S`.
+  - Sau đó CPU kiểm tra chéo (`Contradicts`). Trong các chương mà hai chiều cùng áp dụng, chương trình so cách A tự xưng với cách B gọi A, và cách A gọi B với cách B tự xưng. Nếu cả hai đều là từ chỉ vai/tuổi mà không có dạng nào trùng nhau → `ReciprocalMismatch` cho **cả hai chiều**, và Hoàn thành giữ chúng lại.
+  - Dạng trung tính (tôi, ta, mình, tao, tớ, ngươi, mày, bạn, cậu, ngài, các hạ…) không đem ra so. Ví dụ "anh trai xưng tôi với em" vẫn hợp lệ.
+- **Kết quả vẫn là hai đề xuất có hướng** (A → B và B → A, cùng `TaskId`). Vì vậy Hoàn thành, cửa sổ duyệt và bản dịch không phải đổi gì. Cửa sổ duyệt hiển thị mẫu `R` khi bạn xem chiều ngược.
+- `PromptVersion` lên `addressing-ledger-6`. Mã nhiệm vụ cặp đổi, nên lần khảo sát sau sẽ hỏi lại các cặp, theo dạng mới.
+- **Đo offline trên test cpu:** trước đây có 13 nhiệm vụ một chiều. Giờ còn **8 nhiệm vụ hai chiều, phủ 16 chiều**: chiều nào cũng có mẫu, kể cả những chiều chỉ có 2 lời. Ước tính token gần như không đổi (~24 nghìn).
+
 **Còn lại (các giai đoạn sau):**
 
-- **C:** hỏi mỗi cặp theo cả hai chiều trong một nhiệm vụ và kiểm tra chéo cho khớp (ví dụ `陆霆骁 → 小宝: tôi / con` lẽ ra phải là `ba / con`).
 - **D:** gộp danh tính (`小包子` và `小宝` hiện là hai hồ sơ).
 - Người chỉ có danh xưng (`陆老夫人`) chưa có hồ sơ, nên các cặp của bà chưa được ghi.
 

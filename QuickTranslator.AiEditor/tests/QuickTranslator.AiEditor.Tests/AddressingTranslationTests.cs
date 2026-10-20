@@ -101,12 +101,17 @@ public sealed class AddressingTranslationTests : IDisposable
     {
         var (session, service, ledger) = await AddressingReviewTests.Seed(_root, t => t.Kind != AddressingTaskKind.Pair || t.Subject != "王秀兰" ? null : new JsonObject
         {
-            ["task_id"] = t.TaskId, ["status"] = "Changes", ["relationship"] = "chị → em",
-            ["phases"] = new JsonArray(
-                new JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 1, ["self_vi"] = "chị", ["address_vi"] = "em", ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray(),
-                    ["sample_ids"] = new JsonArray(t.Samples.First(s => s.ChapterNumber == 1).SampleId) },
-                new JsonObject { ["from_chapter"] = 2, ["to_chapter"] = 0, ["self_vi"] = "ta", ["address_vi"] = "chàng", ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray(),
-                    ["sample_ids"] = new JsonArray(t.Samples.First(s => s.ChapterNumber == 2).SampleId) }),
+            ["task_id"] = t.TaskId,
+            ["forward"] = new JsonObject
+            {
+                ["status"] = "Changes", ["relationship"] = "chị → em",
+                ["phases"] = new JsonArray(
+                    new JsonObject { ["from_chapter"] = 1, ["to_chapter"] = 1, ["self_vi"] = "chị", ["address_vi"] = "em", ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray(),
+                        ["sample_ids"] = new JsonArray(t.Samples.First(s => s.ChapterNumber == 1).SampleId) },
+                    new JsonObject { ["from_chapter"] = 2, ["to_chapter"] = 0, ["self_vi"] = "ta", ["address_vi"] = "chàng", ["self_zh"] = new JsonArray(), ["address_zh"] = new JsonArray(),
+                        ["sample_ids"] = new JsonArray(t.Samples.First(s => s.ChapterNumber == 2).SampleId) })
+            },
+            ["reverse"] = new JsonObject { ["status"] = "Ambiguous", ["relationship"] = "", ["phases"] = new JsonArray() }, // This test is about ranges only.
             ["reason"] = "Đổi cách xưng hô."
         });
         var pair = ledger.Proposals.Single(p => p.Kind == AddressingTaskKind.Pair && p.Subject == "王秀兰");

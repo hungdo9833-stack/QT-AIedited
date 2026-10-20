@@ -162,7 +162,7 @@ static string PlanMarkdown(IReadOnlyList<AddressingTask> tasks, IReadOnlyList<Ad
 {
     var md = new StringBuilder();
     md.AppendLine("# Sổ xưng hô · Bước 2 · kế hoạch offline (chưa gọi AI)").AppendLine();
-    md.AppendLine($"- Nhiệm vụ: {tasks.Count} ({tasks.Count(t => t.Kind == AddressingTaskKind.Pair)} cặp, {tasks.Count(t => t.Kind == AddressingTaskKind.Character)} nhân vật)");
+    md.AppendLine($"- Nhiệm vụ: {tasks.Count} ({tasks.Count(t => t.Kind == AddressingTaskKind.Pair)} cặp hai chiều, {tasks.Count(t => t.Kind == AddressingTaskKind.Character)} nhân vật)");
     md.AppendLine($"- Request dự kiến: {requests.Count}; ước tính input khoảng {requests.Sum(r => r.EstimatedInputTokens):N0} token (heuristic, không phải số đo).").AppendLine();
     md.AppendLine("## Biến thể tên (CPU, chờ AI + người duyệt)").AppendLine();
     foreach (var g in variants.Where(g => g.Variants.Count > 0 || g.SharedForms.Count > 0))
@@ -172,10 +172,10 @@ static string PlanMarkdown(IReadOnlyList<AddressingTask> tasks, IReadOnlyList<Ad
     md.AppendLine("| Nhân vật | Mẫu | 他 | 她 | Giới tính theo nguyên văn | Chương |").AppendLine("|---|---:|---:|---:|---|---|");
     foreach (var t in tasks.Where(t => t.Kind == AddressingTaskKind.Character))
         md.AppendLine($"| {t.Subject} | {t.Samples.Count} | {t.He} | {t.She} | {t.SourceGender} | {t.FirstChapter}–{t.LastChapter} |");
-    md.AppendLine().AppendLine("## Cặp · xưng hô trong thoại").AppendLine();
-    md.AppendLine("| Người nói → người nghe | Mẫu | Chương | Gom biến thể |").AppendLine("|---|---:|---|---|");
+    md.AppendLine().AppendLine("## Cặp · xưng hô trong thoại (hai chiều trong một nhiệm vụ)").AppendLine();
+    md.AppendLine("| A ↔ B | Mẫu A → B | Mẫu B → A | Chương | Gom biến thể |").AppendLine("|---|---:|---:|---|---|");
     foreach (var t in tasks.Where(t => t.Kind == AddressingTaskKind.Pair))
-        md.AppendLine($"| {t.Subject} → {t.Listener} | {t.Samples.Count} | {t.FirstChapter}–{t.LastChapter} | {(t.NameCandidates.Count == 0 ? "—" : string.Join(", ", t.NameCandidates.Select(v => v.Form)))} |");
+        md.AppendLine($"| {t.Subject} ↔ {t.Listener} | {t.Samples.Count} | {t.ReverseSamples.Count} | {t.FirstChapter}–{t.LastChapter} | {(t.NameCandidates.Count == 0 ? "—" : string.Join(", ", t.NameCandidates.Select(v => v.Form)))} |");
     return md.ToString();
 }
 

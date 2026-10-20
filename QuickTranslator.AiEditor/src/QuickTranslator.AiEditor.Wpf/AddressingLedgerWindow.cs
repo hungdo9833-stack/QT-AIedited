@@ -240,7 +240,9 @@ public sealed class AddressingLedgerWindow : Window
             if (task.Kind == AddressingTaskKind.Character) lines.Add($"CPU: 他 sau tên {task.He} · 她 {task.She} → giới tính theo nguyên văn: {task.SourceGender}");
             var cited = p.Phases.SelectMany(x => x.SampleIds).ToHashSet(StringComparer.Ordinal);
             lines.Add("Mẫu nguyên văn (★ = AI trích dẫn):");
-            lines.AddRange(task.Samples.Select(s => $"{(cited.Contains(s.SampleId) ? "★" : " ")} {s.SampleId} ch.{s.ChapterNumber}: {s.Lead} 「{s.Text}」".Replace(" 「", task.Kind == AddressingTaskKind.Pair ? " 「" : " ")
+            // A pair task holds both directions: the reverse proposal (B → A) was answered from the R samples.
+            var shown = task.Kind == AddressingTaskKind.Pair && p.Subject != task.Subject ? task.ReverseSamples : task.Samples;
+            lines.AddRange(shown.Select(s => $"{(cited.Contains(s.SampleId) ? "★" : " ")} {s.SampleId} ch.{s.ChapterNumber}: {s.Lead} 「{s.Text}」".Replace(" 「", task.Kind == AddressingTaskKind.Pair ? " 「" : " ")
                 .Replace("」", task.Kind == AddressingTaskKind.Pair ? "」" : "")));
         }
         else lines.Add("Mẫu nguyên văn không còn khớp (nguyên tác hoặc danh sách tên đã đổi kể từ lúc khảo sát).");

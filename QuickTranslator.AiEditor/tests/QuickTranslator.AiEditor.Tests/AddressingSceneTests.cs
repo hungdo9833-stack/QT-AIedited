@@ -342,13 +342,13 @@ public sealed class AddressingSceneTests : IDisposable
         var heroine = tasks.Single(t => t.Kind == AddressingTaskKind.Pair && t.Subject == "宁夕" && t.Listener == "陆霆骁");
         Assert.Equal(8, heroine.Samples.Count); Assert.All(heroine.Samples, s => Assert.True(s.FromScene));
         Assert.Contains(" FROM-SCENE LEAD:", AddressingAiSurvey.PlanRequests([heroine], "m").Single().Prompt);
-        Assert.Contains(tasks, t => t.Kind == AddressingTaskKind.Pair && t.Subject == "陆霆骁" && t.Listener == "宁夕");
+        Assert.NotEmpty(heroine.ReverseSamples); Assert.All(heroine.ReverseSamples, s => Assert.True(s.FromScene)); // 陆霆骁 → 宁夕, same task.
 
         // Same offsets, different words: the old answer must not attribute the edited quote.
         var edited = new[] { sources[0] with { OriginalText = Romance.Replace("我很好。", "我没事。") }, sources[1] };
-        var after = AddressingAiSurvey.PlanTasks(edited, Romantic, sceneTurns: turns)
-            .Single(t => t.Kind == AddressingTaskKind.Pair && t.Subject == "宁夕" && t.Listener == "陆霆骁");
-        Assert.Equal(7, after.Samples.Count); Assert.DoesNotContain(after.Samples, s => s.Text == "我没事。");
+        var afterTask = AddressingAiSurvey.PlanTasks(edited, Romantic, sceneTurns: turns).Single(t => t.Kind == AddressingTaskKind.Pair);
+        var after = afterTask.Subject == "宁夕" ? afterTask.Samples : afterTask.ReverseSamples; // 宁夕 → 陆霆骁 (now the less attested direction).
+        Assert.Equal(7, after.Count); Assert.DoesNotContain(after, s => s.Text == "我没事。");
         // The new answer supersedes the old one, even where it now leaves quotes blank.
         var blank = new Mock(_ => SceneAnswer(AddressingAiSurvey.PlanRequests([widened[0]], AddressingAiSurveyTests.Options.Model).Single(),
             new Dictionary<string, (string, string)> { ["你怎么来了？"] = ("宁夕", "陆霆骁") }).ToJsonString());
@@ -364,8 +364,9 @@ public sealed class AddressingSceneTests : IDisposable
         var turns = AddressingAiSurvey.PlanScenes(sources, Cultivators).SelectMany(task => task.Samples.Select(s =>
             new AddressingTurn(s.SampleId, s.ChapterNumber, s.StartUtf16, s.QuoteHash, "林动", "萧炎", [], [], []))).ToArray(); // Unverified, all 林动.
         var tasks = AddressingAiSurvey.PlanTasks(sources, Cultivators, sceneTurns: turns);
-        var xiao = tasks.Single(t => t.Kind == AddressingTaskKind.Pair && t.Subject == "萧炎");
-        Assert.Equal(3, xiao.Samples.Count); Assert.All(xiao.Samples, s => Assert.Equal("你找死！", s.Text)); // Explicit 萧炎 lines stay 萧炎.
+        var pair = tasks.Single(t => t.Kind == AddressingTaskKind.Pair && new[] { t.Subject, t.Listener }.Order().SequenceEqual(new[] { "林动", "萧炎" }.Order()));
+        var xiao = pair.Subject == "萧炎" ? pair.Samples : pair.ReverseSamples; // 萧炎 speaking to 林动, whichever direction is forward.
+        Assert.Equal(3, xiao.Count); Assert.All(xiao, s => Assert.Equal("你找死！", s.Text)); // Explicit 萧炎 lines stay 萧炎.
         Assert.DoesNotContain(tasks, t => t.Kind == AddressingTaskKind.Pair && t.Subject == "林动" && t.Listener == "林动");
     }
 }
