@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Data;
 using QuickTranslator.AiEditor.Core.Addressing;
@@ -103,22 +104,117 @@ public sealed class AddressingLedgerWindow : Window
 
     private UIElement Build()
     {
-        var root = new DockPanel { Margin = new Thickness(12) };
+        var root = new DockPanel { Margin = new Thickness(16) };
         var top = new StackPanel(); DockPanel.SetDock(top, Dock.Top);
-        top.Children.Add(new TextBlock { Text = "Sổ xưng hô · kết quả khảo sát", FontSize = 20 });
-        top.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Text = "① Khảo sát: CPU tìm nhân vật, lời thoại và cảnh, rồi AI xác định người nói, đại từ kể, tên phụ và xưng hô theo cặp; " +
+
+        var header = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+        header.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var heading = new StackPanel();
+        heading.Children.Add(new TextBlock { Text = "Sổ xưng hô", Style = Themed("WindowTitle") });
+        heading.Children.Add(new TextBlock
+        {
+            Text = string.IsNullOrWhiteSpace(_session.Manifest.VietnameseTitle) ? "Kết quả khảo sát" : _session.Manifest.VietnameseTitle,
+            Style = Themed("WindowSubtitle")
+        });
+        header.Children.Add(heading);
+        var headerActions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Top };
+        _reload.Margin = new Thickness(0, 0, 8, 0);
+        headerActions.Children.Add(_reload);
+        var help = WithGlyph(new Button { Width = 32, Height = 32, Padding = new Thickness(0), ToolTip = "Hướng dẫn" }, Glyphs.Question);
+        AutomationProperties.SetName(help, "Hướng dẫn");
+        headerActions.Children.Add(help);
+        Grid.SetColumn(headerActions, 1); header.Children.Add(headerActions);
+        top.Children.Add(header);
+
+        var instructions = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 12), Text = "① Khảo sát: CPU tìm nhân vật, lời thoại và cảnh, rồi AI xác định người nói, đại từ kể, tên phụ và xưng hô theo cặp; " +
             "mọi câu trả lời được kiểm chứng với nguyên văn. Mỗi lần bấm gửi tối đa số request đã đặt; bấm lại để chạy tiếp, phần đã xong không gửi lại. " +
             "② Hoàn thành: ghi toàn bộ kết quả đã kiểm chứng vào hồ sơ rồi dịch ngay. Hồ sơ hoặc quy tắc bạn đã khóa / đã có sẵn không bao giờ bị ghi đè; " +
-            "mục không tự quyết được chỉ được liệt kê, không chặn Hoàn thành. Có thể hoàn tác. Duyệt từng mục bên dưới là tùy chọn." });
-        var survey = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-        foreach (var e in new UIElement[] { new TextBlock { Text = "AI:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) }, _backend, _model,
-                     new TextBlock { Text = "Tối đa request mỗi lần:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) }, _maxRequests, _survey, _stop })
-            survey.Children.Add(e);
-        top.Children.Add(survey); top.Children.Add(_surveyStatus);
-        var finish = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
-        finish.Children.Add(_complete); finish.Children.Add(_undo); top.Children.Add(finish); top.Children.Add(_completion);
-        var bar = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-        bar.Children.Add(_reload); bar.Children.Add(_onlyValid); bar.Children.Add(_lock); top.Children.Add(bar); top.Children.Add(_summary);
+            "mục không tự quyết được chỉ được liệt kê, không chặn Hoàn thành. Có thể hoàn tác. Duyệt từng mục bên dưới là tùy chọn." };
+        help.Click += (_, _) => instructions.Visibility = instructions.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        top.Children.Add(instructions);
+
+        static TextBlock StepTitle(string text) => new() { Text = text, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) };
+        static TextBlock FieldLabel(string text) => new() { Text = text, FontWeight = FontWeights.SemiBold, Margin = new Thickness(3, 0, 3, 3) };
+        static Border Card(UIElement content) => new() { Style = Themed("Card"), Margin = new Thickness(0), Child = content };
+
+        var surveyCardContent = new StackPanel();
+        surveyCardContent.Children.Add(StepTitle("1 · Khảo sát"));
+        var surveyFields = new Grid();
+        surveyFields.ColumnDefinitions.Add(new() { Width = new GridLength(5, GridUnitType.Star) });
+        surveyFields.ColumnDefinitions.Add(new() { Width = new GridLength(5, GridUnitType.Star) });
+        surveyFields.ColumnDefinitions.Add(new() { Width = new GridLength(2, GridUnitType.Star) });
+        surveyFields.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        surveyFields.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        var aiLabel = FieldLabel("AI");
+        var modelLabel = FieldLabel("Model"); Grid.SetColumn(modelLabel, 1);
+        var maximumLabel = FieldLabel("Tối đa"); Grid.SetColumn(maximumLabel, 2);
+        surveyFields.Children.Add(aiLabel); surveyFields.Children.Add(modelLabel); surveyFields.Children.Add(maximumLabel);
+        _backend.Width = _model.Width = _maxRequests.Width = double.NaN;
+        _backend.Margin = new Thickness(0, 0, 6, 0); _model.Margin = new Thickness(0, 0, 6, 0); _maxRequests.Margin = new Thickness(0);
+        Grid.SetRow(_backend, 1); surveyFields.Children.Add(_backend);
+        Grid.SetRow(_model, 1); Grid.SetColumn(_model, 1); surveyFields.Children.Add(_model);
+        Grid.SetRow(_maxRequests, 1); Grid.SetColumn(_maxRequests, 2); surveyFields.Children.Add(_maxRequests);
+        surveyCardContent.Children.Add(surveyFields);
+        var surveyActions = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+        _survey.Margin = new Thickness(0, 0, 6, 0); _stop.Margin = new Thickness(0);
+        surveyActions.Children.Add(_survey); surveyActions.Children.Add(_stop); surveyCardContent.Children.Add(surveyActions);
+        var progress = new ProgressBar { Height = 4, IsIndeterminate = true, Margin = new Thickness(0, 8, 0, 0) };
+        progress.SetBinding(VisibilityProperty, new Binding(nameof(IsEnabled)) { Source = _stop, Converter = new BooleanToVisibilityConverter() });
+        surveyCardContent.Children.Add(progress); surveyCardContent.Children.Add(_surveyStatus);
+
+        var reviewCardContent = new StackPanel();
+        reviewCardContent.Children.Add(StepTitle("2 · Xem lại (không bắt buộc)"));
+        reviewCardContent.Children.Add(_summary);
+        _onlyValid.Margin = new Thickness(0, 4, 0, 0); _lock.Margin = new Thickness(0, 6, 0, 0);
+        reviewCardContent.Children.Add(_onlyValid); reviewCardContent.Children.Add(_lock);
+
+        var completionSummary = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) };
+        void ShowCompletionFirstLine() => completionSummary.Text = _completion.Text.Split(["\r\n", "\n"], StringSplitOptions.None)[0];
+        _completion.TextChanged += (_, _) => ShowCompletionFirstLine();
+        ShowCompletionFirstLine();
+        var finishCardContent = new StackPanel();
+        finishCardContent.Children.Add(StepTitle("3 · Hoàn thành"));
+        finishCardContent.Children.Add(completionSummary);
+        _complete.HorizontalAlignment = HorizontalAlignment.Stretch; _complete.Margin = new Thickness(0, 0, 0, 8);
+        _undo.HorizontalAlignment = HorizontalAlignment.Left; _undo.Margin = new Thickness(0);
+        finishCardContent.Children.Add(_complete); finishCardContent.Children.Add(_undo);
+
+        var surveyCard = Card(surveyCardContent);
+        var reviewCard = Card(reviewCardContent);
+        var finishCard = Card(finishCardContent);
+        finishCard.SetResourceReference(Border.BorderBrushProperty, "AccentTextBrush");
+        finishCard.BorderThickness = new Thickness(1.5);
+        var cards = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+        void ArrangeCards(bool stacked)
+        {
+            cards.ColumnDefinitions.Clear(); cards.RowDefinitions.Clear();
+            if (stacked)
+            {
+                cards.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+                for (int row = 0; row < 5; row++) cards.RowDefinitions.Add(new() { Height = row is 1 or 3 ? new GridLength(12) : GridLength.Auto });
+                Grid.SetRow(surveyCard, 0); Grid.SetColumn(surveyCard, 0);
+                Grid.SetRow(reviewCard, 2); Grid.SetColumn(reviewCard, 0);
+                Grid.SetRow(finishCard, 4); Grid.SetColumn(finishCard, 0);
+            }
+            else
+            {
+                for (int column = 0; column < 5; column++) cards.ColumnDefinitions.Add(new() { Width = column is 1 or 3 ? new GridLength(12) : new GridLength(1, GridUnitType.Star) });
+                cards.RowDefinitions.Add(new() { Height = GridLength.Auto });
+                Grid.SetRow(surveyCard, 0); Grid.SetColumn(surveyCard, 0);
+                Grid.SetRow(reviewCard, 0); Grid.SetColumn(reviewCard, 2);
+                Grid.SetRow(finishCard, 0); Grid.SetColumn(finishCard, 4);
+            }
+        }
+        cards.Children.Add(surveyCard); cards.Children.Add(reviewCard); cards.Children.Add(finishCard);
+        ArrangeCards(Width < 1100);
+        SizeChanged += (_, e) => ArrangeCards(e.NewSize.Width < 1100);
+        top.Children.Add(cards);
+
+        var completionDetails = new Expander { Header = "Mục được giữ lại · không chặn Hoàn thành", IsExpanded = false, Content = _completion, Margin = new Thickness(0, 0, 0, 12) };
+        completionDetails.SetResourceReference(BackgroundProperty, "WarningSubtleBrush");
+        _completion.SetResourceReference(Control.BackgroundProperty, "WarningSubtleBrush");
+        top.Children.Add(completionDetails);
         root.Children.Add(top);
 
         var body = new Grid();
@@ -137,8 +233,13 @@ public sealed class AddressingLedgerWindow : Window
             _pairFields.Children.Add(e);
         editor.Children.Add(_characterFields); editor.Children.Add(_pairFields);
         editor.Children.Add(Label("Ghi chú duyệt")); editor.Children.Add(_note);
-        var actions = new WrapPanel { Margin = new Thickness(0, 6, 0, 6) };
-        foreach (var b in new[] { _accept, _reject, _defer }) { b.Margin = new Thickness(0, 0, 6, 0); actions.Children.Add(b); }
+        var actions = new Grid { Margin = new Thickness(0, 6, 0, 6) };
+        actions.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        actions.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var normalActions = new StackPanel { Orientation = Orientation.Horizontal };
+        _accept.Margin = new Thickness(0, 0, 6, 0); _defer.Margin = new Thickness(0);
+        normalActions.Children.Add(_accept); normalActions.Children.Add(_defer); actions.Children.Add(normalActions);
+        _reject.Margin = new Thickness(16, 0, 0, 0); Grid.SetColumn(_reject, 1); actions.Children.Add(_reject);
         editor.Children.Add(actions);
         editor.Children.Add(Label("Lý do, lỗi kiểm chứng và mẫu nguyên văn"));
         _details.Height = 220; editor.Children.Add(_details);
