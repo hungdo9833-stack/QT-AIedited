@@ -21,6 +21,8 @@ public partial class MainWindow
         CharacterProjectNameInput.Text = _characterProject.Name;
         NormalizeAfterTranslationCheck.IsChecked = _characterProject.NormalizeAfterTranslation;
         ConsistencyLockCheck.IsChecked = _characterProject.ConsistencyLockEnabled;
+        StorySettingCombo.SelectedItem = StorySettingCombo.Items.OfType<ComboBoxItem>()
+            .FirstOrDefault(i => i.Tag?.ToString() == _characterProject.Setting.ToString()) ?? StorySettingCombo.Items[0];
         RefreshCharacterGrid();
         ClearPronounReport();
         if (_initialized && _service is not null && _selectedId is Guid id)
@@ -50,6 +52,8 @@ public partial class MainWindow
         _characterProject.Name = CharacterProjectNameInput.Text.Trim();
         _characterProject.NormalizeAfterTranslation = NormalizeAfterTranslationCheck.IsChecked == true;
         _characterProject.ConsistencyLockEnabled = ConsistencyLockCheck.IsChecked == true;
+        _characterProject.Setting = (StorySettingCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() is string tag &&
+            Enum.TryParse(tag, out StorySetting setting) ? setting : StorySetting.Unspecified;
         _characterProject.UpdatedAt = DateTimeOffset.UtcNow;
         _characterProject.Validate();
     }

@@ -136,6 +136,32 @@ public sealed class BookIntelligenceSession2Tests
         Assert.Contains(scenes, x => x.ResolutionStatus == SceneResolutionStatus.Ambiguous && x.SpeakerCharacterId is null);
     }
 
+    [Fact]
+    public void Knowledge_block_carries_ledger_addressing_by_name_without_forbidding_dialogue_rules()
+    {
+        Guid project = Guid.NewGuid();
+        CharacterProfile mother = Profile("王秀兰", "Vương Tú Lan"), wife = Profile("苏雨", "Tô Vũ");
+        mother.Relationships.Add(new CharacterRelationship { TargetCharacterId = wife.Id, ListenerCharacterId = wife.Id,
+            Relationship = "mẹ chồng - con dâu", SelfReference = "mẹ", AddresseeReference = "con", Enabled = true });
+        ProjectResources resources = Resources(project, mother, wife);
+        ChapterDocument chapter = TranslationService.CreateChapter("Chương", "王秀兰指着苏雨：“你这个疯女人！”",
+            model: new ModelOptions { Model = "fake" });
+        chapter.ProjectId = project;
+        BookIntelligenceState state = State(project, chapter.OriginalText);
+        state.Chapters[0].ChapterId = chapter.Id;
+        foreach (CorpusEvidence item in state.Chapters[0].Evidence) item.ChapterId = chapter.Id;
+
+        string block = new BookKnowledgeContextProvider(state, resources).GetSnapshot(chapter, chapter.Segments[0]).PromptBlock;
+
+        Assert.Contains("- Dialogue Vương Tú Lan -> Tô Vũ: self=mẹ; address=con", block);
+        Assert.DoesNotContain("do not force", block);
+        Assert.DoesNotContain(wife.Id.ToString("D"), block);
+
+        // With the consistency lock on, the CHARACTER CONSISTENCY block carries the rule; it is not repeated here.
+        resources.Characters.ConsistencyLockEnabled = true;
+        Assert.DoesNotContain("- Dialogue", new BookKnowledgeContextProvider(state, resources).GetSnapshot(chapter, chapter.Segments[0]).PromptBlock);
+    }
+
     private static BookIntelligenceState State(Guid project, params string[] excerpts)
     {
         var state = new BookIntelligenceState { ProjectId = project };

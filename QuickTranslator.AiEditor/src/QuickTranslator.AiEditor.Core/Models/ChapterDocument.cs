@@ -5,7 +5,7 @@ namespace QuickTranslator.AiEditor.Core.Models;
 public enum SegmentStatus { Untranslated, Translating, AwaitingReview, Approved, Error, InspectionRequired }
 public enum AttemptOutcome { InProgress, Completed, InvalidOutput, Failed, Cancelled, Interrupted }
 public enum IssueSeverity { Warning, Error }
-public enum IssueCode { EmptyOutput, TruncatedOutput, SuspiciousRepetition, PossibleMissingContent, UntranslatedChinese, IncompleteFinalSentence, SourceEndsMidSentence, AmbiguousPronoun }
+public enum IssueCode { EmptyOutput, TruncatedOutput, SuspiciousRepetition, PossibleMissingContent, UntranslatedChinese, IncompleteFinalSentence, SourceEndsMidSentence, AmbiguousPronoun, ArchaicAddressing }
 
 public sealed record TranslationIssue(IssueCode Code, IssueSeverity Severity, string Message);
 

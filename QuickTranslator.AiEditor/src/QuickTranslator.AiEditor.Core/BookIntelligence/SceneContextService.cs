@@ -94,28 +94,51 @@ public sealed class BookKnowledgeContextProvider : IBookKnowledgeContextProvider
             x.Aliases.ToArray(), x.Gender, x.PrimaryNarrativePronoun, x.NarrativePronounLocked)).ToArray();
         var knowledgeRelations = relations.Select(x => new BookKnowledgeRelation(x.Id, x.SubjectCharacterId,
             x.TargetCharacterId, x.RelationType, x.RelationQualifier)).ToArray();
-        var knowledgeAddressing = addressing.Select(x => new BookKnowledgeAddressing(x.SpeakerCharacterId,
-            x.ListenerCharacterId, x.SelfReference, x.AddresseeReference, x.Locked)).ToArray();
+        // The addressing ledger writes the Character Project: its rules are the confirmed source and win over
+        // older knowledge periods for the same direction. With the consistency lock on, the CHARACTER CONSISTENCY
+        // block already carries them, so they are not repeated here.
+        BookKnowledgeAddressing[] ledger = _resources.Characters.ConsistencyLockEnabled ? [] : LedgerAddressing(relevant, ids,
+            number == int.MaxValue ? chapter.ChapterNumber : number);
+        var knowledgeAddressing = ledger.Concat(addressing
+                .Where(x => !ledger.Any(l => l.SpeakerId == x.SpeakerCharacterId && l.ListenerId == x.ListenerCharacterId))
+                .Select(x => new BookKnowledgeAddressing(x.SpeakerCharacterId, x.ListenerCharacterId, x.SelfReference, x.AddresseeReference, x.Locked)))
+            .Take(MaximumAddressingRules).ToArray();
         var knowledgeTerms = terms.Select(x => new BookKnowledgeTerm(x.Chinese, x.Vietnamese, x.Scope)).ToArray();
+        var names = _resources.Characters.Profiles.ToDictionary(x => x.Id, x => x.VietnameseName);
         string block = BuildPromptBlock(characters, knowledgeRelations, knowledgeAddressing, knowledgeTerms,
-            scene?.ResolutionStatus ?? SceneResolutionStatus.Unresolved);
+            scene?.ResolutionStatus ?? SceneResolutionStatus.Unresolved, id => names.GetValueOrDefault(id, "?"));
         return new BookKnowledgeContextSnapshot(_state.Revision, chapter.ProjectId ?? Guid.Empty, chapter.Id, segment.Id,
             characters, knowledgeRelations, knowledgeAddressing, knowledgeTerms,
             scene?.ResolutionStatus ?? SceneResolutionStatus.Unresolved, block);
     }
 
+    private const int MaximumAddressingRules = 24;
+
+    /// <summary>Enabled, complete Character Project rules between relevant characters; a chapter-ranged rule beats a whole-book one.</summary>
+    private static BookKnowledgeAddressing[] LedgerAddressing(IReadOnlyList<CharacterProfile> relevant, Guid[] ids, int? chapter) => relevant
+        .SelectMany(owner => owner.Relationships.Select(rule => (Owner: owner, Rule: rule)))
+        .Where(x => x.Rule.Enabled && x.Rule.EffectiveSpeakerCharacterId(x.Owner.Id) == x.Owner.Id &&
+            ids.Contains(x.Rule.EffectiveListenerCharacterId) && x.Rule.EffectiveListenerCharacterId != x.Owner.Id &&
+            x.Rule.AppliesTo(chapter) && !string.IsNullOrWhiteSpace(x.Rule.SelfReference) && !string.IsNullOrWhiteSpace(x.Rule.AddresseeReference))
+        .GroupBy(x => (x.Owner.Id, x.Rule.EffectiveListenerCharacterId))
+        .Select(g => g.OrderBy(x => x.Rule.EffectiveFromChapter is null && x.Rule.EffectiveToChapter is null).First())
+        .Select(x => new BookKnowledgeAddressing(x.Owner.Id, x.Rule.EffectiveListenerCharacterId,
+            x.Rule.SelfReference.Trim(), x.Rule.AddresseeReference.Trim(), x.Rule.Locked))
+        .ToArray();
+
+    // Names, never ids: the model cannot resolve a GUID to a character.
     private static string BuildPromptBlock(IReadOnlyCollection<BookKnowledgeCharacter> characters,
         IReadOnlyCollection<BookKnowledgeRelation> relations, IReadOnlyCollection<BookKnowledgeAddressing> addressing,
-        IReadOnlyCollection<BookKnowledgeTerm> terms, SceneResolutionStatus scene)
+        IReadOnlyCollection<BookKnowledgeTerm> terms, SceneResolutionStatus scene, Func<Guid, string> name)
     {
         if (characters.Count == 0 && relations.Count == 0 && addressing.Count == 0 && terms.Count == 0) return "";
-        var lines = new List<string> { "BOOK KNOWLEDGE (approved, chapter-scoped):", $"- Scene resolution: {scene}" };
+        var lines = new List<string> { "BOOK KNOWLEDGE (approved, chapter-scoped):" };
         lines.AddRange(characters.Select(x => $"- Character {x.ChineseName}={x.VietnameseName}; aliases=[{string.Join(",", x.Aliases)}]; narrative={x.NarrativePronoun}"));
-        lines.AddRange(relations.Select(x => $"- Confirmed relation {x.SubjectId:D}->{x.TargetId:D}: {x.Type} {x.Qualifier}"));
-        lines.AddRange(addressing.Select(x => $"- Approved addressing {x.SpeakerId:D}->{x.ListenerId:D}: self={x.SelfReference}; address={x.AddresseeReference}{(x.Locked ? " [LOCKED]" : "")}"));
+        lines.AddRange(relations.Select(x => $"- Relation {name(x.SubjectId)} -> {name(x.TargetId)}: {x.Type} {x.Qualifier}".TrimEnd()));
+        lines.AddRange(addressing.Select(x => $"- Dialogue {name(x.SpeakerId)} -> {name(x.ListenerId)}: self={x.SelfReference}; address={x.AddresseeReference}{(x.Locked ? " [LOCKED]" : "")}"));
         lines.AddRange(terms.Select(x => $"- Term {x.Chinese}={x.Vietnamese}"));
-        if (scene != SceneResolutionStatus.Verified)
-            lines.Add("- Speaker/listener is not verified; do not force dialogue pronouns from scene context.");
+        if (addressing.Count > 0 && scene != SceneResolutionStatus.Verified)
+            lines.Add("- Apply a dialogue rule to a quote when the passage shows who is speaking to whom.");
         return string.Join('\n', lines);
     }
 }

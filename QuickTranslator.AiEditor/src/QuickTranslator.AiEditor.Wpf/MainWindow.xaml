@@ -805,6 +805,12 @@
                                <TextBox x:Name="CharacterProjectNameInput" Width="300" ToolTip="Tên dự án" AutomationProperties.Name="Tên dự án nhân vật" AutomationProperties.HelpText="Tên dự án"/>
                                <CheckBox x:Name="ConsistencyLockCheck" Content="Bật khóa nhất quán Project" ToolTip="Chèn đại từ và cách xưng hô đã khóa vào prompt của đúng nhân vật xuất hiện trong đoạn"/>
                                <CheckBox x:Name="NormalizeAfterTranslationCheck" Content="Chuẩn hóa an toàn sau dịch" IsChecked="True"/>
+                               <ComboBox x:Name="StorySettingCombo" Width="190" SelectedIndex="0" AutomationProperties.Name="Bối cảnh truyện"
+                                         ToolTip="Hiện đại: lời thoại không dùng ngươi/ta/huynh… và đoạn dịch còn những từ này sẽ được cảnh báo. Cổ trang: cho phép xưng hô cổ.">
+                                   <ComboBoxItem Tag="Unspecified" Content="Bối cảnh: chưa chọn"/>
+                                   <ComboBoxItem Tag="Modern" Content="Bối cảnh: hiện đại"/>
+                                   <ComboBoxItem Tag="Historical" Content="Bối cảnh: cổ trang"/>
+                               </ComboBox>
                            </WrapPanel>
                            <WrapPanel Grid.Row="3">
                                <Button x:Name="AddressingLedgerButton" Content="Sổ xưng hô · khảo sát &amp; Hoàn thành" ui:ButtonIcon.Glyph="&#xE716;" Click="OnOpenAddressingLedger" Style="{StaticResource PrimaryButton}" ToolTip="Khảo sát nhân vật, tên phụ, đại từ lời kể và xưng hô theo cặp bằng AI, rồi bấm Hoàn thành để ghi tất cả vào hồ sơ (có thể hoàn tác)"/>

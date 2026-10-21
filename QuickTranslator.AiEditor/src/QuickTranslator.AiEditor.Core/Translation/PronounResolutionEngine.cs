@@ -228,6 +228,10 @@ public sealed class PronounResolutionEngine
         return spans;
     }
 
+    /// <summary>Quoted dialogue ranges (start inclusive, end exclusive) of a Vietnamese translation.</summary>
+    internal static IReadOnlyList<(int Start, int End)> DialogueRanges(string text) =>
+        DialogueSpans(text).Select(s => (s.Start, s.End)).ToArray();
+
     private static List<TextSpan> DialogueSpans(string text)
     {
         var spans = new List<TextSpan>();

@@ -248,6 +248,7 @@ public sealed partial class TranslationService
                 postProcessBatchId, chineseAnalysis.Run is null ? null : chineseAnalysis.Text);
             var issues = _quality.Check(selected.SourceText, result with { Text = pronounAnalysis.Text }, options)
                 .Concat(chineseAnalysis.Issues).Concat(pronounAnalysis.Issues)
+                .Concat(StorySettingRules.CheckDialogue(context.CharacterProject, pronounAnalysis.Text))
                 .DistinctBy(i => (i.Code, i.Message)).ToList();
             lock (_sync)
             {

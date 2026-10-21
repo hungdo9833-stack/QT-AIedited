@@ -10,6 +10,7 @@ public static class CharacterConsistencyProtection
         ArgumentNullException.ThrowIfNull(current);
         ArgumentNullException.ThrowIfNull(incoming);
         if (current.ConsistencyLockEnabled) incoming.ConsistencyLockEnabled = true;
+        if (incoming.Setting == StorySetting.Unspecified) incoming.Setting = current.Setting;
 
         foreach (CharacterProfile sourceOwner in current.Profiles)
         {

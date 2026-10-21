@@ -58,6 +58,7 @@ public partial class MainWindow
         InitializeOllamaBackendUi();
         NormalizeAfterTranslationCheck.Checked += OnSettingsInputChanged;
         NormalizeAfterTranslationCheck.Unchecked += OnSettingsInputChanged;
+        StorySettingCombo.SelectionChanged += OnSettingsInputChanged;
         UpdateSettingsCounters();
     }
 
@@ -97,7 +98,7 @@ public partial class MainWindow
     {
         if (!_initialized || _rendering || _syncingGlossary) return;
         bool resource = ReferenceEquals(sender, ContextNotesInput) || ReferenceEquals(sender, CharacterProjectNameInput) ||
-            ReferenceEquals(sender, NormalizeAfterTranslationCheck);
+            ReferenceEquals(sender, NormalizeAfterTranslationCheck) || ReferenceEquals(sender, StorySettingCombo);
         if (resource) _resourcesDirty = true; else _configurationDirty = true;
         UpdateSettingsCounters();
         SetStatus(resource ? "Tài nguyên có thay đổi chưa lưu." : "Thiết lập có thay đổi chưa lưu.");

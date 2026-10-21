@@ -4,6 +4,7 @@ namespace QuickTranslator.AiEditor.Core.Models;
 
 public enum CharacterGender { Unknown, Male, Female, Other }
 public enum PronounSuggestionKind { SafeReplacement, Ambiguous, Valid, Protected }
+public enum StorySetting { Unspecified, Modern, Historical }
 
 public sealed record CharacterRelationship
 {
@@ -234,11 +235,13 @@ public sealed class CharacterProject
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public bool NormalizeAfterTranslation { get; set; } = true;
     public bool ConsistencyLockEnabled { get; set; }
+    /// <summary>Story era for dialogue register: modern books never get archaic addressing (ngươi, huynh…).</summary>
+    public StorySetting Setting { get; set; }
     public List<CharacterProfile> Profiles { get; set; } = [];
 
     public void Validate()
     {
-        if (SchemaVersion != 1 || Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 300 ||
+        if (SchemaVersion != 1 || Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 300 || !Enum.IsDefined(Setting) ||
             Profiles is null || Profiles.Count > 1000 || Profiles.Any(p => p is null))
             throw new ArgumentException("Dự án nhân vật không hợp lệ.");
         foreach (var profile in Profiles) profile.Validate();
