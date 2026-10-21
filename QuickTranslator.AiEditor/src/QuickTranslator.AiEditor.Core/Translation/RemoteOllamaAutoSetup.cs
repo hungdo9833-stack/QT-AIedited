@@ -44,9 +44,6 @@ public sealed class RemoteOllamaAutoSetup
 
         progress?.Report(new(AutoSetupStage.Inspect, "Đang nhận diện máy thuê…"));
         RemoteGpuInspection inspection = await _setup.InspectAsync(session, cancellationToken).ConfigureAwait(false);
-        // SSH works from outside, which is what the port splitter's timed rollback waits for.
-        if (inspection.OsFamily == RemoteOsFamily.Windows)
-            await session.ExecuteAsync(SshOperation.ConfirmWindowsMux, cancellationToken: cancellationToken).ConfigureAwait(false);
         if (!inspection.SupportsAutomaticSetup)
             return new(false, inspection.BlockedReason ?? "Máy thuê chưa hỗ trợ cài đặt tự động.", inspection);
         if (inspection.GpuName is null)

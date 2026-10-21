@@ -15,11 +15,17 @@ public sealed class RemoteOllamaSetupService
         {
             // /etc/os-release is missing: either a Windows host (OpenSSH for Windows) or something we cannot set up.
             SshCommandResult version = await session.ExecuteAsync(SshOperation.ReadWindowsVersion, cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (version.Output.Contains("Windows", StringComparison.OrdinalIgnoreCase))
+            // cmd.exe is the only common shell that answers an unknown program with "is not recognized as an internal or
+            // external command"; a Linux shell says "not found". That alone is enough to know it is Windows.
+            string combined = version.Output + "\n" + version.Error + "\n" + os.Output + "\n" + os.Error;
+            if (combined.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
+                combined.Contains("is not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase))
                 return await InspectWindowsAsync(session, cancellationToken).ConfigureAwait(false);
-            return new(os.Error.Trim().Length == 0 ? "Hệ điều hành không xác định" : os.Error.Trim(), null, null, null,
-                false, false, [], false, "Không nhận diện được hệ điều hành máy thuê (chỉ hỗ trợ Ubuntu và Windows).",
-                RemoteOsFamily.Unknown);
+            string detail = (version.Output + " " + version.Error + " " + os.Error).Replace('\r', ' ').Replace('\n', ' ').Trim();
+            return new("Hệ điều hành không xác định", null, null, null,
+                false, false, [], false,
+                "Không nhận diện được hệ điều hành máy thuê (chỉ hỗ trợ Ubuntu và Windows). Phản hồi: " +
+                (detail.Length > 300 ? detail[..300] : detail), RemoteOsFamily.Unknown);
         }
         SshCommandResult gpu = await session.ExecuteAsync(SshOperation.ReadNvidiaGpu, cancellationToken: cancellationToken).ConfigureAwait(false);
         SshCommandResult disk = await session.ExecuteAsync(SshOperation.ReadRootDisk, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -42,6 +48,9 @@ public sealed class RemoteOllamaSetupService
     private static async Task<RemoteGpuInspection> InspectWindowsAsync(ISshSession session,
         CancellationToken cancellationToken)
     {
+        // A logged-in SSH session proves the port is reachable from outside, which is what the port splitter's timed
+        // rollback (see WindowsPortMux) waits for. Harmless on a machine without the splitter.
+        await session.ExecuteAsync(SshOperation.ConfirmWindowsMux, cancellationToken: cancellationToken).ConfigureAwait(false);
         SshCommandResult info = await session.ExecuteAsync(SshOperation.ReadWindowsInfo, cancellationToken: cancellationToken).ConfigureAwait(false);
         SshCommandResult gpu = await session.ExecuteAsync(SshOperation.ReadNvidiaGpuWindows, cancellationToken: cancellationToken).ConfigureAwait(false);
         SshCommandResult disk = await session.ExecuteAsync(SshOperation.ReadSystemDiskWindows, cancellationToken: cancellationToken).ConfigureAwait(false);

@@ -154,6 +154,22 @@ public sealed class WindowsGpuSetupTests
     }
 
     [Fact]
+    public async Task A_cmd_exe_shell_is_enough_to_know_the_host_is_windows_even_when_ver_gives_nothing()
+    {
+        // Seen on a real rental: cat fails with the cmd.exe wording and ver returned no text we could use.
+        var host = WindowsHost(ollama: false, models: []);
+        host.Results[SshOperation.ReadOperatingSystem] =
+            new(1, "", "'cat' is not recognized as an internal or external command,\r\noperable program or batch file.");
+        host.Results[SshOperation.ReadWindowsVersion] = new(1, "", "");
+        var session = new ScriptedSession(host);
+
+        RemoteGpuInspection result = await new RemoteOllamaSetupService().InspectAsync(session);
+
+        Assert.Equal(RemoteOsFamily.Windows, result.OsFamily);
+        Assert.Contains(session.Executed, e => e.Operation == SshOperation.ConfirmWindowsMux);
+    }
+
+    [Fact]
     public async Task Unknown_operating_system_is_reported_instead_of_guessing()
     {
         var host = new Dictionary<SshOperation, SshCommandResult>
