@@ -393,10 +393,10 @@ public partial class MainWindow
             if (list.SelectedItem is not SourceOccurrence item) return;
             if (item.SegmentId is Guid id)
             {
-                _selectedId = id; _shownAttemptId = null; EditorTabs.SelectedIndex = 1; Refresh();
+                _selectedId = id; _shownAttemptId = null; NavigateTo(WorkspaceId.Editor, EditorMode.Review); Refresh();
                 SourceText.Focus(); SourceText.Select(item.Start, selected.Length);
             }
-            else { EditorTabs.SelectedIndex = 0; EditorModeButton.IsChecked = true; ChapterInput.Focus(); ChapterInput.Select(item.Start, selected.Length); }
+            else { NavigateTo(WorkspaceId.Editor, EditorMode.Translate); ChapterInput.Focus(); ChapterInput.Select(item.Start, selected.Length); }
         }
         open.Click += (_, _) => Open(); list.MouseDoubleClick += (_, _) => Open(); close.Click += (_, _) => window.Close();
         window.Closed += (_, _) => { if (ReferenceEquals(_sourceOccurrencesWindow, window)) _sourceOccurrencesWindow = null; };

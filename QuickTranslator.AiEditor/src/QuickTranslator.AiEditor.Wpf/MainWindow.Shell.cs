@@ -244,6 +244,9 @@ public partial class MainWindow
 
     private void ShowTranslationWorkspace(bool fourPane)
     {
+        CurrentWorkspace = WorkspaceId.Editor;
+        CurrentEditorMode = fourPane ? EditorMode.Review : EditorMode.Translate;
+        EditorContextHeader.Visibility = Visibility.Visible;
         EditorModeButton.IsChecked = true;
         _workspaceLayout.FourPaneMode = fourPane;
         if (fourPane)
@@ -259,7 +262,13 @@ public partial class MainWindow
         }
         SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
         Refresh();
-        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(fourPane));
+        FocusSelectedEditor(fourPane);
+        _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, () =>
+        {
+            ChapterBlocksItems.ApplyTemplate();
+            ChapterBlocksItems.UpdateLayout();
+            FocusSelectedEditor(fourPane);
+        });
         _ = SaveWorkspaceLayoutAsync();
         MarkActiveNavigation(TranslateNavButton);
     }
@@ -324,6 +333,8 @@ public partial class MainWindow
 
     private void ShowReaderWorkspace()
     {
+        CurrentWorkspace = WorkspaceId.Reader;
+        EditorContextHeader.Visibility = Visibility.Collapsed;
         EditorTabs.SelectedIndex = 0;
         ReaderModeButton.IsChecked = true;
         SetTranslationInspectorVisibility(false);
@@ -333,6 +344,8 @@ public partial class MainWindow
 
     private void ShowSettingsWorkspace(string? section = null)
     {
+        CurrentWorkspace = WorkspaceId.Settings;
+        EditorContextHeader.Visibility = Visibility.Collapsed;
         EditorTabs.SelectedIndex = 2;
         MarkActiveNavigation(SettingsNavButton);
         SetTranslationInspectorVisibility(false);
@@ -359,7 +372,13 @@ public partial class MainWindow
                 ShowSettingsWorkspace("Dictionary");
                 break;
             case "quality":
-                ShowSettingsWorkspace("Quality");
+                NavigateTo(WorkspaceId.Editor, EditorMode.Review);
+                ReviewChecksPanel.IsExpanded = true;
+                _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, () =>
+                {
+                    ReviewChecksPanel.Focus();
+                    Keyboard.Focus(ReviewChecksPanel);
+                });
                 break;
             case "settings":
                 ShowSettingsWorkspace();
@@ -568,10 +587,19 @@ public partial class MainWindow
 
     private void FocusSelectedEditor(bool fourPane)
     {
-        if (fourPane) { DraftText.Focus(); return; }
+        if (fourPane)
+        {
+            DraftText.Focus();
+            Keyboard.Focus(DraftText);
+            return;
+        }
         TextBox? target = FindVisualChildren<TextBox>(ChapterBlocksItems)
             .FirstOrDefault(input => !input.IsReadOnly && input.Tag is Guid id && id == _selectedId);
-        target?.Focus();
+        if (target is not null)
+        {
+            target.Focus();
+            Keyboard.Focus(target);
+        }
     }
 
     private void OnShowCurrentHistory(object sender, RoutedEventArgs e)

@@ -53,7 +53,6 @@ public partial class MainWindow
         SettingsPromptPanel.Visibility = selected == "Prompts" ? Visibility.Visible : Visibility.Collapsed;
         SettingsDictionaryPanel.Visibility = selected == "Dictionary" ? Visibility.Visible : Visibility.Collapsed;
         SettingsCharactersPanel.Visibility = selected == "Characters" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsQualityPanel.Visibility = selected == "Quality" ? Visibility.Visible : Visibility.Collapsed;
         SettingsAppearancePanel.Visibility = selected == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         if (_settingsDirty && _initialized) SetStatus("Thiết lập có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
     }

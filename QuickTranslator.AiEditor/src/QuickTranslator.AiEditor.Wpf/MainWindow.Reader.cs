@@ -452,11 +452,7 @@ public partial class MainWindow
         if (id is null) return;
         _selectedId = id; _shownAttemptId = null;
         _service?.SelectSegment(id.Value);
-        ReaderModeButton.IsChecked = false;
-        EditorModeButton.IsChecked = true;
-        EditorTabs.SelectedIndex = _workspaceLayout.FourPaneMode ? 1 : 0;
-        Refresh();
-        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
+        ShowTranslationWorkspace(_workspaceLayout.FourPaneMode);
         SetStatus("Đã mở đúng đoạn đang đọc trong Editor.");
     }
 
@@ -756,10 +752,10 @@ public partial class MainWindow
             new("translate-seg", "Dịch / Dịch lại đoạn đang chọn", "Ctrl+Shift+R", () => { OnTranslate(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("translate-all", "Dịch toàn bộ chương hiện tại", "Queue 1 chương", () => { OnTranslateAll(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("approve-chapter", "Duyệt toàn bộ chương hiện tại", "Duyệt tất cả đoạn đã có bản dịch", () => { OnApproveAllSegments(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("scan-chinese", "Quét chữ Hán còn sót & Tìm thay thế", "Ctrl+H", () => { OnScanChineseText(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("scan-pronouns", "Quét tên & chuẩn hóa xưng hô nhân vật", "Inspector / Nháp", () => { OnScanPronouns(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("mode-two", "Chuyển sang Chế độ Hai ô (Lưới song ngữ)", "Ctrl+1", () => { ShowTranslationWorkspace(false); return Task.CompletedTask; }),
-            new("mode-four", "Chuyển sang Chế độ Bốn ô (Biên tập Segment)", "Ctrl+2", () => { ShowTranslationWorkspace(true); return Task.CompletedTask; }),
+            new("scan-chinese", "Kiểm tra & Duyệt · Quét chữ Hán còn sót", "Ctrl+H", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; OnScanChineseText(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("scan-pronouns", "Kiểm tra & Duyệt · Quét xưng hô", "Checks", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; OnScanPronouns(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("mode-two", "Biên tập", "Ctrl+1 · Lưới song ngữ", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Translate); return Task.CompletedTask; }),
+            new("mode-four", "Kiểm tra & Duyệt", "Ctrl+2 · Biên tập Segment", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; return Task.CompletedTask; }),
             new("mode-reader", "Chuyển sang Chế độ Đọc (Reader)", "Đọc thử toàn chương", () => { ActivateShellSection("reader"); return Task.CompletedTask; }),
             new("toggle-sidebar", "Ẩn / Hiện cột Mục lục bên trái", "Ctrl+B", () => { OnToggleProjectSidebar(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("toggle-inspector", "Ẩn / Hiện bảng Inspector bên phải", "Ctrl+Shift+I", () => { OnToggleInspector(this, new RoutedEventArgs()); return Task.CompletedTask; }),

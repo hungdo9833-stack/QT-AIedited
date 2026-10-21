@@ -628,7 +628,7 @@ public partial class MainWindow
             }
             if (_service?.GetSnapshot().Id != request.ChapterId) return;
             _selectedId = request.SegmentId; _shownAttemptId = null;
-            ReaderModeButton.IsChecked = false; EditorModeButton.IsChecked = true; EditorTabs.SelectedIndex = 1;
+            NavigateTo(WorkspaceId.Editor, EditorMode.Review);
             Refresh();
             int start = Math.Clamp(request.StartUtf16, 0, DraftText.Text.Length);
             int length = Math.Min(request.LengthUtf16, DraftText.Text.Length - start);

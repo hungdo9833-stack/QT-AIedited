@@ -570,8 +570,6 @@ public partial class MainWindow : Window
         Visibility standaloneVis = document && _projectSession is not null ? Visibility.Collapsed : Visibility.Visible;
         PasteButton.Visibility = ImportTextButton.Visibility = SplitButton.Visibility = standaloneVis;
         if (FindName("ApproveAllChapterButton") is Button approveAllBtn) approveAllBtn.IsEnabled = document && !active && available;
-        if (FindName("QuickScanChineseToolbarButton") is Button quickChineseBtn) quickChineseBtn.IsEnabled = document && !active && available;
-        if (FindName("QuickScanPronounsToolbarButton") is Button quickPronounsBtn) quickPronounsBtn.IsEnabled = document && !active && available;
         if (FindName("ApproveAndNextButton") is Button approveNextBtn)
             approveNextBtn.IsEnabled = selectedSegment?.Status != SegmentStatus.Translating && selected &&
                 !string.IsNullOrWhiteSpace(DraftText.Text) && available;
@@ -629,6 +627,7 @@ public partial class MainWindow : Window
             TranslateButton.Content = selectedSegment.Attempts.Count == 0
                 ? "Dịch đoạn đang chọn" : "Dịch lại đoạn đang chọn";
         }
+        ApplyEditorActionPlan(chapter);
     }
 
     private ModelOptions ReadModelOptions()

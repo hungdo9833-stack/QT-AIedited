@@ -323,9 +323,7 @@ public partial class MainWindow
         // only leave Settings (Tab 2) to the user's active Editor mode.
         if (EditorTabs.SelectedIndex == 2)
         {
-            ReaderModeButton.IsChecked = false;
-            EditorModeButton.IsChecked = true;
-            EditorTabs.SelectedIndex = _workspaceLayout.FourPaneMode ? 1 : 0;
+            NavigateTo(WorkspaceId.Editor, _workspaceLayout.FourPaneMode ? EditorMode.Review : EditorMode.Translate);
         }
         Refresh();
         if (EditorTabs.SelectedIndex == 1)

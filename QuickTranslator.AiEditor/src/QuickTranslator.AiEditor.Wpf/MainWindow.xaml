@@ -41,7 +41,7 @@
                     <Button x:Name="ProjectSidebarToggleButton" Content="Ẩn mục lục" Click="OnToggleProjectSidebar" ToolTip="Ẩn/Hiện mục lục chương (Ctrl+B)"/>
                     <Button x:Name="InspectorToggleButton" Content="Ẩn Inspector" Click="OnToggleInspector" ToolTip="Ẩn/Hiện Inspector (Ctrl+Shift+I)"/>
                     <Button x:Name="ThemeToggleButton" Content="Light" ui:ButtonIcon.Glyph="&#xE793;" Click="OnToggleShellTheme" ToolTip="Chuyển sang giao diện này (Dark / Light)"/>
-                    <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" Style="{StaticResource PrimaryButton}" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)"/>
+                    <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)"/>
                 </StackPanel>
                 <DockPanel>
                     <ComboBox x:Name="ProjectSwitcher" Width="300" HorizontalAlignment="Left" DisplayMemberPath="Title" SelectionChanged="OnProjectSwitcherChanged" ToolTip="Chuyển dự án gần đây" AutomationProperties.Name="Chuyển dự án gần đây" AutomationProperties.HelpText="Chuyển dự án gần đây"/>
@@ -53,7 +53,7 @@
         </Border>
         <Border x:Name="QueueResumeBanner" DockPanel.Dock="Top" Visibility="Collapsed" Background="{DynamicResource SelectionBrush}" BorderBrush="{DynamicResource PrimaryBrush}" BorderThickness="0,0,0,1" Padding="12,8">
             <DockPanel>
-                <Button DockPanel.Dock="Right" Content="Tiếp tục dịch" Click="OnResumeProjectTranslationFromShell" Style="{StaticResource PrimaryButton}"/>
+                <Button DockPanel.Dock="Right" Content="Tiếp tục dịch" Click="OnResumeProjectTranslationFromShell" Style="{StaticResource StateButton}"/>
                 <TextBlock x:Name="QueueResumeSummaryText" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap"/>
             </DockPanel>
         </Border>
@@ -76,7 +76,7 @@
                 </StackPanel>
                 <StackPanel>
                     <TextBlock Text="WORKSPACE" Margin="14,4,8,8" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
-                    <Button x:Name="TranslateNavButton" Content="Biên dịch" ui:ButtonIcon.Glyph="&#xE8C1;" Tag="Translate" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Không gian biên dịch (Ctrl+1 / Ctrl+2)"/>
+                    <Button x:Name="TranslateNavButton" Content="Biên tập" ui:ButtonIcon.Glyph="&#xE8C1;" Tag="Translate" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Biên tập / Kiểm tra &amp; Duyệt (Ctrl+1 / Ctrl+2)"/>
                     <Button Content="Chương" ui:ButtonIcon.Glyph="&#xE8FD;" Tag="Chapters" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Quản lý chương"/>
                     <Button Content="Nhập TXT" ui:ButtonIcon.Glyph="&#xE8B5;" Tag="Import" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Nhập TXT nhiều chương"/>
                     <Button Content="Hàng đợi" ui:ButtonIcon.Glyph="&#xE9D5;" Tag="Queue" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Hàng đợi dịch nhiều chương"/>
@@ -111,7 +111,7 @@
                         <ComboBoxItem Tag="Updated">Mới sửa trước</ComboBoxItem>
                     </ComboBox>
                     <WrapPanel>
-                        <Button Content="TXT" ui:ButtonIcon.Glyph="&#xE710;" Click="OnAddChapterFromText" ToolTip="ThÃªm chÆ°Æ¡ng tá»« tá»p TXT"/>
+                        <Button Content="TXT" ui:ButtonIcon.Glyph="&#xE710;" Click="OnAddChapterFromText" ToolTip="Thêm chương từ tệp TXT"/>
                         <Button Content="Quản lý chương" Click="OnOpenChapterManager"/>
                         <Button Content="Đổi tên" Click="OnRenameProjectChapter"/>
                         <Button Content="Nhân bản" Click="OnDuplicateProjectChapter"/>
@@ -181,7 +181,7 @@
                                 <TextBlock Text="Quét &amp; chuẩn hóa xưng hô tại chỗ" Style="{StaticResource FieldLabel}"/>
                                 <WrapPanel>
                                     <Button x:Name="InspectorScanPronounsButton" Content="Quét xưng hô" Click="OnScanPronouns"/>
-                                    <Button x:Name="InspectorApplyPronounsButton" Content="Áp dụng an toàn" Click="OnApplyPronouns" Style="{StaticResource PrimaryButton}"/>
+                                    <Button x:Name="InspectorApplyPronounsButton" Content="Áp dụng an toàn" Click="OnApplyPronouns"/>
                                     <Button x:Name="InspectorUndoPronounsButton" Content="Hoàn tác" Click="OnUndoPronouns"/>
                                 </WrapPanel>
                                 <TextBlock x:Name="InspectorPronounSummaryText" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}" FontSize="12" Margin="2,4"/>
@@ -194,8 +194,39 @@
         </Border>
         <GridSplitter x:Name="InspectorSplitter" DockPanel.Dock="Right" Width="5" Background="{DynamicResource BorderBrush}" DragCompleted="OnWorkspaceSplitterDragCompleted" AutomationProperties.Name="Đổi kích thước Inspector"/>
         <AdornerDecorator>
+          <DockPanel>
+            <Border x:Name="EditorContextHeader" DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,8">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center" MaxWidth="650">
+                        <TextBlock x:Name="EditorContextTitleText" Text="Chưa mở Project" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="EditorContentStateText" Text="Chưa có chương" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="EditorProcessingStateText" Visibility="Collapsed" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Button x:Name="PrimaryActionButton" Content="Mở Project" Click="OnPrimaryAction" Style="{StaticResource PrimaryButton}" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="TranslateAllButton" Content="Dịch chương" ui:ButtonIcon.Glyph="&#xE768;" Click="OnTranslateAll" Style="{StaticResource StateButton}" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="PauseQueueButton" Content="Tạm dừng" ui:ButtonIcon.Glyph="&#xE769;" Click="OnPauseQueue" Style="{StaticResource StateButton}" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="ResumeQueueButton" Content="Tiếp tục" ui:ButtonIcon.Glyph="&#xE768;" Click="OnResumeQueue" Style="{StaticResource StateButton}" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="RetryErrorsButton" Content="Dịch lại lỗi" ui:ButtonIcon.Glyph="&#xE72C;" Click="OnRetryErrors" Style="{StaticResource StateButton}" ToolTip="Dịch lại các đoạn lỗi trong chương" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="EditSourceButton" Content="Sửa nguyên văn" ui:ButtonIcon.Glyph="&#xE70F;" Click="OnBeginSourceEdit" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="SaveSourceEditButton" Content="Lưu nguyên văn" Click="OnSaveSourceEdit" Style="{StaticResource StateButton}" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="CancelSourceEditButton" Content="Hủy sửa nguồn" Click="OnCancelSourceEdit" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="ApproveCurrentButton" Content="Duyệt đoạn" ui:ButtonIcon.Glyph="&#xE73E;" Click="OnApprove" ToolTip="Duyệt đoạn hiện tại" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="ApproveAllChapterButton" Content="Duyệt chương" Click="OnApproveAllSegments" ToolTip="Duyệt toàn bộ các đoạn đã có bản dịch" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="SecondaryActionButton1" Click="OnSecondaryAction" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="SecondaryActionButton2" Click="OnSecondaryAction" ToolTipService.ShowOnDisabled="True"/>
+                        <Button x:Name="SecondaryActionButton3" Click="OnSecondaryAction" ToolTipService.ShowOnDisabled="True"/>
+                        <ToggleButton x:Name="EditorActionOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm hành động" AutomationProperties.Name="Thêm hành động"/>
+                        <Popup IsOpen="{Binding IsChecked, ElementName=EditorActionOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=EditorActionOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                            <Border Margin="0,4,0,0" Padding="4" MinWidth="190" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}">
+                                <Button x:Name="CancelQueueButton" Content="Hủy queue chương" ui:ButtonIcon.Glyph="&#xE71A;" Click="OnCancelQueue" Style="{StaticResource StateDangerButton}" ToolTipService.ShowOnDisabled="True"/>
+                            </Border>
+                        </Popup>
+                    </WrapPanel>
+                </DockPanel>
+            </Border>
             <TabControl x:Name="EditorTabs" Style="{StaticResource ShellTabControl}" SelectedIndex="0">
-                <TabItem Header="Bản dịch chương">
+                <TabItem Header="Biên tập">
                     <Grid x:Name="ChapterWorkspace" Margin="8">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -364,18 +395,11 @@
                                     <!-- State-driven command bar: run controls show only while usable; rarely used tools live under "Thêm". No horizontal scrolling. -->
                                     <DockPanel>
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                            <Button x:Name="EditSourceButton" Content="Sửa nguyên văn" ui:ButtonIcon.Glyph="&#xE70F;" Click="OnBeginSourceEdit"/>
-                                            <Button x:Name="SaveSourceEditButton" Content="Lưu nguyên văn" Click="OnSaveSourceEdit" Style="{StaticResource PrimaryButton}" Visibility="Collapsed"/>
-                                            <Button x:Name="CancelSourceEditButton" Content="Hủy sửa nguồn" Click="OnCancelSourceEdit" Visibility="Collapsed"/>
-                                            <Border Width="1" Margin="6,6" Background="{DynamicResource BorderBrush}"/>
-                                            <Button x:Name="ApproveCurrentButton" Content="Duyệt đoạn" ui:ButtonIcon.Glyph="&#xE73E;" Click="OnApprove" ToolTip="Duyệt đoạn hiện tại (Ctrl+Enter: Duyệt &amp; sang đoạn kế)"/>
-                                            <Button x:Name="ApproveAllChapterButton" Content="Duyệt chương" Click="OnApproveAllSegments" ToolTip="Duyệt toàn bộ các đoạn đã có bản dịch trong chương này"/>
                                             <ToggleButton x:Name="CommandOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm lệnh: quét, lịch sử, xuất, thay thế" AutomationProperties.Name="Thêm lệnh" AutomationProperties.HelpText="Thêm lệnh: quét, lịch sử, xuất, thay thế" IsTabStop="True"/>
                                             <Popup IsOpen="{Binding IsChecked, ElementName=CommandOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=CommandOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                                                 <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
                                                     <StackPanel ButtonBase.Click="OnCommandOverflowClick">
-                                                        <Button x:Name="QuickScanChineseToolbarButton" Content="Quét chữ Hán còn sót" ui:ButtonIcon.Glyph="&#xE721;" Click="OnScanChineseText" Style="{StaticResource MenuButton}"/>
-                                                        <Button x:Name="QuickScanPronounsToolbarButton" Content="Quét xưng hô" ui:ButtonIcon.Glyph="&#xE716;" Click="OnScanPronouns" Style="{StaticResource MenuButton}" ToolTip="Quét đại từ &amp; xưng hô bằng quy tắc nhân vật"/>
+                                                        <Button x:Name="ReviewChecksNavigationButton" Content="Kiểm tra &amp; Duyệt…" ui:ButtonIcon.Glyph="&#xE721;" Click="OnOpenReviewChecks" Style="{StaticResource MenuButton}"/>
                                                         <Button x:Name="BatchReplaceButton" Content="Thay thế hàng loạt" ui:ButtonIcon.Glyph="&#xE8AC;" Click="OnOpenBatchReplace" Style="{StaticResource MenuButton}" ToolTip="Tìm &amp; thay thế hàng loạt / Quét chữ Hán (Ctrl+H)"/>
                                                         <Button Content="Lịch sử đoạn" ui:ButtonIcon.Glyph="&#xE81C;" Click="OnShowCurrentHistory" Style="{StaticResource MenuButton}"/>
                                                         <Button x:Name="ExportButton" Content="Xuất chương TXT" ui:ButtonIcon.Glyph="&#xEDE1;" Click="OnExportChapter" Style="{StaticResource MenuButton}"/>
@@ -383,13 +407,6 @@
                                                 </Border>
                                             </Popup>
                                         </StackPanel>
-                                        <WrapPanel Orientation="Horizontal">
-                                            <Button x:Name="TranslateAllButton" Content="Dịch toàn chương" ui:ButtonIcon.Glyph="&#xE768;" Click="OnTranslateAll" Style="{StaticResource PrimaryButton}"/>
-                                            <Button x:Name="PauseQueueButton" Content="Tạm dừng" ui:ButtonIcon.Glyph="&#xE769;" Click="OnPauseQueue" Style="{StaticResource StateButton}"/>
-                                            <Button x:Name="ResumeQueueButton" Content="Tiếp tục" ui:ButtonIcon.Glyph="&#xE768;" Click="OnResumeQueue" Style="{StaticResource StateButton}"/>
-                                            <Button x:Name="RetryErrorsButton" Content="Dịch lại lỗi" ui:ButtonIcon.Glyph="&#xE72C;" Click="OnRetryErrors" Style="{StaticResource StateButton}" ToolTip="Dịch lại các đoạn lỗi trong chương (F8: nhảy tới đoạn lỗi)"/>
-                                            <Button x:Name="CancelQueueButton" Content="Hủy" ui:ButtonIcon.Glyph="&#xE71A;" Click="OnCancelQueue" Style="{StaticResource StateDangerButton}" Margin="16,3,3,3"/>
-                                        </WrapPanel>
                                     </DockPanel>
                                     <DockPanel x:Name="StandaloneChapterInitBar">
                                         <TextBlock Text="CHAPTER" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
@@ -401,8 +418,6 @@
                                     </DockPanel>
                                     <ProgressBar x:Name="ChapterProgress" Height="4" Margin="4,5,4,2" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
                                     <TextBlock x:Name="QueueInfo" Margin="4,2" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
-                                    <TextBlock x:Name="PronounReportSummary" Margin="4" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"/>
-                                    <ListBox x:Name="PronounResultsList" MaxHeight="80" DisplayMemberPath="Label" SelectionChanged="OnPronounResultSelected" AutomationProperties.Name="Danh sách kết quả xưng hô"/>
                                 </StackPanel>
                             </Border>
                             <Grid>
@@ -459,7 +474,7 @@
                                                                     <Button DockPanel.Dock="Right" Content="Duyệt" ui:ButtonIcon.Glyph="&#xE73E;" Tag="{Binding Id}" Click="OnApproveBlockButtonClicked" Padding="7,2" MinHeight="22" FontSize="12" ToolTip="Duyệt đoạn này (Ctrl+Enter)"/>
                                                                     <TextBlock DockPanel.Dock="Left" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding StatusBrush}" VerticalAlignment="Center"/>
                                                                 </DockPanel>
-                                                                <TextBox Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Tag="{Binding Id}" AcceptsReturn="True" IsUndoEnabled="True" TextWrapping="Wrap" FontSize="16" MinHeight="46" BorderThickness="1" GotKeyboardFocus="OnChapterBlockFocused" SelectionChanged="OnChapterBlockSelectionChanged"/>
+                                                                <TextBox Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Tag="{Binding Id}" AcceptsReturn="True" IsUndoEnabled="True" TextWrapping="Wrap" FontSize="16" MinHeight="46" BorderThickness="1" Loaded="OnBilingualEditorLoaded" GotKeyboardFocus="OnChapterBlockFocused" SelectionChanged="OnChapterBlockSelectionChanged"/>
                                                             </StackPanel>
                                                         </Grid>
                                                     </Border>
@@ -472,17 +487,17 @@
                         </DockPanel>
                     </Grid>
                 </TabItem>
-                <TabItem Header="Phân đoạn &amp; chỉnh sửa">
+                <TabItem Header="Kiểm tra &amp; Duyệt">
                     <DockPanel Margin="8">
                         <Border DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="6" Margin="0,0,0,7">
                             <DockPanel>
                                 <StackPanel Orientation="Horizontal">
                                     <Button Content="Hai ô" ui:ButtonIcon.Glyph="&#xE72B;" Click="OnShowTwoPane" ToolTip="Chuyển sang chế độ Hai ô (Ctrl+1)"/>
                                     <Border Width="1" Margin="6,6" Background="{DynamicResource BorderBrush}"/>
-                                    <Button x:Name="TranslateButton" Content="Dịch đoạn" ui:ButtonIcon.Glyph="&#xE768;" Click="OnTranslate" ToolTip="Dịch / Dịch lại đoạn đang chọn (Ctrl+Shift+R)"/>
-                                    <Button x:Name="CancelButton" Content="Hủy request" ui:ButtonIcon.Glyph="&#xE71A;" Click="OnCancelTranslation" Style="{StaticResource StateDangerButton}"/>
-                                    <Button x:Name="UseAiButton" Content="Dùng bản lịch sử" Click="OnUseAiDraft"/>
-                                    <Button x:Name="ApproveButton" Content="Duyệt" ui:ButtonIcon.Glyph="&#xE73E;" Click="OnApprove" ToolTip="Duyệt đoạn hiện tại (Ctrl+Enter: Duyệt &amp; sang đoạn kế)"/>
+                                    <Button x:Name="TranslateButton" Content="Dịch đoạn" ui:ButtonIcon.Glyph="&#xE768;" Click="OnTranslate" ToolTip="Dịch / Dịch lại đoạn đang chọn (Ctrl+Shift+R)" ToolTipService.ShowOnDisabled="True"/>
+                                    <Button x:Name="CancelButton" Content="Hủy request" ui:ButtonIcon.Glyph="&#xE71A;" Click="OnCancelTranslation" Style="{StaticResource StateDangerButton}" ToolTipService.ShowOnDisabled="True"/>
+                                    <Button x:Name="UseAiButton" Content="Dùng bản lịch sử" Click="OnUseAiDraft" ToolTipService.ShowOnDisabled="True"/>
+                                    <Button x:Name="ApproveButton" Content="Duyệt" ui:ButtonIcon.Glyph="&#xE73E;" Click="OnApprove" ToolTip="Duyệt đoạn hiện tại (Ctrl+Enter: Duyệt &amp; sang đoạn kế)" ToolTipService.ShowOnDisabled="True"/>
                                 </StackPanel>
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                     <CheckBox x:Name="FollowQueueCheck" Content="Theo queue" IsChecked="True"/>
@@ -491,17 +506,32 @@
                                     <Popup IsOpen="{Binding IsChecked, ElementName=StructureOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=StructureOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                                         <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
                                             <StackPanel ButtonBase.Click="OnCommandOverflowClick">
-                                                <Button x:Name="SplitSegmentButton" Content="Tách đoạn" Click="OnSplitSegment" Style="{StaticResource MenuButton}"/>
-                                                <Button x:Name="MergeSegmentButton" Content="Gộp đoạn" Click="OnMergeSegments" Style="{StaticResource MenuButton}"/>
-                                                <Button x:Name="MoveBoundaryButton" Content="Dời ranh giới" Click="OnMoveBoundary" Style="{StaticResource MenuButton}"/>
-                                                <Button x:Name="ArchiveButton" Content="Lịch sử cấu trúc" ui:ButtonIcon.Glyph="&#xE81C;" Click="OnShowSegmentationArchive" Style="{StaticResource MenuButton}"/>
-                                                <Button x:Name="RestoreStructureButton" Content="Khôi phục cấu trúc" ui:ButtonIcon.Glyph="&#xE7A7;" Click="OnRestoreStructure" Style="{StaticResource MenuButton}"/>
+                                                <Button x:Name="SplitSegmentButton" Content="Tách đoạn" Click="OnSplitSegment" Style="{StaticResource MenuButton}" ToolTipService.ShowOnDisabled="True"/>
+                                                <Button x:Name="MergeSegmentButton" Content="Gộp đoạn" Click="OnMergeSegments" Style="{StaticResource MenuButton}" ToolTipService.ShowOnDisabled="True"/>
+                                                <Button x:Name="MoveBoundaryButton" Content="Dời ranh giới" Click="OnMoveBoundary" Style="{StaticResource MenuButton}" ToolTipService.ShowOnDisabled="True"/>
+                                                <Button x:Name="ArchiveButton" Content="Lịch sử cấu trúc" ui:ButtonIcon.Glyph="&#xE81C;" Click="OnShowSegmentationArchive" Style="{StaticResource MenuButton}" ToolTipService.ShowOnDisabled="True"/>
+                                                <Button x:Name="RestoreStructureButton" Content="Khôi phục cấu trúc" ui:ButtonIcon.Glyph="&#xE7A7;" Click="OnRestoreStructure" Style="{StaticResource MenuButton}" ToolTipService.ShowOnDisabled="True"/>
                                             </StackPanel>
                                         </Border>
                                     </Popup>
                                 </StackPanel>
                             </DockPanel>
                         </Border>
+                        <Expander x:Name="ReviewChecksPanel" DockPanel.Dock="Top" Header="KIỂM TRA" Margin="0,0,0,7" Focusable="True">
+                            <StackPanel Margin="8,4">
+                                <WrapPanel>
+                                    <Button x:Name="ScanChineseButton" Content="Quét chữ Hán còn sót" Click="OnScanChineseText" ToolTipService.ShowOnDisabled="True"/>
+                                    <Button x:Name="NormalizePronounsButton" Content="Quét xưng hô" Click="OnScanPronouns" ToolTipService.ShowOnDisabled="True"/>
+                                    <Button x:Name="ApplyPronounsButton" Content="Áp dụng đề xuất an toàn" Click="OnApplyPronouns" ToolTipService.ShowOnDisabled="True"/>
+                                    <Button x:Name="UndoPronounsButton" Content="Hoàn tác chuẩn hóa" Click="OnUndoPronouns" ToolTipService.ShowOnDisabled="True"/>
+                                    <Button x:Name="UndoBatchReplaceButton" Content="Hoàn tác lần thay thế" Click="OnUndoBatchReplace" ToolTipService.ShowOnDisabled="True"/>
+                                    <Button x:Name="BatchReplaceReviewButton" Content="Thay thế hàng loạt" Click="OnOpenBatchReplace" ToolTip="Thay thế hàng loạt (Ctrl+H)" ToolTipService.ShowOnDisabled="True"/>
+                                    <CheckBox x:Name="AutoCleanConfirmedCheck" Content="Tự áp dụng ánh xạ đã xác nhận sau dịch" Margin="12,4"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="PronounReportSummary" Margin="4" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"/>
+                                <ListBox x:Name="PronounResultsList" MaxHeight="100" DisplayMemberPath="Label" SelectionChanged="OnPronounResultSelected" AutomationProperties.Name="Danh sách kết quả xưng hô"/>
+                            </StackPanel>
+                        </Expander>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition x:Name="SegmentNavigatorColumn" Width="250"/>
@@ -510,7 +540,7 @@
                             </Grid.ColumnDefinitions>
                             <DockPanel Grid.Column="0">
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                                    <Button x:Name="NextIssueSegmentButton" DockPanel.Dock="Right" Content="Lỗi kế" ui:ButtonIcon.Glyph="&#xE7BA;" Click="OnJumpToNextIssueSegment" Padding="8,4" ToolTip="Nhảy tới đoạn lỗi / cần kiểm tra kế tiếp (F8)"/>
+                                    <Button x:Name="NextIssueSegmentButton" DockPanel.Dock="Right" Content="Lỗi kế" ui:ButtonIcon.Glyph="&#xE7BA;" Click="OnJumpToNextIssueSegment" Padding="8,4" ToolTip="Nhảy tới đoạn lỗi / cần kiểm tra kế tiếp (F8)" ToolTipService.ShowOnDisabled="True"/>
                                     <ComboBox x:Name="SegmentStateFilter" SelectionChanged="OnSegmentFilterChanged" ToolTip="Lọc nhanh đoạn theo trạng thái" AutomationProperties.Name="Lọc trạng thái đoạn" AutomationProperties.HelpText="Lọc nhanh đoạn theo trạng thái">
                                         <ComboBoxItem Tag="All" IsSelected="True">Tất cả đoạn</ComboBoxItem>
                                         <ComboBoxItem Tag="Untranslated">○ Chưa dịch</ComboBoxItem>
@@ -589,7 +619,7 @@
                                         <DockPanel>
                                             <DockPanel DockPanel.Dock="Top">
                                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                                    <Button x:Name="ApproveAndNextButton" Content="Duyệt &amp; Tiếp" ui:ButtonIcon.Glyph="&#xE73E;" Click="OnApproveAndAdvance" Style="{StaticResource PrimaryButton}" Padding="8,4" ToolTip="Duyệt đoạn này và nhảy sang đoạn kế tiếp (Ctrl+Enter)"/>
+                                                    <Button x:Name="ApproveAndNextButton" Content="Duyệt &amp; Tiếp" ui:ButtonIcon.Glyph="&#xE73E;" Click="OnApproveAndAdvance" Padding="8,4" ToolTip="Duyệt đoạn này và nhảy sang đoạn kế tiếp (Ctrl+Enter)" ToolTipService.ShowOnDisabled="True"/>
                                                     <Button x:Name="ToggleAiCompareButton" Content="So sánh AI gốc" Click="OnToggleAiComparison" Padding="8,4"/>
                                                     <Button Content="Ẩn" Tag="Ai" Click="OnHideTraditionalPane"/>
                                                     <Button Content="Phóng lớn" Tag="Ai" Click="OnMaximizeTraditionalPane" ToolTip="Phóng lớn / Thu nhỏ ô (Ctrl+Shift+M)"/>
@@ -626,7 +656,6 @@
                             <ListBoxItem Tag="Prompts">Prompt Presets</ListBoxItem>
                             <ListBoxItem Tag="Dictionary">Từ điển &amp; ngữ cảnh</ListBoxItem>
                             <ListBoxItem Tag="Characters">Nhân vật &amp; xưng hô</ListBoxItem>
-                            <ListBoxItem Tag="Quality">Chất lượng bản dịch</ListBoxItem>
                             <ListBoxItem Tag="Appearance">Giao diện</ListBoxItem>
                         </ListBox>
                         <Grid Grid.Column="1" Margin="16,0,0,0">
@@ -809,27 +838,6 @@
                                     </DataGrid>
                                 </StackPanel>
                             </ScrollViewer>
-                            <ScrollViewer x:Name="SettingsQualityPanel" Visibility="Collapsed">
-                                <StackPanel>
-                                    <TextBlock Text="Chất lượng bản dịch" Style="{StaticResource SectionTitle}"/>
-                                    <TextBlock Text="Kiểm tra cục bộ chỉ đưa ra cảnh báo, không tự duyệt." Foreground="{DynamicResource MutedBrush}"/>
-                                    <Border Style="{StaticResource Card}">
-                                        <StackPanel>
-                                            <WrapPanel>
-                                                <Button x:Name="NormalizePronounsButton" Content="Quét tên &amp; xưng hô" Click="OnScanPronouns"/>
-                                                <Button x:Name="ApplyPronounsButton" Content="Áp dụng đề xuất an toàn" Click="OnApplyPronouns"/>
-                                                <Button x:Name="UndoPronounsButton" Content="Hoàn tác chuẩn hóa" Click="OnUndoPronouns"/>
-                                            </WrapPanel>
-                                            <WrapPanel>
-                                                <Button x:Name="ScanChineseButton" Content="Quét chữ Hán còn sót" Click="OnScanChineseText" Style="{StaticResource PrimaryButton}"/>
-                                                <Button x:Name="UndoBatchReplaceButton" Content="Hoàn tác lần thay thế" Click="OnUndoBatchReplace"/>
-                                                <CheckBox x:Name="AutoCleanConfirmedCheck" Content="Tự áp dụng ánh xạ đã xác nhận sau dịch" Margin="12,4"/>
-                                            </WrapPanel>
-                                            <TextBlock Text="Bản AI gốc luôn được giữ. Đề xuất từ Data truyền thống không tự áp dụng cho tới khi bạn xác nhận." TextWrapping="Wrap"/>
-                                        </StackPanel>
-                                    </Border>
-                                </StackPanel>
-                            </ScrollViewer>
                             <ScrollViewer x:Name="SettingsTraditionalPanel" Visibility="Collapsed">
                                 <StackPanel>
                                     <TextBlock Text="Data QuickTranslator truyền thống" Style="{StaticResource SectionTitle}"/>
@@ -886,6 +894,7 @@
                     </Grid>
                 </TabItem>
             </TabControl>
+          </DockPanel>
         </AdornerDecorator>
     </DockPanel>
 </Window>

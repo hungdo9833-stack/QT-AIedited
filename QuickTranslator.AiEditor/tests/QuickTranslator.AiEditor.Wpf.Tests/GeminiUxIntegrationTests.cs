@@ -55,12 +55,12 @@ public sealed class GeminiUxIntegrationTests
 
         fixture.Call("UpdateResponsiveShell", 1600d);
         fixture.Call("ActivateShellSection", "character");
-        Assert.Equal(2, ((TabControl)fixture.Window.FindName("EditorTabs")).SelectedIndex);
-        Assert.Equal(4, ((ListBox)fixture.Window.FindName("SettingsNavigation")).SelectedIndex);
+        Assert.Equal(WorkspaceId.Settings, fixture.Window.CurrentWorkspace);
+        Assert.Equal("Characters", ((ListBoxItem)((ListBox)fixture.Window.FindName("SettingsNavigation")).SelectedItem).Tag);
         fixture.Call("ActivateShellSection", "reader");
-        Assert.True(((RadioButton)fixture.Window.FindName("ReaderModeButton")).IsChecked);
+        Assert.Equal(WorkspaceId.Reader, fixture.Window.CurrentWorkspace);
         fixture.Call("ActivateShellSection", "translate");
-        Assert.True(((RadioButton)fixture.Window.FindName("EditorModeButton")).IsChecked);
+        Assert.Equal(WorkspaceId.Editor, fixture.Window.CurrentWorkspace);
     });
 
     [Fact]

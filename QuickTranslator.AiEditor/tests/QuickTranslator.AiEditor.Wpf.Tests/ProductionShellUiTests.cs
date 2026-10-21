@@ -27,16 +27,17 @@ public sealed class ProductionShellUiTests
         Assert.True(((RadioButton)fixture.Window.FindName("EditorModeButton")).IsChecked);
         Assert.Equal(Visibility.Visible, ((DockPanel)fixture.Window.FindName("EditorView")).Visibility);
         Assert.Equal(Visibility.Collapsed, ((Grid)fixture.Window.FindName("ReaderView")).Visibility);
-        Assert.Equal(0, ((TabControl)fixture.Window.FindName("EditorTabs")).SelectedIndex);
+        Assert.Equal(WorkspaceId.Editor, fixture.Window.CurrentWorkspace);
+        Assert.Equal(EditorMode.Translate, fixture.Window.CurrentEditorMode);
 
         fixture.Call("ShowTranslationWorkspace", true);
-        Assert.Equal(1, ((TabControl)fixture.Window.FindName("EditorTabs")).SelectedIndex);
+        Assert.Equal(EditorMode.Review, fixture.Window.CurrentEditorMode);
         TextBox draft = fixture.Text("DraftText");
         draft.Text = "Bản Việt chỉnh trong chế độ bốn ô.";
         Guid selected = fixture.Get<Guid?>("_selectedId")!.Value;
 
         fixture.Call("ShowTranslationWorkspace", false);
-        Assert.Equal(0, ((TabControl)fixture.Window.FindName("EditorTabs")).SelectedIndex);
+        Assert.Equal(EditorMode.Translate, fixture.Window.CurrentEditorMode);
         Assert.Equal(selected, fixture.Get<Guid?>("_selectedId"));
         object block = ((ItemsControl)fixture.Window.FindName("ChapterBlocksItems")).Items[0];
         Assert.Equal("Bản Việt chỉnh trong chế độ bốn ô.", block.GetType().GetProperty("Text",
@@ -139,12 +140,16 @@ public sealed class ProductionShellUiTests
         using var fixture = new WorkspaceFixture();
         Button Nav(string name) => (Button)fixture.Window.FindName(name);
         fixture.Call("ShowReaderWorkspace");
+        Assert.Equal(WorkspaceId.Reader, fixture.Window.CurrentWorkspace);
         Assert.True(NavState.GetIsActive(Nav("ReaderNavButton")));
         Assert.False(NavState.GetIsActive(Nav("TranslateNavButton")));
         fixture.Call("ShowSettingsWorkspace", (string?)null);
+        Assert.Equal(WorkspaceId.Settings, fixture.Window.CurrentWorkspace);
         Assert.True(NavState.GetIsActive(Nav("SettingsNavButton")));
         Assert.False(NavState.GetIsActive(Nav("ReaderNavButton")));
         fixture.Call("ShowTranslationWorkspace", false);
+        Assert.Equal(WorkspaceId.Editor, fixture.Window.CurrentWorkspace);
+        Assert.Equal(EditorMode.Translate, fixture.Window.CurrentEditorMode);
         Assert.True(NavState.GetIsActive(Nav("TranslateNavButton")));
         Assert.False(NavState.GetIsActive(Nav("SettingsNavButton")));
         return Task.CompletedTask;
@@ -257,7 +262,8 @@ public sealed class ProductionShellUiTests
             fixture.Call("ShowTranslationWorkspace", false);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
 
-            Assert.Equal(0, ((TabControl)fixture.Window.FindName("EditorTabs")).SelectedIndex);
+            Assert.Equal(WorkspaceId.Editor, fixture.Window.CurrentWorkspace);
+            Assert.Equal(EditorMode.Translate, fixture.Window.CurrentEditorMode);
             Assert.Contains("原文1", fixture.Text("ChapterInput").Text);
             Assert.Contains("标题1", ((TextBlock)fixture.Window.FindName("ShellChapterText")).Text);
             Assert.Equal(snapshot.Chapters[0].ChapterId, fixture.Service.GetSnapshot().Id);
