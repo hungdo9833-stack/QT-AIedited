@@ -70,6 +70,56 @@ public sealed class AddressingPackingTests : IDisposable
         Assert.All(requests, request => Assert.True(request.EstimatedInputTokens + gemini.MaximumOutputTokens < gemini.ContextSize));
     }
 
+    // A local 4K model whose GPU settings reserve 2048 output tokens: reserving the whole output limit for every reply left
+    // too little room for the prompt, so nothing could be sent. Each request now gets the room its own reply needs.
+    private static readonly ModelOptions Local4K = new() { Model = "local-4k", ContextSize = 4_096, MaximumOutputTokens = 2_048 };
+
+    [Fact]
+    public void A_small_context_model_gets_smaller_requests_that_each_fit_with_room_for_their_reply()
+    {
+        var tasks = Characters(20);
+        var requests = AddressingAiSurvey.PlanRequests(tasks, Local4K.Model, null, Local4K);
+        Assert.Equal(tasks.Length, requests.Sum(r => r.Tasks.Count));
+        Assert.All(requests, r =>
+        {
+            Assert.NotNull(r.OutputTokenLimit);
+            Assert.True(r.OutputTokenLimit >= AddressingAiSurvey.ReplyRoom(r.ExpectedOutputTokens), $"{r.OutputTokenLimit} < room for {r.ExpectedOutputTokens}");
+            Assert.True(r.EstimatedInputTokens + r.OutputTokenLimit + 128 <= Local4K.ContextSize);
+            Assert.True(r.OutputTokenLimit <= Local4K.MaximumOutputTokens);
+        });
+        // Changing the model re-splits the same work: the big Gemini context needs far fewer requests.
+        var gemini = new ModelOptions { Model = "gemini-3.8-flash", ContextSize = 65_536, MaximumOutputTokens = 10_240 };
+        Assert.True(AddressingAiSurvey.CountRequests(tasks, new(), Local4K) > AddressingAiSurvey.CountRequests(tasks, new(), gemini));
+        // A big context keeps the model's own output limit.
+        Assert.All(AddressingAiSurvey.PlanRequests(tasks, gemini.Model, null, gemini), r => Assert.Equal(10_240, r.OutputTokenLimit));
+    }
+
+    private sealed class Recording : IJsonSchemaOllamaClient
+    {
+        public List<(string Prompt, ModelOptions Options)> Calls { get; } = [];
+        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+        {
+            Calls.Add((prompt, options)); return Task.FromResult(new OllamaCompletion("{", true, "stop", new GenerationMetrics()));
+        }
+    }
+
+    [Fact]
+    public async Task A_small_context_model_sends_its_requests_with_the_output_limit_its_context_leaves()
+    {
+        var tasks = AddressingAiSurvey.PlanTasks(AddressingAiSurveyTests.Sources, AddressingAiSurveyTests.Names);
+        var session = await new ProjectRepository().CreateAsync(Path.Combine(_root, Guid.NewGuid().ToString("N")), "Synthetic 4K");
+        var client = new Recording();
+        var run = await new AddressingAiEngine(client).RunAsync(new AddressingLedgerStore(session), tasks, Local4K, 10);
+        Assert.NotEqual("ContextBudgetExceeded", run.StoppedBy);
+        Assert.NotEmpty(client.Calls);
+        Assert.All(client.Calls, call =>
+        {
+            Assert.True(call.Options.MaximumOutputTokens <= Local4K.MaximumOutputTokens);
+            Assert.True(PromptTokenBudget.Estimate(call.Prompt) + call.Options.MaximumOutputTokens <= Local4K.ContextSize);
+        });
+    }
+
     [Fact]
     public void A_scene_with_many_quotes_expects_more_output_than_a_character()
     {

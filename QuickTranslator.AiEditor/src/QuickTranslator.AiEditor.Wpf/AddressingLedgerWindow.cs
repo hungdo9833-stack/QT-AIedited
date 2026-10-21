@@ -268,7 +268,9 @@ public sealed class AddressingLedgerWindow : Window
         _complete.Click += async (_, _) => await CompleteAsync();
         _undo.Click += async (_, _) => await UndoAsync(discardLaterEdits: false);
         _backend.ItemsSource = _profiles;
-        _backend.SelectionChanged += (_, _) => PopulateModels();
+        _backend.SelectionChanged += (_, _) => { PopulateModels(); OnSurveyModelChanged(); };
+        _model.SelectionChanged += (_, _) => Dispatcher.BeginInvoke(OnSurveyModelChanged); // Text follows the selection after this event.
+        _model.LostKeyboardFocus += (_, _) => OnSurveyModelChanged();
         _backend.SelectedIndex = 0;
         _survey.Click += async (_, _) => await SurveyAsync();
         _stop.Click += (_, _) => _surveyCancel?.Cancel();
@@ -429,9 +431,33 @@ public sealed class AddressingLedgerWindow : Window
         options.Validate(); return options;
     }
 
-    private void ShowWork(AddressingSurveyWork work) => _surveyStatus.Text = work.Complete
-        ? $"Đã khảo sát xong: {work.Scenes.Count} cảnh, {work.Tasks.Count(t => t.Kind == AddressingTaskKind.Character)} nhân vật, {work.Tasks.Count(t => t.Kind == AddressingTaskKind.Pair)} cặp. Bấm Hoàn thành để ghi vào hồ sơ."
-        : $"Còn {work.PendingScenes.Count} cảnh, {work.PendingCharacters} nhân vật, {work.PendingPairs} cặp, {work.PendingIdentities} câu hỏi \"cùng một người?\" chưa khảo sát (khoảng {work.EstimatedRequests} request, mỗi request gom nhiều nhiệm vụ tới giới hạn token; cặp mới có thể xuất hiện sau khi xong các cảnh).";
+    private void ShowWork(AddressingSurveyWork work)
+    {
+        if (work.Complete)
+        {
+            _surveyStatus.Text = $"Đã khảo sát xong: {work.Scenes.Count} cảnh, {work.Tasks.Count(t => t.Kind == AddressingTaskKind.Character)} nhân vật, {work.Tasks.Count(t => t.Kind == AddressingTaskKind.Pair)} cặp. Bấm Hoàn thành để ghi vào hồ sơ.";
+            return;
+        }
+        // The split follows the selected AI's own settings (context, output length in Quản lý GPU), recomputed on every change.
+        ModelOptions? options = SelectedSurveyOptions();
+        string budget = options is null ? "mỗi request gom nhiều nhiệm vụ tới giới hạn token"
+            : $"chia theo {options.Model}: context {options.ContextSize:N0}, đầu ra tối đa {options.MaximumOutputTokens:N0} token";
+        _surveyStatus.Text = $"Còn {work.PendingScenes.Count} cảnh, {work.PendingCharacters} nhân vật, {work.PendingPairs} cặp, {work.PendingIdentities} câu hỏi \"cùng một người?\" chưa khảo sát " +
+            $"(khoảng {work.EstimateRequests(options)} request, {budget}; cặp mới có thể xuất hiện sau khi xong các cảnh).";
+    }
+
+    private ModelOptions? SelectedSurveyOptions()
+    {
+        if (_backend.SelectedItem is not OllamaBackendProfile profile || string.IsNullOrWhiteSpace(_model.Text)) return null;
+        try { return SurveyOptions(profile, _model.Text); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return null; }
+    }
+
+    // Changing AI or model re-splits the remaining work for that model's context right away.
+    private void OnSurveyModelChanged()
+    {
+        if (Work is not null && _surveyCancel is null) ShowWork(Work);
+    }
 
     private static string StopReason(string? code) => code switch
     {
@@ -440,7 +466,7 @@ public sealed class AddressingLedgerWindow : Window
         "RetryNextRun" => "Một số câu trả lời không qua kiểm chứng: bấm Khảo sát lần nữa để hỏi lại (mỗi nhiệm vụ tối đa 2 lần).",
         "Cancelled" => "Đã dừng theo yêu cầu. Phần đã xong được giữ lại.",
         "ProviderRefusal" => "AI từ chối nội dung của một request (thường do nội dung nhạy cảm). Phần đó được giữ lại, không gửi lại; thử Ollama cục bộ cho truyện này.",
-        "ContextBudgetExceeded" => "Request lớn hơn context của model: chọn model có context lớn hơn.",
+        "ContextBudgetExceeded" => "Một nhiệm vụ không vừa context của model kể cả khi gửi riêng: tăng Context trong Quản lý GPU (Thiết lập nâng cao) hoặc chọn model có context lớn hơn.",
         _ => $"Dừng vì lỗi {code}. Phần đã xong được giữ lại; thử lại sau hoặc đổi model."
     };
 

@@ -42,7 +42,16 @@ public sealed record AddressingTask(string TaskId, AddressingTaskKind Kind, stri
     public string Trailer { get; init; } = "";
 }
 
-public sealed record AddressingRequestPlan(string Id, IReadOnlyList<AddressingTask> Tasks, string Prompt, int EstimatedInputTokens);
+public sealed record AddressingRequestPlan(string Id, IReadOnlyList<AddressingTask> Tasks, string Prompt, int EstimatedInputTokens)
+{
+    /// <summary>Reply tokens the planner expects for these tasks.</summary>
+    public int ExpectedOutputTokens { get; init; }
+    /// <summary>
+    /// Output limit to send with this request when it was planned for a model: what the context leaves beside the input,
+    /// never more than the model's own limit. null = planned without model options (send the model's limit).
+    /// </summary>
+    public int? OutputTokenLimit { get; init; }
+}
 
 /// <summary>Verified proposals plus every contained schema fault, by JSON path (no source text).</summary>
 public sealed record AddressingVerification(IReadOnlyList<AddressingProposal> Proposals, IReadOnlyList<string> SchemaIssues);
@@ -447,6 +456,8 @@ public static class AddressingAiSurvey
     /// Packs the tasks, in order, into requests. A request is closed when the next task would break any of three budgets: the
     /// estimated input tokens, the expected output tokens (so the reply cannot be cut off by the output limit) or the task count.
     /// <paramref name="options"/> (the model actually used) only lowers the budgets; one task always travels alone if it is over.
+    /// With a model, the context is shared per request: the input plus the reply it expects (with headroom) must fit, so a small
+    /// context (e.g. a local 4K model) gets smaller requests instead of reserving the whole output limit for every reply.
     /// </summary>
     public static IReadOnlyList<AddressingRequestPlan> PlanRequests(IReadOnlyList<AddressingTask> tasks, string model, AddressingSettings? settings = null,
         Models.ModelOptions? options = null)
@@ -456,9 +467,19 @@ public static class AddressingAiSurvey
         {
             string prompt = Prompt(chunk);
             string id = EntityMemoryIdentity.Fingerprint(new { PromptVersion, model, tasks = chunk.Select(t => t.TaskId).ToArray() });
-            return new AddressingRequestPlan(id, chunk, prompt, PromptTokenEstimate(prompt));
+            int input = PromptTokenEstimate(prompt);
+            return new AddressingRequestPlan(id, chunk, prompt, input)
+            {
+                ExpectedOutputTokens = chunk.Sum(t => ExpectedOutputTokens(t, settings)),
+                OutputTokenLimit = options is null ? null : Math.Min(options.MaximumOutputTokens, options.ContextSize - input - ContextMargin)
+            };
         }).ToArray();
     }
+
+    // Tokens kept free beside prompt and reply (chat template, role markers).
+    private const int ContextMargin = 128;
+    // A reply is planned with 2/3 of the room it gets, so an answer longer than expected is not cut off.
+    internal static int ReplyRoom(int expectedOutputTokens) => (expectedOutputTokens * 5 + 2) / 3;
 
     /// <summary>How many requests these tasks need: the same packing as <see cref="PlanRequests"/>, without building the prompts.</summary>
     public static int CountRequests(IReadOnlyList<AddressingTask> tasks, AddressingSettings settings, Models.ModelOptions? options = null) =>
@@ -468,17 +489,17 @@ public static class AddressingAiSurvey
     {
         int inputBudget = settings.InputTokensPerRequest, outputBudget = settings.OutputTokensPerRequest;
         if (options is not null)
-        {
-            inputBudget = Math.Min(inputBudget, options.ContextSize - options.MaximumOutputTokens - 128);
             outputBudget = Math.Min(outputBudget, options.MaximumOutputTokens * 3 / 5); // Never plan a reply near the cut-off.
-        }
+        // Input and the room its reply needs share the model's context.
+        bool OverContext(int input, int output) => options is not null && input + ReplyRoom(output) + ContextMargin > options.ContextSize;
         int fixedInput = PromptTokenEstimate(Prompt([]));
         var packs = new List<AddressingTask[]>(); var open = new List<AddressingTask>();
         int input = fixedInput, output = 0;
         foreach (var task in tasks)
         {
             int taskInput = Translation.PromptTokenBudget.Estimate(TaskBody(task)) + 8, taskOutput = ExpectedOutputTokens(task, settings);
-            if (open.Count > 0 && (open.Count >= settings.TasksPerRequest || input + taskInput > inputBudget || output + taskOutput > outputBudget))
+            if (open.Count > 0 && (open.Count >= settings.TasksPerRequest || input + taskInput > inputBudget || output + taskOutput > outputBudget ||
+                                   OverContext(input + taskInput, output + taskOutput)))
             { packs.Add([.. open]); open.Clear(); input = fixedInput; output = 0; }
             open.Add(task); input += taskInput; output += taskOutput;
         }

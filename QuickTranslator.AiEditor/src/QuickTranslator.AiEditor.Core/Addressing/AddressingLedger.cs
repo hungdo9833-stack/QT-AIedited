@@ -172,14 +172,17 @@ public sealed class AddressingAiEngine(IJsonSchemaOllamaClient client)
         {
             ct.ThrowIfCancellationRequested();
             if (sent >= maximumRequests) { stoppedBy = "RequestBudget"; break; }
-            if (request.EstimatedInputTokens + options.MaximumOutputTokens > options.ContextSize) { stoppedBy = "ContextBudgetExceeded"; break; }
+            // The request's own output limit is what its context leaves; it must still hold the reply it expects.
+            int outputLimit = request.OutputTokenLimit ?? options.MaximumOutputTokens;
+            if (outputLimit < Math.Max(1, request.ExpectedOutputTokens)) { stoppedBy = "ContextBudgetExceeded"; break; }
+            var requestOptions = options with { MaximumOutputTokens = outputLimit };
             sent++;
             IReadOnlyList<AddressingProposal>? proposals = null; IReadOnlyList<string> schemaIssues = []; string error = ""; int? input = null, output = null; bool stop = false;
             var stage = SemanticFailureStage.Provider;
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(options.RequestTimeout);
-                var completion = await client.TranslateStructuredAsync(request.Prompt, options, AddressingAiSurvey.Schema, timeout.Token).ConfigureAwait(false);
+                var completion = await client.TranslateStructuredAsync(request.Prompt, requestOptions, AddressingAiSurvey.Schema, timeout.Token).ConfigureAwait(false);
                 input = completion.Metrics.InputTokens; output = completion.Metrics.OutputTokens;
                 stage = SemanticFailureStage.Completion;
                 if (completion.Done == false || completion.DoneReason is not (null or "stop")) throw new InvalidDataException("IncompleteProviderResponse");

@@ -14,7 +14,10 @@ public sealed record AddressingSurveyWork(IReadOnlyList<AddressingTask> Scenes, 
     public int PendingPairs => PendingTasks.Count(t => t.Kind == AddressingTaskKind.Pair);
     public int PendingIdentities => PendingTasks.Count(t => t.Kind == AddressingTaskKind.Identity);
     /// <summary>Requests still needed. Pairs are planned again once the scenes are answered, so this is an estimate.</summary>
-    public int EstimatedRequests => AddressingAiSurvey.CountRequests(PendingScenes, Settings) + AddressingAiSurvey.CountRequests(PendingTasks, Settings);
+    public int EstimatedRequests => EstimateRequests(null);
+    /// <summary>Requests still needed with this model: its context and output limit decide how many tasks fit in one request.</summary>
+    public int EstimateRequests(ModelOptions? options) =>
+        AddressingAiSurvey.CountRequests(PendingScenes, Settings, options) + AddressingAiSurvey.CountRequests(PendingTasks, Settings, options);
     public bool Complete => PendingScenes.Count == 0 && PendingTasks.Count == 0;
 }
 
