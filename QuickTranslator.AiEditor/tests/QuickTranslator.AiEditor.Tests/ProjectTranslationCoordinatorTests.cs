@@ -918,6 +918,191 @@ public sealed class ProjectTranslationCoordinatorTests
         });
     }
 
+    [Fact]
+    public async Task Worker_with_three_slots_limits_overlap_and_translates_each_chapter_once()
+    {
+        await WithProjectAsync(5, async context =>
+        {
+            var client = new SlotFakeClient(3) { Block = true };
+            ProjectTranslationWorkerDefinition worker = SingleWorker(context, client, 3);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, [worker],
+                context.LoadEnvironment);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await client.TargetConcurrencyReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(3, coordinator.CurrentJob!.Workers.Single().RunningChapterIds.Count);
+            client.Release.TrySetResult();
+            await run;
+
+            Assert.InRange(client.MaximumConcurrency, 2, 3);
+            Assert.Equal(5, client.Calls);
+            Assert.Equal(5, client.Prompts.Count);
+            Assert.Equal(5, coordinator.CurrentJob.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
+            Assert.Equal(3, coordinator.CurrentJob.Workers.Single().Slots);
+            Assert.Empty(coordinator.CurrentJob.Workers.Single().RunningChapterIds);
+            foreach (Guid id in context.ChapterIds)
+            {
+                ChapterDocument chapter = (await context.Repository.LoadChapterAsync(context.Session, id)).Chapter;
+                Assert.Single(chapter.Segments[0].Attempts);
+            }
+        });
+    }
+
+    [Fact]
+    public async Task Pause_stops_all_three_slots_and_resume_finishes_remaining_chapters()
+    {
+        await WithProjectAsync(6, async context =>
+        {
+            var client = new SlotFakeClient(3) { Block = true };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                [SingleWorker(context, client, 3)], context.LoadEnvironment);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await client.TargetConcurrencyReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Task pause = coordinator.PauseAsync();
+            client.Release.TrySetResult();
+            await Task.WhenAll(pause, run);
+
+            Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob!.Status);
+            Assert.Equal(ProjectTranslationWorkerStatus.Paused, coordinator.CurrentJob.Workers.Single().Status);
+            Assert.Empty(coordinator.CurrentJob.Workers.Single().RunningChapterIds);
+            client.Block = false;
+            await coordinator.ResumeAsync();
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob.Status);
+            Assert.Equal(6, coordinator.CurrentJob.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
+            Assert.Equal(6, client.Calls);
+        });
+    }
+
+    [Fact]
+    public async Task Cancel_stops_all_three_slots_and_marks_pending_chapters_cancelled()
+    {
+        await WithProjectAsync(6, async context =>
+        {
+            var client = new SlotFakeClient(3) { Block = true };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                [SingleWorker(context, client, 3)], context.LoadEnvironment);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await client.TargetConcurrencyReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Task cancel = coordinator.CancelPendingAsync();
+            client.Release.TrySetResult();
+            await Task.WhenAll(cancel, run);
+
+            Assert.Equal(ProjectTranslationJobStatus.Cancelled, coordinator.CurrentJob!.Status);
+            Assert.Equal(ProjectTranslationWorkerStatus.Cancelled, coordinator.CurrentJob.Workers.Single().Status);
+            Assert.Empty(coordinator.CurrentJob.Workers.Single().RunningChapterIds);
+            Assert.Equal(3, client.Calls);
+            Assert.Equal(3, coordinator.CurrentJob.Items.Count(item => item.Status == ProjectTranslationItemStatus.Cancelled));
+        });
+    }
+
+    [Fact]
+    public async Task Failure_in_one_slot_does_not_stop_other_slots_and_is_counted_once()
+    {
+        await WithProjectAsync(5, async context =>
+        {
+            var client = new SlotFakeClient(2);
+            client.FailCalls.Add(1);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                [SingleWorker(context, client, 3)], context.LoadEnvironment);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            Assert.Equal(5, client.Calls);
+            Assert.Equal(4, coordinator.CurrentJob!.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
+            Assert.Single(coordinator.CurrentJob.Items, item => item.Status == ProjectTranslationItemStatus.Failed);
+            Assert.Equal(1, coordinator.CurrentJob.Workers.Single().FailedChapters);
+        });
+    }
+
+    [Fact]
+    public async Task Old_worker_json_without_slots_or_running_chapters_loads_with_defaults()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            var client = new SlotFakeClient(1);
+            ProjectTranslationWorkerDefinition worker = SingleWorker(context, client, 1);
+            var store = new ProjectTranslationJobStore(context.Session);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, [worker],
+                context.LoadEnvironment, store);
+            await store.SaveNewAsync(await coordinator.PlanAsync(context.ChapterIds));
+            System.Text.Json.Nodes.JsonNode root = System.Text.Json.Nodes.JsonNode.Parse(
+                await File.ReadAllTextAsync(store.PathName))!;
+            foreach (System.Text.Json.Nodes.JsonNode? workerNode in root["workers"]!.AsArray())
+            {
+                workerNode!.AsObject().Remove("runningChapterIds");
+                workerNode.AsObject().Remove("slots");
+            }
+            await File.WriteAllTextAsync(store.PathName, root.ToJsonString(new() { WriteIndented = true }));
+
+            ProjectTranslationJob loaded = Assert.IsType<ProjectTranslationJob>(await store.LoadAsync());
+
+            Assert.Equal(1, loaded.Workers.Single().Slots);
+            Assert.Empty(loaded.Workers.Single().RunningChapterIds);
+        });
+    }
+
+    [Fact]
+    public async Task Two_workers_combine_two_and_one_slots()
+    {
+        await WithProjectAsync(7, async context =>
+        {
+            var concurrency = new ParallelConcurrency();
+            var local = new ParallelFakeClient("local", concurrency, 40);
+            var remote = new ParallelFakeClient("remote", concurrency, 40);
+            ProjectTranslationWorkerDefinition[] workers = Workers(context, local, remote);
+            workers[0] = workers[0] with { Slots = 2 };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
+                context.LoadEnvironment);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            Assert.Equal(3, concurrency.Maximum);
+            Assert.Equal(7, local.Calls + remote.Calls);
+            Assert.Equal([2, 1], coordinator.CurrentJob!.Workers.Select(worker => worker.Slots).ToArray());
+            Assert.Equal(7, coordinator.CurrentJob.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
+        });
+    }
+
+    [Fact]
+    public async Task Resume_allows_slots_to_change_without_changing_backend_identity()
+    {
+        await WithProjectAsync(5, async context =>
+        {
+            var initialClient = new SlotFakeClient(1);
+            ProjectTranslationWorkerDefinition initial = SingleWorker(context, initialClient, 1);
+            var store = new ProjectTranslationJobStore(context.Session);
+            var planner = new ProjectTranslationCoordinator(context.Session, context.Repository, [initial],
+                context.LoadEnvironment, store);
+            ProjectTranslationJob saved = await store.SaveNewAsync(await planner.PlanAsync(context.ChapterIds));
+            saved.Status = ProjectTranslationJobStatus.Paused;
+            await store.SaveAsync(saved);
+            var resumedClient = new SlotFakeClient(3) { Block = true };
+            ProjectTranslationWorkerDefinition changed = initial with { Client = resumedClient, Slots = 3 };
+            var resumed = new ProjectTranslationCoordinator(context.Session, context.Repository, [changed],
+                context.LoadEnvironment, new(context.Session));
+            await resumed.LoadAsync();
+
+            Task run = resumed.ResumeAsync();
+            await resumedClient.TargetConcurrencyReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            resumedClient.Release.TrySetResult();
+            await run;
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, resumed.CurrentJob!.Status);
+            Assert.Equal(3, resumed.CurrentJob.Workers.Single().Slots);
+            Assert.Equal(3, resumedClient.MaximumConcurrency);
+        });
+    }
+
+    private static ProjectTranslationWorkerDefinition SingleWorker(TestProject context, IOllamaClient client, int slots)
+    {
+        ModelOptions options = context.Environment.ModelOptions;
+        return new ProjectTranslationWorkerDefinition(Guid.NewGuid(), OllamaBackendSnapshot.LocalDefault(options.Model),
+            client, options with { }) with { Slots = slots };
+    }
+
     private static ProjectTranslationWorkerDefinition[] Workers(TestProject context, IOllamaClient local, IOllamaClient remote)
     {
         ModelOptions options = context.Environment.ModelOptions;
@@ -1028,6 +1213,44 @@ public sealed class ProjectTranslationCoordinatorTests
                 OllamaCompletion completion = FakeClient.Completion($"Bản dịch tuần tự {call}.");
                 AfterCompletion?.Invoke(call);
                 return completion;
+            }
+            finally { Interlocked.Decrement(ref _concurrency); }
+        }
+    }
+
+    private sealed class SlotFakeClient(int targetConcurrency) : IOllamaClient
+    {
+        private int _calls;
+        private int _concurrency;
+        private int _maximumConcurrency;
+        public int Calls => Volatile.Read(ref _calls);
+        public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+        public bool Block { get; set; }
+        public HashSet<int> FailCalls { get; } = [];
+        public List<string> Prompts { get; } = [];
+        public TaskCompletionSource TargetConcurrencyReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            int call = Interlocked.Increment(ref _calls);
+            lock (Prompts) Prompts.Add(prompt);
+            int active = Interlocked.Increment(ref _concurrency);
+            int observed;
+            do { observed = _maximumConcurrency; }
+            while (active > observed && Interlocked.CompareExchange(ref _maximumConcurrency, active, observed) != observed);
+            if (active >= targetConcurrency) TargetConcurrencyReached.TrySetResult();
+            try
+            {
+                if (Block) await Release.Task.WaitAsync(cancellationToken);
+                lock (FailCalls)
+                {
+                    if (FailCalls.Contains(call))
+                        throw new OllamaRequestException(OllamaErrorKind.Http, "Synthetic slot failure.");
+                }
+                return FakeClient.Completion($"slot translated {call}");
             }
             finally { Interlocked.Decrement(ref _concurrency); }
         }
