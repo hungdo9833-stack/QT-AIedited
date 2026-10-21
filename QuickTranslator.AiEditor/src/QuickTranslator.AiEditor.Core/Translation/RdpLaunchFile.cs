@@ -30,17 +30,12 @@ public static class RemoteAddress
 }
 
 /// <summary>
-/// A throw-away .rdp file that signs in to a rented Windows machine for the user and, instead of the desktop, starts
-/// a tiny PowerShell that waits for the setup command QT Studio put on the (redirected) clipboard and runs it.
+/// A throw-away .rdp file that signs in to a rented Windows machine for the user, with the clipboard shared so the
+/// setup command QT Studio copied can be pasted there, and Windows key combinations sent to the remote desktop.
 /// The saved password is a DPAPI blob that only this Windows user can decrypt; the file is deleted right after launch.
 /// </summary>
 public static class RdpLaunchFile
 {
-    // Fits the 256-character limit of the RDP "alternate shell" field with room to spare.
-    public const string AlternateShell =
-        "powershell.exe -NoProfile -Command \"for($i=0;$i -lt 150;$i++){$c=Get-Clipboard -Raw;" +
-        "if($c -like 'powershell.exe*EncodedCommand*'){iex $c;break};sleep 1}\"";
-
     public static string Build(string host, int port, string username, string password)
     {
         if (string.IsNullOrWhiteSpace(host) || host.Any(c => char.IsWhiteSpace(c) || char.IsControl(c) || c is '/' or '@') ||
@@ -70,8 +65,7 @@ public static class RdpLaunchFile
             "desktopheight:i:640",
             "session bpp:i:16",
             "disable wallpaper:i:1",
-            "alternate shell:s:" + AlternateShell,
-            "shell working directory:s:C:\\",
+            "keyboardhook:i:1", // Win+R and friends go to the remote machine while this window has the focus.
             "");
     }
 }

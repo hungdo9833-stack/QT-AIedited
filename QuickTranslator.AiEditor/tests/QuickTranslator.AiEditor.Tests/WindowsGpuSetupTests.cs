@@ -52,9 +52,7 @@ public sealed class WindowsGpuSetupTests
             ["provision"] = WindowsRemoteScripts.ProvisionScript, ["bootstrap"] = WindowsPortMux.BootstrapScript,
             ["switch"] = WindowsPortMux.SwitchScript, ["revert"] = WindowsPortMux.RevertScript,
             ["confirm"] = WindowsRemoteScripts.ConfirmMux,
-            ["loader"] = Encoding.Unicode.GetString(Convert.FromBase64String(WindowsPortMux.BuildBootstrapCommand().Split(' ')[^1])),
-            ["altshell"] = RdpLaunchFile.AlternateShell,
-            ["info"] = WindowsRemoteScripts.ReadInfo, ["gpu"] = WindowsRemoteScripts.ReadGpu,
+            ["loader"] = Encoding.Unicode.GetString(Convert.FromBase64String(WindowsPortMux.BuildBootstrapCommand().Split(' ')[^1])),            ["info"] = WindowsRemoteScripts.ReadInfo, ["gpu"] = WindowsRemoteScripts.ReadGpu,
             ["disk"] = WindowsRemoteScripts.ReadFreeDisk, ["find"] = WindowsRemoteScripts.FindOllama,
             ["service"] = WindowsRemoteScripts.ReadOllamaService, ["models"] = WindowsRemoteScripts.ListModels,
             ["start"] = WindowsRemoteScripts.StartProvision, ["status"] = WindowsRemoteScripts.ReadProvisionStatus,
@@ -111,7 +109,7 @@ public sealed class WindowsGpuSetupTests
     }
 
     [Fact]
-    public void Rdp_launch_file_signs_in_without_prompts_and_runs_what_is_on_the_clipboard()
+    public void Rdp_launch_file_signs_in_without_prompts_and_shares_the_clipboard()
     {
         const string password = "S3cret-pass!";
         string file = RdpLaunchFile.Build("203.0.113.7", 49217, "gpu-admin", password);
@@ -120,16 +118,11 @@ public sealed class WindowsGpuSetupTests
         Assert.Contains("username:s:gpu-admin", file);
         Assert.Contains("prompt for credentials:i:0", file);
         Assert.Contains("redirectclipboard:i:1", file);
-        Assert.Contains("alternate shell:s:" + RdpLaunchFile.AlternateShell, file);
+        Assert.Contains("keyboardhook:i:1", file);
         Assert.DoesNotContain(password, file);
         string blob = file.Split("\r\n").Single(l => l.StartsWith("password 51:b:", StringComparison.Ordinal))["password 51:b:".Length..];
         Assert.True(blob.Length > 100 && blob.All(Uri.IsHexDigit), "The saved password must be a hex DPAPI blob.");
-        Assert.True(RdpLaunchFile.AlternateShell.Length <= 240, "The RDP alternate-shell field holds at most 256 characters.");
-        // The shell waits for clipboard text like 'powershell.exe*EncodedCommand*', which is what the bootstrap command is.
-        string command = WindowsPortMux.BuildBootstrapCommand();
-        Assert.True(command.StartsWith("powershell.exe", StringComparison.Ordinal) &&
-                    command.Contains("EncodedCommand", StringComparison.Ordinal));
-        Assert.Contains("'powershell.exe*EncodedCommand*'", RdpLaunchFile.AlternateShell);
+        Assert.DoesNotContain("alternate shell", file); // The session keeps its normal desktop; QT Studio types into it.
         Assert.Throws<ArgumentException>(() => RdpLaunchFile.Build("host\r\nfoo", 3389, "u", "p"));
         Assert.Throws<ArgumentException>(() => RdpLaunchFile.Build("203.0.113.7", 3389, "u", "pass\nword"));
     }

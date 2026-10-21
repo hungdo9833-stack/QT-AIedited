@@ -406,17 +406,23 @@ public partial class GpuManagerWindow : Window
             catch (System.ComponentModel.Win32Exception)
             { StatusText.Text = "Không mở được Remote Desktop (mstsc.exe)."; return SshReadiness.Failed; }
 
+            // The same steps a person would take in that window: confirm, open an administrator PowerShell, paste.
+            string? stopped;
+            try { stopped = await RemoteDesktopAutomation.RunAsync(remoteDesktop!, text => StatusText.Text = text + " · có thể hủy", cancellationToken); }
+            catch (InvalidOperationException error) { stopped = error.Message; }
+            TryDelete(rdpFile);
+
             DateTime started = DateTime.UtcNow, deadline = started.AddMinutes(15);
-            bool fileDeleted = false;
+            const string manual = " Hãy tự mở PowerShell bằng Run as administrator trong cửa sổ Remote Desktop, nhấn Ctrl+V rồi Enter (lệnh đang ở clipboard).";
             while (DateTime.UtcNow < deadline)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 TimeSpan elapsed = DateTime.UtcNow - started;
-                if (!fileDeleted && elapsed > TimeSpan.FromSeconds(20)) { TryDelete(rdpFile); fileDeleted = true; }
-                StatusText.Text = elapsed < TimeSpan.FromMinutes(2)
-                    ? "Đang đăng nhập Remote Desktop và chạy lệnh cài đặt trên máy thuê… nếu Windows hỏi “Unknown publisher” bấm Connect, hỏi quyền (UAC) bấm Yes · có thể hủy"
-                    : "Chưa thấy SSH. Nếu cửa sổ Remote Desktop đang mở nhưng không có gì chạy, mở PowerShell bằng Run as administrator trong đó, " +
-                      $"nhấn Ctrl+V rồi Enter (lệnh đang ở clipboard) · đang chờ cổng {rdpPort} · có thể hủy";
+                StatusText.Text = stopped is not null
+                    ? stopped + manual + $" · đang chờ SSH ở cổng {rdpPort} · có thể hủy"
+                    : elapsed < TimeSpan.FromSeconds(120)
+                        ? $"Đã gửi lệnh cài đặt vào máy thuê, đang chờ SSH ở cổng {rdpPort}… · có thể hủy"
+                        : "Chưa thấy SSH." + manual + $" · đang chờ cổng {rdpPort} · có thể hủy";
                 RemoteHostProbeResult check = await _probe.ProbeAsync(ssh.Host, rdpPort, cancellationToken);
                 if (check.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = "Đã thấy SSH trên máy thuê."; return SshReadiness.Bootstrapped; }
                 await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);

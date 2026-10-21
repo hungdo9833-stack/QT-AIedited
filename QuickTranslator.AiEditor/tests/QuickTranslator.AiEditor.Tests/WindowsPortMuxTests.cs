@@ -31,7 +31,15 @@ public sealed class MuxFixture : IDisposable
             throw new InvalidOperationException("The splitter did not compile: " + output);
     }
 
-    public void Dispose() => System.IO.Directory.Delete(Directory, true);
+    public void Dispose()
+    {
+        // The splitter process may still be shutting down and holding its exe for a moment.
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            try { System.IO.Directory.Delete(Directory, true); return; }
+            catch (Exception error) when (error is UnauthorizedAccessException or IOException) { Thread.Sleep(250); }
+        }
+    }
 }
 
 public sealed class WindowsPortMuxTests(MuxFixture fixture) : IClassFixture<MuxFixture>
