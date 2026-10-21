@@ -539,12 +539,15 @@ public partial class ProjectTranslationQueueView : UserControl
     {
         public WorkerCard(ProjectTranslationWorkerProgress progress, ProjectTranslationWorkerState? definition) : this(
             progress.WorkerId, progress.Name, progress.Status,
-            definition is null ? "Worker mặc định" : $"{definition.Backend.Kind} · {definition.Backend.ProfileName}",
+            definition is null ? "Worker mặc định" : $"{definition.Backend.Kind} · {definition.Backend.ProfileName}" +
+                (progress.Slots > 1 ? $" · {progress.Slots} luồng" : ""),
             definition?.ModelOptions.Model ?? "—", definition?.ModelOptions.ContextSize ?? 0,
             definition?.ModelOptions.MaximumOutputTokens ?? 0,
             definition is null ? "—" : $"{definition.SegmentationOptions.MinimumHanCharacters}/" +
                 $"{definition.SegmentationOptions.TargetHanCharacters}/{definition.SegmentationOptions.MaximumHanCharacters}",
-            progress.CurrentChapterTitle, progress.CompletedSegments, progress.TotalSegments,
+            progress.RunningChapters > 1 && progress.CurrentChapterTitle is not null
+                ? $"{progress.CurrentChapterTitle} (+{progress.RunningChapters - 1} chương song song)" : progress.CurrentChapterTitle,
+            progress.CompletedSegments, progress.TotalSegments,
             progress.HanCharactersPerMinute, progress.TokensPerSecond, progress.InputTokens,
             progress.OutputTokens, progress.ErrorSegments + progress.TruncatedOutputCount +
                 progress.PossibleMissingContentCount + progress.TimeoutCount, progress.EstimatedCost) { }

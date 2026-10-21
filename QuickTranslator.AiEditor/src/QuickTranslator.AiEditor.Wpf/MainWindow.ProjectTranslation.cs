@@ -211,7 +211,10 @@ public partial class MainWindow
             throw new InvalidOperationException($"GPU Remote “{backend.ProfileName}” chưa có SSH tunnel. Mở GPU Manager và bấm Kết nối.");
         string remoteIdentity = SshBackendIdentity(connection.Profile);
         EnsureBackendIdentity(expectedIdentity, remoteIdentity, backend.ProfileName);
-        return new(workerId, backend, connection.Client, options with { }, segmentation with { }, hourlyPrice, remoteIdentity);
+        // Slots follow the connected profile: its client was built with the same number of parallel requests. Ollama
+        // serves one request at a time, so extra slots there would only queue up behind each other.
+        int slots = connection.Profile.Api == BackendApi.OpenAiCompatible ? connection.Profile.ParallelRequests : 1;
+        return new(workerId, backend, connection.Client, options with { }, segmentation with { }, hourlyPrice, remoteIdentity, slots);
     }
 
     private static void EnsureBackendIdentity(string? expected, string current, string name)

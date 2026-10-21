@@ -225,7 +225,12 @@ public sealed record ProjectTranslationWorkerProgress(Guid WorkerId, string Name
     int CompletedChapters, int FailedChapters, decimal EstimatedCost, string? Error,
     double TokensPerSecond = 0, long InputTokens = 0, long OutputTokens = 0,
     int ErrorSegments = 0, int TruncatedOutputCount = 0,
-    int PossibleMissingContentCount = 0, int TimeoutCount = 0);
+    int PossibleMissingContentCount = 0, int TimeoutCount = 0)
+{
+    /// <summary>Chapters this worker is translating right now; CurrentChapterTitle names one of them.</summary>
+    public int RunningChapters { get; init; }
+    public int Slots { get; init; } = 1;
+}
 
 public sealed record ProjectTranslationAggregateMetrics(double HanCharactersPerMinute,
     TimeSpan? EstimatedRemaining, decimal EstimatedCost);

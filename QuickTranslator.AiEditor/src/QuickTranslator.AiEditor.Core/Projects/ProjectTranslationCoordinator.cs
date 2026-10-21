@@ -382,7 +382,8 @@ public sealed class ProjectTranslationCoordinator
                 current?.ChapterId, current?.Title, current?.CompletedSegments ?? 0, current?.TotalSegments ?? 0,
                 rate, worker.CompletedChapters, worker.FailedChapters, cost, worker.LastError,
                 tokensPerSecond, worker.InputTokens, worker.OutputTokens, worker.ErrorSegments,
-                worker.TruncatedOutputCount, worker.PossibleMissingContentCount, worker.TimeoutCount);
+                worker.TruncatedOutputCount, worker.PossibleMissingContentCount, worker.TimeoutCount)
+            { RunningChapters = worker.RunningChapterIds.Count, Slots = worker.Slots };
         }).ToArray();
     }
 
