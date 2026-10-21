@@ -39,7 +39,7 @@ public sealed class AddressingSurveyRunner(IJsonSchemaOllamaClient client)
         AddressingSettings? settings = null, CancellationToken ct = default)
     {
         settings ??= new(); settings.Validate();
-        var (names, titles) = AddressingAiSurvey.SurveyNames(projectId, sources, resources);
+        var (names, titles) = AddressingAiSurvey.SurveyNames(projectId, sources, resources, 3, settings.FilterJunkCandidates, ct);
         var scenes = AddressingAiSurvey.PlanScenes(sources, names, settings, ct, titles);
         var turns = state.SceneTurns();
         // Identity questions go with characters and pairs: they need no scene answer, only the verified turns (who talks to whom).

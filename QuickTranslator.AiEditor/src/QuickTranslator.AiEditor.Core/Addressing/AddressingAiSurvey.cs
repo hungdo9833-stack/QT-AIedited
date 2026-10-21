@@ -49,7 +49,7 @@ public sealed record AddressingVerification(IReadOnlyList<AddressingProposal> Pr
 
 public sealed record AddressingSettings(int MinimumPairLines = 3, int MaximumPairs = 120, int MinimumNarrationMentions = 3, int MaximumCharacters = 60,
     int SamplesPerTask = 8, int TasksPerRequest = 16, int MaximumSampleLength = 160, int MaximumScenes = 40, int SceneQuotes = 10, int SceneCharacters = 1_400,
-    int InputTokensPerRequest = 24_000, int OutputTokensPerTask = 350, int OutputTokensPerRequest = 6_000)
+    int InputTokensPerRequest = 24_000, int OutputTokensPerTask = 350, int OutputTokensPerRequest = 6_000, bool FilterJunkCandidates = true)
 {
     public void Validate()
     {
@@ -106,26 +106,48 @@ public static class AddressingAiSurvey
     /// Candidate names shared by every caller (probe, review window): CPU census persons/aliases seen at least
     /// <paramref name="minimumMentions"/> times plus existing profile names and aliases. Same inputs → same task ids.
     /// </summary>
-    public static IReadOnlyList<string> CandidateNames(Guid projectId, IReadOnlyList<CensusSource> sources, Projects.ProjectResources resources, int minimumMentions = 3)
-        => SurveyNames(projectId, sources, resources, minimumMentions).Names;
+    public static IReadOnlyList<string> CandidateNames(Guid projectId, IReadOnlyList<CensusSource> sources, Projects.ProjectResources resources, int minimumMentions = 3,
+        bool filterJunk = true) => SurveyNames(projectId, sources, resources, minimumMentions, filterJunk).Names;
 
     /// <summary>Candidate names and title forms from one census pass (see <see cref="CandidateNames"/> and <see cref="TitleForms"/>).</summary>
     public static (IReadOnlyList<string> Names, IReadOnlyList<string> Titles) SurveyNames(Guid projectId, IReadOnlyList<CensusSource> sources,
-        Projects.ProjectResources resources, int minimumMentions = 3)
+        Projects.ProjectResources resources, int minimumMentions = 3, bool filterJunk = true, CancellationToken ct = default)
     {
-        var census = CharacterMentionCensus.Scan(projectId, 0, sources, resources, new BookIntelligenceState { ProjectId = projectId });
+        var surveyed = SurveyNamesDetailed(projectId, sources, resources, minimumMentions, filterJunk, ct);
+        return (surveyed.Names, surveyed.Titles);
+    }
+
+    /// <summary>The candidates the CPU pre-filter removed (names only, with the rule that removed them): for the probe and review, never sent anywhere.</summary>
+    public static IReadOnlyList<DroppedCandidate> DroppedCandidates(Guid projectId, IReadOnlyList<CensusSource> sources, Projects.ProjectResources resources,
+        int minimumMentions = 3, CancellationToken ct = default) => SurveyNamesDetailed(projectId, sources, resources, minimumMentions, true, ct).Dropped;
+
+    internal static SurveyedNames SurveyNamesDetailed(Guid projectId, IReadOnlyList<CensusSource> sources, Projects.ProjectResources resources,
+        int minimumMentions, bool filterJunk, CancellationToken ct)
+    {
+        var census = CharacterMentionCensus.Scan(projectId, 0, sources, resources, new BookIntelligenceState { ProjectId = projectId }, ct);
         var names = census.Candidates
             .Where(c => c.Category is MentionCandidateCategory.PersonCandidate or MentionCandidateCategory.AliasCandidate && c.Frequency >= minimumMentions &&
                 !IsOrganizationOrPlace(c.ChineseName))
             .Select(c => c.ChineseName)
             .Concat(resources.Characters.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases)))
             .Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.Ordinal).ToArray();
+        IReadOnlyList<DroppedCandidate> dropped = [];
+        if (filterJunk)
+        {
+            var protectedNames = resources.Characters.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases)).ToHashSet(StringComparer.Ordinal);
+            var frequency = census.Candidates.ToDictionary(c => c.ChineseName, c => c.Frequency, StringComparer.Ordinal);
+            dropped = CandidateFilter.Find(sources, names, protectedNames, frequency, ct);
+            var gone = dropped.Select(d => d.Name).ToHashSet(StringComparer.Ordinal);
+            names = names.Where(n => !gone.Contains(n)).ToArray();
+        }
         var known = names.ToHashSet(StringComparer.Ordinal);
         var titles = census.Candidates.Where(c => c.Category == MentionCandidateCategory.TitleCandidate && c.Frequency >= minimumMentions &&
                 !known.Contains(c.ChineseName) && !IsOrganizationOrPlace(c.ChineseName))
             .OrderByDescending(c => c.Frequency).ThenBy(c => c.ChineseName, StringComparer.Ordinal).Select(c => c.ChineseName).ToArray();
-        return (names, titles);
+        return new(names, titles, dropped);
     }
+
+    internal sealed record SurveyedNames(IReadOnlyList<string> Names, IReadOnlyList<string> Titles, IReadOnlyList<DroppedCandidate> Dropped);
 
     /// <summary>
     /// Surname + title forms the census found (陆老夫人, 叶经理, 秦老太爷) at least <paramref name="minimumMentions"/> times, that

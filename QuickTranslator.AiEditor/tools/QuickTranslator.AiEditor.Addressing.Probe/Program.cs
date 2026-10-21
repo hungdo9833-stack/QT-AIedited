@@ -44,7 +44,8 @@ try
     var session = (await new ProjectRepository().OpenAsync(Path.Combine(copy, Path.GetFileName(project)))).Session;
     var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(session, new ProjectRepository());
     var resources = await new ProjectResourceStore(session).LoadAsync();
-    var names = AddressingAiSurvey.CandidateNames(session.Manifest.ProjectId, sources, resources, minimumMentions);
+    bool filterJunk = Environment.GetEnvironmentVariable("QT_PROBE_NO_FILTER") != "1"; // Baseline for before/after comparisons.
+    var names = AddressingAiSurvey.CandidateNames(session.Manifest.ProjectId, sources, resources, minimumMentions, filterJunk);
     var report = AddressingDialogueSurvey.Analyze(sources, names, samples);
 
     Directory.CreateDirectory(outDir);
@@ -72,6 +73,34 @@ try
     Console.WriteLine($"STEP2B offline: titles={titleForms.Count} scenes={allScenes.Count} selected={scenes.Count} quotes={scenes.Sum(t => t.Samples.Count)} " +
         $"cpuExplicit={scenes.Sum(t => t.Samples.Count(s => s.CpuSpeaker is not null))} requests={sceneRequests.Count} " +
         $"estimatedInputTokens={sceneRequests.Sum(r => r.EstimatedInputTokens):N0} HTTP=0");
+    // Whole survey as the app plans it (scenes + characters + pairs + identities), packed for Gemini. Counts only; HTTP=0.
+    {
+        var geminiOptions = new QuickTranslator.AiEditor.Core.Models.ModelOptions { Model = model, ContextSize = 65536, MaximumOutputTokens = 10_240 };
+        var full = AddressingSurveyRunner.Plan(session.Manifest.ProjectId, sources, resources, new() { ProjectId = session.Manifest.ProjectId }, new(FilterJunkCandidates: filterJunk));
+        int Count(AddressingTaskKind k) => full.Tasks.Count(t => t.Kind == k);
+        int fullRequests = AddressingAiSurvey.CountRequests(full.Scenes, full.Settings, geminiOptions) + AddressingAiSurvey.CountRequests(full.Tasks, full.Settings, geminiOptions);
+        Console.WriteLine($"FULL PLAN offline: chapters={report.Chapters} scenes={full.Scenes.Count} characters={Count(AddressingTaskKind.Character)} pairs={Count(AddressingTaskKind.Pair)} " +
+            $"identities={Count(AddressingTaskKind.Identity)} tasks={full.Scenes.Count + full.Tasks.Count} requests={fullRequests} (Gemini packing; the old 6-per-request plan = " +
+            $"{(full.Scenes.Count + 5) / 6 + (full.Tasks.Count + 5) / 6}) HTTP=0");
+        // How binding are the caps? Pool sizes with the caps lifted (pairs from the step-1 report: best direction per unordered pair).
+        var forward = report.Pairs.Where(p => p.Listener is not null).GroupBy(p => string.CompareOrdinal(p.Speaker, p.Listener!) < 0 ? (p.Speaker, p.Listener!) : (p.Listener!, p.Speaker))
+            .Select(g => g.Max(p => p.Lines)).OrderByDescending(x => x).ToArray();
+        var poolTasks = AddressingAiSurvey.PlanTasks(sources, names, new(MaximumPairs: 1000, MaximumCharacters: 1000));
+        Console.WriteLine($"POOL pairs(best direction lines): >=3:{forward.Count(x => x >= 3)} >=5:{forward.Count(x => x >= 5)} >=10:{forward.Count(x => x >= 10)} >=20:{forward.Count(x => x >= 20)} >=50:{forward.Count(x => x >= 50)} " +
+            $"chapters/100={report.Chapters / 100} top10=[{string.Join(",", forward.Take(10))}] 60th={(forward.Length > 59 ? forward[59] : 0)} 120th={(forward.Length > 119 ? forward[119] : 0)}; " +
+            $"characters pool={poolTasks.Count(t => t.Kind == AddressingTaskKind.Character)} pair tasks pool={poolTasks.Count(t => t.Kind == AddressingTaskKind.Pair)}");
+        var mentions = NarrativeReferenceSurvey.Analyze(sources, names, 1).Where(x => poolTasks.Any(t => t.Kind == AddressingTaskKind.Character && t.Subject == x.Name))
+            .Select(x => x.NarrationMentions).OrderByDescending(x => x).ToArray();
+        Console.WriteLine($"POOL character narration mentions by rank: " + string.Join(" ", new[] { 1, 5, 10, 20, 30, 40, 60, 80, 100, 150 }.Where(r => r <= mentions.Length).Select(r => $"#{r}={mentions[r - 1]}")) +
+            $" sourceChars={sources.Sum(s => (long)s.OriginalText.Length)}");
+        var dropped = AddressingAiSurvey.DroppedCandidates(session.Manifest.ProjectId, sources, resources);
+        // Names only (never source text), in a UTF-8 file: the console code page garbles Chinese.
+        await File.WriteAllTextAsync(Path.Combine(outDir, "addressing-dropped-candidates.md"), "# Candidates dropped by the CPU pre-filter (names only)\n\n" +
+            string.Join("\n", dropped.Select(d => $"- {d.Name} — {d.Reason}")) + "\n\n# Character tasks kept\n\n" +
+            string.Join("\n", full.Tasks.Where(t => t.Kind == AddressingTaskKind.Character).Select(t => $"{t.Subject} he={t.He} she={t.She} " +
+                $"pairs={full.Tasks.Count(p => p.Kind == AddressingTaskKind.Pair && (p.Subject == t.Subject || p.Listener == t.Subject))}")) + "\n", new UTF8Encoding(false));
+        Console.WriteLine($"DROPPED candidates={dropped.Count} (extension={dropped.Count(d => d.Reason.StartsWith("extends"))}, no-evidence={dropped.Count(d => d.Reason.StartsWith("no "))})");
+    }
     if (mockScenes)
     {
         // MOCK, not AI: a deterministic stand-in that alternates two participants and injects known faults, to run plan →
