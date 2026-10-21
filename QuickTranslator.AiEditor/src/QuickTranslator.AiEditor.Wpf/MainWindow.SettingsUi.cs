@@ -24,10 +24,13 @@ public partial class MainWindow
 
     private void UpdateSettingsDirtyIndicator()
     {
-        if (SettingsDirtyText is null) return;
-        SettingsDirtyText.Text = _settingsDirtyValue ? "Có thay đổi chưa lưu" : "Mọi thay đổi đã được lưu";
-        SettingsDirtyText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, _settingsDirtyValue ? "WarningBrush" : "MutedBrush");
-        Accessibility.Announce(SettingsDirtyText);
+        if (SettingsDirtyText is null || ResourcesDirtyText is null) return;
+        foreach (TextBlock indicator in new[] { SettingsDirtyText, ResourcesDirtyText })
+        {
+            indicator.Text = _settingsDirtyValue ? "Có thay đổi chưa lưu" : "Mọi thay đổi đã được lưu";
+            indicator.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, _settingsDirtyValue ? "WarningBrush" : "MutedBrush");
+            Accessibility.Announce(indicator);
+        }
     }
     private bool _syncingGlossary;
     private readonly ObservableCollection<GlossaryRow> _glossaryRows = [];
@@ -50,11 +53,18 @@ public partial class MainWindow
         string selected = item.Tag?.ToString() ?? "Ai";
         SettingsAiPanel.Visibility = selected == "Ai" ? Visibility.Visible : Visibility.Collapsed;
         SettingsTraditionalPanel.Visibility = selected == "Traditional" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsAppearancePanel.Visibility = selected == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
+        if (_settingsDirty && _initialized) SetStatus("Thiết lập có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
+    }
+
+    private void OnResourcesNavigationChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SettingsDictionaryPanel is null || ResourcesNavigation.SelectedItem is not ListBoxItem item) return;
+        string selected = item.Tag?.ToString() ?? "Dictionary";
         SettingsPromptPanel.Visibility = selected == "Prompts" ? Visibility.Visible : Visibility.Collapsed;
         SettingsDictionaryPanel.Visibility = selected == "Dictionary" ? Visibility.Visible : Visibility.Collapsed;
         SettingsCharactersPanel.Visibility = selected == "Characters" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsAppearancePanel.Visibility = selected == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        if (_settingsDirty && _initialized) SetStatus("Thiết lập có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
+        if (_settingsDirty && _initialized) SetStatus("Tài nguyên có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
     }
 
     private void OnSettingsInputChanged(object sender, RoutedEventArgs e)

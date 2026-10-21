@@ -226,27 +226,29 @@ public partial class MainWindow
         SetResourceReference(ForegroundProperty, "TextBrush");
     }
 
-    private async void OnShellNavigate(object sender, RoutedEventArgs e)
+    private void OnShellNavigate(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: string target }) return;
         switch (target)
         {
-            case "Translate": ShowTranslationWorkspace(_workspaceLayout.FourPaneMode); break;
-            case "Chapters": OnOpenChapterManager(sender, e); break;
-            case "Import": OnAddChapterFromText(sender, e); break;
-            case "Queue": await OpenQueueStatusAsync(); break;
-            case "Library": ShowProjectLibraryWindow(); break;
-            case "Publish": await OpenProjectPublicationAsync(); break;
-            case "Reader": ShowReaderWorkspace(); break;
-            case "Settings": ShowSettingsWorkspace(); break;
+            case "Translate": NavigateTo(WorkspaceId.Editor, CurrentEditorMode); break;
+            case "Chapters": NavigateTo(WorkspaceId.Chapters); break;
+            case "Queue": NavigateTo(WorkspaceId.Queue); break;
+            case "Publish": NavigateTo(WorkspaceId.Publish); break;
+            case "Reader": NavigateTo(WorkspaceId.Reader); break;
+            case "Resources": NavigateTo(WorkspaceId.Resources); break;
+            case "Settings": NavigateTo(WorkspaceId.Settings); break;
         }
     }
 
     private void ShowTranslationWorkspace(bool fourPane)
     {
+        EditorMode targetMode = fourPane ? EditorMode.Review : EditorMode.Translate;
+        if (CurrentWorkspace != WorkspaceId.Editor || CurrentEditorMode != targetMode)
+            _pendingEditorFocus = true;
         CurrentWorkspace = WorkspaceId.Editor;
-        CurrentEditorMode = fourPane ? EditorMode.Review : EditorMode.Translate;
-        EditorContextHeader.Visibility = Visibility.Visible;
+        CurrentEditorMode = targetMode;
+        ApplyWorkspaceVisibility(CurrentWorkspace);
         EditorModeButton.IsChecked = true;
         _workspaceLayout.FourPaneMode = fourPane;
         if (fourPane)
@@ -262,15 +264,15 @@ public partial class MainWindow
         }
         SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
         Refresh();
-        FocusSelectedEditor(fourPane);
-        _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, () =>
+        if (_pendingEditorFocus) FocusSelectedEditor(fourPane);
+        if (_pendingEditorFocus) _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, () =>
         {
             ChapterBlocksItems.ApplyTemplate();
             ChapterBlocksItems.UpdateLayout();
-            FocusSelectedEditor(fourPane);
+            if (_pendingEditorFocus) FocusSelectedEditor(fourPane);
         });
         _ = SaveWorkspaceLayoutAsync();
-        MarkActiveNavigation(TranslateNavButton);
+        MarkActiveNavigation(WorkspaceId.Editor);
     }
 
     private void OnEditorLayoutChanged(object sender, RoutedEventArgs e)
@@ -324,34 +326,79 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    // Only in-window workspaces are destinations; the other navigation items open separate windows.
-    private void MarkActiveNavigation(Button active)
+    private WorkspaceId _activeInWindowWorkspace = WorkspaceId.Editor;
+
+    // Window-backed destinations preserve the active in-window workspace until Phase 4 rehosts them.
+    private void MarkActiveNavigation(WorkspaceId workspace)
     {
-        foreach (Button button in new[] { TranslateNavButton, ReaderNavButton, SettingsNavButton })
-            NavState.SetIsActive(button, ReferenceEquals(button, active));
+        if (workspace is WorkspaceId.Editor or WorkspaceId.Reader or WorkspaceId.Resources or WorkspaceId.Settings)
+            _activeInWindowWorkspace = workspace;
+        var routes = new Dictionary<WorkspaceId, Button>
+        {
+            [WorkspaceId.Editor] = TranslateNavButton,
+            [WorkspaceId.Chapters] = ChaptersNavButton,
+            [WorkspaceId.Queue] = QueueNavButton,
+            [WorkspaceId.Publish] = PublishNavButton,
+            [WorkspaceId.Reader] = ReaderNavButton,
+            [WorkspaceId.Resources] = ResourcesNavButton,
+            [WorkspaceId.Settings] = SettingsNavButton
+        };
+        foreach ((WorkspaceId id, Button button) in routes)
+            NavState.SetIsActive(button, id == _activeInWindowWorkspace);
+    }
+
+    private void ApplyWorkspaceVisibility(WorkspaceId workspace)
+    {
+        bool editorHost = workspace is WorkspaceId.Editor or WorkspaceId.Reader;
+        EditorWorkspaceRoot.Visibility = editorHost ? Visibility.Visible : Visibility.Collapsed;
+        ResourcesWorkspaceRoot.Visibility = workspace == WorkspaceId.Resources ? Visibility.Visible : Visibility.Collapsed;
+        SettingsWorkspaceRoot.Visibility = workspace == WorkspaceId.Settings ? Visibility.Visible : Visibility.Collapsed;
+        EditorContextHeader.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
+        ChapterModeBar.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
+        if (workspace is WorkspaceId.Resources or WorkspaceId.Settings)
+        {
+            ProjectSidebar.Visibility = Visibility.Collapsed;
+            ProjectSidebarSplitter.Visibility = Visibility.Collapsed;
+            SetTranslationInspectorVisibility(false);
+        }
     }
 
     private void ShowReaderWorkspace()
     {
         CurrentWorkspace = WorkspaceId.Reader;
-        EditorContextHeader.Visibility = Visibility.Collapsed;
+        ApplyWorkspaceVisibility(CurrentWorkspace);
         EditorTabs.SelectedIndex = 0;
         ReaderModeButton.IsChecked = true;
         SetTranslationInspectorVisibility(false);
         ChapterModeHint.Text = "Đọc bản dịch · chọn đoạn để mở đúng vị trí trong Editor";
-        MarkActiveNavigation(ReaderNavButton);
+        MarkActiveNavigation(WorkspaceId.Reader);
     }
 
     private void ShowSettingsWorkspace(string? section = null)
     {
+        if (section is not null && section.Equals("Dictionary", StringComparison.OrdinalIgnoreCase) ||
+            section is not null && section.Equals("Characters", StringComparison.OrdinalIgnoreCase) ||
+            section is not null && section.Equals("Prompts", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowResourcesWorkspace(section);
+            return;
+        }
         CurrentWorkspace = WorkspaceId.Settings;
-        EditorContextHeader.Visibility = Visibility.Collapsed;
-        EditorTabs.SelectedIndex = 2;
-        MarkActiveNavigation(SettingsNavButton);
-        SetTranslationInspectorVisibility(false);
+        ApplyWorkspaceVisibility(CurrentWorkspace);
+        MarkActiveNavigation(WorkspaceId.Settings);
         if (section is not null)
             SettingsNavigation.SelectedItem = SettingsNavigation.Items.OfType<ListBoxItem>()
-                .FirstOrDefault(item => string.Equals(item.Tag as string, section, StringComparison.Ordinal));
+                .FirstOrDefault(item => string.Equals(item.Tag as string, section, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void ShowResourcesWorkspace(string? section = null)
+    {
+        CurrentWorkspace = WorkspaceId.Resources;
+        ApplyWorkspaceVisibility(CurrentWorkspace);
+        MarkActiveNavigation(WorkspaceId.Resources);
+        string target = section ?? "Dictionary";
+        ResourcesNavigation.SelectedItem = ResourcesNavigation.Items.OfType<ListBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, target, StringComparison.OrdinalIgnoreCase));
     }
 
     internal void ActivateShellSection(string section)
@@ -366,10 +413,13 @@ public partial class MainWindow
                 break;
             case "character":
             case "characters":
-                ShowSettingsWorkspace("Characters");
+                ShowResourcesWorkspace("Characters");
                 break;
             case "dictionary":
-                ShowSettingsWorkspace("Dictionary");
+                ShowResourcesWorkspace("Dictionary");
+                break;
+            case "prompts":
+                ShowResourcesWorkspace("Prompts");
                 break;
             case "quality":
                 NavigateTo(WorkspaceId.Editor, EditorMode.Review);
@@ -441,7 +491,7 @@ public partial class MainWindow
 
     private void OnOpenInspectorSettings(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: string section }) ShowSettingsWorkspace(section);
+        if (sender is FrameworkElement { Tag: string section }) ShowResourcesWorkspace(section);
     }
 
     private void OnChapterBlockFocused(object sender, KeyboardFocusChangedEventArgs e)
@@ -591,6 +641,7 @@ public partial class MainWindow
         {
             DraftText.Focus();
             Keyboard.Focus(DraftText);
+            if (DraftText.IsKeyboardFocusWithin) _pendingEditorFocus = false;
             return;
         }
         TextBox? target = FindVisualChildren<TextBox>(ChapterBlocksItems)
@@ -599,6 +650,7 @@ public partial class MainWindow
         {
             target.Focus();
             Keyboard.Focus(target);
+            if (target.IsKeyboardFocusWithin) _pendingEditorFocus = false;
         }
     }
 

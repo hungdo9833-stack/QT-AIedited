@@ -319,14 +319,13 @@ public partial class MainWindow
         _selectedId = selected.Item.SegmentId;
         _shownAttemptId = null;
         _service.SelectSegment(selected.Item.SegmentId);
-        // BL-05 (CC-06): Do not force-jump between tabs when already in Editor (Two-Pane or Four-Pane);
-        // only leave Settings (Tab 2) to the user's active Editor mode.
-        if (EditorTabs.SelectedIndex == 2)
+        // Do not force-jump between modes when already in Editor; only leave another workspace.
+        if (CurrentWorkspace != WorkspaceId.Editor)
         {
             NavigateTo(WorkspaceId.Editor, _workspaceLayout.FourPaneMode ? EditorMode.Review : EditorMode.Translate);
         }
         Refresh();
-        if (EditorTabs.SelectedIndex == 1)
+        if (CurrentEditorMode == EditorMode.Review)
         {
             int start = Math.Min(selected.Item.StartUtf16, DraftText.Text.Length);
             int length = Math.Min(selected.Item.Length, DraftText.Text.Length - start);

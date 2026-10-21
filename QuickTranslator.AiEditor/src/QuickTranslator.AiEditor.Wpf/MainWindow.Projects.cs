@@ -414,7 +414,8 @@ public partial class MainWindow
 
     private void OnRecentProjectsOpened(object sender, RoutedEventArgs e)
     {
-        RecentProjectsMenu.Items.Clear();
+        if (sender is not MenuItem menu) return;
+        menu.Items.Clear();
         var accessKeys = new HashSet<char>();
         static string WithAccessKey(string text, HashSet<char> used)
         {
@@ -429,9 +430,9 @@ public partial class MainWindow
         foreach (var recent in _projectLibrary.RecentProjects.OrderByDescending(x => x.LastOpenedAt).Take(12))
         {
             var item = new MenuItem { Header = WithAccessKey((recent.Missing ? "⚠ " : "") + recent.Title, accessKeys), Tag = recent.ManifestPath, IsEnabled = !recent.Missing };
-            item.Click += async (_, _) => await OpenProjectPathAsync((string)item.Tag); RecentProjectsMenu.Items.Add(item);
+            item.Click += async (_, _) => await OpenProjectPathAsync((string)item.Tag); menu.Items.Add(item);
         }
-        if (RecentProjectsMenu.Items.Count == 0) RecentProjectsMenu.Items.Add(new MenuItem { Header = "_Chưa có dự án", IsEnabled = false });
+        if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "_Chưa có dự án", IsEnabled = false });
     }
 
     private void OnShowProjectLibrary(object sender, RoutedEventArgs e) => ShowProjectLibraryWindow();

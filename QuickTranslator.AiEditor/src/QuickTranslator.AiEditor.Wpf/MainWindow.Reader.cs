@@ -597,36 +597,11 @@ public partial class MainWindow
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
         if (key == Key.F11) { OnToggleFullScreen(sender, e); e.Handled = true; return; }
         if (key == Key.Escape && _focusMode) { OnToggleFocusMode(sender, e); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.D1)
-        { ShowTranslationWorkspace(false); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.D2)
-        { ShowTranslationWorkspace(true); e.Handled = true; return; }
+        if (HandleShortcut(key, Keyboard.Modifiers)) { e.Handled = true; return; }
         if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.S)
         { OnSaveProgress(sender, e); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.B)
-        { OnToggleProjectSidebar(sender, e); e.Handled = true; return; }
-        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.I)
-        { OnToggleInspector(sender, e); e.Handled = true; return; }
         if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.H)
         { OnOpenBatchReplace(sender, e); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.Return)
-        {
-            OnApproveAndAdvance(sender, e);
-            e.Handled = true;
-            return;
-        }
-        if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.Up)
-        {
-            NavigateSegment(-1);
-            e.Handled = true;
-            return;
-        }
-        if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.Down)
-        {
-            NavigateSegment(1);
-            e.Handled = true;
-            return;
-        }
         if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.PageUp)
         {
             OnPreviousProjectChapter(sender, e);
@@ -636,12 +611,6 @@ public partial class MainWindow
         if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.PageDown)
         {
             OnNextProjectChapter(sender, e);
-            e.Handled = true;
-            return;
-        }
-        if (Keyboard.Modifiers == ModifierKeys.None && key == Key.F8)
-        {
-            JumpToNextIssueSegment();
             e.Handled = true;
             return;
         }
@@ -669,24 +638,33 @@ public partial class MainWindow
             e.Handled = true;
             return;
         }
-        if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.P)
-        {
-            ShowQuickPalette(commandsMode: false);
-            e.Handled = true;
-            return;
-        }
-        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.P)
-        {
-            ShowQuickPalette(commandsMode: true);
-            e.Handled = true;
-            return;
-        }
         if (EditorTabs.SelectedIndex != 0 || ReaderModeButton.IsChecked != true) return;
         if (Keyboard.Modifiers == ModifierKeys.Control && key == Key.F) { OnOpenReaderSearch(sender, e); e.Handled = true; }
         else if (Keyboard.Modifiers == ModifierKeys.Control && (key is Key.Add or Key.OemPlus)) { ReaderFontSizeInput.Value = Math.Min(30, ReaderFontSizeInput.Value + 1); e.Handled = true; }
         else if (Keyboard.Modifiers == ModifierKeys.Control && (key is Key.Subtract or Key.OemMinus)) { ReaderFontSizeInput.Value = Math.Max(14, ReaderFontSizeInput.Value - 1); e.Handled = true; }
         else if (!ReaderSearchInput.IsKeyboardFocusWithin && key is Key.PageDown or Key.Space) { ReaderScroll.PageDown(); e.Handled = true; }
         else if (!ReaderSearchInput.IsKeyboardFocusWithin && key == Key.PageUp) { ReaderScroll.PageUp(); e.Handled = true; }
+    }
+
+    internal bool? LastPaletteCommandsMode { get; private set; }
+
+    internal bool HandleShortcut(Key key, ModifierKeys modifiers, bool showPalette = true)
+    {
+        if (modifiers == ModifierKeys.Control && key == Key.D1) { ShowTranslationWorkspace(false); return true; }
+        if (modifiers == ModifierKeys.Control && key == Key.D2) { ShowTranslationWorkspace(true); return true; }
+        if (modifiers == ModifierKeys.Control && key == Key.B) { OnToggleProjectSidebar(this, new RoutedEventArgs()); return true; }
+        if (modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.I) { OnToggleInspector(this, new RoutedEventArgs()); return true; }
+        if (modifiers == ModifierKeys.Control && key == Key.Return) { OnApproveAndAdvance(this, new RoutedEventArgs()); return true; }
+        if (modifiers == ModifierKeys.Alt && key == Key.Up) { NavigateSegment(-1); return true; }
+        if (modifiers == ModifierKeys.Alt && key == Key.Down) { NavigateSegment(1); return true; }
+        if (modifiers == ModifierKeys.None && key == Key.F8) { JumpToNextIssueSegment(); return true; }
+        if (key == Key.P && modifiers is ModifierKeys.Control or (ModifierKeys.Control | ModifierKeys.Shift))
+        {
+            LastPaletteCommandsMode = modifiers.HasFlag(ModifierKeys.Shift);
+            if (showPalette) ShowQuickPalette(LastPaletteCommandsMode.Value);
+            return true;
+        }
+        return false;
     }
 
     private void ToggleMaximizeActiveTraditionalPane()
@@ -757,12 +735,35 @@ public partial class MainWindow
             new("mode-two", "Biên tập", "Ctrl+1 · Lưới song ngữ", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Translate); return Task.CompletedTask; }),
             new("mode-four", "Kiểm tra & Duyệt", "Ctrl+2 · Biên tập Segment", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; return Task.CompletedTask; }),
             new("mode-reader", "Chuyển sang Chế độ Đọc (Reader)", "Đọc thử toàn chương", () => { ActivateShellSection("reader"); return Task.CompletedTask; }),
+            new("open-editor", "Mở Biên tập · Hai ô", "Ctrl+1", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Translate); return Task.CompletedTask; }),
+            new("open-review", "Mở Kiểm tra & Duyệt · Bốn ô", "Ctrl+2", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); return Task.CompletedTask; }),
+            new("open-resources-dictionary", "Tài nguyên · Từ điển & Knowledge Context", "Tài nguyên", () => { ShowResourcesWorkspace("Dictionary"); return Task.CompletedTask; }),
+            new("open-resources-characters", "Tài nguyên · Nhân vật & xưng hô", "Tài nguyên", () => { ShowResourcesWorkspace("Characters"); return Task.CompletedTask; }),
+            new("open-resources-prompts", "Tài nguyên · Prompt Presets", "Tài nguyên", () => { ShowResourcesWorkspace("Prompts"); return Task.CompletedTask; }),
+            new("open-settings-ai", "Thiết lập · AI Provider & GPU", "Thiết lập", () => { ShowSettingsWorkspace("Ai"); return Task.CompletedTask; }),
+            new("open-settings-data", "Thiết lập · Data QuickTranslator", "Thiết lập", () => { ShowSettingsWorkspace("Traditional"); return Task.CompletedTask; }),
+            new("open-settings-appearance", "Thiết lập · Giao diện", "Thiết lập", () => { ShowSettingsWorkspace("Appearance"); return Task.CompletedTask; }),
+            new("open-library", "Mở Thư viện Project", "Project", () => { OnShowProjectLibrary(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("open-queue", "Mở Hàng đợi Project", "Cửa sổ riêng", OpenQueueStatusAsync),
             new("toggle-sidebar", "Ẩn / Hiện cột Mục lục bên trái", "Ctrl+B", () => { OnToggleProjectSidebar(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("toggle-inspector", "Ẩn / Hiện bảng Inspector bên phải", "Ctrl+Shift+I", () => { OnToggleInspector(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("open-chapters", "Mở Quản lý chương (Chapter Manager)", "Chọn dải chương, đổi tên, lọc", () => { OnOpenChapterManager(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("open-import", "Nhập nhiều chương từ tệp TXT", "Bulk Import Preview", () => OpenDetectedBulkImportAsync()),
             new("open-gpu", "Mở Quản lý GPU (Local + Remote SSH)", "Dual-GPU Runtime", () => { OnOpenGpuManager(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("open-publish", "Xuất bản toàn bộ truyện (TXT / PDF)", "Kiểm tra & ghép chương", OpenProjectPublicationAsync)
+            new("open-publish", "Xuất bản toàn bộ truyện (TXT / PDF)", "Kiểm tra & ghép chương", OpenProjectPublicationAsync),
+            new("edit-source", "Sửa nguyên văn chương", "Hành động nâng cao", () => { OnBeginSourceEdit(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("split-segment", "Tách đoạn", "Cấu trúc đoạn", () => { OnSplitSegment(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("merge-segment", "Gộp đoạn", "Cấu trúc đoạn", () => { OnMergeSegments(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("move-boundary", "Dời ranh giới", "Cấu trúc đoạn", () => { OnMoveBoundary(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("structure-history", "Lịch sử cấu trúc", "Cấu trúc đoạn", () => { OnShowSegmentationArchive(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("restore-structure", "Khôi phục cấu trúc", "Cấu trúc đoạn", () => { OnRestoreStructure(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("segment-history", "Lịch sử đoạn", "Kiểm tra & Duyệt", () => { OnShowCurrentHistory(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("show-prompt", "Xem prompt / cấu hình", "Attempt hiện tại", () => { OnShowPrompt(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("batch-replace", "Thay thế hàng loạt", "Ctrl+H", () => { OnOpenBatchReplace(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("export-chapter", "Xuất chương TXT", "Chương hiện tại", () => { OnExportChapter(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("toggle-ai-compare", "So sánh AI gốc", "Kiểm tra & Duyệt", () => { OnToggleAiComparison(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("undo-pronouns", "Hoàn tác chuẩn hóa xưng hô", "Kiểm tra", () => { OnUndoPronouns(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("apply-pronouns", "Áp dụng đề xuất xưng hô", "Kiểm tra", () => { OnApplyPronouns(this, new RoutedEventArgs()); return Task.CompletedTask; })
         };
         if (cmdQuery.Length == 0) return commands;
         return commands.Where(c =>

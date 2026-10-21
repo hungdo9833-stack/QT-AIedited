@@ -10,6 +10,7 @@ public partial class MainWindow
 {
     private readonly Dictionary<Button, object?> _normalActionTooltips = [];
     private EditorActionPlan? _currentEditorActionPlan;
+    private bool _pendingEditorFocus;
 
     internal WorkspaceId CurrentWorkspace { get; private set; } = WorkspaceId.Editor;
     internal EditorMode CurrentEditorMode { get; private set; } = EditorMode.Translate;
@@ -22,19 +23,22 @@ public partial class MainWindow
                 ShowTranslationWorkspace((mode ?? CurrentEditorMode) == EditorMode.Review);
                 break;
             case WorkspaceId.Chapters:
+                MarkActiveNavigation(id);
                 OnOpenChapterManager(this, new RoutedEventArgs());
                 break;
             case WorkspaceId.Queue:
+                MarkActiveNavigation(id);
                 _ = OpenQueueStatusAsync();
                 break;
             case WorkspaceId.Publish:
+                MarkActiveNavigation(id);
                 _ = OpenProjectPublicationAsync();
                 break;
             case WorkspaceId.Reader:
                 ShowReaderWorkspace();
                 break;
             case WorkspaceId.Resources:
-                ShowSettingsWorkspace("Dictionary");
+                ShowResourcesWorkspace("Dictionary");
                 break;
             case WorkspaceId.Settings:
                 ShowSettingsWorkspace();
@@ -312,12 +316,15 @@ public partial class MainWindow
 
     private void OnBilingualEditorLoaded(object sender, RoutedEventArgs e)
     {
-        if (CurrentWorkspace != WorkspaceId.Editor || CurrentEditorMode != EditorMode.Translate ||
+        if (!_pendingEditorFocus || CurrentWorkspace != WorkspaceId.Editor || CurrentEditorMode != EditorMode.Translate ||
             sender is not TextBox { Tag: Guid id } editor || id != _selectedId) return;
         _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () =>
         {
+            if (!_pendingEditorFocus || CurrentWorkspace != WorkspaceId.Editor ||
+                CurrentEditorMode != EditorMode.Translate || editor.Tag is not Guid current || current != _selectedId) return;
             editor.Focus();
             System.Windows.Input.Keyboard.Focus(editor);
+            if (editor.IsKeyboardFocusWithin) _pendingEditorFocus = false;
         });
     }
 

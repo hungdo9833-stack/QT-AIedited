@@ -55,8 +55,8 @@ public sealed class GeminiUxIntegrationTests
 
         fixture.Call("UpdateResponsiveShell", 1600d);
         fixture.Call("ActivateShellSection", "character");
-        Assert.Equal(WorkspaceId.Settings, fixture.Window.CurrentWorkspace);
-        Assert.Equal("Characters", ((ListBoxItem)((ListBox)fixture.Window.FindName("SettingsNavigation")).SelectedItem).Tag);
+        Assert.Equal(WorkspaceId.Resources, fixture.Window.CurrentWorkspace);
+        Assert.Equal("Characters", ((ListBoxItem)((ListBox)fixture.Window.FindName("ResourcesNavigation")).SelectedItem).Tag);
         fixture.Call("ActivateShellSection", "reader");
         Assert.Equal(WorkspaceId.Reader, fixture.Window.CurrentWorkspace);
         fixture.Call("ActivateShellSection", "translate");
