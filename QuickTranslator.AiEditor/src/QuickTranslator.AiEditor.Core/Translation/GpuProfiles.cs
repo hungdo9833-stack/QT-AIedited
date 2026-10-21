@@ -4,8 +4,6 @@ namespace QuickTranslator.AiEditor.Core.Translation;
 
 public enum SshAuthenticationKind { Password, PrivateKey }
 public enum GpuConnectionState { Disconnected, Connecting, TrustRequired, Connected, Reconnecting, Offline, Blocked, Error }
-public enum RemoteSetupAction { InstallOllamaUbuntu, StartOllamaService, PullModel }
-public enum RemoteOsFamily { Linux, Windows, Unknown }
 
 public sealed class GpuSshSettings
 {
@@ -69,10 +67,6 @@ public sealed class GpuSshSettings
 
 public sealed record GpuProfileStatus(Guid ProfileId, GpuConnectionState State, string Message,
     string? GpuName = null, long? VramBytes = null, Uri? TunnelEndpoint = null, DateTimeOffset? CheckedAt = null);
-
-public sealed record RemoteGpuInspection(string OperatingSystem, string? GpuName, long? VramBytes,
-    long? FreeDiskBytes, bool OllamaInstalled, bool OllamaServiceActive, IReadOnlyList<string> Models,
-    bool SupportsAutomaticSetup, string? BlockedReason = null, RemoteOsFamily OsFamily = RemoteOsFamily.Linux);
 
 public sealed record SshCommandResult(int ExitStatus, string Output, string Error)
 {

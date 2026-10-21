@@ -1,0 +1,243 @@
+using System.Net;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+
+namespace QuickTranslator.AiEditor.Core.Translation;
+
+public enum RemoteLlamaSetupStage { Inspect, PreparePackage, Upload, Extract, Configure, DownloadModel, Verify, Done }
+public sealed record RemoteLlamaSetupProgress(RemoteLlamaSetupStage Stage, string Message, double? Percent = null);
+public sealed record RemoteLlamaInspection(string OperatingSystem, string? GpuName, long? VramBytes, long? FreeDiskBytes,
+    bool LlamaServerRunning, int Port, IReadOnlyList<string> Models, bool SupportsAutomaticSetup, string? BlockedReason = null);
+public sealed record RemoteLlamaSetupResult(bool Success, string Message, RemoteLlamaInspection? Inspection);
+public sealed record LlamaServerHealth(bool Healthy, IReadOnlyList<string> Models);
+
+public interface IRemoteLlamaHealthClient
+{
+    Task<LlamaServerHealth> CheckAsync(Uri tunnelEndpoint, CancellationToken cancellationToken = default);
+}
+
+public sealed class RemoteLlamaHealthClient(Func<HttpClient>? clientFactory = null) : IRemoteLlamaHealthClient
+{
+    private readonly Func<HttpClient> _clientFactory = clientFactory ?? (() => new HttpClient(new HttpClientHandler
+        { UseProxy = false, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(5) });
+
+    public async Task<LlamaServerHealth> CheckAsync(Uri tunnelEndpoint, CancellationToken cancellationToken = default)
+    {
+        Uri root = ValidateLoopback(tunnelEndpoint);
+        using HttpClient client = _clientFactory();
+        using HttpResponseMessage health = await client.GetAsync(new Uri(root, "/health"), cancellationToken).ConfigureAwait(false);
+        if (health.StatusCode != HttpStatusCode.OK) return new(false, []);
+        using HttpResponseMessage modelsResponse = await client.GetAsync(new Uri(root, "/v1/models"), cancellationToken).ConfigureAwait(false);
+        if (!modelsResponse.IsSuccessStatusCode) return new(true, []);
+        using JsonDocument document = JsonDocument.Parse(await modelsResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        var models = new List<string>();
+        if (document.RootElement.TryGetProperty("data", out JsonElement data) && data.ValueKind == JsonValueKind.Array)
+            foreach (JsonElement item in data.EnumerateArray())
+                if (item.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String) models.Add(id.GetString()!);
+        return new(true, models);
+    }
+
+    private static Uri ValidateLoopback(Uri endpoint)
+    {
+        if (!endpoint.IsAbsoluteUri || endpoint.Scheme != Uri.UriSchemeHttp ||
+            !IPAddress.TryParse(endpoint.Host, out IPAddress? address) || !IPAddress.IsLoopback(address) ||
+            !string.IsNullOrEmpty(endpoint.UserInfo))
+            throw new ArgumentException("Chỉ kiểm tra llama-server qua SSH loopback.", nameof(endpoint));
+        return new UriBuilder(endpoint) { Path = "/", Query = "", Fragment = "" }.Uri;
+    }
+}
+
+public sealed class RemoteWindowsGpuProbe
+{
+    public async Task<RemoteLlamaInspection> InspectAsync(ISshSession session, int port,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        SshCommandResult unix = await session.ExecuteAsync(SshOperation.ReadOperatingSystem, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult version = await session.ExecuteAsync(SshOperation.ReadWindowsVersion, cancellationToken: cancellationToken).ConfigureAwait(false);
+        string combined = unix.Output + unix.Error + version.Output + version.Error;
+        bool windows = !unix.Success && (combined.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
+            combined.Contains("is not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase));
+        if (!windows)
+            return new("Hệ điều hành không được hỗ trợ", null, null, null, false, port, [], false,
+                "Cài đặt tự động llama-server chỉ hỗ trợ máy thuê Windows.");
+        await session.ExecuteAsync(SshOperation.ConfirmWindowsMux, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult info = await session.ExecuteAsync(SshOperation.ReadWindowsInfo, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult gpu = await session.ExecuteAsync(SshOperation.ReadNvidiaGpuWindows, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult disk = await session.ExecuteAsync(SshOperation.ReadSystemDiskWindows, cancellationToken: cancellationToken).ConfigureAwait(false);
+        string gpuText = gpu.Output.Trim(); bool noNvidia = !gpu.Success || gpuText.StartsWith("NONVIDIA:", StringComparison.Ordinal);
+        (string? name, long? vram) = noNvidia ? (null, null) : ParseGpu(gpuText);
+        long? free = long.TryParse(disk.Output.Trim(), out long bytes) ? bytes : null;
+        string os = string.IsNullOrWhiteSpace(info.Output) ? "Windows" : info.Output.Trim();
+        string? blocked = noNvidia ? "Máy Windows chưa có driver NVIDIA (không tìm thấy nvidia-smi)." : null;
+        return new(os, name, vram, free, false, port, [], blocked is null, blocked);
+    }
+
+    private static (string?, long?) ParseGpu(string output)
+    {
+        string line = output.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+        int comma = line.LastIndexOf(',');
+        if (comma < 1 || !long.TryParse(line[(comma + 1)..].Trim(), out long mib)) return (line.Length == 0 ? null : line, null);
+        return (line[..comma].Trim(), checked(mib * 1024L * 1024L));
+    }
+}
+
+public sealed class RemoteLlamaSetup
+{
+    public const long MinimumFreeDiskBytes = 12L * 1024 * 1024 * 1024;
+    private readonly ILlamaCppPackageProvider _packages;
+    private readonly IRemoteLlamaHealthClient _health;
+    private readonly RemoteWindowsGpuProbe _probe;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly TimeSpan _pollInterval, _healthTimeout;
+
+    public RemoteLlamaSetup(ILlamaCppPackageProvider packages, IRemoteLlamaHealthClient? health = null,
+        RemoteWindowsGpuProbe? probe = null, Func<TimeSpan, CancellationToken, Task>? delay = null,
+        TimeSpan? pollInterval = null, TimeSpan? healthTimeout = null)
+    {
+        _packages = packages ?? throw new ArgumentNullException(nameof(packages)); _health = health ?? new RemoteLlamaHealthClient();
+        _probe = probe ?? new(); _delay = delay ?? Task.Delay; _pollInterval = pollInterval ?? TimeSpan.FromSeconds(3);
+        _healthTimeout = healthTimeout ?? TimeSpan.FromMinutes(45);
+    }
+
+    public async Task<RemoteLlamaInspection> InspectAsync(ISshSession session, Uri tunnelEndpoint, int port,
+        CancellationToken cancellationToken = default)
+    {
+        RemoteLlamaInspection result = await _probe.InspectAsync(session, port, cancellationToken).ConfigureAwait(false);
+        if (!result.SupportsAutomaticSetup) return result;
+        try { LlamaServerHealth health = await _health.CheckAsync(tunnelEndpoint, cancellationToken).ConfigureAwait(false);
+            return result with { LlamaServerRunning = health.Healthy, Models = health.Models }; }
+        catch (Exception e) when (e is not OperationCanceledException) { return result; }
+    }
+
+    public async Task<RemoteLlamaSetupResult> RunAsync(ISshSession session, Uri tunnelEndpoint, string model,
+        int port, int slots, int contextPerSlot, IProgress<RemoteLlamaSetupProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var launch = new LlamaServerLaunch(GgufModelReference.Parse(model), port, slots, contextPerSlot); launch.Validate();
+        progress?.Report(new(RemoteLlamaSetupStage.Inspect, "Đang nhận diện máy thuê Windows…"));
+        RemoteLlamaInspection inspection = await _probe.InspectAsync(session, port, cancellationToken).ConfigureAwait(false);
+        if (!inspection.SupportsAutomaticSetup) return new(false, inspection.BlockedReason!, inspection);
+        if (inspection.FreeDiskBytes is long free && free < MinimumFreeDiskBytes)
+            return new(false, $"Ổ đĩa máy thuê chỉ còn {free / 1024d / 1024 / 1024:0.0} GB, không đủ để tải model.", inspection);
+
+        SshCommandResult executable = await session.ExecuteAsync(SshOperation.TestLlamaServerExecutable,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (!executable.Success)
+        {
+            progress?.Report(new(RemoteLlamaSetupStage.PreparePackage, "Đang chuẩn bị llama.cpp trên máy này…"));
+            LlamaCppPackage package = await _packages.EnsureAsync(new TextProgress(text =>
+                progress?.Report(new(RemoteLlamaSetupStage.PreparePackage, text))), cancellationToken).ConfigureAwait(false);
+            if (!string.Equals(package.Build, LlamaCppRelease.Build, StringComparison.Ordinal) || package.ZipPaths.Count != 2)
+                throw new InvalidOperationException("Gói llama.cpp không đúng bản đã ghim " + LlamaCppRelease.Build + ".");
+            long total = package.ZipPaths.Sum(path => new FileInfo(path).Length), completed = 0;
+            foreach (string zip in package.ZipPaths)
+            {
+                long prior = completed, length = new FileInfo(zip).Length;
+                var upload = new ByteProgress(bytes => progress?.Report(new(RemoteLlamaSetupStage.Upload,
+                    $"Đang tải {Path.GetFileName(zip)} lên máy thuê…", Math.Clamp((prior + bytes) * 100d / total, 0, 100))));
+                await session.UploadFileAsync(zip, RemoteLlamaWindowsScripts.DownloadDirectory + "\\" + Path.GetFileName(zip), upload, cancellationToken).ConfigureAwait(false);
+                completed += length;
+            }
+            progress?.Report(new(RemoteLlamaSetupStage.Extract, "Đang giải nén llama.cpp và CUDA runtime…"));
+            await RequireAsync(session, SshOperation.ExtractLlamaCpp, null, cancellationToken).ConfigureAwait(false);
+            await RequireAsync(session, SshOperation.TestLlamaServerExecutable, null, cancellationToken).ConfigureAwait(false);
+        }
+
+        progress?.Report(new(RemoteLlamaSetupStage.Configure, "Đang đăng ký llama-server tự khởi động…"));
+        string specification = JsonSerializer.Serialize(new RemoteLlamaTaskSpecification(model, port, slots, contextPerSlot));
+        await RequireAsync(session, SshOperation.ConfigureLlamaServerTask, specification, cancellationToken).ConfigureAwait(false);
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + _healthTimeout;
+        while (DateTimeOffset.UtcNow <= deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                LlamaServerHealth state = await _health.CheckAsync(tunnelEndpoint, cancellationToken).ConfigureAwait(false);
+                if (state.Healthy)
+                {
+                    RemoteLlamaInspection final = inspection with { LlamaServerRunning = true, Models = state.Models };
+                    progress?.Report(new(RemoteLlamaSetupStage.Done, "llama-server đã sẵn sàng.", 100));
+                    return new(true, $"Đã sẵn sàng: {final.GpuName} · {launch.Model.DisplayName}.", final);
+                }
+            }
+            catch (Exception e) when (e is not OperationCanceledException) { }
+            SshCommandResult size = await session.ExecuteAsync(SshOperation.ReadLlamaCacheSize, cancellationToken: cancellationToken).ConfigureAwait(false);
+            string downloaded = long.TryParse(size.Output.Trim(), out long bytes) ? $" · đã tải {bytes / 1024d / 1024 / 1024:0.0} GB" : "";
+            progress?.Report(new(RemoteLlamaSetupStage.DownloadModel, "llama-server đang tải/khởi tạo model" + downloaded + "…"));
+            await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
+        }
+        SshCommandResult log = await session.ExecuteAsync(SshOperation.ReadLlamaServerLogTail, cancellationToken: cancellationToken).ConfigureAwait(false);
+        string tail = SafeTail(log.Output + (string.IsNullOrWhiteSpace(log.Error) ? "" : "\n" + log.Error));
+        return new(false, "llama-server không sẵn sàng trước thời hạn." + (tail.Length == 0 ? "" : "\nLog cuối:\n" + tail), inspection);
+    }
+
+    private static async Task RequireAsync(ISshSession session, SshOperation operation, string? argument, CancellationToken token)
+    { SshCommandResult result = await session.ExecuteAsync(operation, argument, token).ConfigureAwait(false);
+        if (!result.Success) throw new InvalidOperationException("Máy Windows từ chối bước cài đặt: " + SafeTail(result.Error)); }
+    private static string SafeTail(string value) => value.Trim().Length <= 3000 ? value.Trim() : value.Trim()[^3000..];
+    private sealed class TextProgress(Action<string> report) : IProgress<string> { public void Report(string value) => report(value); }
+    private sealed class ByteProgress(Action<long> report) : IProgress<long> { public void Report(long value) => report(value); }
+}
+
+/// <summary>Bridge used by the remote UI until the shared local package provider supplies the package explicitly.</summary>
+public sealed class CachedLlamaCppPackageProvider : ILlamaCppPackageProvider
+{
+    public Task<LlamaCppPackage> EnsureAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "QTStudio", "llamacpp", LlamaCppRelease.Build);
+        string serverZip = Path.Combine(root, LlamaCppRelease.ServerZip);
+        string runtimeZip = Path.Combine(root, LlamaCppRelease.CudaRuntimeZip);
+        string executable = Path.Combine(root, "llama-server.exe");
+        if (!File.Exists(serverZip) || !File.Exists(runtimeZip))
+            throw new FileNotFoundException("Chưa có gói llama.cpp đã tải trên máy này. Hãy chuẩn bị bản " +
+                LlamaCppRelease.Build + " trước khi cài máy thuê.", root);
+        progress?.Report("Đã tìm thấy gói llama.cpp trong bộ nhớ đệm.");
+        return Task.FromResult(new LlamaCppPackage(LlamaCppRelease.Build, [serverZip, runtimeZip], executable));
+    }
+}
+
+internal sealed record RemoteLlamaTaskSpecification(string Model, int Port, int Slots, int ContextPerSlot);
+
+public static class RemoteLlamaWindowsScripts
+{
+    public const string Root = @"C:\ProgramData\QTStudio";
+    public const string DownloadDirectory = Root + @"\dl";
+    public const string InstallDirectory = Root + @"\llamacpp\" + LlamaCppRelease.Build;
+    public const string Executable = InstallDirectory + @"\llama-server.exe";
+    public const string LogPath = Root + @"\logs\llama-server.log";
+    public const string TestExecutable = "if(Test-Path '" + Executable + "'){'installed'}else{exit 1}";
+    public const string ExtractPackage =
+        "$ErrorActionPreference='Stop';$d='" + InstallDirectory + "';New-Item -ItemType Directory -Force $d|Out-Null;" +
+        "Expand-Archive -LiteralPath '" + DownloadDirectory + @"\" + LlamaCppRelease.ServerZip + "' -DestinationPath $d -Force;" +
+        "Expand-Archive -LiteralPath '" + DownloadDirectory + @"\" + LlamaCppRelease.CudaRuntimeZip + "' -DestinationPath $d -Force;" +
+        "if(-not(Test-Path '" + Executable + "')){throw 'LLAMA_SERVER_EXE_MISSING'}";
+    public const string ReadLogTail = "if(Test-Path '" + LogPath + "'){Get-Content -LiteralPath '" + LogPath + "' -Tail 80}else{'(log empty)'}";
+    public const string ReadCacheSize = "$p='" + Root + @"\models\llama';if(Test-Path $p){(Get-ChildItem -LiteralPath $p -File -Recurse -ErrorAction SilentlyContinue|Measure-Object Length -Sum).Sum}else{0}";
+
+    public static string ConfigureTask(string? json)
+    {
+        RemoteLlamaTaskSpecification spec;
+        try { spec = JsonSerializer.Deserialize<RemoteLlamaTaskSpecification>(json ?? "") ?? throw new JsonException(); }
+        catch (JsonException e) { throw new ArgumentException("Cấu hình llama-server không hợp lệ.", nameof(json), e); }
+        var launch = new LlamaServerLaunch(GgufModelReference.Parse(spec.Model), spec.Port, spec.Slots, spec.ContextPerSlot);
+        string arguments = string.Join(" ", launch.Arguments().Select(Quote));
+        string wrapper = "$ErrorActionPreference='Stop'\r\n$env:LLAMA_CACHE=" + Quote(Root + @"\models\llama") +
+            "\r\n& " + Quote(Executable) + " " + arguments + " *>> " + Quote(LogPath) + "\r\nexit $LASTEXITCODE\r\n";
+        string encodedWrapper = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(wrapper));
+        return "$ErrorActionPreference='Stop';$root='" + Root + "';New-Item -ItemType Directory -Force \"$root\\logs\",\"$root\\models\\llama\"|Out-Null;" +
+            "$script=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encodedWrapper + "'));" +
+            "[IO.File]::WriteAllText(\"$root\\llama-server.ps1\",$script,(New-Object Text.UTF8Encoding($false)));" +
+            "Stop-ScheduledTask -TaskName 'QTStudio llama-server' -ErrorAction SilentlyContinue;" +
+            "$old=Get-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue;if($old){Stop-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue};" +
+            "$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:\\ProgramData\\QTStudio\\llama-server.ps1\"';" +
+            "$t=New-ScheduledTaskTrigger -AtStartup;$p=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest;" +
+            "$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1);" +
+            "Register-ScheduledTask -TaskName 'QTStudio llama-server' -Action $a -Trigger $t -Principal $p -Settings $s -Force|Out-Null;" +
+            "Start-ScheduledTask -TaskName 'QTStudio llama-server'";
+    }
+
+    private static string Quote(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+}

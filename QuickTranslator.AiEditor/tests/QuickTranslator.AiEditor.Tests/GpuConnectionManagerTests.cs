@@ -125,133 +125,6 @@ public sealed class GpuConnectionManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task Setup_uses_only_controlled_operations_and_requires_confirmation()
-    {
-        var session = new FakeSshSession();
-        var setup = new RemoteOllamaSetupService();
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() => setup.ExecuteConfirmedAsync(session,
-            RemoteSetupAction.InstallOllamaUbuntu, confirmed: false));
-        await setup.ExecuteConfirmedAsync(session, RemoteSetupAction.PullModel, confirmed: true, "translategemma:12b");
-        await Assert.ThrowsAsync<ArgumentException>(() => setup.ExecuteConfirmedAsync(session,
-            RemoteSetupAction.PullModel, confirmed: true, "safe; curl bad.example"));
-
-        Assert.Equal([(SshOperation.PullOllamaModel, "translategemma:12b")], session.Executed);
-    }
-
-    [Fact]
-    public async Task Sudo_setup_prompts_only_when_required_and_keeps_secret_out_of_command_text()
-    {
-        var session = new PasswordSshSession();
-        var service = new RemoteOllamaSetupService();
-        var missing = await service.ExecuteConfirmedAsync(session, RemoteSetupAction.InstallOllamaUbuntu, true);
-        Assert.StartsWith("SUDO_PASSWORD_REQUIRED:", missing.Error, StringComparison.Ordinal);
-        Assert.Equal(0, session.PasswordCalls);
-
-        var installed = await service.ExecuteConfirmedAsync(session, RemoteSetupAction.InstallOllamaUbuntu, true,
-            sudoPassword: "fake-sudo-secret");
-        Assert.True(installed.Success);
-        Assert.Equal(1, session.PasswordCalls);
-        Assert.Equal(SshOperation.InstallOllamaUbuntu, session.LastOperation);
-        Assert.DoesNotContain("fake-sudo-secret", SshCommands.Resolve(SshOperation.InstallOllamaUbuntu, sudoStdin: true));
-        Assert.Contains("sudo -S -p ''", SshCommands.Resolve(SshOperation.InstallOllamaUbuntu, sudoStdin: true));
-        Assert.Contains("sudo -n", SshCommands.Resolve(SshOperation.InstallOllamaUbuntu));
-        Assert.DoesNotContain("fake-sudo-secret", installed.ToString(), StringComparison.Ordinal);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            session.ExecuteWithSudoPasswordAsync(SshOperation.PullOllamaModel, "fake-sudo-secret"));
-    }
-
-    private sealed class PasswordSshSession : ISshSession
-    {
-        public bool IsConnected => true;
-        public int PasswordCalls { get; private set; }
-        public SshOperation LastOperation { get; private set; }
-        public Task<SshCommandResult> ExecuteAsync(SshOperation operation, string? argument = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new SshCommandResult(1, "", "sudo: a password is required"));
-        public Task<SshCommandResult> ExecuteWithSudoPasswordAsync(SshOperation operation, string password,
-            CancellationToken cancellationToken = default)
-        {
-            if (operation == SshOperation.PullOllamaModel) throw new InvalidOperationException("not allowed");
-            PasswordCalls++;
-            LastOperation = operation;
-            return Task.FromResult(new SshCommandResult(0, "ok", ""));
-        }
-        public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    [Fact]
-    public async Task Model_pull_streams_real_byte_progress_only_through_loopback()
-    {
-        const string body = "{\"status\":\"pulling layer\",\"completed\":524288,\"total\":1048576}\n" +
-                            "{\"status\":\"success\"}\n";
-        var handler = new StubHttpHandler((request, _) =>
-        {
-            Assert.Equal("http://127.0.0.1:43117/api/pull", request.RequestUri!.ToString());
-            Assert.Equal(HttpMethod.Post, request.Method);
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
-        });
-        var observed = new List<OllamaModelPullProgress>();
-        var service = new RemoteOllamaModelPullService(() => new HttpClient(handler, disposeHandler: false));
-
-        await service.PullAsync(new Uri("http://127.0.0.1:43117/api/chat"), "translategemma:12b",
-            new InlineProgress<OllamaModelPullProgress>(observed.Add));
-
-        Assert.Equal(2, observed.Count);
-        Assert.Equal(50, observed[0].Percentage);
-        Assert.Equal(1048576, observed[0].TotalBytes);
-        await Assert.ThrowsAsync<ArgumentException>(() => service.PullAsync(
-            new Uri("http://gpu.example.test:11434/api/chat"), "translategemma:12b"));
-        await Assert.ThrowsAsync<ArgumentException>(() => service.PullAsync(
-            new Uri("http://127.0.0.1:43117/api/chat"), "safe;curl-bad"));
-    }
-
-    [Fact]
-    public async Task Model_pull_honors_cancellation()
-    {
-        var handler = new StubHttpHandler(async (_, cancellationToken) =>
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-            throw new InvalidOperationException("unreachable");
-        });
-        var service = new RemoteOllamaModelPullService(() => new HttpClient(handler, disposeHandler: false));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.PullAsync(
-            new Uri("http://127.0.0.1:43117/api/chat"), "translategemma:12b", cancellationToken: cancellation.Token));
-    }
-
-    [Fact]
-    public async Task Inspection_parses_ubuntu_gpu_disk_service_and_models()
-    {
-        var session = new FakeSshSession
-        {
-            Results =
-            {
-                [SshOperation.ReadOperatingSystem] = new(0, "ID=ubuntu\nPRETTY_NAME=\"Ubuntu 24.04 LTS\"", ""),
-                [SshOperation.ReadNvidiaGpu] = new(0, "NVIDIA RTX 3090 Ti, 24564", ""),
-                [SshOperation.ReadRootDisk] = new(0, "/dev/vda 1000000 100 800000 1% /", ""),
-                [SshOperation.FindOllama] = new(0, "/usr/local/bin/ollama", ""),
-                [SshOperation.ReadOllamaService] = new(0, "active", ""),
-                [SshOperation.ListOllamaModels] = new(0, "NAME ID SIZE MODIFIED\ntranslategemma:12b abc 8GB now", "")
-            }
-        };
-
-        RemoteGpuInspection result = await new RemoteOllamaSetupService().InspectAsync(session);
-
-        Assert.Equal("Ubuntu 24.04 LTS", result.OperatingSystem);
-        Assert.Equal("NVIDIA RTX 3090 Ti", result.GpuName);
-        Assert.Equal(24564L * 1024 * 1024, result.VramBytes);
-        Assert.Equal(800000L * 1024, result.FreeDiskBytes);
-        Assert.True(result.OllamaInstalled);
-        Assert.True(result.OllamaServiceActive);
-        Assert.Equal(["translategemma:12b"], result.Models);
-        Assert.True(result.SupportsAutomaticSetup);
-    }
-
-    [Fact]
     public async Task Ssh_profile_never_uses_saved_endpoint_before_runtime_tunnel_is_attached()
     {
         Directory.CreateDirectory(_root);
@@ -345,6 +218,8 @@ public sealed class GpuConnectionManagerTests : IDisposable
             Executed.Add((operation, argument));
             return Task.FromResult(Results.TryGetValue(operation, out var result) ? result : new SshCommandResult(0, "", ""));
         }
+        public Task UploadFileAsync(string localPath, string remotePath, IProgress<long>? progress = null,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort, CancellationToken cancellationToken = default)
         { RemotePort = remotePort; Tunnel = new(); return Task.FromResult<ISshTunnel>(Tunnel); }
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }

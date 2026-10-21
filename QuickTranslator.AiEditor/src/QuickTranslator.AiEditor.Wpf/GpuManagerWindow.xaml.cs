@@ -14,11 +14,10 @@ public partial class GpuManagerWindow : Window
     private readonly OllamaBackendManager _backends;
     private readonly GpuConnectionManager _connections;
     private readonly GpuTranslationPreferences _preferences;
-    private readonly RemoteOllamaSetupService _setup = new();
-    private readonly RemoteOllamaModelPullService _modelPull = new();
     private readonly LocalOllamaService _local = new();
     private readonly RemoteHostProbe _probe = new();
-    private readonly RemoteOllamaAutoSetup _autoSetup = new();
+    private readonly ISshConnectionService _setupSsh = new SshConnectionService();
+    private readonly RemoteLlamaSetup _remoteLlama = new(new CachedLlamaCppPackageProvider());
     private int? _rdpPort;
     private readonly ObservableCollection<OllamaBackendProfile> _profiles = [];
     private string? _loadedPrivateKey;
@@ -76,7 +75,6 @@ public partial class GpuManagerWindow : Window
         if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         NameInput.Text = profile.Name; ModelInput.Text = runtime.ModelOptions.Model;
-        DownloadModelInput.Text = runtime.ModelOptions.Model;
         RuntimeTemperatureInput.Text = runtime.ModelOptions.Temperature.ToString(CultureInfo.InvariantCulture);
         RuntimeContextInput.Text = runtime.ModelOptions.ContextSize.ToString(CultureInfo.InvariantCulture);
         RuntimeOutputInput.Text = runtime.ModelOptions.MaximumOutputTokens.ToString(CultureInfo.InvariantCulture);
@@ -125,13 +123,11 @@ public partial class GpuManagerWindow : Window
     private void ApplyServerApiUi()
     {
         if (AutoSetupButton is null) return;
-        bool ollama = ServerApiInput.SelectedIndex != 1;
-        ParallelRequestsInput.IsEnabled = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote };
-        AutoSetupButton.IsEnabled = ollama;
-        InstallOllamaButton.IsEnabled = ollama;
-        StartOllamaButton.IsEnabled = ollama;
-        PullModelButton.IsEnabled = ollama;
-        DownloadModelInput.IsEnabled = ollama;
+        bool remote = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote };
+        ParallelRequestsInput.IsEnabled = remote;
+        AutoSetupButton.IsEnabled = remote;
+        StartOllamaButton.IsEnabled = true;
+        PullModelButton.IsEnabled = remote;
     }
     private void ApplyConnectionUi()
     {
@@ -275,22 +271,16 @@ public partial class GpuManagerWindow : Window
         }
         if (!_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
             throw new InvalidOperationException("Hãy kết nối SSH trước khi kiểm tra server.");
-        if (profile.Api == BackendApi.OpenAiCompatible)
-        {
-            IReadOnlyList<string> models = await handle.Client.ListModelsAsync(TimeSpan.FromSeconds(10));
-            await handle.Client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10));
-            InspectionText.Text = "llama-server phản hồi qua SSH tunnel · Models: " +
-                (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models));
-            return;
-        }
-        InspectionText.Text = DescribeInspection(await _setup.InspectAsync(handle.Session));
+        RemoteLlamaInspection inspection = await _remoteLlama.InspectAsync(handle.Session, handle.TunnelEndpoint,
+            profile.Ssh.RemoteOllamaPort);
+        InspectionText.Text = DescribeInspection(inspection);
     });
 
-    private static string DescribeInspection(RemoteGpuInspection result) =>
+    private static string DescribeInspection(RemoteLlamaInspection result) =>
         $"{result.OperatingSystem}\n{result.GpuName ?? "Không đọc được GPU"} · " +
         $"VRAM {(result.VramBytes ?? 0) / 1024d / 1024d / 1024d:0.0} GB · Trống {(result.FreeDiskBytes ?? 0) / 1024d / 1024d / 1024d:0.0} GB\n" +
-        $"Ollama: {(result.OllamaInstalled ? "đã cài" : "chưa cài")} · Service: {(result.OllamaServiceActive ? "active" : "inactive")}\n" +
-        $"Models: {(result.Models.Count == 0 ? "chưa có" : string.Join(", ", result.Models))}" +
+        $"llama-server: {(result.LlamaServerRunning ? "đang chạy" : "chưa phản hồi")} · Cổng {result.Port}\n" +
+        $"Model đã nạp: {(result.Models.Count == 0 ? "chưa có" : string.Join(", ", result.Models))}" +
         (result.BlockedReason is null ? "" : "\n" + result.BlockedReason);
 
     private void OnImportRdp(object sender, RoutedEventArgs e)
@@ -337,28 +327,38 @@ public partial class GpuManagerWindow : Window
             OllamaBackendProfile profile = ReadProfile();
             if (profile.Kind != OllamaBackendKind.Remote || profile.Ssh is null)
             { StatusText.Text = "Cài đặt tự động dành cho profile GPU Remote qua SSH."; return; }
+            ServerApiInput.SelectedIndex = 1;
+            profile.Api = BackendApi.OpenAiCompatible;
             string model = profile.Model;
             SshReadiness readiness = await EnsureSshReachableAsync(profile, cancellation.Token);
             if (readiness == SshReadiness.Failed) return;
             // A machine QT Studio just prepared was confirmed in one dialog already, and its SSH server is our own.
             if (readiness == SshReadiness.AlreadyAvailable && ThemedDialog.Show(this,
-                    $"QT Studio sẽ kết nối SSH tới {profile.Ssh.Host}, nhận diện Ubuntu hoặc Windows, cài Ollama nếu máy chưa có và tải model “{model}”.\n\n" +
+                    $"QT Studio sẽ kết nối SSH tới {profile.Ssh.Host}, nhận diện máy Windows, tải gói llama.cpp từ máy này và khởi động model “{model}”.\n\n" +
                     "Không cài hay nâng cấp driver NVIDIA. Nhà cung cấp có thể tính phí mạng và thời gian thuê trong lúc cài. Tiếp tục?",
                     "Xác nhận cài đặt tự động", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
             profile = ReadProfile(); // The port may have been corrected while checking.
+            GpuSshSettings ssh = profile.Ssh!;
             StatusText.Text = "Đang kết nối SSH…";
-            if (!await ConnectSshAsync(profile, trustNewHostKey: readiness == SshReadiness.Bootstrapped)) return;
-            if (!_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
-            { StatusText.Text = "Chưa có kết nối SSH."; return; }
-
-            var progress = new Progress<AutoSetupProgress>(UpdateAutoSetupProgress);
-            AutoSetupResult result = await _autoSetup.RunAsync(handle.Session, handle.TunnelEndpoint, model,
-                () => Dispatcher.Invoke(() => RequestSudoPassword(profile)), progress, cancellation.Token);
+            await using ISshSession? session = await ConnectSetupSessionAsync(profile,
+                readiness == SshReadiness.Bootstrapped, cancellation.Token);
+            if (session is null) return;
+            await using ISshTunnel tunnel = await session.OpenOllamaTunnelAsync(ssh.RemoteOllamaPort, cancellation.Token);
+            Uri endpoint = new($"http://127.0.0.1:{tunnel.LocalPort}/api/chat");
+            var progress = new Progress<RemoteLlamaSetupProgress>(UpdateAutoSetupProgress);
+            RemoteLlamaSetupResult result = await _remoteLlama.RunAsync(session, endpoint, model,
+                ssh.RemoteOllamaPort, profile.ParallelRequests, profile.Runtime!.ModelOptions.ContextSize,
+                progress, cancellation.Token);
             if (result.Inspection is not null) InspectionText.Text = DescribeInspection(result.Inspection);
             ModelPullProgress.IsIndeterminate = false;
             ModelPullProgress.Value = result.Success ? 100 : ModelPullProgress.Value;
             StatusText.Text = result.Message;
+            if (result.Success)
+            {
+                await _connections.DisconnectAsync(profile.Id);
+                await ConnectSshAsync(ReadProfile());
+            }
         }
         catch (OperationCanceledException) { StatusText.Text = "Đã hủy cài đặt tự động. Máy thuê giữ nguyên những gì đã cài xong."; }
         catch (Exception error) { StatusText.Text = error.Message; }
@@ -369,7 +369,7 @@ public partial class GpuManagerWindow : Window
         }
     }
 
-    private void UpdateAutoSetupProgress(AutoSetupProgress step)
+    private void UpdateAutoSetupProgress(RemoteLlamaSetupProgress step)
     {
         if (step.Percent is double percent)
         {
@@ -378,6 +378,23 @@ public partial class GpuManagerWindow : Window
         }
         else ModelPullProgress.IsIndeterminate = true;
         StatusText.Text = step.Message + " · có thể hủy";
+    }
+
+    private async Task<ISshSession?> ConnectSetupSessionAsync(OllamaBackendProfile profile, bool trustNewHostKey,
+        CancellationToken cancellationToken)
+    {
+        try { return await _setupSsh.ConnectAsync(profile.Ssh!, cancellationToken); }
+        catch (SshHostKeyVerificationException error)
+        {
+            FingerprintInput.Text = error.ObservedFingerprint;
+            if (!trustNewHostKey && ThemedDialog.Show(this,
+                    $"Máy chủ trả về SSH Host Key Fingerprint:\n{error.ObservedFingerprint}\n\nTin cậy fingerprint này và tiếp tục cài llama-server?",
+                    "Xác nhận SSH Fingerprint", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return null;
+            OllamaBackendProfile confirmed = ReadProfile(); confirmed.RemoteDisclosureAccepted = true;
+            await _backends.SaveProfileAsync(confirmed, activate: false);
+            return await _setupSsh.ConnectAsync(confirmed.Ssh!, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -413,7 +430,7 @@ public partial class GpuManagerWindow : Window
                 "Nếu Windows hỏi “Unknown publisher” hoặc quyền (UAC), bấm Connect hoặc Yes. Đừng đóng cửa sổ và đừng sao chép gì khác trong lúc này.\n" +
                 $"2. Bật OpenSSH Server (chỉ nghe nội bộ) và chia cổng {rdpPort} cho cả Remote Desktop lẫn SSH. Remote Desktop ngắt vài giây. " +
                 "Nếu có lỗi hoặc QT Studio không xác nhận được SSH trong 12 phút, máy tự trả cổng lại cho Remote Desktop.\n" +
-                $"3. Nhận diện GPU, cài Ollama nếu thiếu và tải model “{profile.Model}”. Không cài hay nâng cấp driver NVIDIA.\n\n" +
+                $"3. Nhận diện GPU, tải llama.cpp từ máy này và để llama-server tải model “{profile.Model}”. Không cài hay nâng cấp driver NVIDIA.\n\n" +
                 "Nhà cung cấp tính phí theo giờ trong lúc cài. Sau bước này tài khoản quản trị cũng đăng nhập được bằng SSH qua cổng " +
                 $"{rdpPort}. Tiếp tục?",
                 "Cài đặt tự động trên máy Windows", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
@@ -471,139 +488,17 @@ public partial class GpuManagerWindow : Window
 
     private enum SshReadiness { Failed, AlreadyAvailable, Bootstrapped }
 
-    private async void OnInstallOllama(object sender, RoutedEventArgs e) => await ConfirmSetupAsync(RemoteSetupAction.InstallOllamaUbuntu,
-        "Cài Ollama bằng script chính thức trên Ubuntu? QT Studio sẽ không cài hoặc nâng cấp driver NVIDIA.");
     private async void OnStartOllama(object sender, RoutedEventArgs e)
     {
         if (ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Local } local)
         { await RunAsync(async () => StatusText.Text = (await _local.StartAsync(local.Model)).Message); return; }
-        await ConfirmSetupAsync(RemoteSetupAction.StartOllamaService,
-            "Bật Ollama service trên GPU thuê? Nếu cần quyền sudo, QT Studio sẽ hỏi mật khẩu ngay tại đây.");
+        OnAutoSetup(sender, e);
     }
-    private async void OnPullModel(object sender, RoutedEventArgs e)
-    {
-        string model = DownloadModelInput.Text.Trim();
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            StatusText.Text = "Hãy nhập tên model Ollama cần tải."; return;
-        }
-        await ConfirmSetupAsync(RemoteSetupAction.PullModel,
-            $"Tải model “{model}” qua SSH tunnel? Dung lượng tải sẽ được hiển thị; nhà cung cấp có thể tính phí mạng.",
-            model);
-    }
+    private void OnPullModel(object sender, RoutedEventArgs e) => OnAutoSetup(sender, e);
     private void OnCancelSetup(object sender, RoutedEventArgs e)
     {
         _setupCancellation?.Cancel();
         StatusText.Text = "Đang yêu cầu hủy thao tác Remote…";
-    }
-
-    private async Task ConfirmSetupAsync(RemoteSetupAction action, string message, string? model = null)
-    {
-        if (ThemedDialog.Show(this, message, "Xác nhận thao tác Remote GPU", MessageBoxButton.YesNo,
-            MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        if (_busy) return;
-        _busy = true;
-        CancelSetupButton.IsEnabled = true;
-        ModelPullProgress.Visibility = action == RemoteSetupAction.PullModel ? Visibility.Visible : Visibility.Collapsed;
-        ModelPullProgress.IsIndeterminate = action == RemoteSetupAction.PullModel;
-        ModelPullProgress.Value = 0;
-        try
-        {
-            if (ProfileList.SelectedItem is not OllamaBackendProfile profile ||
-                !_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
-                throw new InvalidOperationException("Hãy kết nối SSH trước.");
-            using var cancellation = new CancellationTokenSource();
-            _setupCancellation = cancellation;
-            StatusText.Text = action == RemoteSetupAction.PullModel ? "Đang tải model trên Remote; có thể hủy…" : "Đang thực hiện thao tác Remote…";
-            try
-            {
-                if (action == RemoteSetupAction.PullModel)
-                {
-                    var progress = new Progress<OllamaModelPullProgress>(UpdateModelPullProgress);
-                    await _modelPull.PullAsync(handle.TunnelEndpoint, model ?? "", progress, cancellation.Token);
-                    ModelPullProgress.IsIndeterminate = false;
-                    ModelPullProgress.Value = 100;
-                    StatusText.Text = "Tải model hoàn tất.";
-                }
-                else
-                {
-                    SshCommandResult result = await _setup.ExecuteConfirmedAsync(handle.Session, action, true, model, cancellation.Token);
-                    if (!result.Success && result.Error.StartsWith("SUDO_PASSWORD_REQUIRED:", StringComparison.Ordinal))
-                    {
-                        string? password = RequestSudoPassword(profile);
-                        if (password is null)
-                        {
-                            StatusText.Text = "Đã hủy nhập mật khẩu sudo."; return;
-                        }
-                        result = await _setup.ExecuteConfirmedAsync(handle.Session, action, true, model,
-                            cancellation.Token, sudoPassword: password);
-                    }
-                    StatusText.Text = result.Success ? "Thao tác hoàn tất." : "Thao tác bị chặn/thất bại: " + result.Error;
-                }
-            }
-            finally { if (ReferenceEquals(_setupCancellation, cancellation)) _setupCancellation = null; }
-        }
-        catch (OperationCanceledException) { StatusText.Text = "Đã hủy thao tác Remote theo yêu cầu."; }
-        catch (Exception error) { StatusText.Text = error.Message; }
-        finally { CancelSetupButton.IsEnabled = false; _busy = false; }
-    }
-
-    private string? RequestSudoPassword(OllamaBackendProfile profile)
-    {
-        // Sudo is often configured with the same password as SSH. Do not persist a separate sudo secret.
-        var window = new Window
-        {
-            Title = "Mật khẩu sudo · Ubuntu",
-            Owner = this, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize,
-            MinWidth = 420
-        };
-        window.SetResourceReference(BackgroundProperty, "PanelBrush");
-        window.SetResourceReference(ForegroundProperty, "TextBrush");
-        var stack = new StackPanel { Margin = new Thickness(24) };
-        stack.Children.Add(new TextBlock
-        {
-            Text = "Ubuntu yêu cầu xác thực để cài/khởi động Ollama.\nDùng mật khẩu SSH hoặc nhập mật khẩu sudo riêng:",
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12)
-        });
-        var input = new PasswordBox { Margin = new Thickness(0, 0, 0, 12), MinWidth = 345 };
-        // For password-based SSH login this is usually the sudo password too.
-        if (profile.Ssh?.Authentication == SshAuthenticationKind.Password)
-            input.Password = profile.Ssh.Password ?? "";
-        stack.Children.Add(input);
-        var cancel = new Button { Content = "Hủy", MinWidth = 76, Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
-        var confirm = new Button { Content = "Tiếp tục", MinWidth = 92, IsDefault = true };
-        confirm.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
-        cancel.Click += (_, _) => window.DialogResult = false;
-        confirm.Click += (_, _) => window.DialogResult = true;
-        var root = new DockPanel();
-        Border footer = ThemedDialog.Footer(confirm, cancel);
-        DockPanel.SetDock(footer, Dock.Bottom); root.Children.Add(footer); root.Children.Add(stack);
-        window.Content = root;
-        if (window.ShowDialog() != true) { input.Clear(); return null; }
-        string password = input.Password;
-        input.Clear();
-        return password;
-    }
-
-    private void UpdateModelPullProgress(OllamaModelPullProgress progress)
-    {
-        if (progress.Percentage is double percentage)
-        {
-            ModelPullProgress.IsIndeterminate = false;
-            ModelPullProgress.Value = percentage;
-            StatusText.Text = $"{progress.Status} · {FormatBytes(progress.CompletedBytes ?? 0)} / " +
-                $"{FormatBytes(progress.TotalBytes ?? 0)} ({percentage:0.0}%) · có thể hủy";
-        }
-        else StatusText.Text = progress.Status + " · đang chờ Ollama báo dung lượng · có thể hủy";
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
-        double value = Math.Max(0, bytes); int unit = 0;
-        while (value >= 1024 && unit < units.Length - 1) { value /= 1024; unit++; }
-        return $"{value:0.##} {units[unit]}";
     }
 
     private void OnChoosePrivateKey(object sender, RoutedEventArgs e)

@@ -255,6 +255,8 @@ public sealed class ProjectTranslationRestartUiTests
         public bool IsConnected { get; private set; } = true;
         public Task<SshCommandResult> ExecuteAsync(SshOperation operation, string? argument = null,
             CancellationToken cancellationToken = default) => Task.FromResult(new SshCommandResult(0, "", ""));
+        public Task UploadFileAsync(string localPath, string remotePath, IProgress<long>? progress = null,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort,
             CancellationToken cancellationToken = default) => Task.FromResult<ISshTunnel>(new SshTunnel());
         public ValueTask DisposeAsync() { IsConnected = false; return ValueTask.CompletedTask; }

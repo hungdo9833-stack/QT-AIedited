@@ -44,7 +44,8 @@ public sealed class GpuManagerUiTests
             window.Arrange(new Rect(0, 0, 1040, 720));
 
             Assert.NotNull(window.FindName("ProfileList"));
-            Assert.NotNull(window.FindName("DownloadModelInput"));
+            Assert.Contains("llama-server", ((Button)window.FindName("AutoSetupButton")).Content.ToString());
+            Assert.Equal("Áp dụng model/luồng", ((Button)window.FindName("PullModelButton")).Content);
             Assert.NotNull(window.FindName("HostInput"));
             Assert.NotNull(window.FindName("PasswordInput"));
             Assert.NotNull(window.FindName("PrivateKeyInput"));
@@ -83,9 +84,7 @@ public sealed class GpuManagerUiTests
             var expander = (Expander)window.FindName("AdvancedConnectionExpander");
             Assert.False(expander.IsExpanded);
 
-            var download = (TextBox)window.FindName("DownloadModelInput");
             var configured = (TextBox)window.FindName("ModelInput");
-            download.Text = "llama3.2:3b";
             Assert.Equal("translategemma:12b", configured.Text);
 
             var list = (ListBox)window.FindName("ProfileList");
