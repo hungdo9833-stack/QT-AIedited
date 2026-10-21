@@ -201,7 +201,7 @@ public sealed class ProductionShellUiTests
         fixture.Call("UpdateResponsiveShell", 960d);
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("ProjectSidebar")).Visibility);
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("TranslationInspector")).Visibility);
-        Assert.Equal(148, ((Border)fixture.Window.FindName("ShellNavigation")).Width);
+        Assert.Equal(172, ((Border)fixture.Window.FindName("ShellNavigation")).Width);
         Assert.Equal(190, ((ComboBox)fixture.Window.FindName("ProjectSwitcher")).Width);
         Assert.Equal(Visibility.Visible,
             ((Button)fixture.Window.FindName("ProjectSidebarToggleButton")).Visibility);

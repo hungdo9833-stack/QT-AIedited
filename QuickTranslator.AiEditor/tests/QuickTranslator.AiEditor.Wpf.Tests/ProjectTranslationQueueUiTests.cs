@@ -151,9 +151,12 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob?.Status);
         Assert.False(coordinator.IsRunning);
         fixture.Call("RefreshShellQueueStatus");
-        Assert.Equal(Visibility.Visible, ((Border)fixture.Window.FindName("QueueResumeBanner")).Visibility);
-        Assert.Contains("Còn", ((TextBlock)fixture.Window.FindName("QueueResumeSummaryText")).Text);
-        Assert.Equal("Hàng đợi · có thể tiếp tục", ((Button)fixture.Window.FindName("ShellQueueButton")).Content);
+        // The resume banner is gone: the rail button carries the label, the summary (tooltip) and the resume action.
+        var queueButton = (Button)fixture.Window.FindName("ShellQueueButton");
+        Assert.Null(fixture.Window.FindName("QueueResumeBanner"));
+        Assert.Equal("Hàng đợi / tiếp tục dịch", queueButton.Content);
+        Assert.Contains("Còn", queueButton.ToolTip as string);
+        Assert.True(fixture.Get<bool>("_shellQueueResumable"));
     });
 
     [Fact]

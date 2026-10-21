@@ -93,10 +93,13 @@ public partial class MainWindow
     private void OnToggleProjectSidebar(object sender, RoutedEventArgs e) =>
         TogglePanelPreference(PanelId.ProjectSidebar);
 
+    // The rail also holds the shell tools (queue, panels, theme, save), so it is wide enough for their labels.
+    private double NavRailWidth => _navRailCollapsed ? 56 : (_compactShell ? 172 : 204);
+
     private void OnToggleNavRail(object sender, RoutedEventArgs e)
     {
         _navRailCollapsed = !_navRailCollapsed;
-        ShellNavigation.Width = _navRailCollapsed ? 56 : (_compactShell ? 148 : 176);
+        ShellNavigation.Width = NavRailWidth;
         if (FindName("NavRailToggleButton") is Button btn)
             btn.Content = _navRailCollapsed ? "»" : "«";
     }
@@ -128,8 +131,8 @@ public partial class MainWindow
         if (ShellNavigation is null) return;
         _panelPolicyWidth = width;
         _compactShell = width > 0 && width < 1180;
-        ShellNavigation.Width = _navRailCollapsed ? 56 : (_compactShell ? 148 : 176);
-        BrandBlock.Width = _compactShell ? 150 : 190;
+        ShellNavigation.Width = NavRailWidth;
+        BrandBlock.Width = _compactShell ? 162 : 194;
         ProjectSwitcher.Width = _compactShell ? 190 : 300;
         TitleInput.Width = _compactShell ? 250 : 360;
         ShellChapterText.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
@@ -429,7 +432,14 @@ public partial class MainWindow
         }
     }
 
-    private async void OnOpenQueueStatus(object sender, RoutedEventArgs e) => await OpenQueueStatusAsync();
+    private bool _shellQueueResumable;
+
+    // "Hàng đợi / tiếp tục dịch" replaces the old resume banner: while the queue is paused or interrupted the button resumes it.
+    private async void OnOpenQueueStatus(object sender, RoutedEventArgs e)
+    {
+        if (_shellQueueResumable) OnResumeProjectTranslationFromShell(sender, e);
+        else await OpenQueueStatusAsync();
+    }
 
     private async Task OpenQueueStatusAsync()
     {
@@ -717,20 +727,18 @@ public partial class MainWindow
         ProjectTranslationProgress? progress = _projectTranslationCoordinator?.CurrentJob is null
             ? null : _projectTranslationCoordinator.GetProgress();
         bool resumable = progress?.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted;
-        if (QueueResumeBanner is not null)
-        {
-            QueueResumeBanner.Visibility = resumable ? Visibility.Visible : Visibility.Collapsed;
-            if (resumable && progress is not null)
-                QueueResumeSummaryText.Text = $"Đã dịch {progress.CompletedChapters:N0}/{progress.TotalChapters:N0} chương. " +
-                    $"Còn {Math.Max(0, progress.TotalChapters - progress.CompletedChapters - progress.SkippedChapters):N0} chương.";
-        }
+        _shellQueueResumable = resumable;
+        ShellQueueButton.ToolTip = resumable && progress is not null
+            ? $"Đã dịch {progress.CompletedChapters:N0}/{progress.TotalChapters:N0} chương. " +
+              $"Còn {Math.Max(0, progress.TotalChapters - progress.CompletedChapters - progress.SkippedChapters):N0} chương. Bấm để tiếp tục dịch."
+            : "Mở Hàng đợi";
         if (_compactShell)
         {
-            ShellQueueButton.Content = progress is null ? "Queue" : resumable ? "Tiếp tục dịch" :
-                $"Queue {progress.CompletedChapters}/{progress.TotalChapters}";
+            ShellQueueButton.Content = progress is null ? "Hàng đợi" : resumable ? "Tiếp tục dịch" :
+                $"Hàng đợi {progress.CompletedChapters}/{progress.TotalChapters}";
             return;
         }
-        ShellQueueButton.Content = progress is null ? "Hàng đợi · chưa chạy" : resumable ? "Hàng đợi · có thể tiếp tục" :
+        ShellQueueButton.Content = progress is null ? "Hàng đợi · chưa chạy" : resumable ? "Hàng đợi / tiếp tục dịch" :
             $"Hàng đợi · {progress.CompletedChapters}/{progress.TotalChapters}" +
             (progress.FailedChapters > 0 ? $" · {progress.FailedChapters} lỗi" : "");
     }

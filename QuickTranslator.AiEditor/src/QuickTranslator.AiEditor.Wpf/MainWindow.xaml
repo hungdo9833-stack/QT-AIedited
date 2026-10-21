@@ -30,30 +30,12 @@
                 <MenuItem Header="_Mở thư mục" Click="OnOpenProjectFolder"/>
             </MenuItem>
         </Menu>
-        <Border x:Name="GlobalToolbar" DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,7">
+        <!-- One slim row: brand, Project and the open chapter. Shell tools live in the left rail. -->
+        <Border x:Name="GlobalToolbar" DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,2">
             <DockPanel>
-                <StackPanel x:Name="BrandBlock" DockPanel.Dock="Left" Width="190">
-                    <TextBlock Text="QT STUDIO" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}"/>
-                    <TextBlock Text="TRUNG–VIỆT EDITOR" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
-                </StackPanel>
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button x:Name="ShellQueueButton" Content="Hàng đợi · chưa chạy" Click="OnOpenQueueStatus" ToolTip="Mở Queue Progress"/>
-                    <Button x:Name="ProjectSidebarToggleButton" Content="Ẩn mục lục" Click="OnToggleProjectSidebar" ToolTip="Ẩn/Hiện mục lục chương (Ctrl+B)">
-                        <Button.ContextMenu><ContextMenu>
-                            <MenuItem Header="Tự động" Tag="ProjectSidebar.Auto" Click="OnPanelPreferenceMenuClick"/>
-                            <MenuItem Header="Ghim hiện" Tag="ProjectSidebar.PinnedShown" Click="OnPanelPreferenceMenuClick"/>
-                            <MenuItem Header="Ghim ẩn" Tag="ProjectSidebar.PinnedHidden" Click="OnPanelPreferenceMenuClick"/>
-                        </ContextMenu></Button.ContextMenu>
-                    </Button>
-                    <Button x:Name="InspectorToggleButton" Content="Ẩn Inspector" Click="OnToggleInspector" ToolTip="Ẩn/Hiện Inspector (Ctrl+Shift+I)">
-                        <Button.ContextMenu><ContextMenu>
-                            <MenuItem Header="Tự động" Tag="Inspector.Auto" Click="OnPanelPreferenceMenuClick"/>
-                            <MenuItem Header="Ghim hiện" Tag="Inspector.PinnedShown" Click="OnPanelPreferenceMenuClick"/>
-                            <MenuItem Header="Ghim ẩn" Tag="Inspector.PinnedHidden" Click="OnPanelPreferenceMenuClick"/>
-                        </ContextMenu></Button.ContextMenu>
-                    </Button>
-                    <Button x:Name="ThemeToggleButton" Content="Light" ui:ButtonIcon.Glyph="&#xE793;" Click="OnToggleShellTheme" ToolTip="Chuyển sang giao diện này (Dark / Light)"/>
-                    <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)"/>
+                <StackPanel x:Name="BrandBlock" DockPanel.Dock="Left" Width="194" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="QT STUDIO" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}" VerticalAlignment="Center"/>
+                    <TextBlock Text="Trung–Việt" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
                 <DockPanel>
                     <ToggleButton x:Name="ProjectMenuButton" DockPanel.Dock="Left" Content="Project ▾" MinWidth="92" ToolTip="Lệnh Project" AutomationProperties.Name="Mở menu Project"/>
@@ -79,12 +61,6 @@
                 <Button x:Name="OpenButton" Content="Mở tiến độ cũ" Click="OnOpenProgress" Visibility="Collapsed"/>
             </DockPanel>
         </Border>
-        <Border x:Name="QueueResumeBanner" DockPanel.Dock="Top" Visibility="Collapsed" Background="{DynamicResource SelectionBrush}" BorderBrush="{DynamicResource PrimaryBrush}" BorderThickness="0,0,0,1" Padding="12,8">
-            <DockPanel>
-                <Button DockPanel.Dock="Right" Content="Tiếp tục dịch" Click="OnResumeProjectTranslationFromShell" Style="{StaticResource StateButton}"/>
-                <TextBlock x:Name="QueueResumeSummaryText" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap"/>
-            </DockPanel>
-        </Border>
         <Border x:Name="GlobalStatus" DockPanel.Dock="Bottom" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="10,5">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
@@ -95,11 +71,30 @@
                 <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
             </DockPanel>
         </Border>
-        <Border x:Name="ShellNavigation" DockPanel.Dock="Left" Width="176" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="4,10">
+        <Border x:Name="ShellNavigation" DockPanel.Dock="Left" Width="204" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="4,10">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Bottom">
                     <Separator Margin="8"/>
-                    <TextBlock Text="TIỆN ÍCH" Margin="14,4,8,8" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
+                    <TextBlock Text="CÔNG CỤ" Margin="14,4,8,6" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
+                    <Button x:Name="ShellQueueButton" Content="Hàng đợi · chưa chạy" ui:ButtonIcon.Glyph="&#xE895;" Click="OnOpenQueueStatus" Style="{StaticResource NavigationToolButton}" ToolTip="Mở Hàng đợi; khi hàng đợi đang tạm dừng, bấm để tiếp tục dịch"/>
+                    <Button x:Name="ProjectSidebarToggleButton" Content="Ẩn mục lục" ui:ButtonIcon.Glyph="&#xE8A0;" Click="OnToggleProjectSidebar" Style="{StaticResource NavigationToolButton}" ToolTip="Ẩn/Hiện mục lục chương (Ctrl+B)">
+                        <Button.ContextMenu><ContextMenu>
+                            <MenuItem Header="Tự động" Tag="ProjectSidebar.Auto" Click="OnPanelPreferenceMenuClick"/>
+                            <MenuItem Header="Ghim hiện" Tag="ProjectSidebar.PinnedShown" Click="OnPanelPreferenceMenuClick"/>
+                            <MenuItem Header="Ghim ẩn" Tag="ProjectSidebar.PinnedHidden" Click="OnPanelPreferenceMenuClick"/>
+                        </ContextMenu></Button.ContextMenu>
+                    </Button>
+                    <Button x:Name="InspectorToggleButton" Content="Ẩn Inspector" ui:ButtonIcon.Glyph="&#xE946;" Click="OnToggleInspector" Style="{StaticResource NavigationToolButton}" ToolTip="Ẩn/Hiện Inspector (Ctrl+Shift+I)">
+                        <Button.ContextMenu><ContextMenu>
+                            <MenuItem Header="Tự động" Tag="Inspector.Auto" Click="OnPanelPreferenceMenuClick"/>
+                            <MenuItem Header="Ghim hiện" Tag="Inspector.PinnedShown" Click="OnPanelPreferenceMenuClick"/>
+                            <MenuItem Header="Ghim ẩn" Tag="Inspector.PinnedHidden" Click="OnPanelPreferenceMenuClick"/>
+                        </ContextMenu></Button.ContextMenu>
+                    </Button>
+                    <Button x:Name="ThemeToggleButton" Content="Light" ui:ButtonIcon.Glyph="&#xE793;" Click="OnToggleShellTheme" Style="{StaticResource NavigationToolButton}" ToolTip="Chuyển sang giao diện này (Dark / Light)"/>
+                    <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" Style="{StaticResource NavigationToolButton}" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)"/>
+                    <Separator Margin="8"/>
+                    <TextBlock Text="TIỆN ÍCH" Margin="14,4,8,6" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
                     <Button x:Name="ResourcesNavButton" Content="Tài nguyên" ui:ButtonIcon.Glyph="&#xE8F1;" Tag="Resources" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
                     <Button x:Name="SettingsNavButton" Content="Thiết lập" ui:ButtonIcon.Glyph="&#xE713;" Tag="Settings" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
                     <Button x:Name="NavRailToggleButton" Content="«" Click="OnToggleNavRail" Style="{StaticResource NavigationButton}" HorizontalContentAlignment="Center" ToolTip="Thu gọn / Mở rộng thanh điều hướng" AutomationProperties.Name="Thu gọn hoặc mở rộng thanh điều hướng" AutomationProperties.HelpText="Thu gọn / Mở rộng thanh điều hướng"/>

@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Media;
 using Microsoft.Win32;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
@@ -278,24 +279,28 @@ public partial class MainWindow
         WriteAlignmentDiagnostic(origin, new(input.SelectionStart, input.SelectionLength), projected, "mapped");
     }
 
+    // The four panes live in the Kiểm tra & Duyệt tab, which is only in the visual tree while that mode is shown.
+    // Layers are therefore (re)attached when a highlight is needed, not once at window load.
     private void InitializeTraditionalHighlightLayers()
     {
-        _chineseHighlight ??= AddHighlightLayer(SourceText);
-        _hanVietHighlight ??= AddHighlightLayer(HanVietText);
-        _vietPhraseHighlight ??= AddHighlightLayer(VietPhraseText);
+        EnsureHighlightLayer(ref _chineseHighlight, SourceText);
+        EnsureHighlightLayer(ref _hanVietHighlight, HanVietText);
+        EnsureHighlightLayer(ref _vietPhraseHighlight, VietPhraseText);
     }
 
-    private static TextBoxRangeHighlightAdorner? AddHighlightLayer(TextBox textBox)
+    private static void EnsureHighlightLayer(ref TextBoxRangeHighlightAdorner? adorner, TextBox textBox)
     {
         AdornerLayer? layer = AdornerLayer.GetAdornerLayer(textBox);
-        if (layer is null) return null;
-        var adorner = new TextBoxRangeHighlightAdorner(textBox);
+        if (layer is null) return;
+        if (adorner is not null && ReferenceEquals(VisualTreeHelper.GetParent(adorner), layer)) return;
+        if (adorner is not null && VisualTreeHelper.GetParent(adorner) is AdornerLayer stale) stale.Remove(adorner);
+        adorner = new TextBoxRangeHighlightAdorner(textBox);
         layer.Add(adorner);
-        return adorner;
     }
 
     private void ShowTraditionalHighlights(TraditionalPane origin, SelectionProjection projection)
     {
+        InitializeTraditionalHighlightLayers();
         _chineseHighlight?.SetRange(origin == TraditionalPane.Chinese ? null : projection.Chinese);
         _hanVietHighlight?.SetRange(origin == TraditionalPane.HanViet ? null : projection.HanViet);
         _vietPhraseHighlight?.SetRange(origin == TraditionalPane.VietPhrase ? null : projection.VietPhrase);
