@@ -20,51 +20,92 @@ internal static class RemoteDesktopAutomation
     /// <summary>Returns null when every key was sent, otherwise a short reason the automation stopped.</summary>
     public static async Task<string?> RunAsync(string fileToken, Action<string> status, CancellationToken cancellationToken)
     {
-        Window? main = null;
-        DateTime until = DateTime.UtcNow.AddSeconds(120);
+        // mstsc replaces its window once the connection is up, so the window is looked up again by title every time.
+        DateTime until = DateTime.UtcNow.AddSeconds(180);
+        DateTime lastSeen = DateTime.UtcNow;
+        DateTime? ready = null;
         status("Đang chờ Remote Desktop kết nối…");
         while (DateTime.UtcNow < until)
         {
             cancellationToken.ThrowIfCancellationRequested();
             List<Window> windows = TopLevelWindows();
-            main = windows.FirstOrDefault(w => w.Visible && w.ClassName == "TscShellContainerClass" && w.Title.Contains(fileToken, StringComparison.Ordinal));
-            if (main is not null) break;
-            // Windows asks about an unsigned .rdp file; that decision stays with the user.
-            if (windows.Any(w => w.Visible && w.ClassName == "#32770" && w.ProcessName == "mstsc"))
-                status("Windows hỏi về kết nối này: hãy bấm Connect trong hộp thoại Remote Desktop");
-            await Task.Delay(500, cancellationToken);
-        }
-        if (main is null) return "Không thấy cửa sổ Remote Desktop kết nối.";
-        uint pid = main.Value.ProcessId;
-        IntPtr handle = main.Value.Handle;
-
-        // Give the remote desktop time to appear and settle after sign-in.
-        for (int second = 14; second > 0; second--)
-        {
-            status($"Đã kết nối. Sắp tự thao tác trong cửa sổ Remote Desktop ({second}s) · đừng chạm chuột hoặc bàn phím");
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!IsOpen(handle)) return "Cửa sổ Remote Desktop đã đóng.";
+            Window? main = FindMain(windows, fileToken);
+            if (main is null)
+            {
+                // Windows asks about an unsigned .rdp file and about wrong credentials; those stay with the user.
+                if (windows.Any(w => w.Visible && w.ProcessName == "mstsc" && w.ClassName == "#32770"))
+                    status("Windows đang hỏi về kết nối này: hãy trả lời trong hộp thoại Remote Desktop (Connect)");
+                else if (DateTime.UtcNow - lastSeen > TimeSpan.FromSeconds(20))
+                    return "Cửa sổ Remote Desktop đã đóng.";
+                await Task.Delay(500, cancellationToken);
+                continue;
+            }
+            lastSeen = DateTime.UtcNow;
+            // The desktop is drawn only after sign-in; until then the window is black.
+            if (Focus(main.Value.Handle, main.Value.ProcessId) && ShowsDesktop(main.Value.Handle))
+            {
+                ready ??= DateTime.UtcNow;
+                int left = 4 - (int)(DateTime.UtcNow - ready.Value).TotalSeconds;
+                status($"Đã kết nối. Sắp tự thao tác trong cửa sổ Remote Desktop ({Math.Max(left, 0)}s) · đừng chạm chuột hoặc bàn phím");
+                if (left <= 0) break;
+            }
+            else
+            {
+                ready = null;
+                status("Đang chờ màn hình máy thuê hiện ra (nếu Windows hỏi mật khẩu thì hãy nhập)…");
+            }
             await Task.Delay(1000, cancellationToken);
         }
+        if (ready is null) return "Không thấy màn hình máy thuê hiện ra trong 3 phút.";
 
         status("Đang tự mở PowerShell quản trị và dán lệnh cài đặt · đừng chạm chuột hoặc bàn phím");
-        if (!Focus(handle, pid)) return "Không đưa được cửa sổ Remote Desktop lên trước để gõ phím.";
-        await Chord(pid, cancellationToken, VkLwin, 'R');                         // Run box
+        await Chord(fileToken, cancellationToken, VkLwin, 'R');                    // Run box
         await Task.Delay(1500, cancellationToken);
-        foreach (char letter in "powershell") await Chord(pid, cancellationToken, letter);
+        foreach (char letter in "powershell") await Chord(fileToken, cancellationToken, letter);
         await Task.Delay(400, cancellationToken);
-        await Chord(pid, cancellationToken, VkControl, VkShift, VkReturn);         // run as administrator
+        await Chord(fileToken, cancellationToken, VkControl, VkShift, VkReturn);   // run as administrator
         // Windows may now show its UAC consent prompt inside the window; the user answers it. Wait for that.
         for (int second = 12; second > 0; second--)
         {
             status($"Nếu Windows hỏi quyền (UAC) trong cửa sổ Remote Desktop, hãy bấm Yes. Sẽ dán lệnh sau {second}s · đừng chạm bàn phím");
             await Task.Delay(1000, cancellationToken);
         }
-        if (!Focus(handle, pid)) return "Cửa sổ Remote Desktop không còn ở trước để dán lệnh.";
-        await Chord(pid, cancellationToken, VkControl, 'V');                       // paste the setup command
+        await Chord(fileToken, cancellationToken, VkControl, 'V');                 // paste the setup command
         await Task.Delay(2500, cancellationToken);
-        await Chord(pid, cancellationToken, VkReturn);
+        await Chord(fileToken, cancellationToken, VkReturn);
         return null;
+    }
+
+    private static Window? FindMain(List<Window> windows, string fileToken) =>
+        windows.FirstOrDefault(w => w.Visible && w.ClassName == "TscShellContainerClass" &&
+                                    w.Title.Contains(fileToken, StringComparison.Ordinal));
+
+    /// <summary>True when the window shows something other than black, which means the remote desktop is drawn.</summary>
+    private static bool ShowsDesktop(IntPtr handle)
+    {
+        if (!GetWindowRect(handle, out Rect rect)) return false;
+        int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+        if (width < 200 || height < 150) return false;
+        int x = rect.Left + width / 10, y = rect.Top + height / 5, w = width * 8 / 10, h = height * 6 / 10;
+        try
+        {
+            using var bitmap = new System.Drawing.Bitmap(w, h);
+            using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+                graphics.CopyFromScreen(x, y, 0, 0, new System.Drawing.Size(w, h));
+            int bright = 0, samples = 0;
+            for (int row = 0; row < 16; row++)
+                for (int column = 0; column < 24; column++)
+                {
+                    System.Drawing.Color pixel = bitmap.GetPixel(column * (w - 1) / 23, row * (h - 1) / 15);
+                    samples++;
+                    if (Math.Max(pixel.R, Math.Max(pixel.G, pixel.B)) > 48) bright++;
+                }
+            return bright * 100 / samples >= 25;
+        }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or ArgumentException or ExternalException)
+        {
+            return true; // The screen cannot be read here; do not hold the automation back because of that.
+        }
     }
 
     /// <summary>Closes the Remote Desktop window of the given file, if it is still open.</summary>
@@ -79,19 +120,21 @@ internal static class RemoteDesktopAutomation
         }
     }
 
-    private static async Task Chord(uint pid, CancellationToken cancellationToken, params ushort[] keys) =>
-        await Press(pid, cancellationToken, keys);
+    private static async Task Chord(string fileToken, CancellationToken cancellationToken, params ushort[] keys) =>
+        await Press(fileToken, cancellationToken, keys);
 
-    private static async Task Chord(uint pid, CancellationToken cancellationToken, ushort first, char letter) =>
-        await Press(pid, cancellationToken, first, (ushort)char.ToUpperInvariant(letter));
+    private static async Task Chord(string fileToken, CancellationToken cancellationToken, ushort first, char letter) =>
+        await Press(fileToken, cancellationToken, first, (ushort)char.ToUpperInvariant(letter));
 
-    private static async Task Chord(uint pid, CancellationToken cancellationToken, char letter) =>
-        await Press(pid, cancellationToken, (ushort)char.ToUpperInvariant(letter));
+    private static async Task Chord(string fileToken, CancellationToken cancellationToken, char letter) =>
+        await Press(fileToken, cancellationToken, (ushort)char.ToUpperInvariant(letter));
 
-    private static async Task Press(uint pid, CancellationToken cancellationToken, params ushort[] keys)
+    private static async Task Press(string fileToken, CancellationToken cancellationToken, params ushort[] keys)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!IsForeground(pid))
+        Window main = FindMain(TopLevelWindows(), fileToken)
+            ?? throw new InvalidOperationException("Cửa sổ Remote Desktop đã đóng nên QT Studio dừng gõ phím.");
+        if (!IsForeground(main.ProcessId) && !Focus(main.Handle, main.ProcessId))
             throw new InvalidOperationException("Cửa sổ Remote Desktop mất tiêu điểm nên QT Studio dừng gõ phím.");
         foreach (ushort key in keys) { Send(key, up: false); await Task.Delay(40, cancellationToken); }
         foreach (ushort key in Enumerable.Reverse(keys)) { Send(key, up: true); await Task.Delay(40, cancellationToken); }
@@ -129,8 +172,6 @@ internal static class RemoteDesktopAutomation
         return owner == pid;
     }
 
-    private static bool IsOpen(IntPtr handle) => IsWindow(handle);
-
     private readonly record struct Window(IntPtr Handle, string ClassName, string Title, uint ProcessId, bool Visible)
     {
         public string ProcessName
@@ -165,6 +206,9 @@ internal static class RemoteDesktopAutomation
     private delegate bool EnumProc(IntPtr handle, IntPtr parameter);
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct Rect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct Input { public uint Type; public InputUnion Union; }
 
     [StructLayout(LayoutKind.Explicit)]
@@ -185,7 +229,7 @@ internal static class RemoteDesktopAutomation
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int max);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int max);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
-    [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
