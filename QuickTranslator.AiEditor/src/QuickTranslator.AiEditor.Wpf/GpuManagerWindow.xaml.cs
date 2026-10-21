@@ -397,20 +397,24 @@ public partial class GpuManagerWindow : Window
         catch (System.Runtime.InteropServices.ExternalException)
         { StatusText.Text = "Không sao chép được vào clipboard. Đóng ứng dụng đang giữ clipboard rồi thử lại."; return SshReadiness.Failed; }
 
-        string rdpFile = Path.Combine(Path.GetTempPath(), "qtstudio-" + Guid.NewGuid().ToString("N") + ".rdp");
-        System.Diagnostics.Process? remoteDesktop = null;
+        // Leftovers of an earlier run (the app was closed before the cleanup below ran).
+        foreach (string old in Directory.GetFiles(Path.GetTempPath(), "qtstudio-*.rdp"))
+            if (File.GetLastWriteTimeUtc(old) < DateTime.UtcNow.AddMinutes(-10)) TryDelete(old);
+        string rdpName = "qtstudio-" + Guid.NewGuid().ToString("N"); // Also what the Remote Desktop window shows as its title.
+        string rdpFile = Path.Combine(Path.GetTempPath(), rdpName + ".rdp");
         try
         {
             File.WriteAllText(rdpFile, RdpLaunchFile.Build(ssh.Host, rdpPort, ssh.Username, ssh.Password ?? ""), System.Text.Encoding.ASCII);
-            try { remoteDesktop = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mstsc.exe", [rdpFile])); }
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mstsc.exe", [rdpFile]))?.Dispose(); }
             catch (System.ComponentModel.Win32Exception)
             { StatusText.Text = "Không mở được Remote Desktop (mstsc.exe)."; return SshReadiness.Failed; }
+            // mstsc may hand the file to another process, so it must outlive this call: it is removed in the background.
+            _ = Task.Delay(TimeSpan.FromSeconds(60)).ContinueWith(_ => TryDelete(rdpFile), TaskScheduler.Default);
 
-            // The same steps a person would take in that window: confirm, open an administrator PowerShell, paste.
+            // The same steps a person would take in that window: open an administrator PowerShell and paste.
             string? stopped;
-            try { stopped = await RemoteDesktopAutomation.RunAsync(remoteDesktop!, text => StatusText.Text = text + " · có thể hủy", cancellationToken); }
+            try { stopped = await RemoteDesktopAutomation.RunAsync(rdpName, text => StatusText.Text = text + " · có thể hủy", cancellationToken); }
             catch (InvalidOperationException error) { stopped = error.Message; }
-            TryDelete(rdpFile);
 
             DateTime started = DateTime.UtcNow, deadline = started.AddMinutes(15);
             const string manual = " Hãy tự mở PowerShell bằng Run as administrator trong cửa sổ Remote Desktop, nhấn Ctrl+V rồi Enter (lệnh đang ở clipboard).";
@@ -430,12 +434,7 @@ public partial class GpuManagerWindow : Window
             StatusText.Text = $"Chưa thấy SSH ở cổng {rdpPort} sau 15 phút. Xem C:\\ProgramData\\QTStudio\\logs\\mux-switch.log trên máy thuê.";
             return SshReadiness.Failed;
         }
-        finally
-        {
-            TryDelete(rdpFile);
-            try { if (remoteDesktop is { HasExited: false }) remoteDesktop.Kill(); } catch (InvalidOperationException) { }
-            remoteDesktop?.Dispose();
-        }
+        finally { RemoteDesktopAutomation.Close(rdpName); }
     }
 
     private static void TryDelete(string path)
