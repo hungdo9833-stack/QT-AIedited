@@ -51,5 +51,13 @@ tải model đã chọn và kiểm tra model trả lời được. Không bao gi
 Có test tự động (`WindowsGpuSetupTests`, `WindowsPortMuxTests`): mọi script qua parser PowerShell; bộ chia cổng được biên dịch thật
 bằng Windows PowerShell và chạy với server giả (định tuyến SSH/RDP, luồng 300 KB hai chiều, 12 kết nối song song, probe nhận SSH sau bộ chia cổng);
 các lệnh đọc GPU/đĩa/Ollama đã chạy trên Windows 11 cục bộ.
-Chưa chạy trọn vẹn trên một máy Windows thuê thật: cài OpenSSH, đổi cổng RDP và restart `TermService`, tải/giải nén Ollama,
-tác vụ SYSTEM, truy cập GPU từ session 0.
+Đã chạy trọn vẹn trên một máy thuê thật (thuepcpro / ezycloudx, Windows 10 Pro 19045, RTX 3090, 2026-10-21):
+nhận diện RDP, dán lệnh, OpenSSH + bộ chia cổng trên cổng RDP, QT Studio kết nối SSH, nhận diện Windows/GPU/VRAM/ổ đĩa,
+Ollama chạy, model `translategemma:12b` sẵn sàng, báo “Đã sẵn sàng”.
+
+Bài học từ lần thử đầu: chương trình tự biên dịch mà chạy trong phiên RDP của người dùng làm Windows Firewall hiện hộp thoại;
+RDP ngắt khi chưa bấm Allow thì Windows tạo luật chặn theo chương trình, thắng mọi luật mở theo cổng, và khởi động lại không gỡ được.
+Vì vậy lệnh phải tạo luật Allow theo chương trình (và xóa luật Block cũ) trước khi chương trình mở cổng, kèm cơ chế tự hoàn lại sau 12 phút.
+Ngoài ra `cmd /c ver` không đủ để nhận ra Windows; thông báo lỗi kiểu cmd.exe (“is not recognized as an internal or external command”) cũng được coi là dấu hiệu Windows.
+
+Chưa kiểm chứng: dịch thật một chương qua tunnel này. Chưa rõ lần chạy trên máy thật đã tải/giải nén Ollama từ đầu hay máy đã có sẵn Ollama.
