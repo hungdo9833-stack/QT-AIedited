@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private readonly OllamaBackendManager _ollamaBackends;
     private readonly GpuConnectionManager _gpuConnections;
     private readonly GpuTranslationPreferences _gpuPreferences = new();
+    private readonly LocalLlamaServerHost _localLlama;
     private readonly IOllamaClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
     private readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromMilliseconds(500) };
@@ -38,12 +39,14 @@ public partial class MainWindow : Window
 
     // Integration tests construct controls on an STA dispatcher without loading any real user stores.
     internal MainWindow(string? startupProjectPath, bool initializeApplication,
-        OllamaBackendManager? ollamaBackends = null, GpuConnectionManager? gpuConnections = null)
+        OllamaBackendManager? ollamaBackends = null, GpuConnectionManager? gpuConnections = null,
+        LocalLlamaServerHost? localLlama = null, IOllamaClient? translationClient = null)
     {
         _startupProjectPath = startupProjectPath;
         _ollamaBackends = ollamaBackends ?? new OllamaBackendManager();
         _gpuConnections = gpuConnections ?? new GpuConnectionManager();
-        _translationClient = _ollamaBackends;
+        _localLlama = localLlama ?? new LocalLlamaServerHost();
+        _translationClient = translationClient ?? _ollamaBackends;
         InitializeComponent();
         ClampWindowToWorkArea(this, 1600, 950);
         _projectCatalog = new(_projectRepository);
@@ -194,7 +197,7 @@ public partial class MainWindow : Window
         Task? request = null;
         try
         {
-            EnsureOllamaBackendReady();
+            await EnsureOllamaBackendReadyAsync();
             if (!BeginUiOperation()) return;
             try { await SaveSelectedSettingsAsync(); } finally { EndUiOperation(); }
             var options = ReadModelOptions();
@@ -793,6 +796,7 @@ public partial class MainWindow : Window
         _projectCatalog.Changed -= OnProjectCatalogChanged;
         _projectCatalog.Dispose();
         _gpuConnections.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _localLlama.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _ollamaBackends.Dispose();
     }
     private sealed record SegmentItem(Guid Id, string Label)

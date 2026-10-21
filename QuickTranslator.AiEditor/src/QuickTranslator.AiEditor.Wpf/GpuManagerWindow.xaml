@@ -41,7 +41,7 @@
      <TextBlock Text="CẤU HÌNH GPU ĐANG CHỌN" FontWeight="SemiBold"/>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
       <StackPanel Margin="0,0,8,0"><TextBlock Text="Tên hiển thị" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NameInput"/></StackPanel>
-      <StackPanel Grid.Column="1"><TextBlock Text="Model Ollama" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ModelInput" Text="translategemma:12b"/></StackPanel>
+      <StackPanel Grid.Column="1"><TextBlock x:Name="ModelLabel" Text="Model Ollama" Style="{StaticResource FieldLabel}"/><DockPanel><Button x:Name="ChooseGgufButton" DockPanel.Dock="Right" Content="Chọn file .gguf…" Click="OnChooseGguf" Visibility="Collapsed"/><TextBox x:Name="ModelInput" Text="translategemma:12b"/></DockPanel></StackPanel>
      </Grid>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
       <StackPanel Margin="0,0,8,0"><TextBlock Text="Loại server" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="ServerApiInput" SelectedIndex="0" SelectionChanged="OnServerApiChanged"><ComboBoxItem Content="Ollama"/><ComboBoxItem Content="llama-server (OpenAI)"/></ComboBox></StackPanel>

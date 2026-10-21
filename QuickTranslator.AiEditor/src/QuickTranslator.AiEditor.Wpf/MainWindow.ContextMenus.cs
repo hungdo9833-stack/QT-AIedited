@@ -412,7 +412,7 @@ public partial class MainWindow
         try
         {
             selected = SourceContextActions.ValidateTranslationSelection(GetSourceSelection(textBox));
-            EnsureOllamaBackendReady();
+            await EnsureOllamaBackendReadyAsync();
         }
         catch (Exception ex) { ShowError(ex); return; }
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

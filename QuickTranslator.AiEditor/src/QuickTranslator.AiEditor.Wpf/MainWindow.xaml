@@ -65,7 +65,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
                     <TextBlock x:Name="AutosaveStatusText" Text="✓ Đã tự lưu" TextWrapping="NoWrap" Foreground="{DynamicResource SuccessBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,14,0" AutomationProperties.LiveSetting="Polite"/>
-                    <Button Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)" AutomationProperties.Name="Backend dịch · mở Quản lý GPU"><TextBlock x:Name="OllamaBackendStatus" Text="Local · Ollama Local · translategemma:12b" TextWrapping="NoWrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
+                    <Button Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)" AutomationProperties.Name="Backend dịch · mở Quản lý GPU"><TextBlock x:Name="OllamaBackendStatus" Text="Local · llama-server Local · Index-Translate-9B-Q4_K_M" TextWrapping="NoWrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
                     <TextBlock x:Name="SavePathText" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="14,0,0,0" MaxWidth="420"/>
                 </StackPanel>
                 <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>

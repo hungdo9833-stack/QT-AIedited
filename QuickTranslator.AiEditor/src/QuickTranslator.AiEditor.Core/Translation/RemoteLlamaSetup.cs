@@ -180,25 +180,6 @@ public sealed class RemoteLlamaSetup
     private sealed class ByteProgress(Action<long> report) : IProgress<long> { public void Report(long value) => report(value); }
 }
 
-/// <summary>Bridge used by the remote UI until the shared local package provider supplies the package explicitly.</summary>
-public sealed class CachedLlamaCppPackageProvider : ILlamaCppPackageProvider
-{
-    public Task<LlamaCppPackage> EnsureAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "QTStudio", "llamacpp", LlamaCppRelease.Build);
-        string serverZip = Path.Combine(root, LlamaCppRelease.ServerZip);
-        string runtimeZip = Path.Combine(root, LlamaCppRelease.CudaRuntimeZip);
-        string executable = Path.Combine(root, "llama-server.exe");
-        if (!File.Exists(serverZip) || !File.Exists(runtimeZip))
-            throw new FileNotFoundException("Chưa có gói llama.cpp đã tải trên máy này. Hãy chuẩn bị bản " +
-                LlamaCppRelease.Build + " trước khi cài máy thuê.", root);
-        progress?.Report("Đã tìm thấy gói llama.cpp trong bộ nhớ đệm.");
-        return Task.FromResult(new LlamaCppPackage(LlamaCppRelease.Build, [serverZip, runtimeZip], executable));
-    }
-}
-
 internal sealed record RemoteLlamaTaskSpecification(string Model, int Port, int Slots, int ContextPerSlot);
 
 public static class RemoteLlamaWindowsScripts
@@ -231,7 +212,10 @@ public static class RemoteLlamaWindowsScripts
             "$script=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encodedWrapper + "'));" +
             "[IO.File]::WriteAllText(\"$root\\llama-server.ps1\",$script,(New-Object Text.UTF8Encoding($false)));" +
             "Stop-ScheduledTask -TaskName 'QTStudio llama-server' -ErrorAction SilentlyContinue;" +
-            "$old=Get-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue;if($old){Stop-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue};" +
+            // Stopping a task leaves its ollama.exe child running (seen on a real rental), and the task would come back
+            // at the next boot: disable it, then end QT Studio's Ollama and any hand-started llama-server on this port.
+            "$old=Get-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue;if($old){Stop-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue;Disable-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue|Out-Null};" +
+            "Get-Process ollama*,llama-server -ErrorAction SilentlyContinue|Where-Object{$_.Path -like ($root+'\\*')}|Stop-Process -Force -ErrorAction SilentlyContinue;" +
             "$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:\\ProgramData\\QTStudio\\llama-server.ps1\"';" +
             "$t=New-ScheduledTaskTrigger -AtStartup;$p=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest;" +
             "$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1);" +

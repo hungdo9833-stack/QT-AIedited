@@ -3,6 +3,7 @@ using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Translation;
 using QuickTranslator.AiEditor.Core.BookIntelligence;
+using System.Net.Http;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -84,7 +85,7 @@ public partial class MainWindow
             ProjectTranslationJob? resumable = recovered?.Status is ProjectTranslationJobStatus.Completed or
                 ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled ? null : recovered;
             await ApplyTranslationModeAsync(resumable);
-            EnsureOllamaBackendReady();
+            await EnsureOllamaBackendReadyAsync();
             await SaveCurrentAsync();
             await SaveProjectAssetsAsync();
             ProjectTranslationCoordinator coordinator = resumable?.Workers.Count > 0 || resumable is null
@@ -143,6 +144,13 @@ public partial class MainWindow
         bool closeWindow = true, bool loadExisting = true, bool useCurrentWorkers = false)
     {
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_translationClient is OllamaBackendManager &&
+            (recovered?.Workers.Any(worker => worker.Backend.Kind == OllamaBackendKind.Local) == true ||
+             _gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote))
+        {
+            OllamaBackendProfile localProfile = _ollamaBackends.GetProfile(OllamaBackendProfile.DefaultLocalId);
+            await _localLlama.StartAsync(localProfile);
+        }
         if (closeWindow) DropHostedQueueView();
         if (_projectTranslationCoordinator is not null)
             _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
@@ -199,12 +207,16 @@ public partial class MainWindow
             IOllamaClient client;
             if (_translationClient is OllamaBackendManager)
             {
-                IOllamaBackendClient localClient = OllamaClient.CreateLocal();
+                Uri endpoint = _localLlama.Endpoint ?? throw new InvalidOperationException("llama-server Local chưa chạy.");
+                IOllamaBackendClient localClient = new OpenAiCompatibleClient(new HttpClient(), endpoint,
+                    _ollamaBackends.GetProfile(backend.ProfileId).ParallelRequests, ownsHttpClient: true);
                 _projectTranslationOwnedClients.Add(localClient);
                 client = localClient;
             }
             else client = _translationClient; // Deterministic injected provider used by integration tests.
-            return new(workerId, backend, client, options with { }, segmentation with { }, hourlyPrice, identity);
+            int localSlots = _translationClient is OllamaBackendManager
+                ? _ollamaBackends.GetProfile(backend.ProfileId).ParallelRequests : 1;
+            return new(workerId, backend, client, options with { }, segmentation with { }, hourlyPrice, identity, localSlots);
         }
         if (!_gpuConnections.TryGetConnection(backend.ProfileId, out GpuConnectionHandle? connection) ||
             connection is null || !connection.IsConnected)

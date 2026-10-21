@@ -14,6 +14,7 @@ public enum BackendApi { Ollama, OpenAiCompatible }
 
 public sealed class OllamaBackendProfile
 {
+    public const string DefaultLocalModel = "IndexTeam/Index-Translate-9B-GGUF:Q4_K_M";
     public static Guid DefaultLocalId { get; } = Guid.Parse("4e384f1e-dbd8-4fb7-b14f-86a88ececf51");
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Ollama Local";
@@ -31,11 +32,17 @@ public sealed class OllamaBackendProfile
     public static OllamaBackendProfile CreateDefaultLocal() => new()
     {
         Id = DefaultLocalId,
-        Name = "Ollama Local",
+        Name = "llama-server Local",
         Kind = OllamaBackendKind.Local,
-        Endpoint = OllamaClient.DefaultEndpoint.ToString(),
-        Model = "translategemma:12b",
-        Runtime = AiRuntimeProfile.CreateDefault("translategemma:12b")
+        Api = BackendApi.OpenAiCompatible,
+        ParallelRequests = 4,
+        Endpoint = "http://127.0.0.1:11450/api/chat",
+        Model = DefaultLocalModel,
+        Runtime = new AiRuntimeProfile
+        {
+            ModelOptions = new() { Model = DefaultLocalModel, ContextSize = 8192, MaximumOutputTokens = 3072 },
+            SegmentationOptions = new()
+        }
     };
 
     public void Validate()
@@ -56,8 +63,8 @@ public sealed class OllamaBackendProfile
         Model = Model.Trim();
         if (Kind == OllamaBackendKind.Local && !string.IsNullOrEmpty(Token))
             throw new InvalidDataException("Profile Local không lưu hoặc gửi token.");
-        if (Kind == OllamaBackendKind.Local && Api != BackendApi.Ollama)
-            throw new InvalidDataException("Profile Local chỉ hỗ trợ Ollama.");
+        if (Kind == OllamaBackendKind.Local && Api == BackendApi.OpenAiCompatible)
+            _ = GgufModelReference.Parse(Model);
         if (Token?.Length > 8192 || Token?.Any(char.IsControl) == true)
             throw new InvalidDataException("Token xác thực không hợp lệ.");
         if (HourlyPrice is < 0 or > 1_000_000) throw new InvalidDataException("Giá thuê GPU theo giờ không hợp lệ.");
@@ -185,7 +192,9 @@ public class OllamaProfileStore
     {
         StoredCatalog read = await SimpleFileStorage.ReadOptionalAsync(PathName, DecodeStored,
             () => EncodeCatalog(OllamaProfileCatalog.CreateDefault()), cancellationToken).ConfigureAwait(false);
-        return DecodeCatalog(read);
+        (OllamaProfileCatalog catalog, bool migrated) = DecodeCatalog(read);
+        if (migrated) await SaveAsync(catalog, cancellationToken).ConfigureAwait(false);
+        return catalog;
     }
 
     public async Task SaveAsync(OllamaProfileCatalog catalog, CancellationToken cancellationToken = default)
@@ -222,7 +231,7 @@ public class OllamaProfileStore
         }).ToList()
     };
 
-    private OllamaProfileCatalog DecodeCatalog(StoredCatalog stored)
+    private (OllamaProfileCatalog Catalog, bool Migrated) DecodeCatalog(StoredCatalog stored)
     {
         var catalog = new OllamaProfileCatalog
         {
@@ -246,8 +255,33 @@ public class OllamaProfileStore
                 }
             }).ToList()
         };
+        bool migrated = false;
+        // Every local profile still on Ollama moves to llama-server once. A model that is already a GGUF reference
+        // (Ollama's "hf.co/owner/repo:quant" form parses) keeps its runtime; an Ollama-only tag gets the default.
+        foreach (OllamaBackendProfile profile in catalog.Profiles.Where(item => item.Kind == OllamaBackendKind.Local &&
+                     (item.Api != BackendApi.OpenAiCompatible || !IsGguf(item.Model))))
+        {
+            OllamaBackendProfile defaults = OllamaBackendProfile.CreateDefaultLocal();
+            profile.Name = defaults.Name;
+            profile.Api = defaults.Api;
+            profile.ParallelRequests = defaults.ParallelRequests;
+            profile.Endpoint = defaults.Endpoint;
+            if (IsGguf(profile.Model) && profile.Runtime is not null)
+            {
+                profile.Model = GgufModelReference.Parse(profile.Model).ToString();
+                profile.Runtime.ModelOptions = profile.Runtime.ModelOptions with { Model = profile.Model };
+            }
+            else { profile.Model = defaults.Model; profile.Runtime = defaults.Runtime; }
+            migrated = true;
+        }
         catalog.Validate();
-        return catalog;
+        return (catalog, migrated);
+    }
+
+    private static bool IsGguf(string model)
+    {
+        try { _ = GgufModelReference.Parse(model); return true; }
+        catch (ArgumentException) { return false; }
     }
 
     private static StoredCatalog DecodeStored(byte[] bytes) => JsonFileCodec.DecodeDirect<StoredCatalog>(bytes, stored =>
