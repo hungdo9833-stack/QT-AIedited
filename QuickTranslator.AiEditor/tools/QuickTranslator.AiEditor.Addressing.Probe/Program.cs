@@ -45,6 +45,7 @@ try
     var sources = await EntityMemoryProjectInputs.LoadSourcesAsync(session, new ProjectRepository());
     var resources = await new ProjectResourceStore(session).LoadAsync();
     bool filterJunk = Environment.GetEnvironmentVariable("QT_PROBE_NO_FILTER") != "1"; // Baseline for before/after comparisons.
+    var tuning = new AddressingSettings(FilterJunkCandidates: filterJunk, EvidenceScale: filterJunk ? 150 : 0);
     var names = AddressingAiSurvey.CandidateNames(session.Manifest.ProjectId, sources, resources, minimumMentions, filterJunk);
     var report = AddressingDialogueSurvey.Analyze(sources, names, samples);
 
@@ -53,7 +54,7 @@ try
     await File.WriteAllTextAsync(Path.Combine(outDir, "addressing-step1.json"), JsonSerializer.Serialize(report, json), new UTF8Encoding(false));
     await File.WriteAllTextAsync(Path.Combine(outDir, "addressing-step1.md"), Markdown(session.Manifest.VietnameseTitle, report), new UTF8Encoding(false));
     // Step 2 offline plan: what WOULD be sent. No provider is constructed and nothing is sent.
-    var tasks = AddressingAiSurvey.PlanTasks(sources, names);
+    var tasks = AddressingAiSurvey.PlanTasks(sources, names, tuning);
     var requests = AddressingAiSurvey.PlanRequests(tasks, "gemini-3.6-flash");
     var variants = NameVariantSurvey.Analyze(sources, names);
     await File.WriteAllTextAsync(Path.Combine(outDir, "addressing-step2-plan.md"), PlanMarkdown(tasks, requests, variants), new UTF8Encoding(false));
@@ -76,7 +77,7 @@ try
     // Whole survey as the app plans it (scenes + characters + pairs + identities), packed for Gemini. Counts only; HTTP=0.
     {
         var geminiOptions = new QuickTranslator.AiEditor.Core.Models.ModelOptions { Model = model, ContextSize = 65536, MaximumOutputTokens = 10_240 };
-        var full = AddressingSurveyRunner.Plan(session.Manifest.ProjectId, sources, resources, new() { ProjectId = session.Manifest.ProjectId }, new(FilterJunkCandidates: filterJunk));
+        var full = AddressingSurveyRunner.Plan(session.Manifest.ProjectId, sources, resources, new() { ProjectId = session.Manifest.ProjectId }, tuning);
         int Count(AddressingTaskKind k) => full.Tasks.Count(t => t.Kind == k);
         int fullRequests = AddressingAiSurvey.CountRequests(full.Scenes, full.Settings, geminiOptions) + AddressingAiSurvey.CountRequests(full.Tasks, full.Settings, geminiOptions);
         Console.WriteLine($"FULL PLAN offline: chapters={report.Chapters} scenes={full.Scenes.Count} characters={Count(AddressingTaskKind.Character)} pairs={Count(AddressingTaskKind.Pair)} " +
@@ -85,7 +86,7 @@ try
         // How binding are the caps? Pool sizes with the caps lifted (pairs from the step-1 report: best direction per unordered pair).
         var forward = report.Pairs.Where(p => p.Listener is not null).GroupBy(p => string.CompareOrdinal(p.Speaker, p.Listener!) < 0 ? (p.Speaker, p.Listener!) : (p.Listener!, p.Speaker))
             .Select(g => g.Max(p => p.Lines)).OrderByDescending(x => x).ToArray();
-        var poolTasks = AddressingAiSurvey.PlanTasks(sources, names, new(MaximumPairs: 1000, MaximumCharacters: 1000));
+        var poolTasks = AddressingAiSurvey.PlanTasks(sources, names, new(MaximumPairs: 1000, MaximumCharacters: 1000, EvidenceScale: 0));
         Console.WriteLine($"POOL pairs(best direction lines): >=3:{forward.Count(x => x >= 3)} >=5:{forward.Count(x => x >= 5)} >=10:{forward.Count(x => x >= 10)} >=20:{forward.Count(x => x >= 20)} >=50:{forward.Count(x => x >= 50)} " +
             $"chapters/100={report.Chapters / 100} top10=[{string.Join(",", forward.Take(10))}] 60th={(forward.Length > 59 ? forward[59] : 0)} 120th={(forward.Length > 119 ? forward[119] : 0)}; " +
             $"characters pool={poolTasks.Count(t => t.Kind == AddressingTaskKind.Character)} pair tasks pool={poolTasks.Count(t => t.Kind == AddressingTaskKind.Pair)}");

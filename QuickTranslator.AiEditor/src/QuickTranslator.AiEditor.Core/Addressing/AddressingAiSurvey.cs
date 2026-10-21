@@ -49,14 +49,14 @@ public sealed record AddressingVerification(IReadOnlyList<AddressingProposal> Pr
 
 public sealed record AddressingSettings(int MinimumPairLines = 3, int MaximumPairs = 120, int MinimumNarrationMentions = 3, int MaximumCharacters = 60,
     int SamplesPerTask = 8, int TasksPerRequest = 16, int MaximumSampleLength = 160, int MaximumScenes = 40, int SceneQuotes = 10, int SceneCharacters = 1_400,
-    int InputTokensPerRequest = 24_000, int OutputTokensPerTask = 350, int OutputTokensPerRequest = 6_000, bool FilterJunkCandidates = true)
+    int InputTokensPerRequest = 24_000, int OutputTokensPerTask = 350, int OutputTokensPerRequest = 6_000, bool FilterJunkCandidates = true, int EvidenceScale = 150)
 {
     public void Validate()
     {
         if (MinimumPairLines < 1 || MaximumPairs is < 0 or > 1000 || MinimumNarrationMentions < 1 || MaximumCharacters is < 0 or > 1000 ||
             SamplesPerTask is < 2 or > 20 || TasksPerRequest is < 1 or > 24 || MaximumSampleLength is < 40 or > 400 ||
             MaximumScenes is < 0 or > 2000 || SceneQuotes is < 2 or > 30 || SceneCharacters is < 200 or > 4000 ||
-            InputTokensPerRequest is < 1_000 or > 60_000 || OutputTokensPerTask is < 50 or > 2_000 || OutputTokensPerRequest is < 500 or > 32_000)
+            InputTokensPerRequest is < 1_000 or > 60_000 || OutputTokensPerTask is < 50 or > 2_000 || OutputTokensPerRequest is < 500 or > 32_000 || EvidenceScale is < 0 or > 100_000)
             throw new ArgumentOutOfRangeException(nameof(AddressingSettings));
     }
 }
@@ -218,9 +218,10 @@ public static class AddressingAiSurvey
                 bool swap = yx.Length > xy.Length || yx.Length == xy.Length && First(yx).CompareTo(First(xy)) < 0;
                 return swap ? (A: k.Item2, B: k.Item1, Forward: yx, Reverse: xy) : (A: k.Item1, B: k.Item2, Forward: xy, Reverse: yx);
             })
-            .Where(p => p.Forward.Length >= settings.MinimumPairLines)
+            .Where(p => p.Forward.Length >= ScaledMinimum(settings.MinimumPairLines, sources, settings))
             .OrderByDescending(p => p.Forward.Length + p.Reverse.Length).ThenBy(p => p.A, StringComparer.Ordinal).ThenBy(p => p.B, StringComparer.Ordinal)
-            .Take(settings.MaximumPairs);
+            .Take(settings.MaximumPairs).ToArray();
+        var inPairs = pairs.SelectMany(p => new[] { p.A, p.B }).ToHashSet(StringComparer.Ordinal);
         foreach (var (a, b, forward, reverse) in pairs)
         {
             var samples = Samples(forward, "S"); var back = Samples(reverse, "R");
@@ -242,7 +243,10 @@ public static class AddressingAiSurvey
             .Select(g => new NarrativeCharacter(g.Key, g.Sum(x => x.NarrationMentions), g.Sum(x => x.He), g.Sum(x => x.She), g.Sum(x => x.It),
                 g.Min(x => x.FirstChapter), g.Max(x => x.LastChapter), NarrativeReferenceSurvey.Spread(g.SelectMany(x => x.Samples).ToArray(), settings.SamplesPerTask)))
             .OrderByDescending(x => x.NarrationMentions).ThenBy(x => x.Name, StringComparer.Ordinal);
-        foreach (var character in narration.Where(x => x.NarrationMentions >= settings.MinimumNarrationMentions).Take(settings.MaximumCharacters))
+        // A character in a pair we ask about is always asked about (the pair needs a profile), whatever the book length.
+        int mentionMinimum = ScaledMinimum(settings.MinimumNarrationMentions, sources, settings);
+        foreach (var character in narration.Where(x => x.NarrationMentions >= mentionMinimum ||
+                     x.NarrationMentions >= settings.MinimumNarrationMentions && inPairs.Contains(x.Name)).Take(settings.MaximumCharacters))
         {
             var samples = character.Samples.Select((x, i) => new AddressingTaskSample("N" + (i + 1), x.ChapterNumber, x.StartUtf16, "",
                 Clip(x.Text, settings.MaximumSampleLength))).ToArray();
@@ -274,6 +278,20 @@ public static class AddressingAiSurvey
     }
 
     private const int MaximumIdentities = 20, MinimumIdentityParagraphs = 2;
+
+    /// <summary>
+    /// A minimum that grows with the book: one more line per <see cref="AddressingSettings.EvidenceScale"/> chapter-units, a unit
+    /// being 1,500 source characters (a typical web-novel chapter; counting characters, not chapters, because a book of 147
+    /// long chapters is as big as one of 2,000 short ones). Never below <paramref name="floor"/>; EvidenceScale 0 turns it off.
+    /// A 3M-character book therefore asks about pairs with at least 13 lines and characters with at least 13 mentions, and a
+    /// 200K-character novella about those with 3.
+    /// </summary>
+    internal static int ScaledMinimum(int floor, IReadOnlyList<CensusSource> sources, AddressingSettings settings)
+    {
+        if (settings.EvidenceScale == 0) return floor;
+        long units = sources.Sum(s => (long)s.OriginalText.Length) / 1_500;
+        return (int)Math.Max(floor, Math.Min(units / settings.EvidenceScale, 10_000));
+    }
     private static (string, string) Key(string a, string b) => string.CompareOrdinal(a, b) < 0 ? (a, b) : (b, a);
 
     /// <summary>
@@ -331,7 +349,7 @@ public static class AddressingAiSurvey
         }
         var tasks = new List<AddressingTask>();
         foreach (var (key, shared) in together
-                     .Where(kv => kv.Value.Count >= MinimumIdentityParagraphs && (Nickname(kv.Key.Item1) || Nickname(kv.Key.Item2)) &&
+                     .Where(kv => kv.Value.Count >= ScaledMinimum(MinimumIdentityParagraphs, sources, settings) && (Nickname(kv.Key.Item1) || Nickname(kv.Key.Item2)) &&
                                   !talk.Contains(kv.Key) && !listed.Contains(kv.Key) && !GenderClash(kv.Key.Item1, kv.Key.Item2))
                      .OrderByDescending(kv => kv.Value.Count).ThenBy(kv => kv.Key.Item1, StringComparer.Ordinal).ThenBy(kv => kv.Key.Item2, StringComparer.Ordinal)
                      .Take(MaximumIdentities))
