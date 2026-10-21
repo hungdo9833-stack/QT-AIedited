@@ -249,7 +249,7 @@ Với mỗi tên ứng viên, CPU lấy các **câu kể ngoài ngoặc thoại*
 
 ### Bước 2 — AI theo cặp và theo nhân vật (đang triển khai, chưa gọi AI thật)
 
-Mỗi request gom vài **nhiệm vụ**, có hai loại:
+Mỗi request gom nhiều **nhiệm vụ** (theo ngân sách token, xem mục "Giảm số request" bên dưới), có hai loại:
 
 - **Cặp** (người nói → người nghe): 6–12 mẫu thoại, có mệnh đề dẫn, trải đều theo chương. AI trả về:
   - trạng thái (`Consistent` / `Changes` / `Ambiguous` / `NotThisPair`);
@@ -260,7 +260,7 @@ Mỗi request gom vài **nhiệm vụ**, có hai loại:
   - giới tính;
   - các giai đoạn, mỗi giai đoạn gồm: chương từ–đến, đại từ kể chính và phụ tiếng Việt, và các mẫu chứng minh.
 
-Schema chỉ dùng `type/properties/required/items/enum` chuỗi (an toàn với Gemini). Số request tỷ lệ với số cặp và số nhân vật, thường vài chục cho cả truyện, không phụ thuộc số cửa sổ.
+Schema chỉ dùng `type/properties/required/items/enum` chuỗi (an toàn với Gemini). Số request tỷ lệ với số cặp và số nhân vật (sau khi lọc ứng viên rác và áp ngưỡng theo độ dài truyện), cỡ vài request đến vài chục cho cả truyện, không phụ thuộc số cửa sổ.
 
 **Kiểm chứng CPU (fail-closed, không tự xác nhận):**
 
@@ -458,6 +458,31 @@ Không bao giờ ghi đè dữ liệu người dùng đã khóa hoặc đã có:
 **Nhiều giai đoạn:** hồ sơ hiện chưa có mốc chương, nên người dùng chọn giai đoạn áp dụng mặc định. Các giai đoạn khác được ghi vào ghi chú của hồ sơ/quan hệ và vào ledger, để Bước 4 áp dụng theo chương.
 
 **Khóa nhất quán Project** (để trình dịch dùng hồ sơ): duyệt từng mục không tự bật; Hoàn thành thì bật.
+
+### Giảm số request của lần khảo sát (đã triển khai; đo offline, chưa có lần chạy AI thật)
+
+Một truyện ~3 triệu ký tự trước đây cần 240 nhiệm vụ (40 cảnh, 60 nhân vật, 120 cặp, 20 "cùng một người?") = **41 request**, mỗi request 6 nhiệm vụ. Một request 6 nhiệm vụ chỉ khoảng 2,2 nghìn token vào và 1,2–2,4 nghìn token ra (~300 token ra cho mỗi nhiệm vụ), còn Gemini nhận nhiều hơn rất nhiều: giới hạn thật là token đầu ra. Ba thay đổi, mỗi thay đổi một commit:
+
+1. **Gom theo ngân sách token, không gom theo số nhiệm vụ** (`AddressingAiSurvey.PlanRequests`). Giữ nguyên thứ tự, đóng request khi nhiệm vụ kế tiếp làm vượt một trong ba mức: token vào ước tính (`InputTokensPerRequest`, mặc định 24.000, ước tính bảo thủ UTF-8/3), token ra dự kiến (`OutputTokensPerTask` = 350 mỗi nhiệm vụ, cảnh tính 40 mỗi lời thoại nếu nhiều hơn; tối đa `OutputTokensPerRequest` = 6.000), hoặc số nhiệm vụ (`TasksPerRequest`, mặc định 16, tối đa 24). Khi biết model, các mức chỉ bị hạ thêm: token vào không vượt `context − đầu ra tối đa − 128`, token ra dự kiến không vượt 60% đầu ra tối đa. Một nhiệm vụ vượt ngân sách vẫn đi một mình, không bao giờ bị bỏ. Mã ngắn `T1…Tn`, dấu vân tay request và `PromptVersion` không đổi (nội dung prompt không đổi); `EstimatedRequests` trong dòng trạng thái dùng cùng cách gom (`CountRequests`).
+   - Gemini cho đầu ra tối đa **10.240** token, trong khi 16 nhiệm vụ dự kiến chỉ ~5,6 nghìn, nên câu trả lời không bị cắt. Nếu vẫn bị cắt: `finishReason=MAX_TOKENS` hoặc JSON cụt đều là **request lỗi có kiểm soát** (`IncompleteProviderResponse` / `SemanticParseFailure`): không tạo đề xuất nào, không dừng cả lần chạy, không tính là "đã trả lời" nên bấm lần sau sẽ hỏi lại (có test).
+2. **Lọc ứng viên nhân vật rác bằng CPU trước khi thành nhiệm vụ** (`CandidateFilter`, không có danh sách từ riêng của truyện nào, tên hồ sơ/bí danh có sẵn không bao giờ bị loại):
+   - *Mở rộng*: ứng viên bằng một ứng viên khác thường gặp hơn ít nhất 5 lần cộng 1–3 ký tự đuôi (`宁夕缓缓`, `宁夕这`, `秦天不禁`: tên + trạng từ/động từ). Chỉ loại khi cùng một đuôi đi sau ít nhất 2 tên, hoặc tên gốc thường gặp hơn ít nhất 20 lần, để tên thật dài hơn (`林青山` cạnh `林青`) không bị loại nhầm. Văn bản vẫn được khớp theo tên gốc, nên không mất gì.
+   - *Không có bằng chứng người*: không có `他/她/它` sau tên (tính cả các cách viết của cùng một nhân vật) và không nói / không được gọi trong thoại; hoặc chỉ "nói" nhưng không có dạng tên (họ hoặc tiền tố 小/阿/老), vì bộ tìm người nói cũng bám vào từ đứng trước động từ nói (想了一下：「…」).
+   - Cặp, cảnh và "cùng một người?" đều lập từ danh sách đã lọc nên không bao giờ có cặp từ ứng viên đã loại.
+   - **Không dùng từ điển Hán Việt/VietPhrase:** nó chỉ nạp được ở tầng ứng dụng (bất đồng bộ, theo thư mục), chưa có API CPU thuần sạch cho `Plan`. Hệ quả: những từ vẫn có `他/她` đi sau (毕竟, 已经, 强大…) chưa bị loại; AI trả `NotACharacter` cho chúng.
+   - Probe in danh sách tên bị loại (chỉ tên, không nguyên văn) vào `addressing-dropped-candidates.md` để người dùng xem có loại nhầm không.
+3. **Ngưỡng bằng chứng theo độ dài truyện** (`AddressingSettings.EvidenceScale` = 150, `ScaledMinimum`): ngưỡng tối thiểu = `max(sàn cũ, số đơn vị / 150)`, một đơn vị là 1.500 ký tự nguyên tác (một chương web novel điển hình). Tính theo ký tự chứ không theo số chương vì 147 chương dài bằng 2.163 chương ngắn. Áp dụng cho số lời thoại tối thiểu của một cặp (sàn 3), số lần nhắc trong lời kể của một nhân vật (sàn 3) và số đoạn chung của một cặp tên "cùng một người?" (sàn 2). Truyện 3 triệu ký tự: cặp cần ≥ 13 lời; truyện 200 nghìn ký tự: giữ sàn cũ. Người trong một cặp được hỏi luôn có nhiệm vụ nhân vật. Đặt `EvidenceScale = 0` để tắt và có đúng kế hoạch cũ. Các mức trần cứng (40 cảnh, 60 nhân vật, 120 cặp, 20 cặp tên) giữ nguyên.
+
+**Đo offline (probe, HTTP = 0, 2 truyện thật, kế hoạch Gemini):**
+
+| | 隐婚100分 (2.163 chương, 2,9 triệu ký tự) | 反派：我的母亲是大帝 (147 chương, 3,2 triệu ký tự) |
+|---|---|---|
+| Trước đây (6 nhiệm vụ/request) | 240 nhiệm vụ · 41 request | 235 nhiệm vụ · 40 request |
+| Chỉ gom theo token | 240 nhiệm vụ · 16 request | 235 nhiệm vụ · 16 request |
+| + lọc ứng viên rác + ngưỡng theo độ dài | 138 nhiệm vụ (40 cảnh, 60 nhân vật, 18 cặp, 20 tên) · **10 request** | 141 nhiệm vụ (40 cảnh, 60 nhân vật, 21 cặp, 20 tên) · **10 request** |
+| Ứng viên bị loại (trên 979 / 1.186 tên ≥ 3 lần) | 507 (378 mở rộng, 129 không bằng chứng) | 692 (556 mở rộng, 136 không bằng chứng) |
+
+**Chưa kiểm chứng được offline:** 16 nhiệm vụ mỗi request có giữ chất lượng trả lời không (đủ nhiệm vụ, đúng `task_id`, ít bị loại bởi kiểm chứng). Cần một lần A/B nhỏ với Gemini thật (người dùng duyệt): ví dụ 1 request 6 nhiệm vụ và 1 request 16 nhiệm vụ trên cùng các nhiệm vụ, so số nhiệm vụ qua kiểm chứng, `SchemaIssues` và token ra thực tế so với dự kiến 350 mỗi nhiệm vụ.
 
 ### Bước 4 — Nối vào dịch (đang triển khai)
 

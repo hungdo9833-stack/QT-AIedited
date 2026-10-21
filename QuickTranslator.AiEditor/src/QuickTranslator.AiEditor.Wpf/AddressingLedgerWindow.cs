@@ -431,7 +431,7 @@ public sealed class AddressingLedgerWindow : Window
 
     private void ShowWork(AddressingSurveyWork work) => _surveyStatus.Text = work.Complete
         ? $"Đã khảo sát xong: {work.Scenes.Count} cảnh, {work.Tasks.Count(t => t.Kind == AddressingTaskKind.Character)} nhân vật, {work.Tasks.Count(t => t.Kind == AddressingTaskKind.Pair)} cặp. Bấm Hoàn thành để ghi vào hồ sơ."
-        : $"Còn {work.PendingScenes.Count} cảnh, {work.PendingCharacters} nhân vật, {work.PendingPairs} cặp, {work.PendingIdentities} câu hỏi \"cùng một người?\" chưa khảo sát (khoảng {work.EstimatedRequests} request; cặp mới có thể xuất hiện sau khi xong các cảnh).";
+        : $"Còn {work.PendingScenes.Count} cảnh, {work.PendingCharacters} nhân vật, {work.PendingPairs} cặp, {work.PendingIdentities} câu hỏi \"cùng một người?\" chưa khảo sát (khoảng {work.EstimatedRequests} request, mỗi request gom nhiều nhiệm vụ tới giới hạn token; cặp mới có thể xuất hiện sau khi xong các cảnh).";
 
     private static string StopReason(string? code) => code switch
     {
