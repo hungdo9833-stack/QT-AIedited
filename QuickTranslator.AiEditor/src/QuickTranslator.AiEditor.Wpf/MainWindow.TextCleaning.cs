@@ -313,7 +313,7 @@ public partial class MainWindow
             if (choice.Method == ChineseRetranslationMethod.Ollama)
             {
                 await EnsureOllamaBackendsLoadedAsync();
-                EnsureOllamaBackendReady();
+                await EnsureOllamaBackendReadyAsync(cancellationToken);
                 OllamaBackendProfile profile = _ollamaBackends.ActiveProfile;
                 AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
                 string prompt = BuildChineseRetranslationPrompt(chapter, segment, occurrence, choice.Mode,

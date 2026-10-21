@@ -16,7 +16,7 @@ public partial class GpuManagerWindow : Window
     private readonly GpuTranslationPreferences _preferences;
     private readonly RemoteOllamaSetupService _setup = new();
     private readonly RemoteOllamaModelPullService _modelPull = new();
-    private readonly LocalOllamaService _local = new();
+    private readonly LocalLlamaServerHost _local;
     private readonly RemoteHostProbe _probe = new();
     private readonly RemoteOllamaAutoSetup _autoSetup = new();
     private int? _rdpPort;
@@ -27,9 +27,10 @@ public partial class GpuManagerWindow : Window
     private bool _loadingMode;
 
     internal GpuManagerWindow(OllamaBackendManager backends, GpuConnectionManager connections,
-        GpuTranslationPreferences? preferences = null)
+        GpuTranslationPreferences? preferences = null, LocalLlamaServerHost? localLlama = null)
     {
         _backends = backends; _connections = connections;
+        _local = localLlama ?? new LocalLlamaServerHost();
         _preferences = preferences ?? new();
         InitializeComponent();
         System.ComponentModel.DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock))
@@ -40,7 +41,12 @@ public partial class GpuManagerWindow : Window
         _loadingMode = false;
         ProfileList.ItemsSource = _profiles;
         RefreshProfiles();
+        _local.StatusChanged += OnLocalStatusChanged;
+        Closed += (_, _) => _local.StatusChanged -= OnLocalStatusChanged;
     }
+
+    private void OnLocalStatusChanged(object? sender, LocalLlamaServerStatus status) =>
+        Dispatcher.BeginInvoke(() => StatusText.Text = status.Message);
 
     private void OnTranslationModeChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -49,7 +55,7 @@ public partial class GpuManagerWindow : Window
         if (!_loadingMode) _preferences.ModeExplicitlySelected = true;
         TranslationModeText.Text = _preferences.Mode switch
         {
-            GpuTranslationMode.LocalOnly => "Queue dùng một Ollama Local.",
+            GpuTranslationMode.LocalOnly => "Queue dùng llama-server trên máy này.",
             GpuTranslationMode.RemoteOnly => "Queue dùng profile Remote đang kích hoạt.",
             _ => "Một coordinator phân phối chapter động cho Local và Remote, tối đa hai request đồng thời."
         };
@@ -88,6 +94,8 @@ public partial class GpuManagerWindow : Window
         bool remote = profile.Kind == OllamaBackendKind.Remote;
         ServerApiInput.SelectedIndex = profile.Api == BackendApi.OpenAiCompatible ? 1 : 0;
         ServerApiInput.IsEnabled = remote;
+        ModelLabel.Text = remote ? "Model Ollama" : "Model GGUF (chủ/repo:quant hoặc file .gguf)";
+        ChooseGgufButton.Visibility = remote ? Visibility.Collapsed : Visibility.Visible;
         ParallelRequestsInput.Text = profile.ParallelRequests.ToString(CultureInfo.InvariantCulture);
         AdvancedConnectionExpander.IsEnabled = remote;
         AdvancedConnectionExpander.IsExpanded = false;
@@ -113,7 +121,7 @@ public partial class GpuManagerWindow : Window
             _rdpPort = null;
         }
         HourlyPriceInput.Text = (profile.HourlyPrice ?? 0).ToString(CultureInfo.InvariantCulture);
-        StatusText.Text = remote ? _connections.GetStatus(profile.Id).Message : "Ollama Local trên máy Windows này.";
+        StatusText.Text = remote ? _connections.GetStatus(profile.Id).Message : _local.Status.Message;
         ApplyAuthenticationUi();
         ApplyConnectionUi();
         ApplyServerApiUi();
@@ -126,10 +134,12 @@ public partial class GpuManagerWindow : Window
     {
         if (AutoSetupButton is null) return;
         bool ollama = ServerApiInput.SelectedIndex != 1;
-        ParallelRequestsInput.IsEnabled = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote };
+        bool local = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Local };
+        ParallelRequestsInput.IsEnabled = local || ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote };
         AutoSetupButton.IsEnabled = ollama;
         InstallOllamaButton.IsEnabled = ollama;
-        StartOllamaButton.IsEnabled = ollama;
+        StartOllamaButton.IsEnabled = ollama || local;
+        StartOllamaButton.Content = local ? "Khởi động llama-server" : "Khởi động Ollama";
         PullModelButton.IsEnabled = ollama;
         DownloadModelInput.IsEnabled = ollama;
     }
@@ -191,8 +201,7 @@ public partial class GpuManagerWindow : Window
         OllamaBackendProfile profile = ReadProfile();
         if (profile.Kind == OllamaBackendKind.Local)
         {
-            LocalOllamaStatus status = await _local.CheckAsync(profile.Model);
-            StatusText.Text = status.Message; return;
+            StatusText.Text = _local.Status.Message; return;
         }
         if (profile.Ssh is null)
         {
@@ -249,6 +258,12 @@ public partial class GpuManagerWindow : Window
     {
         if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
         await _backends.DetachRuntimeClientAsync(profile.Id);
+        if (profile.Kind == OllamaBackendKind.Local)
+        {
+            await _local.StopAsync();
+            StatusText.Text = _local.Status.Message;
+            return;
+        }
         if (profile.Ssh is not null) await _connections.DisconnectAsync(profile.Id);
         StatusText.Text = profile.Ssh is null ? "Đã ngắt runtime client trực tiếp." :
             "Đã ngắt tunnel. Máy thuê có thể vẫn tiếp tục tính phí.";
@@ -259,7 +274,7 @@ public partial class GpuManagerWindow : Window
         OllamaBackendProfile profile = ReadProfile();
         if (profile.Kind == OllamaBackendKind.Local)
         {
-            InspectionText.Text = (await _local.CheckAsync(profile.Model)).Message; return;
+            InspectionText.Text = _local.Status.Message; return;
         }
         if (profile.Ssh is null)
         {
@@ -475,8 +490,29 @@ public partial class GpuManagerWindow : Window
         "Cài Ollama bằng script chính thức trên Ubuntu? QT Studio sẽ không cài hoặc nâng cấp driver NVIDIA.");
     private async void OnStartOllama(object sender, RoutedEventArgs e)
     {
-        if (ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Local } local)
-        { await RunAsync(async () => StatusText.Text = (await _local.StartAsync(local.Model)).Message); return; }
+        if (ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Local })
+        {
+            if (_busy) return;
+            _busy = true;
+            using var cancellation = new CancellationTokenSource();
+            _setupCancellation = cancellation;
+            CancelSetupButton.IsEnabled = true;
+            try
+            {
+                var progress = new Progress<string>(text => StatusText.Text = text + " · có thể hủy");
+                await _local.StartAsync(ReadProfile(), progress, cancellation.Token);
+                StatusText.Text = _local.Status.Message;
+            }
+            catch (OperationCanceledException) { StatusText.Text = "Đã hủy khởi động llama-server."; }
+            catch (Exception error) { StatusText.Text = error.Message; }
+            finally
+            {
+                if (ReferenceEquals(_setupCancellation, cancellation)) _setupCancellation = null;
+                CancelSetupButton.IsEnabled = false;
+                _busy = false;
+            }
+            return;
+        }
         await ConfirmSetupAsync(RemoteSetupAction.StartOllamaService,
             "Bật Ollama service trên GPU thuê? Nếu cần quyền sudo, QT Studio sẽ hỏi mật khẩu ngay tại đây.");
     }
@@ -494,7 +530,8 @@ public partial class GpuManagerWindow : Window
     private void OnCancelSetup(object sender, RoutedEventArgs e)
     {
         _setupCancellation?.Cancel();
-        StatusText.Text = "Đang yêu cầu hủy thao tác Remote…";
+        StatusText.Text = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Local }
+            ? "Đang yêu cầu hủy khởi động llama-server…" : "Đang yêu cầu hủy thao tác Remote…";
     }
 
     private async Task ConfirmSetupAsync(RemoteSetupAction action, string message, string? model = null)
@@ -614,6 +651,12 @@ public partial class GpuManagerWindow : Window
         PrivateKeyInput.Password = "••••••••";
     }
 
+    private void OnChooseGguf(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Filter = "Model GGUF|*.gguf|Tất cả tệp|*.*" };
+        if (dialog.ShowDialog(this) == true) ModelInput.Text = dialog.FileName;
+    }
+
     private OllamaBackendProfile ReadProfile()
     {
         OllamaBackendProfile original = ProfileList.SelectedItem as OllamaBackendProfile
@@ -626,6 +669,9 @@ public partial class GpuManagerWindow : Window
         {
             OllamaBackendProfile local = original.Clone();
             local.Name = NameInput.Text; local.Runtime = runtime; local.Model = runtime.ModelOptions.Model;
+            local.Api = BackendApi.OpenAiCompatible;
+            local.ParallelRequests = ReadInt(ParallelRequestsInput, "Số request song song");
+            local.Endpoint = _local.Endpoint?.ToString() ?? "http://127.0.0.1:11450/api/chat";
             local.Validate(); return local;
         }
         var profile = original.Clone(); profile.Name = NameInput.Text; profile.Runtime = runtime;

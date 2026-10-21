@@ -66,12 +66,64 @@ public sealed class OllamaBackendTests : IDisposable
     }
 
     [Fact]
-    public void Local_profile_rejects_open_ai_compatible_api()
+    public void Local_profile_accepts_open_ai_compatible_api()
     {
         OllamaBackendProfile profile = OllamaBackendProfile.CreateDefaultLocal();
         profile.Api = BackendApi.OpenAiCompatible;
 
-        Assert.Throws<InvalidDataException>(profile.Validate);
+        profile.Validate();
+        Assert.Equal(BackendApi.OpenAiCompatible, profile.Api);
+    }
+
+    [Fact]
+    public async Task Old_ollama_local_profile_is_migrated_once_to_default_gguf()
+    {
+        Directory.CreateDirectory(_root);
+        string path = Path.Combine(_root, "old-local.json");
+        var store = new OllamaProfileStore(path, new FakeProtector());
+        OllamaBackendProfile old = OllamaBackendProfile.CreateDefaultLocal();
+        old.Name = "Ollama Local";
+        old.Api = BackendApi.Ollama;
+        old.ParallelRequests = 1;
+        old.Endpoint = OllamaClient.DefaultEndpoint.ToString();
+        old.Model = "translategemma:12b";
+        old.Runtime = AiRuntimeProfile.CreateDefault(old.Model);
+        await store.SaveAsync(new OllamaProfileCatalog { Profiles = [old], ActiveProfileId = old.Id });
+
+        OllamaProfileCatalog migrated = await store.LoadAsync();
+        OllamaBackendProfile local = Assert.Single(migrated.Profiles);
+
+        Assert.Equal(BackendApi.OpenAiCompatible, local.Api);
+        Assert.Equal(OllamaBackendProfile.DefaultLocalModel, local.Model);
+        Assert.Equal(4, local.ParallelRequests);
+        Assert.Equal(8192, local.Runtime!.ModelOptions.ContextSize);
+        Assert.Equal(3072, local.Runtime.ModelOptions.MaximumOutputTokens);
+        string once = await File.ReadAllTextAsync(path);
+        await store.LoadAsync();
+        Assert.Equal(once, await File.ReadAllTextAsync(path));
+    }
+
+    [Fact]
+    public async Task Old_ollama_local_profile_with_hf_gguf_tag_keeps_its_model_and_runtime()
+    {
+        Directory.CreateDirectory(_root);
+        string path = Path.Combine(_root, "old-local-hf.json");
+        var store = new OllamaProfileStore(path, new FakeProtector());
+        OllamaBackendProfile old = OllamaBackendProfile.CreateDefaultLocal();
+        old.Api = BackendApi.Ollama;
+        old.ParallelRequests = 1;
+        old.Endpoint = OllamaClient.DefaultEndpoint.ToString();
+        old.Model = "hf.co/IndexTeam/Index-Translate-9B-GGUF:Q4_K_M";
+        old.Runtime = AiRuntimeProfile.CreateDefault(old.Model);
+        old.Runtime.ModelOptions = old.Runtime.ModelOptions with { Temperature = 0.1, MaximumOutputTokens = 2048 };
+        await store.SaveAsync(new OllamaProfileCatalog { Profiles = [old], ActiveProfileId = old.Id });
+
+        OllamaBackendProfile local = Assert.Single((await store.LoadAsync()).Profiles);
+
+        Assert.Equal(BackendApi.OpenAiCompatible, local.Api);
+        Assert.Equal(4, local.ParallelRequests);
+        Assert.Equal("IndexTeam/Index-Translate-9B-GGUF:Q4_K_M", local.Model);
+        Assert.Equal(2048, local.Runtime!.ModelOptions.MaximumOutputTokens);
     }
 
     [Fact]
@@ -280,8 +332,9 @@ public sealed class OllamaBackendTests : IDisposable
 
         OllamaProfileCatalog reopened = await store.LoadAsync();
 
-        Assert.Equal(BackendApi.Ollama, reopened.Profiles[0].Api);
-        Assert.Equal(1, reopened.Profiles[0].ParallelRequests);
+        // A file written before the API fields existed means an Ollama local profile: it is moved to llama-server.
+        Assert.Equal(BackendApi.OpenAiCompatible, reopened.Profiles[0].Api);
+        Assert.Equal(4, reopened.Profiles[0].ParallelRequests);
     }
 
     [Fact]

@@ -86,7 +86,7 @@ public sealed class GpuManagerUiTests
             var download = (TextBox)window.FindName("DownloadModelInput");
             var configured = (TextBox)window.FindName("ModelInput");
             download.Text = "llama3.2:3b";
-            Assert.Equal("translategemma:12b", configured.Text);
+            Assert.Equal(OllamaBackendProfile.DefaultLocalModel, configured.Text);
 
             var list = (ListBox)window.FindName("ProfileList");
             var remote = new OllamaBackendProfile
@@ -120,7 +120,7 @@ public sealed class GpuManagerUiTests
         {
             var autoButton = (Button)window.FindName("AutoSetupButton");
             Assert.NotNull(window.FindName("ImportRdpButton"));
-            Assert.True(autoButton.IsEnabled);
+            Assert.False(autoButton.IsEnabled);
 
             window.GetType().GetMethod("OnNewProfile", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
                 .Invoke(window, [null!, null!]);

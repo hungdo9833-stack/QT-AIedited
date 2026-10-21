@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -41,7 +42,7 @@ public partial class MainWindow
         {
             await EnsureOllamaBackendsLoadedAsync();
             if (_gpuManagerWindow is { IsLoaded: true }) { _gpuManagerWindow.Activate(); return; }
-            _gpuManagerWindow = new GpuManagerWindow(_ollamaBackends, _gpuConnections, _gpuPreferences) { Owner = this };
+            _gpuManagerWindow = new GpuManagerWindow(_ollamaBackends, _gpuConnections, _gpuPreferences, _localLlama) { Owner = this };
             ClampWindowToWorkArea(_gpuManagerWindow, 1180, 820);
             _gpuManagerWindow.Closed += (_, _) => _gpuManagerWindow = null;
             _gpuManagerWindow.Show();
@@ -146,7 +147,7 @@ public partial class MainWindow
         OllamaBackendKind kind = SelectedOllamaKind();
         if (kind == OllamaBackendKind.Local)
         {
-            OllamaEndpointInput.Text = OllamaClient.DefaultEndpoint.ToString();
+            OllamaEndpointInput.Text = "http://127.0.0.1:11450/api/chat";
             OllamaTokenInput.Password = "";
         }
         else if (OllamaEndpointInput.Text.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase))
@@ -174,7 +175,8 @@ public partial class MainWindow
         profile.Name = OllamaProfileNameInput.Text;
         profile.Kind = SelectedOllamaKind();
         profile.Endpoint = profile.Kind == OllamaBackendKind.Local
-            ? OllamaClient.DefaultEndpoint.ToString() : OllamaEndpointInput.Text.Trim();
+            ? "http://127.0.0.1:11450/api/chat" : OllamaEndpointInput.Text.Trim();
+        if (profile.Kind == OllamaBackendKind.Local) profile.Api = BackendApi.OpenAiCompatible;
         profile.Token = profile.Kind == OllamaBackendKind.Remote ? OllamaTokenInput.Password : null;
         profile.Runtime = new AiRuntimeProfile
         {
@@ -283,12 +285,24 @@ public partial class MainWindow
         finally { EndUiOperation(); }
     }
 
-    private void EnsureOllamaBackendReady()
+    private async Task EnsureOllamaBackendReadyAsync(CancellationToken cancellationToken = default)
     {
         if (_projectOllamaProfileMissing)
             throw new InvalidOperationException("Project tham chiếu profile Ollama không còn tồn tại. Hãy chọn và lưu lại backend trong AI & hiệu năng.");
         if (_projectSession is not null && _ollamaBackends.ActiveProfile.Id != SelectedOllamaProfileId)
             throw new InvalidOperationException("Backend đang hoạt động không khớp cấu hình Project. Hãy chọn lại profile trước khi dịch.");
+        OllamaBackendProfile profile = _ollamaBackends.ActiveProfile;
+        if (profile.Kind == OllamaBackendKind.Local && _translationClient is OllamaBackendManager)
+        {
+            Uri endpoint = await _localLlama.StartAsync(profile,
+                new Progress<string>(SetStatus), cancellationToken);
+            if (!string.Equals(endpoint.ToString(), profile.Endpoint, StringComparison.OrdinalIgnoreCase))
+            {
+                var client = new OpenAiCompatibleClient(new HttpClient(), endpoint, profile.ParallelRequests,
+                    ownsHttpClient: true);
+                await _ollamaBackends.AttachRuntimeClientAsync(profile.Id, client, cancellationToken);
+            }
+        }
     }
 
     private static OllamaBackendSnapshot BackendSnapshot(OllamaBackendProfile profile, string model) =>
