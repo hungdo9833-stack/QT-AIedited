@@ -107,7 +107,7 @@ public sealed class RemoteLlamaSetup
         if (!result.SupportsAutomaticSetup) return result;
         try { LlamaServerHealth health = await _health.CheckAsync(tunnelEndpoint, cancellationToken).ConfigureAwait(false);
             return result with { LlamaServerRunning = health.Healthy, Models = health.Models }; }
-        catch (Exception e) when (e is not OperationCanceledException) { return result; }
+        catch (Exception e) when (e is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { return result; }
     }
 
     public async Task<RemoteLlamaSetupResult> RunAsync(ISshSession session, Uri tunnelEndpoint, string model,
@@ -161,7 +161,8 @@ public sealed class RemoteLlamaSetup
                     return new(true, $"Đã sẵn sàng: {final.GpuName} · {launch.Model.DisplayName}.", final);
                 }
             }
-            catch (Exception e) when (e is not OperationCanceledException) { }
+            // A probe timeout (server still starting or downloading) is "not ready yet"; only the caller's token cancels.
+            catch (Exception e) when (e is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
             SshCommandResult size = await session.ExecuteAsync(SshOperation.ReadLlamaCacheSize, cancellationToken: cancellationToken).ConfigureAwait(false);
             string downloaded = long.TryParse(size.Output.Trim(), out long bytes) ? $" · đã tải {bytes / 1024d / 1024 / 1024:0.0} GB" : "";
             progress?.Report(new(RemoteLlamaSetupStage.DownloadModel, "llama-server đang tải/khởi tạo model" + downloaded + "…"));

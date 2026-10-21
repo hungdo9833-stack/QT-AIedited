@@ -46,7 +46,7 @@ public sealed class LocalLlamaServerHost : IAsyncDisposable
     {
         _packages = packageProvider ?? new LlamaCppPackageProvider();
         _launcher = processLauncher ?? new WindowsProcessLauncher();
-        _healthClient = healthClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        _healthClient = healthClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
         _dataRoot = Path.GetFullPath(dataRoot ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "QTStudio"));
         _portSelector = portSelector ?? SelectPort;
@@ -152,6 +152,9 @@ public sealed class LocalLlamaServerHost : IAsyncDisposable
                 if (response.IsSuccessStatusCode) return;
             }
             catch (HttpRequestException) { }
+            // A probe that times out is "not ready yet", not a user cancel: on Windows a connection to a port nobody
+            // listens on yet takes ~2 s to fail, the same as the probe timeout. Only the caller's token stops the wait.
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
             string message;
             if (TryReadDownloadProgress(logPath, out double completedGb, out double totalGb))
                 message = $"llama-server máy này: đang tải model {completedGb:0.00}/{totalGb:0.00} GB";

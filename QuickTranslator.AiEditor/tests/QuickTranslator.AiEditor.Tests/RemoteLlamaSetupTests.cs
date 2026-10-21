@@ -46,6 +46,26 @@ public sealed class RemoteLlamaSetupTests : IDisposable
     }
 
     [Fact]
+    public async Task Probe_timeouts_while_the_server_starts_are_not_a_user_cancel()
+    {
+        var session = new FakeSession(executableExists: true);
+        var setup = new RemoteLlamaSetup(MakePackage(), new TimingOutThenHealthy(2), delay: (_, _) => Task.CompletedTask);
+
+        RemoteLlamaSetupResult result = await setup.RunAsync(session, Tunnel,
+            "IndexTeam/Index-Translate-9B-GGUF:Q4_K_M", 11436, 4, 8192);
+
+        Assert.True(result.Success, result.Message);
+    }
+
+    private sealed class TimingOutThenHealthy(int timeouts) : IRemoteLlamaHealthClient
+    {
+        private int _calls;
+        public Task<LlamaServerHealth> CheckAsync(Uri tunnelEndpoint, CancellationToken cancellationToken = default) =>
+            ++_calls <= timeouts ? throw new TaskCanceledException("probe timeout", new TimeoutException())
+                : Task.FromResult(new LlamaServerHealth(true, ["ready"]));
+    }
+
+    [Fact]
     public async Task Health_timeout_includes_safe_log_tail()
     {
         var session = new FakeSession(executableExists: true) { LogTail = "load failed: synthetic tail" };

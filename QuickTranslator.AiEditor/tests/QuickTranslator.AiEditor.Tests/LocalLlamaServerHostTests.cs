@@ -43,6 +43,22 @@ public sealed class LocalLlamaServerHostTests : IDisposable
     }
 
     [Fact]
+    public async Task Probe_timeouts_while_the_server_starts_are_not_a_user_cancel()
+    {
+        // On Windows a connect to a port nobody listens on yet takes ~2 s, which used to hit the probe timeout and was
+        // reported as "đã hủy khởi động". The first probes time out, then the server answers.
+        int probes = 0;
+        await using var host = Host(new FakeLauncher(), _ => ++probes < 3
+            ? throw new TaskCanceledException("probe timeout", new TimeoutException())
+            : new HttpResponseMessage(HttpStatusCode.OK));
+
+        await host.StartAsync(GpuBackendProfile.CreateDefaultLocal());
+
+        Assert.Equal(LocalLlamaServerState.Ready, host.Status.State);
+        Assert.Equal(3, probes);
+    }
+
+    [Fact]
     public async Task Exited_process_reports_exit_code_and_log_tail()
     {
         var process = new FakeProcess { HasExitedValue = true, ExitCodeValue = 17 };
