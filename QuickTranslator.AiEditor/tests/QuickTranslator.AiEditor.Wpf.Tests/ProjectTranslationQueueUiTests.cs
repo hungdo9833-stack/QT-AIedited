@@ -13,6 +13,7 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 
 public sealed class ProjectTranslationQueueUiTests
 {
+
     [Theory]
     [InlineData(300)]
     [InlineData(1000)]
@@ -32,10 +33,10 @@ public sealed class ProjectTranslationQueueUiTests
             int selectedIndex = chapterCount / 2;
             grid.SelectedIndex = selectedIndex;
             object selected = grid.SelectedItem;
-            ProjectTranslationQueueWindow.QueueRow selectedRow = window.CurrentRows[selectedIndex];
+            ProjectTranslationQueueView.QueueRow selectedRow = window.CurrentRows[selectedIndex];
 
             _ = window.MeasureRefresh(); // warm up templates, formatters and JIT
-            ProjectTranslationQueueWindow.QueueRefreshMeasurement measurement = window.MeasureRefresh();
+            ProjectTranslationQueueView.QueueRefreshMeasurement measurement = window.MeasureRefresh();
 
             Assert.Same(source, grid.ItemsSource);
             Assert.Same(selected, grid.SelectedItem);
@@ -221,6 +222,84 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.True(cleaner.IsVisible);
         cleaner.Close();
     });
+
+    [Fact]
+    public Task Queue_workspace_rehosts_without_duplicate_progress_subscription() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        await fixture.TaskCall("EnsureProjectTranslationCoordinatorAsync");
+        var view = new ProjectTranslationQueueView("Workspace test",
+            fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator"), null);
+        var content = new ContentControl { Content = view };
+        var host = TestWindow(content);
+        try
+        {
+            host.Show();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.Equal(1, view.ProgressSubscriptionCount);
+            content.Content = null;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.Equal(0, view.ProgressSubscriptionCount);
+            content.Content = view;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.Equal(1, view.ProgressSubscriptionCount);
+            content.Content = null;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.Equal(0, view.ProgressSubscriptionCount);
+            content.Content = view;
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert.Equal(1, view.ProgressSubscriptionCount);
+        }
+        finally { host.Close(); }
+    });
+
+    [Fact]
+    public Task Run_controls_are_exclusive_primary_and_cancel_is_only_in_overflow() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        await fixture.TaskCall("EnsureProjectTranslationCoordinatorAsync");
+        var view = new ProjectTranslationQueueView("State matrix",
+            fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator"), null);
+        var host = TestWindow(view);
+        try
+        {
+            host.Show();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var start = (Button)view.FindName("StartButton");
+            var resume = (Button)view.FindName("ResumeButton");
+            var pause = (Button)view.FindName("PauseButton");
+            Style primary = (Style)Application.Current.FindResource("PrimaryButton");
+            AssertRunState(view, start, resume, pause, primary, true, false, ProjectTranslationJobStatus.Draft, start);
+            AssertRunState(view, start, resume, pause, primary, false, true, ProjectTranslationJobStatus.Running, pause);
+            AssertRunState(view, start, resume, pause, primary, false, false, ProjectTranslationJobStatus.Paused, resume);
+            AssertRunState(view, start, resume, pause, primary, false, false, ProjectTranslationJobStatus.Interrupted, resume);
+            Assert.Equal(Visibility.Collapsed, ((Button)view.FindName("CancelButton")).Visibility);
+        }
+        finally { host.Close(); }
+    });
+
+    private static void AssertRunState(ProjectTranslationQueueView view, Button start, Button resume, Button pause,
+        Style primary, bool planMode, bool running, ProjectTranslationJobStatus status, Button expected)
+    {
+        view.UpdateRunControlVisibility(planMode, running, status);
+        Button[] visible = new[] { start, resume, pause }
+            .Where(button => button.Visibility == Visibility.Visible).ToArray();
+        Assert.Single(visible);
+        Assert.Same(expected, visible[0]);
+        Assert.Single(visible, button => ReferenceEquals(button.Style, primary));
+        expected.IsEnabled = false;
+        Assert.True(ToolTipService.GetShowOnDisabled(expected));
+        Assert.False(string.IsNullOrWhiteSpace(expected.ToolTip?.ToString()));
+        expected.IsEnabled = true;
+    }
+
+    private static Window TestWindow(object content) => new()
+    {
+        Content = content, Width = 1000, Height = 700, ShowInTaskbar = false,
+        WindowStartupLocation = WindowStartupLocation.Manual, Left = -30000, Top = -30000
+    };
 
     private static ProjectTranslationJob SyntheticPlan(Guid projectId, int chapterCount)
     {

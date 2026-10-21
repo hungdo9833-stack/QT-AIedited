@@ -121,7 +121,7 @@ internal static class Program
             var wall = System.Diagnostics.Stopwatch.StartNew();
             double refreshMilliseconds = 0;
             long allocatedBytes = 0;
-            ProjectTranslationQueueWindow.QueueRefreshMeasurement measured = default!;
+            ProjectTranslationQueueView.QueueRefreshMeasurement measured = default!;
             for (int index = 0; index < repetitions; index++)
             {
                 measured = window.MeasureRefresh();
