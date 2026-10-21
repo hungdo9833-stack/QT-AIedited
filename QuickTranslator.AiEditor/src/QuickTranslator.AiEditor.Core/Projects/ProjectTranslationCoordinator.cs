@@ -716,11 +716,12 @@ public sealed class ProjectTranslationCoordinator
             worker.CurrentChapterId = worker.RunningChapterIds.Count > 0 ? worker.RunningChapterIds[0] : null;
             WorkerActivity activity;
             lock (_sync) activity = _workerActivity[workerId];
-            if (activity.ActiveChapters > 0 && --activity.ActiveChapters == 0)
-            {
-                worker.ActiveSeconds += Math.Max(0, (DateTimeOffset.UtcNow - activity.StartedAt).TotalSeconds);
-                activity.StartedAt = default;
-            }
+            if (activity.ActiveChapters == 0) return;
+            // Bank the busy time at every finished chapter, not only when the worker goes idle: with all slots busy
+            // the worker never idles before the queue ends, and speed/ETA/cost would read 0 until then.
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            worker.ActiveSeconds += Math.Max(0, (now - activity.StartedAt).TotalSeconds);
+            activity.StartedAt = --activity.ActiveChapters == 0 ? default : now;
         }, CancellationToken.None).ConfigureAwait(false);
     }
 

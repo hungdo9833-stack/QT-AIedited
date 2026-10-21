@@ -1096,6 +1096,29 @@ public sealed class ProjectTranslationCoordinatorTests
         });
     }
 
+    [Fact]
+    public async Task Busy_time_is_banked_per_finished_chapter_while_other_slots_keep_running()
+    {
+        await WithProjectAsync(5, async context =>
+        {
+            var client = new ParallelFakeClient("remote", new ParallelConcurrency(), 60);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                [SingleWorker(context, client, 2)], context.LoadEnvironment);
+            bool bankedWhileBusy = false;
+            coordinator.ProgressChanged += (_, _) =>
+            {
+                ProjectTranslationWorkerState? worker = coordinator.CurrentJob?.Workers.Single();
+                if (worker is { CompletedChapters: > 0, RunningChapterIds.Count: > 0, ActiveSeconds: > 0 }) bankedWhileBusy = true;
+            };
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            // Speed, ETA and cost read ActiveSeconds: it must grow while every slot stays busy, not only at the end.
+            Assert.True(bankedWhileBusy);
+            Assert.InRange(coordinator.CurrentJob!.Workers.Single().ActiveSeconds, 0.1, 2.5);
+        });
+    }
+
     private static ProjectTranslationWorkerDefinition SingleWorker(TestProject context, IOllamaClient client, int slots)
     {
         ModelOptions options = context.Environment.ModelOptions;
