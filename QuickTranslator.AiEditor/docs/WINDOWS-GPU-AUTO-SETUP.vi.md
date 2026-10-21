@@ -60,4 +60,4 @@ RDP ngắt khi chưa bấm Allow thì Windows tạo luật chặn theo chương 
 Vì vậy lệnh phải tạo luật Allow theo chương trình (và xóa luật Block cũ) trước khi chương trình mở cổng, kèm cơ chế tự hoàn lại sau 12 phút.
 Ngoài ra `cmd /c ver` không đủ để nhận ra Windows; thông báo lỗi kiểu cmd.exe (“is not recognized as an internal or external command”) cũng được coi là dấu hiệu Windows.
 
-Chưa kiểm chứng: dịch thật một chương qua tunnel này. Chưa rõ lần chạy trên máy thật đã tải/giải nén Ollama từ đầu hay máy đã có sẵn Ollama.
+Đã dịch thành công một chương qua tunnel này (người dùng xác nhận). Chưa rõ lần chạy trên máy thật đã tải/giải nén Ollama từ đầu hay máy đã có sẵn Ollama.
