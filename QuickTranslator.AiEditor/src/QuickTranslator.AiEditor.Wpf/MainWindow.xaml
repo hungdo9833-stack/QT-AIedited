@@ -759,21 +759,23 @@
                            </Border>
                        </StackPanel>
                    </ScrollViewer>
-                   <ScrollViewer x:Name="SettingsDictionaryPanel">
-                       <StackPanel>
-                           <TextBlock Text="Từ điển &amp; ngữ cảnh" Style="{StaticResource SectionTitle}"/>
-                           <Border Style="{StaticResource Card}">
-                               <StackPanel>
-                                   <TextBlock Text="Thuật ngữ đã xác nhận" FontWeight="SemiBold"/>
-                                   <TextBlock Text="Mỗi mục gồm từ tiếng Trung và bản tiếng Việt đã xác nhận." Foreground="{DynamicResource MutedBrush}"/>
-                                   <TextBox x:Name="TermsInput" Visibility="Collapsed"/>
-                                   <DataGrid x:Name="GlossaryGrid" Height="280" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" AutomationProperties.Name="Danh sách thuật ngữ">
-                                       <DataGrid.Columns>
-                                           <DataGridTextColumn Header="Tiếng Trung" Binding="{Binding Chinese}" Width="*"/>
-                                           <DataGridTextColumn Header="Tiếng Việt" Binding="{Binding Vietnamese}" Width="2*"/>
-                                       </DataGrid.Columns>
-                                   </DataGrid>
-                                   <WrapPanel>
+                   <!-- The glossary table takes all the height the window leaves; only the table scrolls. -->
+                   <Grid x:Name="SettingsDictionaryPanel">
+                       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                       <TextBlock Text="Từ điển &amp; ngữ cảnh" Style="{StaticResource SectionTitle}"/>
+                       <Border Grid.Row="1" Style="{StaticResource Card}">
+                           <Grid>
+                               <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                               <TextBlock Text="Thuật ngữ đã xác nhận" FontWeight="SemiBold"/>
+                               <TextBlock Grid.Row="1" Text="Mỗi mục gồm từ tiếng Trung và bản tiếng Việt đã xác nhận." Foreground="{DynamicResource MutedBrush}"/>
+                               <TextBox x:Name="TermsInput" Visibility="Collapsed"/>
+                               <DataGrid x:Name="GlossaryGrid" Grid.Row="2" MinHeight="120" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single" AutomationProperties.Name="Danh sách thuật ngữ">
+                                   <DataGrid.Columns>
+                                       <DataGridTextColumn Header="Tiếng Trung" Binding="{Binding Chinese}" Width="*"/>
+                                       <DataGridTextColumn Header="Tiếng Việt" Binding="{Binding Vietnamese}" Width="2*"/>
+                                   </DataGrid.Columns>
+                               </DataGrid>
+                               <WrapPanel Grid.Row="3">
                                        <Button Content="Thêm" ui:ButtonIcon.Glyph="&#xE710;" Click="OnAddGlossaryTerm"/>
                                        <Button Content="Sửa" Click="OnEditGlossaryTerm"/>
                                        <Button Content="Xóa" Click="OnDeleteGlossaryTerm" Style="{StaticResource DangerButton}"/>
@@ -787,29 +789,29 @@
                                            </Border>
                                        </Popup>
                                        <TextBlock x:Name="TermsCountText" VerticalAlignment="Center" Margin="8"/>
-                                   </WrapPanel>
-                               </StackPanel>
-                           </Border>
-                           <Border Style="{StaticResource Card}">
-                               <StackPanel>
-                                   <TextBlock Text="Ngữ cảnh ngắn đã xác nhận" FontWeight="SemiBold"/>
-                                   <TextBox x:Name="ContextNotesInput" Height="150" AcceptsReturn="True" TextWrapping="Wrap" MaxLength="1000" TextChanged="OnSettingsInputChanged"/>
-                                   <TextBlock x:Name="ContextCountText" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}"/>
-                               </StackPanel>
-                           </Border>
-                       </StackPanel>
-                   </ScrollViewer>
-                   <ScrollViewer x:Name="SettingsCharactersPanel" Visibility="Collapsed">
-                       <StackPanel>
+                               </WrapPanel>
+                           </Grid>
+                       </Border>
+                       <Border Grid.Row="2" Style="{StaticResource Card}">
+                           <StackPanel>
+                               <TextBlock Text="Ngữ cảnh ngắn đã xác nhận" FontWeight="SemiBold"/>
+                               <TextBox x:Name="ContextNotesInput" Height="110" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxLength="1000" TextChanged="OnSettingsInputChanged"/>
+                               <TextBlock x:Name="ContextCountText" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}"/>
+                           </StackPanel>
+                       </Border>
+                   </Grid>
+                   <!-- The character table takes all the height the window leaves; only the table scrolls. -->
+                   <Grid x:Name="SettingsCharactersPanel" Visibility="Collapsed">
+                       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                            <TextBlock Text="Nhân vật &amp; xưng hô" Style="{StaticResource SectionTitle}"/>
-                           <TextBlock Text="Chỉ quy tắc đã xác nhận được đưa vào prompt; ứng dụng không tự suy đoán nhân vật hay vai thoại." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-                           <WrapPanel>
+                           <TextBlock Grid.Row="1" Text="Chỉ quy tắc đã xác nhận được đưa vào prompt; ứng dụng không tự suy đoán nhân vật hay vai thoại." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+                           <WrapPanel Grid.Row="2">
                                <TextBox x:Name="CharacterSearchInput" Width="240" ToolTip="Tìm nhân vật" TextChanged="OnCharacterSearchChanged" AutomationProperties.Name="Tìm nhân vật" AutomationProperties.HelpText="Tìm nhân vật"/>
                                <TextBox x:Name="CharacterProjectNameInput" Width="300" ToolTip="Tên dự án" AutomationProperties.Name="Tên dự án nhân vật" AutomationProperties.HelpText="Tên dự án"/>
                                <CheckBox x:Name="ConsistencyLockCheck" Content="Bật khóa nhất quán Project" ToolTip="Chèn đại từ và cách xưng hô đã khóa vào prompt của đúng nhân vật xuất hiện trong đoạn"/>
                                <CheckBox x:Name="NormalizeAfterTranslationCheck" Content="Chuẩn hóa an toàn sau dịch" IsChecked="True"/>
                            </WrapPanel>
-                           <WrapPanel>
+                           <WrapPanel Grid.Row="3">
                                <Button x:Name="AddressingLedgerButton" Content="Sổ xưng hô · khảo sát &amp; Hoàn thành" ui:ButtonIcon.Glyph="&#xE716;" Click="OnOpenAddressingLedger" Style="{StaticResource PrimaryButton}" ToolTip="Khảo sát nhân vật, tên phụ, đại từ lời kể và xưng hô theo cặp bằng AI, rồi bấm Hoàn thành để ghi tất cả vào hồ sơ (có thể hoàn tác)"/>
                                <Button x:Name="AddCharacterButton" Content="Thêm" Click="OnAddCharacter"/>
                                <Button x:Name="EditCharacterButton" Content="Sửa" Click="OnEditCharacter"/>
@@ -827,7 +829,7 @@
                                    </Border>
                                </Popup>
                            </WrapPanel>
-                           <DataGrid x:Name="CharactersGrid" AutoGenerateColumns="False" IsReadOnly="False" SelectionMode="Single" SelectionChanged="OnCharacterSelected" Height="430" CanUserAddRows="False" AutomationProperties.Name="Danh sách nhân vật">
+                           <DataGrid x:Name="CharactersGrid" Grid.Row="4" MinHeight="160" AutoGenerateColumns="False" IsReadOnly="False" SelectionMode="Single" SelectionChanged="OnCharacterSelected" CanUserAddRows="False" AutomationProperties.Name="Danh sách nhân vật">
                                <DataGrid.Columns>
                                    <DataGridTextColumn Header="Nhân vật" IsReadOnly="True" Binding="{Binding VietnameseName}" Width="2*"/>
                                    <DataGridTextColumn Header="Tên Trung" IsReadOnly="True" Binding="{Binding ChineseName}" Width="2*"/>
@@ -839,8 +841,7 @@
                                    <DataGridCheckBoxColumn Header="Bật" Binding="{Binding NormalizationEnabled}" Width="65"/>
                                </DataGrid.Columns>
                            </DataGrid>
-                       </StackPanel>
-                   </ScrollViewer>
+                   </Grid>
                    <Border Grid.Row="1" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,8" Margin="0,8,0,0">
                        <DockPanel>
                            <Button x:Name="ResourcesSaveButton" DockPanel.Dock="Right" Content="Lưu tài nguyên" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu từ điển, ngữ cảnh, nhân vật và preset của Project (cấu hình AI đang sửa cũng được lưu cùng lúc)"/>

@@ -109,6 +109,39 @@ public sealed class Phase5SettingsCleanupUiTests
         return Task.CompletedTask;
     });
 
+    [Theory]
+    [InlineData("Dictionary", "GlossaryGrid")]
+    [InlineData("Characters", "CharactersGrid")]
+    public Task Resource_tables_fill_the_height_the_window_leaves(string section, string gridName) => StaHost.Run(() =>
+    {
+        using var fixture = new WorkspaceFixture();
+        fixture.Call("ShowResourcesWorkspace", section);
+        var root = (FrameworkElement)fixture.Window.FindName("ResourcesWorkspaceRoot");
+        var grid = (DataGrid)fixture.Window.FindName(gridName);
+        Assert.Null(FindAncestor<ScrollViewer>(grid));
+
+        double Layout(double height)
+        {
+            var size = new Size(1500, height);
+            root.Measure(size);
+            root.Arrange(new Rect(size));
+            root.UpdateLayout();
+            return grid.ActualHeight;
+        }
+        double tall = Layout(1000), short_ = Layout(600);
+        Assert.True(tall > 450, $"{gridName} chỉ cao {tall:0} px ở cửa sổ 1000 px: không dùng hết chỗ trống");
+        Assert.True(tall - short_ > 300, $"{gridName} không co giãn theo chiều cao cửa sổ ({short_:0} → {tall:0})");
+        return Task.CompletedTask;
+    });
+
+    private static T? FindAncestor<T>(DependencyObject element) where T : DependencyObject
+    {
+        for (DependencyObject? current = LogicalTreeHelper.GetParent(element); current is not null;
+             current = LogicalTreeHelper.GetParent(current))
+            if (current is T match) return match;
+        return null;
+    }
+
     private static void AssertOnlyPanelVisible(WorkspaceFixture fixture, (string Tag, string Panel)[] sections, string visible)
     {
         foreach ((_, string panel) in sections)
