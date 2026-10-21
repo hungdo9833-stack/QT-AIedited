@@ -109,6 +109,37 @@ public sealed class GpuManagerUiTests
         finally { window.Close(); Directory.Delete(root, true); }
     });
 
+    [Fact]
+    public Task Importing_an_rdp_file_fills_the_ssh_fields_and_drops_the_old_host_fingerprint() => StaHost.Run(async () =>
+    {
+        string root = CreateTestRoot();
+        using var backends = CreateBackendManager(root);
+        await using var connections = new GpuConnectionManager(new NoConnectionService(), (_, _) => new StubClient());
+        var window = new GpuManagerWindow(backends, connections);
+        try
+        {
+            var autoButton = (Button)window.FindName("AutoSetupButton");
+            Assert.NotNull(window.FindName("ImportRdpButton"));
+            Assert.True(autoButton.IsEnabled);
+
+            window.GetType().GetMethod("OnNewProfile", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(window, [null!, null!]);
+            ((TextBox)window.FindName("FingerprintInput")).Text = "SHA256:abcdefghijklmnopqrstuv";
+            ((TextBox)window.FindName("HostInput")).Text = "old.example.test";
+
+            window.ApplyRdpFile(RdpConnectionFile.Parse(
+                "full address:s:203.0.113.7:33890\nusername:s:WIN-GPU\\Administrator"), @"C:\gpu.rdp");
+
+            Assert.Equal("203.0.113.7", ((TextBox)window.FindName("HostInput")).Text);
+            Assert.Equal("22", ((TextBox)window.FindName("PortInput")).Text);
+            Assert.Equal("Administrator", ((TextBox)window.FindName("UsernameInput")).Text);
+            Assert.Equal("", ((TextBox)window.FindName("FingerprintInput")).Text);
+            Assert.True(((Expander)window.FindName("AdvancedConnectionExpander")).IsExpanded);
+            Assert.Contains("33890", ((TextBlock)window.FindName("StatusText")).Text);
+        }
+        finally { window.Close(); Directory.Delete(root, true); }
+    });
+
     private static string CreateTestRoot()
     {
         string root = Path.Combine(Path.GetTempPath(), "qtaie-gpu-ui-" + Guid.NewGuid().ToString("N"));

@@ -11,6 +11,16 @@ public sealed class RemoteOllamaSetupService
     {
         ArgumentNullException.ThrowIfNull(session);
         SshCommandResult os = await session.ExecuteAsync(SshOperation.ReadOperatingSystem, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (!os.Success)
+        {
+            // /etc/os-release is missing: either a Windows host (OpenSSH for Windows) or something we cannot set up.
+            SshCommandResult version = await session.ExecuteAsync(SshOperation.ReadWindowsVersion, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (version.Output.Contains("Windows", StringComparison.OrdinalIgnoreCase))
+                return await InspectWindowsAsync(session, cancellationToken).ConfigureAwait(false);
+            return new(os.Error.Trim().Length == 0 ? "Hệ điều hành không xác định" : os.Error.Trim(), null, null, null,
+                false, false, [], false, "Không nhận diện được hệ điều hành máy thuê (chỉ hỗ trợ Ubuntu và Windows).",
+                RemoteOsFamily.Unknown);
+        }
         SshCommandResult gpu = await session.ExecuteAsync(SshOperation.ReadNvidiaGpu, cancellationToken: cancellationToken).ConfigureAwait(false);
         SshCommandResult disk = await session.ExecuteAsync(SshOperation.ReadRootDisk, cancellationToken: cancellationToken).ConfigureAwait(false);
         SshCommandResult ollama = await session.ExecuteAsync(SshOperation.FindOllama, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -27,6 +37,31 @@ public sealed class RemoteOllamaSetupService
             service.Success && service.Output.Trim().Equals("active", StringComparison.OrdinalIgnoreCase),
             ParseModels(models.Output), ubuntu,
             !ubuntu && !ollama.Success ? "Tự động cài Ollama hiện chỉ hỗ trợ Ubuntu." : null);
+    }
+
+    private static async Task<RemoteGpuInspection> InspectWindowsAsync(ISshSession session,
+        CancellationToken cancellationToken)
+    {
+        SshCommandResult info = await session.ExecuteAsync(SshOperation.ReadWindowsInfo, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult gpu = await session.ExecuteAsync(SshOperation.ReadNvidiaGpuWindows, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult disk = await session.ExecuteAsync(SshOperation.ReadSystemDiskWindows, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult ollama = await session.ExecuteAsync(SshOperation.FindOllamaWindows, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult service = await session.ExecuteAsync(SshOperation.ReadOllamaServiceWindows, cancellationToken: cancellationToken).ConfigureAwait(false);
+        bool active = service.Success && service.Output.Trim().Equals("active", StringComparison.OrdinalIgnoreCase);
+        SshCommandResult models = active
+            ? await session.ExecuteAsync(SshOperation.ListOllamaModelsWindows, cancellationToken: cancellationToken).ConfigureAwait(false)
+            : new(1, "", "");
+        string gpuText = gpu.Output.Trim();
+        bool noNvidia = gpuText.StartsWith("NONVIDIA:", StringComparison.Ordinal) || !gpu.Success;
+        (string? gpuName, long? vram) = noNvidia ? (null, null) : ParseGpu(gpu.Output);
+        string system = info.Output.Trim().Length == 0 ? "Windows" : info.Output.Trim();
+        string? blocked = noNvidia
+            ? "Máy Windows này chưa có driver NVIDIA (không có nvidia-smi). Hãy nhờ bên cho thuê cài driver rồi thử lại."
+            : null;
+        long? free = long.TryParse(disk.Output.Trim(), out long freeBytes) ? freeBytes : null;
+        // Ollama can be present from an earlier QT Studio setup even when the service is stopped.
+        return new(system, gpuName, vram, free, ollama.Success || active, active, ParseModels(models.Output),
+            blocked is null, blocked, RemoteOsFamily.Windows);
     }
 
     public async Task<SshCommandResult> ExecuteConfirmedAsync(ISshSession session, RemoteSetupAction action,

@@ -17,7 +17,19 @@ public enum SshOperation
     ListOllamaModels,
     InstallOllamaUbuntu,
     StartOllamaService,
-    PullOllamaModel
+    PullOllamaModel,
+    // Windows hosts (rented GPU machines that expose the OpenSSH server).
+    ReadWindowsVersion,
+    ReadWindowsInfo,
+    ReadNvidiaGpuWindows,
+    ReadSystemDiskWindows,
+    FindOllamaWindows,
+    ReadOllamaServiceWindows,
+    ListOllamaModelsWindows,
+    WriteWindowsProvisionChunk,
+    FinalizeWindowsProvisionScript,
+    StartWindowsProvision,
+    ReadWindowsProvisionStatus
 }
 
 public interface ISshTunnel : IAsyncDisposable
@@ -226,8 +238,31 @@ internal static partial class SshCommands
         SshOperation.StartOllamaService =>
             (sudoStdin ? "sudo -S -p ''" : "sudo -n") + " systemctl enable --now ollama",
         SshOperation.PullOllamaModel => "ollama pull " + QuoteModel(argument),
+        SshOperation.ReadWindowsVersion => "cmd /c ver",
+        SshOperation.ReadWindowsInfo => WindowsRemoteScripts.Encode(WindowsRemoteScripts.ReadInfo),
+        SshOperation.ReadNvidiaGpuWindows => WindowsRemoteScripts.Encode(WindowsRemoteScripts.ReadGpu),
+        SshOperation.ReadSystemDiskWindows => WindowsRemoteScripts.Encode(WindowsRemoteScripts.ReadFreeDisk),
+        SshOperation.FindOllamaWindows => WindowsRemoteScripts.Encode(WindowsRemoteScripts.FindOllama),
+        SshOperation.ReadOllamaServiceWindows => WindowsRemoteScripts.Encode(WindowsRemoteScripts.ReadOllamaService),
+        SshOperation.ListOllamaModelsWindows => WindowsRemoteScripts.Encode(WindowsRemoteScripts.ListModels),
+        SshOperation.WriteWindowsProvisionChunk => WindowsRemoteScripts.Encode(ProvisionChunk(argument)),
+        SshOperation.FinalizeWindowsProvisionScript => WindowsRemoteScripts.Encode(WindowsRemoteScripts.FinalizeProvisionScript),
+        SshOperation.StartWindowsProvision => WindowsRemoteScripts.Encode(WindowsRemoteScripts.StartProvision),
+        SshOperation.ReadWindowsProvisionStatus => WindowsRemoteScripts.Encode(WindowsRemoteScripts.ReadProvisionStatus),
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
     };
+
+    private static string ProvisionChunk(string? argument)
+    {
+        // "<index>:<base64>" — the only caller-controlled text that reaches a Windows command line.
+        Match match = ChunkRegex().Match(argument ?? "");
+        if (!match.Success) throw new ArgumentException("Đoạn script provisioning không hợp lệ.", nameof(argument));
+        return WindowsRemoteScripts.WriteProvisionChunk(int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+            match.Groups[2].Value);
+    }
+
+    [GeneratedRegex(@"^(\d{1,4}):([A-Za-z0-9+/]{1,2100}={0,2})$", RegexOptions.CultureInvariant)]
+    private static partial Regex ChunkRegex();
 
     private static string QuoteModel(string? model)
     {

@@ -17,6 +17,10 @@ public partial class GpuManagerWindow : Window
     private readonly RemoteOllamaSetupService _setup = new();
     private readonly RemoteOllamaModelPullService _modelPull = new();
     private readonly LocalOllamaService _local = new();
+    private readonly RemoteHostProbe _probe = new();
+    private readonly RemoteOllamaAutoSetup _autoSetup = new();
+    private int? _rdpPort;
+    private string? _rdpFilePath;
     private readonly ObservableCollection<OllamaBackendProfile> _profiles = [];
     private string? _loadedPrivateKey;
     private CancellationTokenSource? _setupCancellation;
@@ -97,12 +101,14 @@ public partial class GpuManagerWindow : Window
             PasswordInput.Password = ssh.Password ?? ""; PrivateKeyInput.Password = string.IsNullOrEmpty(ssh.PrivateKey) ? "" : "••••••••";
             PrivateKeyPassphraseInput.Password = ssh.PrivateKeyPassphrase ?? ""; _loadedPrivateKey = ssh.PrivateKey;
             FingerprintInput.Text = ssh.HostKeyFingerprint ?? ""; RemoteOllamaPortInput.Text = ssh.RemoteOllamaPort.ToString(CultureInfo.InvariantCulture);
+            _rdpPort = ssh.RdpPort; _rdpFilePath = ssh.RdpFilePath;
         }
         else
         {
             HostInput.Text = ""; PortInput.Text = "22"; UsernameInput.Text = "ubuntu"; AuthenticationInput.SelectedIndex = 0;
             PasswordInput.Password = PrivateKeyInput.Password = PrivateKeyPassphraseInput.Password = ""; _loadedPrivateKey = null;
             FingerprintInput.Text = ""; RemoteOllamaPortInput.Text = "11434";
+            _rdpPort = null; _rdpFilePath = null;
         }
         HourlyPriceInput.Text = (profile.HourlyPrice ?? 0).ToString(CultureInfo.InvariantCulture);
         StatusText.Text = remote ? _connections.GetStatus(profile.Id).Message : "Ollama Local trên máy Windows này.";
@@ -181,6 +187,12 @@ public partial class GpuManagerWindow : Window
             StatusText.Text = "Connected · Ollama Active · Model Installed · Ready.";
             return;
         }
+        await ConnectSshAsync(profile);
+    });
+
+    /// <summary>Opens the SSH tunnel for the profile, asking once to trust a new host key. Returns whether it is connected.</summary>
+    private async Task<bool> ConnectSshAsync(OllamaBackendProfile profile)
+    {
         try
         {
             await _backends.SaveProfileAsync(profile, activate: false);
@@ -189,6 +201,7 @@ public partial class GpuManagerWindow : Window
             await _backends.ActivateAsync(profile.Id);
             _preferences.RemoteProfileId = profile.Id;
             RefreshProfiles(profile.Id); StatusText.Text = "Đã kết nối SSH tunnel loopback. Profile đang sẵn sàng.";
+            return true;
         }
         catch (SshHostKeyVerificationException error)
         {
@@ -207,9 +220,11 @@ public partial class GpuManagerWindow : Window
                 _preferences.RemoteProfileId = confirmedProfile.Id;
                 RefreshProfiles(confirmedProfile.Id);
                 StatusText.Text = "Đã xác nhận SSH Fingerprint, lưu profile và kết nối tunnel sẵn sàng.";
+                return true;
             }
+            return false;
         }
-    });
+    }
 
     private async void OnDisconnect(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
@@ -238,12 +253,165 @@ public partial class GpuManagerWindow : Window
         }
         if (!_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
             throw new InvalidOperationException("Hãy kết nối SSH trước khi kiểm tra server.");
-        RemoteGpuInspection result = await _setup.InspectAsync(handle.Session);
-        InspectionText.Text = $"{result.OperatingSystem}\n{result.GpuName ?? "Không đọc được GPU"} · " +
-            $"VRAM {(result.VramBytes ?? 0) / 1024d / 1024d / 1024d:0.0} GB · Trống {(result.FreeDiskBytes ?? 0) / 1024d / 1024d / 1024d:0.0} GB\n" +
-            $"Ollama: {(result.OllamaInstalled ? "đã cài" : "chưa cài")} · Service: {(result.OllamaServiceActive ? "active" : "inactive")}\n" +
-            $"Models: {(result.Models.Count == 0 ? "chưa có" : string.Join(", ", result.Models))}";
+        InspectionText.Text = DescribeInspection(await _setup.InspectAsync(handle.Session));
     });
+
+    private static string DescribeInspection(RemoteGpuInspection result) =>
+        $"{result.OperatingSystem}\n{result.GpuName ?? "Không đọc được GPU"} · " +
+        $"VRAM {(result.VramBytes ?? 0) / 1024d / 1024d / 1024d:0.0} GB · Trống {(result.FreeDiskBytes ?? 0) / 1024d / 1024d / 1024d:0.0} GB\n" +
+        $"Ollama: {(result.OllamaInstalled ? "đã cài" : "chưa cài")} · Service: {(result.OllamaServiceActive ? "active" : "inactive")}\n" +
+        $"Models: {(result.Models.Count == 0 ? "chưa có" : string.Join(", ", result.Models))}" +
+        (result.BlockedReason is null ? "" : "\n" + result.BlockedReason);
+
+    private void OnImportRdp(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Filter = "Remote Desktop|*.rdp|Tất cả tệp|*.*" };
+        if (dialog.ShowDialog(this) != true) return;
+        try { ApplyRdpFile(RdpConnectionFile.Load(dialog.FileName), dialog.FileName); }
+        catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException)
+        { StatusText.Text = error.Message; }
+    }
+
+    /// <summary>Fills the connection fields from the provider's .rdp file; the password still has to be typed.</summary>
+    internal void ApplyRdpFile(RdpConnectionFile file, string path)
+    {
+        if (ProfileList.SelectedItem is not OllamaBackendProfile { Kind: OllamaBackendKind.Remote })
+        { StatusText.Text = "Hãy chọn hoặc thêm một profile GPU Remote trước khi nhập file RDP."; return; }
+        // A different machine has a different host key, so the pinned fingerprint must not carry over.
+        if (!string.Equals(HostInput.Text.Trim(), file.Host, StringComparison.OrdinalIgnoreCase)) FingerprintInput.Text = "";
+        ConnectionTypeInput.SelectedIndex = 0;
+        HostInput.Text = file.Host;
+        PortInput.Text = "22";
+        UsernameInput.Text = file.SshUsername ?? "Administrator";
+        AuthenticationInput.SelectedIndex = 0;
+        _rdpPort = file.Port; _rdpFilePath = path;
+        AdvancedConnectionExpander.IsExpanded = true;
+        StatusText.Text = $"Đã đọc file RDP: {file.Host} (RDP cổng {file.Port}), tài khoản {UsernameInput.Text}. " +
+            "Nhập mật khẩu quản trị rồi bấm “Tự nhận diện & cài tự động”." +
+            (file.GatewayHost is null ? "" : $" Lưu ý: file dùng RD Gateway ({file.GatewayHost}); QT Studio không đi qua gateway nên cổng SSH phải truy cập trực tiếp được.");
+    }
+
+    private async void OnAutoSetup(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        _busy = true;
+        AutoSetupButton.IsEnabled = false;
+        CancelSetupButton.IsEnabled = true;
+        ModelPullProgress.Visibility = Visibility.Visible;
+        ModelPullProgress.IsIndeterminate = true;
+        using var cancellation = new CancellationTokenSource();
+        _setupCancellation = cancellation;
+        try
+        {
+            OllamaBackendProfile profile = ReadProfile();
+            if (profile.Kind != OllamaBackendKind.Remote || profile.Ssh is null)
+            { StatusText.Text = "Cài đặt tự động dành cho profile GPU Remote qua SSH."; return; }
+            string model = profile.Model;
+            if (!await EnsureSshReachableAsync(profile, cancellation.Token)) return;
+            if (ThemedDialog.Show(this,
+                    $"QT Studio sẽ kết nối SSH tới {profile.Ssh.Host}, nhận diện Ubuntu hoặc Windows, cài Ollama nếu máy chưa có và tải model “{model}”.\n\n" +
+                    "Không cài hay nâng cấp driver NVIDIA. Nhà cung cấp có thể tính phí mạng và thời gian thuê trong lúc cài. Tiếp tục?",
+                    "Xác nhận cài đặt tự động", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+
+            profile = ReadProfile(); // The port may have been corrected while checking.
+            StatusText.Text = "Đang kết nối SSH…";
+            if (!await ConnectSshAsync(profile)) return;
+            if (!_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
+            { StatusText.Text = "Chưa có kết nối SSH."; return; }
+
+            var progress = new Progress<AutoSetupProgress>(UpdateAutoSetupProgress);
+            AutoSetupResult result = await _autoSetup.RunAsync(handle.Session, handle.TunnelEndpoint, model,
+                () => Dispatcher.Invoke(() => RequestSudoPassword(profile)), progress, cancellation.Token);
+            if (result.Inspection is not null) InspectionText.Text = DescribeInspection(result.Inspection);
+            ModelPullProgress.IsIndeterminate = false;
+            ModelPullProgress.Value = result.Success ? 100 : ModelPullProgress.Value;
+            StatusText.Text = result.Message;
+        }
+        catch (OperationCanceledException) { StatusText.Text = "Đã hủy cài đặt tự động. Máy thuê giữ nguyên những gì đã cài xong."; }
+        catch (Exception error) { StatusText.Text = error.Message; }
+        finally
+        {
+            if (ReferenceEquals(_setupCancellation, cancellation)) _setupCancellation = null;
+            AutoSetupButton.IsEnabled = true; CancelSetupButton.IsEnabled = false; _busy = false;
+        }
+    }
+
+    private void UpdateAutoSetupProgress(AutoSetupProgress step)
+    {
+        if (step.Percent is double percent)
+        {
+            ModelPullProgress.IsIndeterminate = false;
+            ModelPullProgress.Value = percent;
+        }
+        else ModelPullProgress.IsIndeterminate = true;
+        StatusText.Text = step.Message + " · có thể hủy";
+    }
+
+    /// <summary>
+    /// Makes sure the SSH port answers. A Windows rental that only opens Remote Desktop gets a one-line OpenSSH
+    /// bootstrap to paste into its own PowerShell; the check then continues by itself once SSH appears.
+    /// </summary>
+    private async Task<bool> EnsureSshReachableAsync(OllamaBackendProfile profile, CancellationToken cancellationToken)
+    {
+        GpuSshSettings ssh = profile.Ssh!;
+        int sshPort = ssh.Port;
+        int rdpPort = ssh.RdpPort ?? RdpConnectionFile.DefaultPort;
+        StatusText.Text = $"Đang nhận diện {ssh.Host}:{ssh.Port}…";
+        RemoteHostProbeResult probe = await _probe.ProbeAsync(ssh.Host, ssh.Port, cancellationToken);
+        if (probe.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = probe.Message; return true; }
+        if (probe.Kind == RemoteEndpointKind.Rdp)
+        {
+            // The Remote Desktop port was typed where the SSH port belongs: remember it and look for SSH on 22.
+            rdpPort = ssh.Port; sshPort = 22;
+            _rdpPort = rdpPort; PortInput.Text = "22";
+        }
+        else
+        {
+            if (rdpPort == ssh.Port) { StatusText.Text = probe.Message; return false; }
+            RemoteHostProbeResult rdp = await _probe.ProbeAsync(ssh.Host, rdpPort, cancellationToken);
+            if (rdp.Kind != RemoteEndpointKind.Rdp)
+            { StatusText.Text = probe.Message + $" Cổng RDP {rdpPort}: {rdp.Message}"; return false; }
+        }
+
+        if (ThemedDialog.Show(this,
+                $"{ssh.Host} đang mở Remote Desktop (RDP) nhưng chưa có SSH, nên QT Studio chưa thể nhận diện và cài đặt.\n\n" +
+                "Nếu tiếp tục, QT Studio sẽ:\n" +
+                "1. Sao chép vào clipboard một dòng lệnh bật OpenSSH Server trên Windows (không cài thứ gì khác).\n" +
+                "2. Mở Remote Desktop bằng file RDP của nhà cung cấp.\n" +
+                "3. Bạn đăng nhập, mở PowerShell bằng Run as administrator, nhấp chuột phải để dán rồi nhấn Enter.\n" +
+                $"4. QT Studio tự phát hiện SSH ở cổng {sshPort} rồi làm tiếp.\n\n" +
+                "Lưu ý: nhà cung cấp phải cho phép truy cập cổng SSH đó từ Internet.",
+                "Máy Windows chưa bật SSH", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        { StatusText.Text = "Đã hủy. Chưa có SSH nên chưa cài được."; return false; }
+
+        try { Clipboard.SetDataObject(WindowsRemoteScripts.BuildOpenSshBootstrapCommand(sshPort), true); }
+        catch (System.Runtime.InteropServices.ExternalException)
+        { StatusText.Text = "Không sao chép được vào clipboard. Đóng ứng dụng đang giữ clipboard rồi thử lại."; return false; }
+        LaunchRemoteDesktop(ssh.Host, rdpPort);
+
+        DateTime deadline = DateTime.UtcNow.AddMinutes(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TimeSpan left = deadline - DateTime.UtcNow;
+            StatusText.Text = $"Đã sao chép lệnh. Hãy dán vào PowerShell (Run as administrator) trên máy thuê… đang chờ SSH cổng {sshPort} " +
+                $"(còn {left.Minutes}:{left.Seconds:00}) · có thể hủy";
+            RemoteHostProbeResult check = await _probe.ProbeAsync(ssh.Host, sshPort, cancellationToken);
+            if (check.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = "Đã thấy SSH trên máy thuê."; return true; }
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+        }
+        StatusText.Text = $"Chưa thấy SSH ở cổng {sshPort} sau 10 phút. Nếu lệnh đã chạy xong, nhà cung cấp có thể chưa mở cổng này ra Internet.";
+        return false;
+    }
+
+    private void LaunchRemoteDesktop(string host, int port)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("mstsc.exe");
+        if (_rdpFilePath is not null && File.Exists(_rdpFilePath)) start.ArgumentList.Add(_rdpFilePath);
+        else start.ArgumentList.Add($"/v:{host}:{port}");
+        try { System.Diagnostics.Process.Start(start)?.Dispose(); }
+        catch (System.ComponentModel.Win32Exception) { StatusText.Text = "Không mở được Remote Desktop (mstsc.exe)."; }
+    }
 
     private async void OnInstallOllama(object sender, RoutedEventArgs e) => await ConfirmSetupAsync(RemoteSetupAction.InstallOllamaUbuntu,
         "Cài Ollama bằng script chính thức trên Ubuntu? QT Studio sẽ không cài hoặc nâng cấp driver NVIDIA.");
@@ -419,7 +587,8 @@ public partial class GpuManagerWindow : Window
                 Authentication = AuthenticationInput.SelectedIndex == 1 ? SshAuthenticationKind.PrivateKey : SshAuthenticationKind.Password,
                 Password = PasswordInput.Password, PrivateKey = _loadedPrivateKey,
                 PrivateKeyPassphrase = PrivateKeyPassphraseInput.Password, HostKeyFingerprint = FingerprintInput.Text,
-                RemoteOllamaPort = int.Parse(RemoteOllamaPortInput.Text, CultureInfo.InvariantCulture)
+                RemoteOllamaPort = int.Parse(RemoteOllamaPortInput.Text, CultureInfo.InvariantCulture),
+                RdpPort = _rdpPort, RdpFilePath = _rdpFilePath
             };
         }
         profile.Validate(); return profile;

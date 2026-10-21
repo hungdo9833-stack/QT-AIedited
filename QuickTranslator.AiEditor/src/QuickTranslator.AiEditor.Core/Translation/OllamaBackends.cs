@@ -203,7 +203,8 @@ public class OllamaProfileStore
             {
                 Host = profile.Ssh.Host, Port = profile.Ssh.Port, Username = profile.Ssh.Username,
                 Authentication = profile.Ssh.Authentication, HostKeyFingerprint = profile.Ssh.HostKeyFingerprint,
-                RemoteOllamaPort = profile.Ssh.RemoteOllamaPort, ProtectedPassword = Protect(profile.Ssh.Password),
+                RemoteOllamaPort = profile.Ssh.RemoteOllamaPort, RdpPort = profile.Ssh.RdpPort,
+                RdpFilePath = profile.Ssh.RdpFilePath, ProtectedPassword = Protect(profile.Ssh.Password),
                 ProtectedPrivateKey = Protect(profile.Ssh.PrivateKey),
                 ProtectedPrivateKeyPassphrase = Protect(profile.Ssh.PrivateKeyPassphrase)
             }
@@ -226,7 +227,8 @@ public class OllamaProfileStore
                 {
                     Host = profile.Ssh.Host, Port = profile.Ssh.Port, Username = profile.Ssh.Username,
                     Authentication = profile.Ssh.Authentication, HostKeyFingerprint = profile.Ssh.HostKeyFingerprint,
-                    RemoteOllamaPort = profile.Ssh.RemoteOllamaPort, Password = Unprotect(profile.Ssh.ProtectedPassword),
+                    RemoteOllamaPort = profile.Ssh.RemoteOllamaPort, RdpPort = profile.Ssh.RdpPort,
+                    RdpFilePath = profile.Ssh.RdpFilePath, Password = Unprotect(profile.Ssh.ProtectedPassword),
                     PrivateKey = Unprotect(profile.Ssh.ProtectedPrivateKey),
                     PrivateKeyPassphrase = Unprotect(profile.Ssh.ProtectedPrivateKeyPassphrase)
                 }
@@ -275,6 +277,8 @@ public class OllamaProfileStore
         public SshAuthenticationKind Authentication { get; set; }
         public string? HostKeyFingerprint { get; set; }
         public int RemoteOllamaPort { get; set; } = 11434;
+        public int? RdpPort { get; set; }
+        public string? RdpFilePath { get; set; }
         public string? ProtectedPassword { get; set; }
         public string? ProtectedPrivateKey { get; set; }
         public string? ProtectedPrivateKeyPassphrase { get; set; }

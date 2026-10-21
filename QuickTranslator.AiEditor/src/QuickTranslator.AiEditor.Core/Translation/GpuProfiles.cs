@@ -5,6 +5,7 @@ namespace QuickTranslator.AiEditor.Core.Translation;
 public enum SshAuthenticationKind { Password, PrivateKey }
 public enum GpuConnectionState { Disconnected, Connecting, TrustRequired, Connected, Reconnecting, Offline, Blocked, Error }
 public enum RemoteSetupAction { InstallOllamaUbuntu, StartOllamaService, PullModel }
+public enum RemoteOsFamily { Linux, Windows, Unknown }
 
 public sealed class GpuSshSettings
 {
@@ -14,6 +15,9 @@ public sealed class GpuSshSettings
     public SshAuthenticationKind Authentication { get; set; }
     public string? HostKeyFingerprint { get; set; }
     public int RemoteOllamaPort { get; set; } = 11434;
+    // Windows rentals: the provider's Remote Desktop port and .rdp file, used to switch on OpenSSH when SSH is closed.
+    public int? RdpPort { get; set; }
+    public string? RdpFilePath { get; set; }
     [JsonIgnore] public string? Password { get; set; }
     [JsonIgnore] public string? PrivateKey { get; set; }
     [JsonIgnore] public string? PrivateKeyPassphrase { get; set; }
@@ -23,7 +27,7 @@ public sealed class GpuSshSettings
         if (string.IsNullOrWhiteSpace(Host) || Host.Length > 253 || Host.Any(char.IsWhiteSpace) ||
             Host.Contains('/') || Host.Contains('@') || Host.Any(char.IsControl) || Port is < 1 or > 65535 ||
             string.IsNullOrWhiteSpace(Username) || Username.Length > 128 || Username.Any(char.IsControl) ||
-            !Enum.IsDefined(Authentication) || RemoteOllamaPort is < 1 or > 65535)
+            !Enum.IsDefined(Authentication) || RemoteOllamaPort is < 1 or > 65535 || RdpPort is < 1 or > 65535)
             throw new InvalidDataException("Cấu hình SSH thiếu host, port hoặc username hợp lệ.");
         if (requireTrustedHost && string.IsNullOrWhiteSpace(HostKeyFingerprint))
             throw new InvalidOperationException("Chưa có SSH host-key fingerprint đã đối chiếu ngoài băng.");
@@ -46,7 +50,7 @@ public sealed class GpuSshSettings
     {
         Host = Host, Port = Port, Username = Username, Authentication = Authentication,
         HostKeyFingerprint = HostKeyFingerprint, RemoteOllamaPort = RemoteOllamaPort,
-        Password = Password, PrivateKey = PrivateKey, PrivateKeyPassphrase = PrivateKeyPassphrase
+        RdpPort = RdpPort, RdpFilePath = RdpFilePath, Password = Password, PrivateKey = PrivateKey, PrivateKeyPassphrase = PrivateKeyPassphrase
     };
 
     public static string NormalizeFingerprint(string value)
@@ -69,7 +73,7 @@ public sealed record GpuProfileStatus(Guid ProfileId, GpuConnectionState State, 
 
 public sealed record RemoteGpuInspection(string OperatingSystem, string? GpuName, long? VramBytes,
     long? FreeDiskBytes, bool OllamaInstalled, bool OllamaServiceActive, IReadOnlyList<string> Models,
-    bool SupportsAutomaticSetup, string? BlockedReason = null);
+    bool SupportsAutomaticSetup, string? BlockedReason = null, RemoteOsFamily OsFamily = RemoteOsFamily.Linux);
 
 public sealed record SshCommandResult(int ExitStatus, string Output, string Error)
 {
