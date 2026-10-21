@@ -180,6 +180,7 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
         ChapterQueueRunId = item.ChapterQueueRunId,
         AssignedWorkerId = item.AssignedWorkerId,
         SourceHanCharacters = item.SourceHanCharacters,
+        CompletedHanCharacters = item.CompletedHanCharacters,
         TotalSegments = item.TotalSegments,
         CompletedSegments = item.CompletedSegments,
         ErrorSegments = item.ErrorSegments,
@@ -187,6 +188,9 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
         FinishedAt = item.FinishedAt,
         Error = item.Error,
         WorkerMetricsRecorded = item.WorkerMetricsRecorded,
+        WorkerMetricsStartedAt = item.WorkerMetricsStartedAt,
+        RecordedWorkerAttemptIds = item.RecordedWorkerAttemptIds is null ? null : [.. item.RecordedWorkerAttemptIds],
+        RecordedWorkerSegmentIds = item.RecordedWorkerSegmentIds is null ? null : [.. item.RecordedWorkerSegmentIds],
         Disposition = item.Disposition,
         EligibilityDiagnostics = item.EligibilityDiagnostics.Select(diagnostic => diagnostic with
         {

@@ -86,6 +86,7 @@ public sealed class ProjectTranslationItem
     public Guid? ChapterQueueRunId { get; set; }
     public Guid? AssignedWorkerId { get; set; }
     public int SourceHanCharacters { get; set; }
+    public int CompletedHanCharacters { get; set; }
     public int TotalSegments { get; set; }
     public int CompletedSegments { get; set; }
     public int ErrorSegments { get; set; }
@@ -93,6 +94,9 @@ public sealed class ProjectTranslationItem
     public DateTimeOffset? FinishedAt { get; set; }
     public string? Error { get; set; }
     public bool WorkerMetricsRecorded { get; set; }
+    public DateTimeOffset? WorkerMetricsStartedAt { get; set; }
+    public List<Guid>? RecordedWorkerAttemptIds { get; set; }
+    public List<Guid>? RecordedWorkerSegmentIds { get; set; }
     public ProjectTranslationItemDisposition Disposition { get; set; }
     public List<TranslationEligibilityDiagnostic> EligibilityDiagnostics { get; set; } = [];
 
@@ -102,8 +106,13 @@ public sealed class ProjectTranslationItem
             !Enum.IsDefined(Status) || SourceFingerprint.Length != 64 || ProtectedFingerprint.Length != 64 ||
             PreflightWarning?.Length > 4000 ||
             !Enum.IsDefined(Disposition) || EligibilityDiagnostics is null || EligibilityDiagnostics.Count > 8 ||
+            RecordedWorkerAttemptIds is { } attemptIds && (attemptIds.Any(id => id == Guid.Empty) ||
+                attemptIds.Distinct().Count() != attemptIds.Count) ||
+            RecordedWorkerSegmentIds is { } segmentIds && (segmentIds.Any(id => id == Guid.Empty) ||
+                segmentIds.Distinct().Count() != segmentIds.Count) ||
             TotalSegments < 0 || CompletedSegments < 0 ||
-            CompletedSegments > TotalSegments || ErrorSegments < 0 || ErrorSegments > TotalSegments || SourceHanCharacters < 0)
+            CompletedSegments > TotalSegments || ErrorSegments < 0 || ErrorSegments > TotalSegments ||
+            SourceHanCharacters < 0 || CompletedHanCharacters < 0 || CompletedHanCharacters > SourceHanCharacters)
             throw new InvalidDataException("Item trong Project translation job không hợp lệ.");
         foreach (TranslationEligibilityDiagnostic diagnostic in EligibilityDiagnostics)
             diagnostic.Validate(ChapterId);
@@ -223,7 +232,8 @@ public sealed record ProjectTranslationWorkerProgress(Guid WorkerId, string Name
     ProjectTranslationWorkerStatus Status, Guid? CurrentChapterId, string? CurrentChapterTitle,
     int CompletedSegments, int TotalSegments, double HanCharactersPerMinute,
     int CompletedChapters, int FailedChapters, decimal EstimatedCost, string? Error,
-    double TokensPerSecond = 0, long InputTokens = 0, long OutputTokens = 0,
+    double TotalTokensPerSecond = 0, double PerSlotTokensPerSecond = 0,
+    long InputTokens = 0, long OutputTokens = 0,
     int ErrorSegments = 0, int TruncatedOutputCount = 0,
     int PossibleMissingContentCount = 0, int TimeoutCount = 0)
 {
@@ -233,7 +243,8 @@ public sealed record ProjectTranslationWorkerProgress(Guid WorkerId, string Name
 }
 
 public sealed record ProjectTranslationAggregateMetrics(double HanCharactersPerMinute,
-    TimeSpan? EstimatedRemaining, decimal EstimatedCost);
+    TimeSpan? EstimatedRemaining, decimal EstimatedCost, double TotalTokensPerSecond = 0,
+    double PerSlotTokensPerSecond = 0, int Slots = 0);
 
 public sealed record ProjectTranslationViewSnapshot(ProjectTranslationJob Job,
     ProjectTranslationProgress Progress, IReadOnlyList<ProjectTranslationWorkerProgress> Workers,

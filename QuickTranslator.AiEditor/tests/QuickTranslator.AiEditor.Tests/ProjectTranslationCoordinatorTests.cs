@@ -1035,12 +1035,131 @@ public sealed class ProjectTranslationCoordinatorTests
                 workerNode!.AsObject().Remove("runningChapterIds");
                 workerNode.AsObject().Remove("slots");
             }
+            foreach (System.Text.Json.Nodes.JsonNode? itemNode in root["items"]!.AsArray())
+            {
+                itemNode!.AsObject().Remove("workerMetricsStartedAt");
+                itemNode.AsObject().Remove("completedHanCharacters");
+                itemNode.AsObject().Remove("recordedWorkerAttemptIds");
+                itemNode.AsObject().Remove("recordedWorkerSegmentIds");
+            }
             await File.WriteAllTextAsync(store.PathName, root.ToJsonString(new() { WriteIndented = true }));
 
             ProjectTranslationJob loaded = Assert.IsType<ProjectTranslationJob>(await store.LoadAsync());
 
             Assert.Equal(1, loaded.Workers.Single().Slots);
             Assert.Empty(loaded.Workers.Single().RunningChapterIds);
+            Assert.Empty(loaded.Items.Single().RecordedWorkerAttemptIds ?? []);
+            Assert.Empty(loaded.Items.Single().RecordedWorkerSegmentIds ?? []);
+        });
+    }
+
+    [Fact]
+    public async Task Two_slots_report_total_gpu_throughput_and_single_slot_generation_speed()
+    {
+        await WithProjectAsync(2, async context =>
+        {
+            var client = new MetricsSlotFakeClient(TimeSpan.FromSeconds(1), outputTokens: 100,
+                evaluationSeconds: 1);
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                [SingleWorker(context, client, 2)], context.LoadEnvironment);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            ProjectTranslationWorkerProgress worker = Assert.Single(coordinator.GetWorkerProgress());
+            Assert.Equal(200, worker.OutputTokens);
+            Assert.Equal(100, worker.PerSlotTokensPerSecond, 6);
+            Assert.InRange(worker.TotalTokensPerSecond, 150, 230);
+            ProjectTranslationAggregateMetrics aggregate = coordinator.GetViewSnapshot()!.Aggregate;
+            Assert.Equal(worker.TotalTokensPerSecond, aggregate.TotalTokensPerSecond, 6);
+            Assert.Equal(100, aggregate.PerSlotTokensPerSecond, 6);
+            Assert.Equal(2, aggregate.Slots);
+        });
+    }
+
+    [Fact]
+    public async Task Han_tokens_and_busy_time_move_after_first_segment_before_chapter_finishes()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            var segmentation = new SegmenterOptions
+            {
+                MinimumHanCharacters = 1, TargetHanCharacters = 3, MaximumHanCharacters = 4
+            };
+            ProjectResegmentationPreview preview = await context.Repository.PreviewResegmentationAsync(
+                context.Session, context.ChapterIds, segmentation);
+            await context.Repository.ResegmentChaptersAsync(context.Session, preview, confirmed: true);
+            var client = new MetricsSlotFakeClient(TimeSpan.FromMilliseconds(80), 50, 0.08, blockCall: 2);
+            ProjectTranslationWorkerDefinition worker = SingleWorker(context, client, 1) with
+                { SegmentationOptions = segmentation };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                [worker], context.LoadEnvironment);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await client.SecondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            ProjectTranslationWorkerState workerState = coordinator.CurrentJob!.Workers.Single();
+            Assert.Equal(50, workerState.OutputTokens);
+            Assert.True(workerState.CompletedHanCharacters > 0);
+            Assert.True(workerState.ActiveSeconds > 0);
+            Assert.True(coordinator.GetWorkerProgress().Single().HanCharactersPerMinute > 0);
+            Assert.Equal(ProjectTranslationItemStatus.Running, coordinator.CurrentJob.Items.Single().Status);
+
+            client.ReleaseBlocked.TrySetResult();
+            await run;
+        });
+    }
+
+    [Fact]
+    public async Task Segment_metrics_are_not_double_counted_across_pause_resume_and_retry()
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            var segmentation = new SegmenterOptions
+            {
+                MinimumHanCharacters = 1, TargetHanCharacters = 3, MaximumHanCharacters = 4
+            };
+            ProjectResegmentationPreview preview = await context.Repository.PreviewResegmentationAsync(
+                context.Session, context.ChapterIds, segmentation);
+            await context.Repository.ResegmentChaptersAsync(context.Session, preview, confirmed: true);
+            var client = new MetricsSlotFakeClient(TimeSpan.FromMilliseconds(40), 25, 0.04, blockCall: 2);
+            ProjectTranslationWorkerDefinition worker = SingleWorker(context, client, 1) with
+                { SegmentationOptions = segmentation };
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository,
+                [worker], context.LoadEnvironment);
+            Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+            await client.SecondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task pause = coordinator.PauseAsync();
+            client.ReleaseBlocked.TrySetResult();
+            await Task.WhenAll(run, pause);
+            long tokensAtPause = coordinator.CurrentJob!.Workers.Single().OutputTokens;
+            Assert.Equal(client.Calls * 25, tokensAtPause);
+
+            await coordinator.ResumeAsync();
+            Assert.Equal(client.Calls * 25, coordinator.CurrentJob.Workers.Single().OutputTokens);
+
+            await WithProjectAsync(1, async retryContext =>
+            {
+                var retrySegmentation = new SegmenterOptions
+                {
+                    MinimumHanCharacters = 1, TargetHanCharacters = 3, MaximumHanCharacters = 4
+                };
+                ProjectResegmentationPreview retryPreview = await retryContext.Repository.PreviewResegmentationAsync(
+                    retryContext.Session, retryContext.ChapterIds, retrySegmentation);
+                await retryContext.Repository.ResegmentChaptersAsync(retryContext.Session, retryPreview,
+                    confirmed: true);
+                var retryClient = new MetricsSlotFakeClient(TimeSpan.FromMilliseconds(20), 30, 0.02);
+                retryClient.FailCalls.Add(2);
+                ProjectTranslationWorkerDefinition retryWorker = SingleWorker(retryContext, retryClient, 1) with
+                    { SegmentationOptions = retrySegmentation };
+                var retryCoordinator = new ProjectTranslationCoordinator(retryContext.Session, retryContext.Repository,
+                    [retryWorker], retryContext.LoadEnvironment);
+                await retryCoordinator.StartAsync(await retryCoordinator.PlanAsync(retryContext.ChapterIds));
+                Assert.Equal((retryClient.Calls - 1) * 30,
+                    retryCoordinator.CurrentJob!.Workers.Single().OutputTokens);
+                retryClient.FailCalls.Clear();
+                await retryCoordinator.RetryFailedAsync();
+                Assert.Equal((retryClient.Calls - 1) * 30,
+                    retryCoordinator.CurrentJob.Workers.Single().OutputTokens);
+            });
         });
     }
 
@@ -1276,6 +1395,36 @@ public sealed class ProjectTranslationCoordinatorTests
                 return FakeClient.Completion($"slot translated {call}");
             }
             finally { Interlocked.Decrement(ref _concurrency); }
+        }
+    }
+
+    private sealed class MetricsSlotFakeClient(TimeSpan delay, int outputTokens, double evaluationSeconds,
+        int blockCall = 0) : IOllamaClient
+    {
+        private int _calls;
+        public int Calls => Volatile.Read(ref _calls);
+        public HashSet<int> FailCalls { get; } = [];
+        public TaskCompletionSource SecondStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseBlocked { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            int call = Interlocked.Increment(ref _calls);
+            if (call == 2) SecondStarted.TrySetResult();
+            if (call == blockCall) await ReleaseBlocked.Task.WaitAsync(cancellationToken);
+            await Task.Delay(delay, cancellationToken);
+            if (FailCalls.Contains(call))
+                throw new OllamaRequestException(OllamaErrorKind.Http, "Synthetic metrics failure.");
+            return new OllamaCompletion($"metrics translated {call}", true, "stop", new GenerationMetrics
+            {
+                InputTokens = outputTokens * 2,
+                OutputTokens = outputTokens,
+                EvaluationDurationNanoseconds = (long)(evaluationSeconds * 1_000_000_000d),
+                ClientElapsed = delay
+            });
         }
     }
 

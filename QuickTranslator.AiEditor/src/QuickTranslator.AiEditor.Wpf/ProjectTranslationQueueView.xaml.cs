@@ -179,10 +179,17 @@ public partial class ProjectTranslationQueueView : UserControl
         {
             ProjectTranslationAggregateMetrics metrics = planMode
                 ? new(0, null, 0) : view!.Aggregate;
-            string eta = metrics.EstimatedRemaining is TimeSpan estimated
-                ? $"ETA {estimated:hh\\:mm\\:ss}" : "ETA đang học tốc độ";
-            CurrentText.Text = $"Tốc độ {metrics.HanCharactersPerMinute:N0} chữ Hán/phút · {eta} · " +
-                $"chi phí ước tính {metrics.EstimatedCost:N2}";
+            bool measured = metrics.HanCharactersPerMinute > 0 || metrics.TotalTokensPerSecond > 0;
+            CurrentText.Text = measured
+                ? $"Tốc độ {metrics.HanCharactersPerMinute:N0} chữ Hán/phút · " +
+                  $"{metrics.TotalTokensPerSecond:N0} tok/s ({metrics.Slots:N0} luồng · " +
+                  $"~{metrics.PerSlotTokensPerSecond:N0} tok/s mỗi luồng) · " +
+                  $"{FormatRemaining(metrics.EstimatedRemaining)} · chi phí ước tính {metrics.EstimatedCost:N2}"
+                : $"Đang học tốc độ · chi phí ước tính {metrics.EstimatedCost:N2}";
+            ThroughputDiagnosticText.Text = measured
+                ? $"Tổng GPU: {metrics.TotalTokensPerSecond:N1} tok/s từ token đầu ra / thời gian bận; " +
+                  $"mỗi luồng: {metrics.PerSlotTokensPerSecond:N1} tok/s từ token đầu ra / tổng thời gian sinh request."
+                : "Thông lượng sẽ hiện sau segment đầu tiên được lưu.";
         }
         string? resumeHint = needsReview > 0 || progress.Status == ProjectTranslationJobStatus.Interrupted
             ? needsReview > 0
@@ -534,8 +541,8 @@ public partial class ProjectTranslationQueueView : UserControl
     internal sealed record WorkerCard(Guid WorkerId, string Name, ProjectTranslationWorkerStatus Status,
         string BackendLabel, string Model, int ContextSize, int OutputBudget, string Segmentation,
         string? CurrentChapterTitle, int CompletedSegments, int TotalSegments,
-        double HanCharactersPerMinute, double TokensPerSecond, long InputTokens, long GeneratedTokens,
-        int QualityErrors, decimal EstimatedCost)
+        double HanCharactersPerMinute, double TotalTokensPerSecond, double PerSlotTokensPerSecond,
+        int Slots, long InputTokens, long GeneratedTokens, int QualityErrors, decimal EstimatedCost)
     {
         public WorkerCard(ProjectTranslationWorkerProgress progress, ProjectTranslationWorkerState? definition) : this(
             progress.WorkerId, progress.Name, progress.Status,
@@ -548,11 +555,22 @@ public partial class ProjectTranslationQueueView : UserControl
             progress.RunningChapters > 1 && progress.CurrentChapterTitle is not null
                 ? $"{progress.CurrentChapterTitle} (+{progress.RunningChapters - 1} chương song song)" : progress.CurrentChapterTitle,
             progress.CompletedSegments, progress.TotalSegments,
-            progress.HanCharactersPerMinute, progress.TokensPerSecond, progress.InputTokens,
+            progress.HanCharactersPerMinute, progress.TotalTokensPerSecond, progress.PerSlotTokensPerSecond,
+            progress.Slots, progress.InputTokens,
             progress.OutputTokens, progress.ErrorSegments + progress.TruncatedOutputCount +
                 progress.PossibleMissingContentCount + progress.TimeoutCount, progress.EstimatedCost) { }
 
         public string StatusLabel => WorkerStatusLabel(Status);
+        public string ThroughputLabel => $"Tổng {TotalTokensPerSecond:N0} tok/s · mỗi luồng " +
+            $"{PerSlotTokensPerSecond:N0} tok/s · {Slots:N0} luồng";
+    }
+
+    private static string FormatRemaining(TimeSpan? remaining)
+    {
+        if (remaining is not TimeSpan value) return "đã xong";
+        if (value.TotalHours >= 1) return $"còn ~{Math.Ceiling(value.TotalHours):N0} giờ";
+        if (value.TotalMinutes >= 1) return $"còn ~{Math.Ceiling(value.TotalMinutes):N0} phút";
+        return $"còn ~{Math.Max(1, Math.Ceiling(value.TotalSeconds)):N0} giây";
     }
 
     private static string StatusLabel(ProjectTranslationJobStatus status) => status switch

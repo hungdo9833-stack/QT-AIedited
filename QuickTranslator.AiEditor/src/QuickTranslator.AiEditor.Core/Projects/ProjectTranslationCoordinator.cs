@@ -113,7 +113,8 @@ public sealed class ProjectTranslationCoordinator
                 TotalSegments = chapter.Segments.Count,
                 CompletedSegments = CompletedSegments(chapter),
                 ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error),
-                SourceHanCharacters = chapter.Segments.Sum(segment => CountHan(segment.SourceText))
+                SourceHanCharacters = chapter.Segments.Sum(segment => CountHan(segment.SourceText)),
+                CompletedHanCharacters = CompletedHanCharacters(chapter)
             };
             item.RecordEligibilityDiagnostic(TranslationEligibilityDiagnostics.Analyze(chapter,
                 QueueMode.MissingSegments, TranslationEligibilityDiagnosticStage.Plan));
@@ -186,6 +187,7 @@ public sealed class ProjectTranslationCoordinator
                 item.Disposition = ProjectTranslationItemDisposition.None;
                 item.Error = null;
                 item.FinishedAt = null;
+                PrepareItemMetricsForRetry(item);
             }
             value.Status = ProjectTranslationJobStatus.Ready;
             value.LastError = null;
@@ -208,6 +210,7 @@ public sealed class ProjectTranslationCoordinator
 
         // Build the replacement first. If current settings or chapter files cannot be read, the old job remains intact.
         ProjectTranslationJob replacement = await PlanAsync(unfinished, cancellationToken).ConfigureAwait(false);
+        CarryHistoricalWorkerMetrics(current, replacement);
         if (current.Status is not (ProjectTranslationJobStatus.Completed or
             ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled))
         {
@@ -248,6 +251,7 @@ public sealed class ProjectTranslationCoordinator
                 item.Status = ProjectTranslationItemStatus.Pending;
                 item.Disposition = ProjectTranslationItemDisposition.None;
                 item.Error = null; item.FinishedAt = null; item.ChapterQueueRunId = null;
+                PrepareItemMetricsForRetry(item);
             }
             ProjectTranslationWorkerState state = value.Workers.Single(item => item.WorkerId == workerId);
             state.Status = ProjectTranslationWorkerStatus.Ready; state.LastError = null;
@@ -315,7 +319,7 @@ public sealed class ProjectTranslationCoordinator
                 item.FinishedAt = DateTimeOffset.UtcNow;
             }
         }, CancellationToken.None).ConfigureAwait(false);
-        await Task.WhenAll(chapterQueues.Select(queue => queue.CancelAsync())).ConfigureAwait(false);
+        await Task.WhenAll(chapterQueues.Select(CancelQueueAsync)).ConfigureAwait(false);
         await running.ConfigureAwait(false);
     }
 
@@ -336,7 +340,7 @@ public sealed class ProjectTranslationCoordinator
             job.Status = ProjectTranslationJobStatus.Cancelling;
             job.LastError = "Đang dừng request hiện tại; các checkpoint đã hoàn tất được giữ nguyên.";
         }, CancellationToken.None).ConfigureAwait(false);
-        await Task.WhenAll(chapterQueues.Select(queue => queue.CancelAsync())).ConfigureAwait(false);
+        await Task.WhenAll(chapterQueues.Select(CancelQueueAsync)).ConfigureAwait(false);
         await running.ConfigureAwait(false);
     }
 
@@ -376,12 +380,14 @@ public sealed class ProjectTranslationCoordinator
             double rate = worker.ActiveSeconds > 0 ? worker.CompletedHanCharacters / worker.ActiveSeconds * 60d : 0;
             decimal cost = worker.HourlyPrice is decimal hourly
                 ? hourly * (decimal)(worker.ActiveSeconds / 3600d) : 0;
-            double tokensPerSecond = worker.EvaluationSeconds > 0
+            double totalTokensPerSecond = worker.ActiveSeconds > 0
+                ? worker.OutputTokens / worker.ActiveSeconds : 0;
+            double perSlotTokensPerSecond = worker.EvaluationSeconds > 0
                 ? worker.OutputTokens / worker.EvaluationSeconds : 0;
             return new ProjectTranslationWorkerProgress(worker.WorkerId, worker.Name, worker.Status,
                 current?.ChapterId, current?.Title, current?.CompletedSegments ?? 0, current?.TotalSegments ?? 0,
                 rate, worker.CompletedChapters, worker.FailedChapters, cost, worker.LastError,
-                tokensPerSecond, worker.InputTokens, worker.OutputTokens, worker.ErrorSegments,
+                totalTokensPerSecond, perSlotTokensPerSecond, worker.InputTokens, worker.OutputTokens, worker.ErrorSegments,
                 worker.TruncatedOutputCount, worker.PossibleMissingContentCount, worker.TimeoutCount)
             { RunningChapters = worker.RunningChapterIds.Count, Slots = worker.Slots };
         }).ToArray();
@@ -393,10 +399,15 @@ public sealed class ProjectTranslationCoordinator
         double rate = workers.Sum(worker => worker.HanCharactersPerMinute);
         double remaining = job.Items.Where(item => item.Status is ProjectTranslationItemStatus.Pending or
             ProjectTranslationItemStatus.Running or ProjectTranslationItemStatus.Paused or
-            ProjectTranslationItemStatus.Interrupted).Sum(item => item.TotalSegments <= 0 ? item.SourceHanCharacters :
-                item.SourceHanCharacters * Math.Max(0d, 1d - (double)item.CompletedSegments / item.TotalSegments));
+            ProjectTranslationItemStatus.Interrupted).Sum(item =>
+                Math.Max(0, item.SourceHanCharacters - item.CompletedHanCharacters));
         TimeSpan? eta = rate > 0 && remaining > 0 ? TimeSpan.FromMinutes(remaining / rate) : null;
-        return new(rate, eta, workers.Sum(worker => worker.EstimatedCost));
+        long outputTokens = workers.Sum(worker => worker.OutputTokens);
+        double evaluationSeconds = job.Workers.Sum(worker => worker.EvaluationSeconds);
+        return new(rate, eta, workers.Sum(worker => worker.EstimatedCost),
+            workers.Sum(worker => worker.TotalTokensPerSecond),
+            evaluationSeconds > 0 ? outputTokens / evaluationSeconds : 0,
+            workers.Sum(worker => worker.Slots));
     }
 
     public ProjectTranslationViewSnapshot? GetViewSnapshot()
@@ -695,6 +706,7 @@ public sealed class ProjectTranslationCoordinator
             item.AssignedWorkerId = workerId;
             item.Status = ProjectTranslationItemStatus.Running;
             item.StartedAt ??= DateTimeOffset.UtcNow;
+            item.WorkerMetricsStartedAt ??= DateTimeOffset.UtcNow;
             item.Error = null;
             worker.Status = ProjectTranslationWorkerStatus.Running;
             worker.RunningChapterIds.Add(item.ChapterId);
@@ -720,7 +732,7 @@ public sealed class ProjectTranslationCoordinator
             // Bank the busy time at every finished chapter, not only when the worker goes idle: with all slots busy
             // the worker never idles before the queue ends, and speed/ETA/cost would read 0 until then.
             DateTimeOffset now = DateTimeOffset.UtcNow;
-            worker.ActiveSeconds += Math.Max(0, (now - activity.StartedAt).TotalSeconds);
+            BankWorkerBusyTime(worker, activity, now);
             activity.StartedAt = --activity.ActiveChapters == 0 ? default : now;
         }, CancellationToken.None).ConfigureAwait(false);
     }
@@ -731,7 +743,7 @@ public sealed class ProjectTranslationCoordinator
         lock (_sync) queues = _workerQueues
             .Where(pair => pair.Key != exceptChapterId && pair.Value.WorkerId == workerId)
             .Select(pair => pair.Value.Queue).ToArray();
-        await Task.WhenAll(queues.Select(queue => queue.CancelAsync())).ConfigureAwait(false);
+        await Task.WhenAll(queues.Select(CancelQueueAsync)).ConfigureAwait(false);
     }
 
     private ProjectTranslationWorkerDefinition[] ResolveWorkerDefinitions(ProjectTranslationJob job)
@@ -885,7 +897,7 @@ public sealed class ProjectTranslationCoordinator
             else if (_cancelRequested || _stopRequested || (workerDefinition is not null && CurrentJob!.Workers
                 .Single(value => value.WorkerId == workerDefinition.WorkerId).Status is
                 ProjectTranslationWorkerStatus.Offline or ProjectTranslationWorkerStatus.Interrupted))
-                await queue.CancelAsync().ConfigureAwait(false);
+                await CancelQueueAsync(queue).ConfigureAwait(false);
             Guid chapterRunId = service.GetSnapshot().Queue.RunId;
             await MutateInMemoryAsync(job => job.Items.Single(value => value.ChapterId == chapterId).ChapterQueueRunId = chapterRunId,
                 CancellationToken.None).ConfigureAwait(false);
@@ -1187,6 +1199,18 @@ public sealed class ProjectTranslationCoordinator
         destination.TimeoutCount += historical.TimeoutCount;
     }
 
+    private static void CarryHistoricalWorkerMetrics(ProjectTranslationJob current,
+        ProjectTranslationJob replacement)
+    {
+        if (replacement.Workers.Count == 0) return;
+        foreach (ProjectTranslationWorkerState historical in current.Workers)
+        {
+            ProjectTranslationWorkerState destination = replacement.Workers.SingleOrDefault(worker =>
+                worker.WorkerId == historical.WorkerId) ?? replacement.Workers[0];
+            AddHistoricalMetrics(destination, historical);
+        }
+    }
+
     private static string? ValidateEnvironment(ProjectTranslationJob job, ProjectTranslationEnvironment environment)
     {
         OllamaBackendSnapshot planned = job.Backend ?? OllamaBackendSnapshot.LocalDefault(job.ModelOptions.Model);
@@ -1213,15 +1237,43 @@ public sealed class ProjectTranslationCoordinator
     private void OnChapterProgress(Guid chapterId, TranslationService service, TranslationQueue queue)
     {
         ChapterDocument chapter = service.GetSnapshot();
+        bool hasWorker;
         lock (_sync)
         {
-            ProjectTranslationItem? item = _job?.Items.SingleOrDefault(value => value.ChapterId == chapterId);
+            ProjectTranslationItem? current = _job?.Items.SingleOrDefault(value => value.ChapterId == chapterId);
+            hasWorker = current?.AssignedWorkerId is not null;
+            if (!hasWorker && current is not null)
+            {
+                current.TotalSegments = chapter.Segments.Count;
+                current.CompletedSegments = CompletedSegments(chapter);
+                current.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
+                current.CompletedHanCharacters = CompletedHanCharacters(chapter);
+            }
+        }
+        if (!hasWorker)
+        {
+            Notify();
+            return;
+        }
+        PersistProgressAsync(job =>
+        {
+            ProjectTranslationItem? item = job.Items.SingleOrDefault(value => value.ChapterId == chapterId);
             if (item is null) return;
             item.TotalSegments = chapter.Segments.Count;
             item.CompletedSegments = CompletedSegments(chapter);
             item.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
-        }
-        Notify();
+            item.CompletedHanCharacters = CompletedHanCharacters(chapter);
+            if (item.AssignedWorkerId is not Guid workerId) return;
+            ProjectTranslationWorkerState? worker = job.Workers.SingleOrDefault(value => value.WorkerId == workerId);
+            if (worker is null) return;
+            RecordWorkerSegmentMetrics(worker, item, chapter, item.StartedAt ?? DateTimeOffset.UtcNow);
+            WorkerActivity? activity;
+            lock (_sync) _workerActivity.TryGetValue(workerId, out activity);
+            if (activity is null || activity.ActiveChapters == 0) return;
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            BankWorkerBusyTime(worker, activity, now);
+            activity.StartedAt = now;
+        }, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     private async Task PersistAsync(Action<ProjectTranslationJob> update, CancellationToken cancellationToken)
@@ -1327,6 +1379,7 @@ public sealed class ProjectTranslationCoordinator
         item.TotalSegments = chapter.Segments.Count;
         item.CompletedSegments = CompletedSegments(chapter);
         item.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
+        item.CompletedHanCharacters = CompletedHanCharacters(chapter);
         item.SourceFingerprint = ProjectTranslationFingerprints.Source(chapter);
         item.ProtectedFingerprint = ProjectTranslationFingerprints.Protected(chapter);
         item.Error = error;
@@ -1367,35 +1420,82 @@ public sealed class ProjectTranslationCoordinator
         if (item.Status == ProjectTranslationItemStatus.Completed)
         {
             worker.CompletedChapters++;
-            worker.CompletedHanCharacters += item.SourceHanCharacters;
         }
         else if (item.Status is ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview)
             worker.FailedChapters++;
-        if (!item.WorkerMetricsRecorded && item.Status is ProjectTranslationItemStatus.Completed or
-            ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview or
-            ProjectTranslationItemStatus.Cancelled)
-        {
-            TranslationAttempt[] attempts = chapter.Segments.SelectMany(segment => segment.Attempts)
-                .Where(attempt => attempt.StartedAt >= (item.StartedAt ?? started)).ToArray();
-            worker.InputTokens += attempts.Sum(attempt => (long)(attempt.Metrics?.InputTokens ?? 0));
-            worker.OutputTokens += attempts.Sum(attempt => (long)(attempt.Metrics?.OutputTokens ?? 0));
-            worker.EvaluationSeconds += attempts.Sum(attempt =>
-                Math.Max(0, (attempt.Metrics?.EvaluationDurationNanoseconds ?? 0) / 1_000_000_000d));
-            worker.ErrorSegments += item.ErrorSegments;
-            worker.TruncatedOutputCount += attempts.Sum(attempt =>
-                attempt.Issues.Count(issue => issue.Code == IssueCode.TruncatedOutput));
-            worker.PossibleMissingContentCount += attempts.Sum(attempt =>
-                attempt.Issues.Count(issue => issue.Code == IssueCode.PossibleMissingContent));
-            worker.TimeoutCount += attempts.Count(attempt => attempt.Error?.Contains("timeout",
-                StringComparison.OrdinalIgnoreCase) == true || attempt.Error?.Contains("timed out",
-                StringComparison.OrdinalIgnoreCase) == true);
+        RecordWorkerSegmentMetrics(worker, item, chapter, started);
+        if (item.Status is ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Failed or
+            ProjectTranslationItemStatus.NeedsReview or ProjectTranslationItemStatus.Cancelled)
             item.WorkerMetricsRecorded = true;
-        }
         worker.LastError = item.Error;
+    }
+
+    private static void RecordWorkerSegmentMetrics(ProjectTranslationWorkerState worker,
+        ProjectTranslationItem item, ChapterDocument chapter, DateTimeOffset fallbackStarted)
+    {
+        DateTimeOffset started = item.WorkerMetricsStartedAt ?? item.StartedAt ?? fallbackStarted;
+        item.RecordedWorkerAttemptIds ??= [];
+        item.RecordedWorkerSegmentIds ??= [];
+        var recordedAttempts = item.RecordedWorkerAttemptIds.ToHashSet();
+        foreach (TranslationSegment segment in chapter.Segments)
+        {
+            TranslationAttempt[] newAttempts = segment.Attempts.Where(attempt => attempt.StartedAt >= started &&
+                attempt.FinishedAt is not null && attempt.Outcome != AttemptOutcome.InProgress &&
+                !recordedAttempts.Contains(attempt.Id)).ToArray();
+            if (newAttempts.Length == 0) continue;
+            foreach (TranslationAttempt attempt in newAttempts)
+            {
+                worker.InputTokens += attempt.Metrics?.InputTokens ?? 0;
+                worker.OutputTokens += attempt.Metrics?.OutputTokens ?? 0;
+                worker.EvaluationSeconds += Math.Max(0,
+                    (attempt.Metrics?.EvaluationDurationNanoseconds ?? 0) / 1_000_000_000d);
+                worker.TruncatedOutputCount += attempt.Issues.Count(issue => issue.Code == IssueCode.TruncatedOutput);
+                worker.PossibleMissingContentCount += attempt.Issues.Count(issue => issue.Code == IssueCode.PossibleMissingContent);
+                if (attempt.Error?.Contains("timeout", StringComparison.OrdinalIgnoreCase) == true ||
+                    attempt.Error?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true)
+                    worker.TimeoutCount++;
+                item.RecordedWorkerAttemptIds.Add(attempt.Id);
+                recordedAttempts.Add(attempt.Id);
+            }
+            if (segment.HasCompletedTranslation && !item.RecordedWorkerSegmentIds.Contains(segment.Id))
+            {
+                worker.CompletedHanCharacters += segment.HanCharacterCount > 0
+                    ? segment.HanCharacterCount : CountHan(segment.SourceText);
+                item.RecordedWorkerSegmentIds.Add(segment.Id);
+            }
+            if (segment.Status == SegmentStatus.Error) worker.ErrorSegments++;
+        }
+    }
+
+    private static void PrepareItemMetricsForRetry(ProjectTranslationItem item)
+    {
+        item.WorkerMetricsRecorded = false;
+        item.WorkerMetricsStartedAt = DateTimeOffset.UtcNow;
+        item.RecordedWorkerAttemptIds?.Clear();
+        item.RecordedWorkerSegmentIds?.Clear();
+    }
+
+    private static void BankWorkerBusyTime(ProjectTranslationWorkerState worker, WorkerActivity activity,
+        DateTimeOffset now)
+    {
+        if (activity.ActiveChapters > 0 && activity.StartedAt != default)
+            worker.ActiveSeconds += Math.Max(0, (now - activity.StartedAt).TotalSeconds);
+    }
+
+    private static async Task CancelQueueAsync(TranslationQueue queue)
+    {
+        try { await queue.CancelAsync().ConfigureAwait(false); }
+        // Another slot/control path can finish and dispose the linked CTS between the running check and Cancel().
+        // At that point this queue is already crossing the requested cancellation boundary.
+        catch (ObjectDisposedException) { }
     }
 
     private static int CompletedSegments(ChapterDocument chapter) => chapter.Segments.Count(segment =>
         segment.Status == SegmentStatus.Approved || segment.HasCompletedTranslation);
+
+    private static int CompletedHanCharacters(ChapterDocument chapter) => chapter.Segments
+        .Where(segment => segment.Status == SegmentStatus.Approved || segment.HasCompletedTranslation)
+        .Sum(segment => segment.HanCharacterCount > 0 ? segment.HanCharacterCount : CountHan(segment.SourceText));
 
     private static string EligibilityFailureMessage(TranslationEligibilityDiagnostic diagnostic)
     {
