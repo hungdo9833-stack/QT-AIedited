@@ -1,6 +1,4 @@
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Input;
 using QuickTranslator.AiEditor.Core.Projects;
 
 namespace QuickTranslator.AiEditor.Wpf;
@@ -23,55 +21,39 @@ internal sealed record ProjectLibraryCard(Guid ProjectId, string Title, string A
     public string Warning => Missing ? "Chọn “Tìm lại vị trí” để nối đúng Project ID." : Error ?? "";
 }
 
+internal sealed record ProjectLibraryRequest(ProjectLibraryAction Action, ProjectLibraryCard? Project);
+
 public partial class ProjectLibraryWindow : Window
 {
-    private readonly IReadOnlyList<ProjectLibraryCard> _projects;
     internal ProjectLibraryAction? RequestedAction { get; private set; }
     internal ProjectLibraryCard? RequestedProject { get; private set; }
 
     internal ProjectLibraryWindow(IReadOnlyList<ProjectLibraryCard> projects, Guid? activeProjectId)
     {
-        _projects = projects;
         InitializeComponent();
+        View = new ProjectLibraryView(projects, activeProjectId);
+        ViewHost.Content = View;
+        View.ActionRequested += OnActionRequested;
+        Closed += OnClosed;
         MainWindow.ClampWindowToWorkArea(this, 1180, 760);
-        RefreshItems();
-        ProjectList.SelectedItem = _projects.FirstOrDefault(project => project.ProjectId == activeProjectId) ?? _projects.FirstOrDefault();
-        UpdateButtons();
+        View.Attach();
     }
 
-    private void OnFilterChanged(object sender, RoutedEventArgs e) { if (ProjectList is not null) RefreshItems(); }
-    private void RefreshItems()
+    internal ProjectLibraryView View { get; }
+
+    public new object FindName(string name) => View.FindName(name) ?? base.FindName(name) ??
+        throw new ArgumentException($"Không tìm thấy điều khiển '{name}'.", nameof(name));
+
+    private void OnActionRequested(object? sender, ProjectLibraryRequest request)
     {
-        string query = SearchInput?.Text.Trim() ?? "";
-        string status = (StatusFilter?.SelectedItem as ComboBoxItem)?.Tag as string ?? "All";
-        ProjectList.ItemsSource = _projects.Where(project =>
-            (query.Length == 0 || project.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
-             project.Author.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
-             project.ManifestPath.Contains(query, StringComparison.OrdinalIgnoreCase)) &&
-            (status == "All" || status == "Missing" && project.Missing || !project.Missing && project.Status?.ToString() == status)).ToArray();
+        RequestedAction = request.Action;
+        RequestedProject = request.Project;
+        DialogResult = true;
     }
 
-    private void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateButtons();
-    private void UpdateButtons()
+    private void OnClosed(object? sender, EventArgs e)
     {
-        ProjectLibraryCard? selected = ProjectList.SelectedItem as ProjectLibraryCard;
-        bool has = selected is not null;
-        ContinueButton.IsEnabled = has && !selected!.Missing;
-        LocateButton.IsEnabled = has;
-        RemoveButton.IsEnabled = has;
-        DeleteButton.IsEnabled = has && !selected!.Missing;
-        SelectionHint.Text = selected?.ManifestPath ?? "Chọn một Project để tiếp tục.";
+        View.ActionRequested -= OnActionRequested;
+        View.Detach();
     }
-
-    private void Request(ProjectLibraryAction action, bool requiresSelection)
-    {
-        ProjectLibraryCard? selected = ProjectList.SelectedItem as ProjectLibraryCard;
-        if (requiresSelection && selected is null) return;
-        RequestedAction = action; RequestedProject = selected; DialogResult = true;
-    }
-    private void OnContinue(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.Continue, true);
-    private void OnCreate(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.Create, false);
-    private void OnLocate(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.Locate, true);
-    private void OnRemove(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.Remove, true);
-    private void OnDelete(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.Delete, true);
 }
