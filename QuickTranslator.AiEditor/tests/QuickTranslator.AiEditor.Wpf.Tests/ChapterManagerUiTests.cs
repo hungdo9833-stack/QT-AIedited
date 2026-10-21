@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using QuickTranslator.AiEditor.Core.Importing;
@@ -124,14 +125,90 @@ public sealed class ChapterManagerUiTests
         finally { window.Close(); }
     });
 
-    private static ChapterManagerCommands NoOpCommands() => new(
+    [Fact]
+    public Task Workspace_view_rehosts_without_duplicate_catalog_subscription() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        await fixture.AddChapterAsync("Một", 1);
+        var view = new ChapterManagerView(fixture.Project, fixture.Get<ProjectCatalog>("_projectCatalog"), NoOpCommands());
+        var content = new ContentControl { Content = view };
+        var host = TestWindow(content);
+        try
+        {
+            host.Show();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            for (int cycle = 0; cycle < 2; cycle++)
+            {
+                content.Content = null;
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                Assert.Equal(0, view.CatalogSubscriptionCount);
+                content.Content = view;
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                Assert.Equal(1, view.CatalogSubscriptionCount);
+            }
+        }
+        finally { host.Close(); }
+    });
+
+    [Fact]
+    public Task Selection_primary_tooltips_and_optional_import_follow_workspace_rules() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        await fixture.AddChapterAsync("Một", 1);
+        await fixture.AddChapterAsync("Hai", 2);
+        int imports = 0;
+        var view = new ChapterManagerView(fixture.Project, fixture.Get<ProjectCatalog>("_projectCatalog"),
+            NoOpCommands(() => { imports++; return Task.CompletedTask; }));
+        var host = TestWindow(view);
+        try
+        {
+            host.Show();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            var grid = (DataGrid)view.FindName("ChapterGrid");
+            var open = (Button)view.FindName("OpenButton");
+            var queue = (Button)view.FindName("QueueButton");
+            var import = (Button)view.FindName("ImportTxtButton");
+            Style primary = (Style)Application.Current.FindResource("PrimaryButton");
+
+            grid.SelectedItems.Add(grid.Items[0]);
+            Assert.Same(primary, open.Style);
+            Assert.NotSame(primary, queue.Style);
+            grid.SelectedItems.Add(grid.Items[1]);
+            Assert.NotSame(primary, open.Style);
+            Assert.Same(primary, queue.Style);
+            Assert.Equal(Visibility.Visible, import.Visibility);
+            import.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(1, imports);
+
+            Button[] buttons = [open, queue, (Button)view.FindName("RenameButton"),
+                (Button)view.FindName("DeleteButton"), (Button)view.FindName("RestoreButton")];
+            Assert.All(buttons.Where(button => button.IsVisible && !button.IsEnabled), button =>
+                Assert.False(string.IsNullOrWhiteSpace(button.ToolTip?.ToString())));
+        }
+        finally { host.Close(); }
+
+        var withoutImport = new ChapterManagerView(fixture.Project,
+            fixture.Get<ProjectCatalog>("_projectCatalog"), NoOpCommands());
+        Assert.Equal(Visibility.Collapsed, ((Button)withoutImport.FindName("ImportTxtButton")).Visibility);
+    });
+
+    private static Window TestWindow(object content) => new()
+    {
+        Content = content, Width = 1000, Height = 700, ShowInTaskbar = false,
+        WindowStartupLocation = WindowStartupLocation.Manual, Left = -30000, Top = -30000
+    };
+
+    private static ChapterManagerCommands NoOpCommands(Func<Task>? importTxt = null) => new(
         _ => Task.CompletedTask,
         (_, _, _) => Task.CompletedTask,
         _ => Task.CompletedTask,
         _ => Task.CompletedTask,
         _ => Task.CompletedTask,
         _ => Task.CompletedTask,
-        _ => Task.CompletedTask);
+        _ => Task.CompletedTask,
+        importTxt);
 
     private static void AddManifestEntries(ProjectSession session, int count)
     {
