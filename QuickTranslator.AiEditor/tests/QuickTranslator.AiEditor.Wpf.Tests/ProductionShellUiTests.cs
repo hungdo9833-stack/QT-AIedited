@@ -193,16 +193,17 @@ public sealed class ProductionShellUiTests
     });
 
     [Fact]
-    public Task Full_hd_at_150_percent_collapses_catalog_and_restores_it_when_space_returns() => StaHost.Run(async () =>
+    public Task Narrow_layout_uses_flyouts_and_restores_docked_panels_when_space_returns() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
         await fixture.CreateProjectAsync();
+        fixture.Attach(await fixture.AddChapterAsync("Responsive", 1));
         fixture.Call("UpdateResponsiveShell", 960d);
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("ProjectSidebar")).Visibility);
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("TranslationInspector")).Visibility);
         Assert.Equal(148, ((Border)fixture.Window.FindName("ShellNavigation")).Width);
         Assert.Equal(190, ((ComboBox)fixture.Window.FindName("ProjectSwitcher")).Width);
-        Assert.Equal(Visibility.Collapsed,
+        Assert.Equal(Visibility.Visible,
             ((Button)fixture.Window.FindName("ProjectSidebarToggleButton")).Visibility);
         Assert.True(fixture.Window.MinWidth <= 960);
         Assert.True(fixture.Window.MinHeight <= 540);
@@ -211,6 +212,7 @@ public sealed class ProductionShellUiTests
 
         fixture.Call("UpdateResponsiveShell", 1280d);
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("ProjectSidebar")).Visibility);
+        Assert.Equal(Visibility.Visible, ((Border)fixture.Window.FindName("TranslationInspector")).Visibility);
         Assert.Equal("Hiện mục lục", ((Button)fixture.Window.FindName("ProjectSidebarToggleButton")).Content);
 
         fixture.Call("UpdateResponsiveShell", 1600d);

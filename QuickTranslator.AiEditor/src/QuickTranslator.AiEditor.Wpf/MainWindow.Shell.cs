@@ -15,10 +15,9 @@ public partial class MainWindow
     private WorkspaceLayoutPreferences _workspaceLayout = new();
     private readonly SemaphoreSlim _workspaceLayoutSaveGate = new(1, 1);
     private bool _workspaceLayoutReady;
-    private bool _responsiveSidebarCollapsed;
-    private bool _responsiveInspectorCollapsed;
     private bool _compactShell;
     private bool _navRailCollapsed;
+    private bool _switchingEditorMode;
     private string _lastLiveSelectionChinese = "";
 
     private void InitializeProductionShell()
@@ -54,8 +53,7 @@ public partial class MainWindow
         SegmentNavigatorColumn.Width = new(_workspaceLayout.SegmentNavigatorWidth);
         TraditionalLeftColumn.Width = new(_workspaceLayout.FourPaneLeftStar, GridUnitType.Star);
         TraditionalTopRow.Height = new(_workspaceLayout.FourPaneTopStar, GridUnitType.Star);
-        SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
-        ApplyProjectSidebarVisibility();
+        ApplyPanelPolicy();
         ApplyTwoPaneEditorModeLayout();
         TwoPaneModeButton.IsChecked = !_workspaceLayout.FourPaneMode;
         FourPaneModeButton.IsChecked = _workspaceLayout.FourPaneMode;
@@ -89,19 +87,11 @@ public partial class MainWindow
     private async void OnWorkspaceSplitterDragCompleted(object sender,
         System.Windows.Controls.Primitives.DragCompletedEventArgs e) => await SaveWorkspaceLayoutAsync();
 
-    private async void OnToggleInspector(object sender, RoutedEventArgs e)
-    {
-        _workspaceLayout.InspectorVisible = !_workspaceLayout.InspectorVisible;
-        SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
-        await SaveWorkspaceLayoutAsync();
-    }
+    private void OnToggleInspector(object sender, RoutedEventArgs e) =>
+        TogglePanelPreference(PanelId.Inspector);
 
-    private async void OnToggleProjectSidebar(object sender, RoutedEventArgs e)
-    {
-        _workspaceLayout.ProjectSidebarVisible = !_workspaceLayout.ProjectSidebarVisible;
-        ApplyProjectSidebarVisibility();
-        await SaveWorkspaceLayoutAsync();
-    }
+    private void OnToggleProjectSidebar(object sender, RoutedEventArgs e) =>
+        TogglePanelPreference(PanelId.ProjectSidebar);
 
     private void OnToggleNavRail(object sender, RoutedEventArgs e)
     {
@@ -113,16 +103,16 @@ public partial class MainWindow
 
     private void OnSwitchLeftPanelToChapters(object sender, RoutedEventArgs e)
     {
-        _workspaceLayout.ProjectSidebarVisible = true;
-        ApplyProjectSidebarVisibility();
+        SetPanelPreference(PanelId.ProjectSidebar, PanelPreference.PinnedShown);
+        ApplyPanelPolicy();
     }
 
     private void OnSwitchLeftPanelToSegments(object sender, RoutedEventArgs e)
     {
         if (EditorTabs.SelectedIndex == 1)
         {
-            _workspaceLayout.ProjectSidebarVisible = false;
-            ApplyProjectSidebarVisibility();
+            SetPanelPreference(PanelId.ProjectSidebar, PanelPreference.PinnedHidden);
+            ApplyPanelPolicy();
         }
         else
         {
@@ -136,9 +126,8 @@ public partial class MainWindow
     private void UpdateResponsiveShell(double width)
     {
         if (ShellNavigation is null) return;
+        _panelPolicyWidth = width;
         _compactShell = width > 0 && width < 1180;
-        _responsiveSidebarCollapsed = width > 0 && width < 1320;
-        _responsiveInspectorCollapsed = width > 0 && width < 1100;
         ShellNavigation.Width = _navRailCollapsed ? 56 : (_compactShell ? 148 : 176);
         BrandBlock.Width = _compactShell ? 150 : 190;
         ProjectSwitcher.Width = _compactShell ? 190 : 300;
@@ -146,30 +135,17 @@ public partial class MainWindow
         ShellChapterText.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         ChapterModeHint.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         ChapterSummary.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
-        ProjectSidebarToggleButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         ReaderBookmarkButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         FocusModeButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         ReaderFullScreenButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
-        ApplyProjectSidebarVisibility();
+        ApplyPanelPolicy();
         ApplyReaderCatalogVisibility();
-        SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
         RefreshShellQueueStatus();
     }
 
     private void ApplyProjectSidebarVisibility()
     {
-        if (ProjectSidebar is null || ProjectSidebarToggleButton is null) return;
-        bool projectOpen = _projectSession is not null;
-        bool readerActive = ReaderModeButton?.IsChecked == true;
-        bool visible = projectOpen && _workspaceLayout.ProjectSidebarVisible && !_responsiveSidebarCollapsed && !readerActive;
-        ProjectSidebar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        ProjectSidebarSplitter.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        ProjectSidebarToggleButton.Visibility = readerActive || _compactShell
-            ? Visibility.Collapsed : Visibility.Visible;
-        ProjectSidebarToggleButton.Content = visible ? "Ẩn mục lục" : "Hiện mục lục";
-        ProjectSidebarToggleButton.ToolTip = _responsiveSidebarCollapsed
-            ? "Mục lục tự thu gọn ở cửa sổ hẹp; dùng màn Chương để quản lý đầy đủ."
-            : "Ẩn/Hiện mục lục chương (Ctrl+B)";
+        ApplyPanelPolicy();
     }
 
     // BL-14: In Two-Pane mode, show Aligned Bilingual Segment Grid when a chapter is segmented and not in _sourceEditMode;
@@ -194,15 +170,7 @@ public partial class MainWindow
 
     private void SetTranslationInspectorVisibility(bool visible)
     {
-        bool workspace = EditorTabs.SelectedIndex is 0 or 1 && ReaderModeButton.IsChecked != true;
-        TranslationInspector.Visibility = visible && workspace && !_responsiveInspectorCollapsed
-            ? Visibility.Visible : Visibility.Collapsed;
-        InspectorSplitter.Visibility = TranslationInspector.Visibility;
-        InspectorToggleButton.Content = _compactShell ? "Inspector" :
-            TranslationInspector.Visibility == Visibility.Visible ? "Ẩn Inspector" : "Hiện Inspector";
-        InspectorToggleButton.ToolTip = _responsiveInspectorCollapsed
-            ? "Inspector tự thu gọn ở mức DPI cao hoặc cửa sổ hẹp."
-            : "Ẩn/Hiện Inspector (Ctrl+Shift+I)";
+        ApplyPanelPolicy();
     }
 
     private async void OnToggleShellTheme(object sender, RoutedEventArgs e)
@@ -246,31 +214,49 @@ public partial class MainWindow
         EditorMode targetMode = fourPane ? EditorMode.Review : EditorMode.Translate;
         if (CurrentWorkspace != WorkspaceId.Editor || CurrentEditorMode != targetMode)
             _pendingEditorFocus = true;
-        CurrentWorkspace = WorkspaceId.Editor;
-        CurrentEditorMode = targetMode;
-        ApplyWorkspaceVisibility(CurrentWorkspace);
-        EditorModeButton.IsChecked = true;
-        _workspaceLayout.FourPaneMode = fourPane;
-        if (fourPane)
+        _switchingEditorMode = true;
+        try
         {
-            EnsureSelectedSegmentFromChapterCaret();
-            EditorTabs.SelectedIndex = 1;
-            FourPaneModeButton.IsChecked = true;
+            CurrentWorkspace = WorkspaceId.Editor;
+            CurrentEditorMode = targetMode;
+            ApplyWorkspaceVisibility(CurrentWorkspace);
+            EditorModeButton.IsChecked = true;
+            _workspaceLayout.FourPaneMode = fourPane;
+            if (fourPane)
+            {
+                EnsureSelectedSegmentFromChapterCaret();
+                EditorTabs.SelectedIndex = 1;
+                FourPaneModeButton.IsChecked = true;
+            }
+            else
+            {
+                EditorTabs.SelectedIndex = 0;
+                TwoPaneModeButton.IsChecked = true;
+            }
+            ApplyPanelPolicy();
+            Refresh();
         }
-        else
+        catch
         {
-            EditorTabs.SelectedIndex = 0;
-            TwoPaneModeButton.IsChecked = true;
+            _switchingEditorMode = false;
+            throw;
         }
-        SetTranslationInspectorVisibility(_workspaceLayout.InspectorVisible);
-        Refresh();
         if (_pendingEditorFocus) FocusSelectedEditor(fourPane);
         if (_pendingEditorFocus) _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, () =>
         {
-            ChapterBlocksItems.ApplyTemplate();
-            ChapterBlocksItems.UpdateLayout();
-            if (_pendingEditorFocus) FocusSelectedEditor(fourPane);
+            try
+            {
+                ChapterBlocksItems.ApplyTemplate();
+                ChapterBlocksItems.UpdateLayout();
+                if (_pendingEditorFocus) FocusSelectedEditor(fourPane);
+            }
+            finally
+            {
+                _pendingEditorFocus = false;
+                _switchingEditorMode = false;
+            }
         });
+        else _switchingEditorMode = false;
         _ = SaveWorkspaceLayoutAsync();
         MarkActiveNavigation(WorkspaceId.Editor);
     }
@@ -355,12 +341,7 @@ public partial class MainWindow
         SettingsWorkspaceRoot.Visibility = workspace == WorkspaceId.Settings ? Visibility.Visible : Visibility.Collapsed;
         EditorContextHeader.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
         ChapterModeBar.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
-        if (workspace is WorkspaceId.Resources or WorkspaceId.Settings)
-        {
-            ProjectSidebar.Visibility = Visibility.Collapsed;
-            ProjectSidebarSplitter.Visibility = Visibility.Collapsed;
-            SetTranslationInspectorVisibility(false);
-        }
+        ApplyPanelPolicy();
     }
 
     private void ShowReaderWorkspace()
@@ -369,7 +350,7 @@ public partial class MainWindow
         ApplyWorkspaceVisibility(CurrentWorkspace);
         EditorTabs.SelectedIndex = 0;
         ReaderModeButton.IsChecked = true;
-        SetTranslationInspectorVisibility(false);
+        ApplyPanelPolicy();
         ChapterModeHint.Text = "Đọc bản dịch · chọn đoạn để mở đúng vị trí trong Editor";
         MarkActiveNavigation(WorkspaceId.Reader);
     }
@@ -672,6 +653,7 @@ public partial class MainWindow
             if (FindName("InspectorConsistencyStatusText") is TextBlock statusEmpty)
                 statusEmpty.Text = "Chưa chọn segment.";
             InspectorContextText.Text = "Project chưa có ngữ cảnh cho segment đang chọn.";
+            ApplyPanelPolicy();
             return;
         }
         string hanViet = HanVietText.Text;
@@ -723,6 +705,7 @@ public partial class MainWindow
                 .Select(profile => $"{profile.ChineseName}  →  {profile.VietnameseName}\n{profile.PrimaryNarrativePronoun}").ToArray();
         }
         FourPaneSelectionText.Text = $"Đoạn {segment.Order} · {StatusLabel(segment.Status)}";
+        ApplyPanelPolicy();
     }
 
     private void UpdateShellChrome() => UpdateShellChrome(_service?.GetSnapshot());

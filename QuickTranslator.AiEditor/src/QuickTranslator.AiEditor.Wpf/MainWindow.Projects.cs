@@ -107,6 +107,7 @@ public partial class MainWindow
             ApplyInputs(chapter); SelectChapterPreset(chapter.SelectedPreset);
         }
         else ClearChapterEditor();
+        ApplyPanelPolicy();
         RefreshProjectSwitcher(); RefreshProjectChapterList(); Refresh();
         SetStatus($"Đã mở dự án “{candidate.Manifest.VietnameseTitle}”." +
             (_projectLibraryReady ? "" : " Danh sách gần đây không đọc được; chưa ghi shortcut."));
@@ -395,6 +396,7 @@ public partial class MainWindow
                 _chapterManagerWindow?.Close();
                 ClearProjectTranslationCoordinator();
                 DetachChapter(); _projectSession = null; _projectResources = null;
+                ApplyPanelPolicy();
                 _store = new(ChapterFileStore.DefaultDirectory);
                 _readerStore = new(ReaderPreferencesStore.DefaultPath); _characterStore = new(CharacterProjectStore.DefaultDirectory);
                 _presetManager = presets; _presetsReady = true; RefreshPresetEditor();

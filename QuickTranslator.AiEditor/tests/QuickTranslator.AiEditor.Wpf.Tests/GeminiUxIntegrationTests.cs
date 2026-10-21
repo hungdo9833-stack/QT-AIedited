@@ -45,6 +45,7 @@ public sealed class GeminiUxIntegrationTests
     {
         using var fixture = new WorkspaceFixture();
         await fixture.CreateProjectAsync();
+        fixture.Attach(await fixture.AddChapterAsync("Responsive", 1));
 
         fixture.Call("UpdateResponsiveShell", 1600d);
         Assert.Equal(Visibility.Visible, ((FrameworkElement)fixture.Window.FindName("ProjectSidebar")).Visibility);

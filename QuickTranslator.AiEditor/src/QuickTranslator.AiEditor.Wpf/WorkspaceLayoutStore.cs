@@ -20,6 +20,7 @@ internal sealed class WorkspaceLayoutPreferences
     public double SegmentNavigatorWidth { get; set; } = 250;
     public double FourPaneLeftStar { get; set; } = 1;
     public double FourPaneTopStar { get; set; } = 1;
+    public Dictionary<string, PanelPreference>? PanelPreferences { get; set; }
 
     public void Validate()
     {
@@ -28,6 +29,40 @@ internal sealed class WorkspaceLayoutPreferences
             SegmentNavigatorWidth is < 180 or > 520 || FourPaneLeftStar is < 0.25 or > 4 ||
             FourPaneTopStar is < 0.25 or > 4)
             throw new InvalidDataException("Bố cục QT Studio không hợp lệ.");
+        if (PanelPreferences is not null)
+        {
+            foreach (string key in PanelPreferences.Keys.ToArray())
+            {
+                if (!PanelPreferenceKey.TryParse(key, out _, out _, out _) ||
+                    !Enum.IsDefined(PanelPreferences[key]))
+                    PanelPreferences.Remove(key);
+            }
+        }
+    }
+}
+
+internal static class PanelPreferenceKey
+{
+    internal static string Create(WorkspaceId workspace, EditorMode? mode, PanelId panel) =>
+        mode is null ? $"{workspace}.{panel}" : $"{workspace}.{mode}.{panel}";
+
+    internal static bool TryParse(string key, out WorkspaceId workspace, out EditorMode? mode, out PanelId panel)
+    {
+        workspace = default;
+        mode = null;
+        panel = default;
+        string[] parts = key.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 2)
+            return Enum.TryParse(parts[0], out workspace) && Enum.IsDefined(workspace) &&
+                Enum.TryParse(parts[1], out panel) && Enum.IsDefined(panel);
+        if (parts.Length == 3 && Enum.TryParse(parts[0], out workspace) &&
+            Enum.IsDefined(workspace) && Enum.TryParse(parts[1], out EditorMode parsedMode) &&
+            Enum.IsDefined(parsedMode) && Enum.TryParse(parts[2], out panel) && Enum.IsDefined(panel))
+        {
+            mode = parsedMode;
+            return true;
+        }
+        return false;
     }
 }
 

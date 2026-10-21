@@ -176,12 +176,12 @@ public sealed class NavigationRoutesTests
         Assert.Equal(EditorMode.Translate, fixture.Window.CurrentEditorMode);
 
         WorkspaceLayoutPreferences layout = fixture.Get<WorkspaceLayoutPreferences>("_workspaceLayout");
-        bool sidebar = layout.ProjectSidebarVisible;
         Assert.True(fixture.Window.HandleShortcut(Key.B, ModifierKeys.Control));
-        Assert.NotEqual(sidebar, layout.ProjectSidebarVisible);
-        bool inspector = layout.InspectorVisible;
+        Assert.Equal(PanelPreference.PinnedShown,
+            layout.PanelPreferences![PanelPreferenceKey.Create(WorkspaceId.Editor, EditorMode.Translate, PanelId.ProjectSidebar)]);
         Assert.True(fixture.Window.HandleShortcut(Key.I, ModifierKeys.Control | ModifierKeys.Shift));
-        Assert.NotEqual(inspector, layout.InspectorVisible);
+        Assert.Equal(PanelPreference.PinnedHidden,
+            layout.PanelPreferences![PanelPreferenceKey.Create(WorkspaceId.Editor, EditorMode.Translate, PanelId.Inspector)]);
 
         Assert.True(fixture.Window.HandleShortcut(Key.Down, ModifierKeys.Alt));
         Assert.Equal(second.Id, fixture.Get<Guid?>("_selectedId"));

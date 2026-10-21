@@ -18,6 +18,7 @@ public partial class MainWindow
         ChapterDocument chapter = _service.GetSnapshot();
         _sourceBeforeEdit = chapter.OriginalText;
         _sourceEditMode = true;
+        ApplyPanelPolicy();
         UpdateButtons();
         ChapterInput.Focus();
         SetStatus("Đang sửa nguyên văn. Nội dung chỉ được ghi sau khi xem preview và xác nhận.");
@@ -57,6 +58,7 @@ public partial class MainWindow
         _sourceEditMode = false;
         _sourceBeforeEdit = null;
         if (assignSnapshot && _service is not null) AssignOriginalText(_service.GetSnapshot().OriginalText);
+        ApplyPanelPolicy();
         UpdateButtons();
     }
 
