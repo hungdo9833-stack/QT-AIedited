@@ -94,8 +94,11 @@ public sealed partial class TranslationService
             contextBlocks.Add(chapter.ConfirmedContextNotes);
         if (!string.IsNullOrWhiteSpace(memory)) contextBlocks.Add(memory);
         if (!string.IsNullOrWhiteSpace(knowledge?.PromptBlock)) contextBlocks.Add(knowledge.PromptBlock);
-        return BuildWithinTokenBudget(segment.SourceText, glossary, contextBlocks, preset,
-            consistency.PromptBlock, options);
+        // The dialogue map rides with the character rules it refers to: both sit above the preset, fitted first.
+        string dialogueMap = DialogueMapBuilder.Build(chapter, segment);
+        string characters = string.Join(Environment.NewLine + Environment.NewLine,
+            new[] { consistency.PromptBlock, dialogueMap }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        return BuildWithinTokenBudget(segment.SourceText, glossary, contextBlocks, preset, characters, options);
     }
 
     private string BuildWithinTokenBudget(string source, IReadOnlyList<GlossaryEntry> glossary,
