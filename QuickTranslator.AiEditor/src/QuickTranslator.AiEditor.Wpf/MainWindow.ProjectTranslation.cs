@@ -9,13 +9,12 @@ namespace QuickTranslator.AiEditor.Wpf;
 public partial class MainWindow
 {
     private ProjectTranslationCoordinator? _projectTranslationCoordinator;
-    private ProjectTranslationQueueWindow? _projectTranslationWindow;
     private Task<ProjectTranslationJob?>? _projectTranslationLoadTask;
     private readonly List<IDisposable> _projectTranslationOwnedClients = [];
 
     private void InitializeProjectTranslationCoordinator(ProjectSession session)
     {
-        _projectTranslationWindow?.Close();
+        DropHostedQueueView();
         if (_projectTranslationCoordinator is not null)
             _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
         var coordinator = new ProjectTranslationCoordinator(session, _projectRepository, _translationClient,
@@ -95,7 +94,7 @@ public partial class MainWindow
             if (coordinator.IsRunning || existing?.Status is ProjectTranslationJobStatus.Paused or
                 ProjectTranslationJobStatus.Interrupted or ProjectTranslationJobStatus.Ready)
             {
-                ShowProjectTranslationWindow(coordinator, null);
+                HostProjectTranslationView(coordinator, null);
                 return;
             }
             ProjectTranslationJob plan = await coordinator.PlanAsync(chapterIds);
@@ -106,7 +105,7 @@ public partial class MainWindow
                 ClearChapterEditor();
                 Refresh();
             }
-            ShowProjectTranslationWindow(coordinator, plan);
+            HostProjectTranslationView(coordinator, plan);
         }
         finally { EndUiOperation(); }
     }
@@ -144,7 +143,7 @@ public partial class MainWindow
         bool closeWindow = true, bool loadExisting = true, bool useCurrentWorkers = false)
     {
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
-        if (closeWindow) { _projectTranslationWindow?.Close(); _projectTranslationWindow = null; }
+        if (closeWindow) DropHostedQueueView();
         if (_projectTranslationCoordinator is not null)
             _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
         foreach (IDisposable client in _projectTranslationOwnedClients) client.Dispose();
@@ -234,20 +233,6 @@ public partial class MainWindow
         return new Guid(hash.AsSpan(0, 16));
     }
 
-    private void ShowProjectTranslationWindow(ProjectTranslationCoordinator coordinator, ProjectTranslationJob? plan)
-    {
-        if (_projectTranslationWindow is { IsVisible: true })
-        {
-            _projectTranslationWindow.Activate();
-            return;
-        }
-        _projectTranslationWindow = new(_projectSession?.Manifest.VietnameseTitle ?? "Project", coordinator, plan,
-            ReplanProjectTranslationAsync, LoadProjectChapterAsync, RefreshProjectTranslationCoordinatorAsync);
-        if (IsVisible) _projectTranslationWindow.Owner = this;
-        _projectTranslationWindow.Closed += (_, _) => _projectTranslationWindow = null;
-        _projectTranslationWindow.Show();
-    }
-
     private async Task<(ProjectTranslationCoordinator Coordinator, ProjectTranslationJob Plan)>
         ReplanProjectTranslationAsync(ProjectTranslationCoordinator previous)
     {
@@ -318,8 +303,7 @@ public partial class MainWindow
 
     private void ClearProjectTranslationCoordinator()
     {
-        _projectTranslationWindow?.Close();
-        _projectTranslationWindow = null;
+        DropHostedQueueView();
         if (_projectTranslationCoordinator is not null)
             _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
         _projectTranslationCoordinator = null;

@@ -23,7 +23,6 @@ public partial class MainWindow
     private ProjectSession? _projectSession;
     private ProjectResources? _projectResources;
     private readonly ProjectCatalog _projectCatalog;
-    private ChapterManagerWindow? _chapterManagerWindow;
     private readonly ObservableCollection<ProjectChapterItem> _projectChapters = [];
     private bool _syncingProjectUi;
     private bool _syncingProjectSummary;
@@ -59,7 +58,7 @@ public partial class MainWindow
         }
         else if (_projectLibrary.RecentProjects.FirstOrDefault(x => !x.Missing) is { } recent)
             await OpenProjectPathAsync(recent.ManifestPath);
-        else ShowProjectLibraryWindow();
+        else NavigateTo(WorkspaceId.Editor);
     }
 
     private async Task OpenProjectPathAsync(string path)
@@ -92,10 +91,12 @@ public partial class MainWindow
         }
 
         // No await after the context commit: all target stores/chapter have been checked.
-        _chapterManagerWindow?.Close();
+        DropHostedProjectViews();
         ClearProjectTranslationCoordinator();
         DetachChapter();
         _projectSession = candidate; _projectLibrary = library; _store = candidate.ChapterStore;
+        _standaloneEditorRequested = false;
+        StartScreenHost.Visibility = Visibility.Collapsed;
         // Prompt presets belong to the application, not individual Projects.
         _readerStore = new(candidate.Resolve(candidate.Manifest.Files.ReaderSettings));
         _characterStore = new(Path.Combine(candidate.RootDirectory, "Characters"));
@@ -393,9 +394,10 @@ public partial class MainWindow
             {
                 var presets = new PromptPresetManager(await _presetStore.LoadAsync());
                 var reader = await new ReaderPreferencesStore(ReaderPreferencesStore.DefaultPath).LoadAsync();
-                _chapterManagerWindow?.Close();
+                DropHostedProjectViews();
                 ClearProjectTranslationCoordinator();
                 DetachChapter(); _projectSession = null; _projectResources = null;
+                _standaloneEditorRequested = false;
                 ApplyPanelPolicy();
                 _store = new(ChapterFileStore.DefaultDirectory);
                 _readerStore = new(ReaderPreferencesStore.DefaultPath); _characterStore = new(CharacterProjectStore.DefaultDirectory);
@@ -403,6 +405,7 @@ public partial class MainWindow
                 _readerPreferences = reader; _readerReady = true; LoadReaderAppearanceControls(); ApplyReaderAppearance();
                 LoadCharacterProject(new CharacterProject { Name = "Bộ truyện mới" }); SetGlossaryTerms([]); ContextNotesInput.Clear();
                 ClearChapterEditor(); RefreshProjectChapterList(); RefreshProjectSwitcher(); Refresh();
+                NavigateTo(WorkspaceId.Editor, CurrentEditorMode);
                 SetStatus("Đã đóng dự án sau khi lưu.");
             });
         }
@@ -437,7 +440,16 @@ public partial class MainWindow
         if (menu.Items.Count == 0) menu.Items.Add(new MenuItem { Header = "_Chưa có dự án", IsEnabled = false });
     }
 
-    private void OnShowProjectLibrary(object sender, RoutedEventArgs e) => ShowProjectLibraryWindow();
+    private void OnShowProjectLibrary(object sender, RoutedEventArgs e)
+    {
+        if (_projectSession is null)
+        {
+            _standaloneEditorRequested = false;
+            NavigateTo(WorkspaceId.Editor, CurrentEditorMode);
+            return;
+        }
+        ShowProjectLibraryWindow();
+    }
     private async void ShowProjectLibraryWindow()
     {
         while (!_closing)
@@ -447,44 +459,55 @@ public partial class MainWindow
             ClampWindowToWorkArea(window, 1180, 760);
             if (window.ShowDialog() != true || window.RequestedAction is not ProjectLibraryAction action) return;
             ProjectLibraryCard? selected = window.RequestedProject;
-            try
+            if (await HandleProjectLibraryRequestAsync(new(action, selected))) return;
+        }
+    }
+
+    private async Task<bool> HandleProjectLibraryRequestAsync(ProjectLibraryRequest request)
+    {
+        ProjectLibraryCard? selected = request.Project;
+        try
+        {
+            if (request.Action == ProjectLibraryAction.Continue && selected is not null)
+            { await OpenProjectPathAsync(selected.ManifestPath); return true; }
+            if (request.Action == ProjectLibraryAction.Create)
+            { OnNewProject(this, new RoutedEventArgs()); return true; }
+            if (request.Action == ProjectLibraryAction.QuickTranslate) return true;
+            if (selected is null) return false;
+            if (request.Action == ProjectLibraryAction.Locate)
             {
-                if (action == ProjectLibraryAction.Continue && selected is not null)
-                { await OpenProjectPathAsync(selected.ManifestPath); return; }
-                if (action == ProjectLibraryAction.Create)
-                { OnNewProject(this, new RoutedEventArgs()); return; }
-                if (selected is null) continue;
-                if (action == ProjectLibraryAction.Locate)
+                var dialog = new OpenFileDialog { Filter = "Dự án QuickTranslator (*.qtproj)|*.qtproj" };
+                if (dialog.ShowDialog(this) != true) return false;
+                ProjectLibrarySummary summary = await ProjectRepository.ReadLibrarySummaryAsync(dialog.FileName);
+                if (summary.ProjectId != selected.ProjectId) throw new InvalidDataException("Tệp được chọn có Project ID khác.");
+                ProjectLibraryStore.Relocate(_projectLibrary, selected.ProjectId, dialog.FileName);
+                await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher(); return false;
+            }
+            if (request.Action == ProjectLibraryAction.Remove)
+            {
+                if (!BeginUiOperation(allowDuringTranslation: true)) return false;
+                try
                 {
-                    var dialog = new OpenFileDialog { Filter = "Dự án QuickTranslator (*.qtproj)|*.qtproj" };
-                    if (dialog.ShowDialog(this) != true) continue;
-                    ProjectLibrarySummary summary = await ProjectRepository.ReadLibrarySummaryAsync(dialog.FileName);
-                    if (summary.ProjectId != selected.ProjectId) throw new InvalidDataException("Tệp được chọn có Project ID khác.");
-                    ProjectLibraryStore.Relocate(_projectLibrary, selected.ProjectId, dialog.FileName);
-                    await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher(); continue;
-                }
-                if (action == ProjectLibraryAction.Remove)
-                {
-                    if (!BeginUiOperation(allowDuringTranslation: true)) return;
-                    try { ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
-                        await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher(); }
-                    finally { EndUiOperation(); }
-                    continue;
-                }
-                if (action == ProjectLibraryAction.Delete)
-                {
-                    if (selected.ProjectId == _projectSession?.Manifest.ProjectId)
-                    { ThemedDialog.Show(this, "Hãy đóng dự án đang mở trước."); continue; }
-                    if (ThemedDialog.Show(this, $"Chuyển toàn bộ thư mục “{selected.Title}” vào Thùng rác của Windows?\nBạn có thể phục hồi từ Thùng rác.",
-                        "Xóa dự án", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) continue;
-                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(Path.GetDirectoryName(selected.ManifestPath)!,
-                        Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
                     ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
                     await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher();
                 }
+                finally { EndUiOperation(); }
+                return false;
             }
-            catch (Exception ex) { ShowError(ex); }
+            if (request.Action == ProjectLibraryAction.Delete)
+            {
+                if (selected.ProjectId == _projectSession?.Manifest.ProjectId)
+                { ThemedDialog.Show(this, "Hãy đóng dự án đang mở trước."); return false; }
+                if (ThemedDialog.Show(this, $"Chuyển toàn bộ thư mục “{selected.Title}” vào Thùng rác của Windows?\nBạn có thể phục hồi từ Thùng rác.",
+                    "Xóa dự án", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
+                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(Path.GetDirectoryName(selected.ManifestPath)!,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
+                await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher();
+            }
         }
+        catch (Exception ex) { ShowError(ex); }
+        return false;
     }
 
     private async Task<IReadOnlyList<ProjectLibraryCard>> BuildProjectLibraryCardsAsync()

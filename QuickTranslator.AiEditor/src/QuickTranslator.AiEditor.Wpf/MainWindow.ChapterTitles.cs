@@ -52,7 +52,7 @@ public partial class MainWindow
             ProjectRepository.IsProtectedVietnameseTitle(entry))).ToArray();
         var dialog = new ChapterTitleTranslationWindow(session.Manifest.ProjectId, sourceKey, sources,
             CreateChapterTitleRuntimeAsync, session.Resolve($"Cache/title-translation-project-{sourceHash[..24]}.json"))
-        { Owner = _chapterManagerWindow is null ? this : _chapterManagerWindow };
+        { Owner = this };
         if (dialog.ShowDialog() != true || dialog.ResultDraft is not ChapterTitleTranslationDraft draft) return;
         ExistingVietnameseTitlePolicy policy = dialog.OverwriteProtected
             ? ExistingVietnameseTitlePolicy.OverwriteConfirmed : ExistingVietnameseTitlePolicy.KeepExisting;

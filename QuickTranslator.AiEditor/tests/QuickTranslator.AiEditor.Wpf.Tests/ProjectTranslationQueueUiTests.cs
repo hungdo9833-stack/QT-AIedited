@@ -63,7 +63,7 @@ public sealed class ProjectTranslationQueueUiTests
         };
 
         await fixture.TaskCall("OpenProjectTranslationQueueAsync", chapters.Select(chapter => chapter.Id).ToArray());
-        var window = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
+        var window = fixture.Window.HostedQueueView!;
 
         Assert.Equal(3, window.CurrentRows.Count);
         ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
@@ -85,7 +85,6 @@ public sealed class ProjectTranslationQueueUiTests
             StringComparison.Ordinal);
         Assert.False(((Button)window.FindName("StartButton")).IsEnabled);
         Assert.Contains("3/3", ((TextBlock)window.FindName("SummaryText")).Text);
-        window.Close();
     });
 
     [Fact]
@@ -114,7 +113,6 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob?.Status);
         Assert.False(coordinator.IsRunning);
         Assert.NotNull((await fixture.Repository.LoadChapterAsync(fixture.Project, first.Id)).Chapter.Segments[0].LatestAiAttempt);
-        fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow").Close();
     });
 
     [Fact]
@@ -133,7 +131,7 @@ public sealed class ProjectTranslationQueueUiTests
         };
 
         await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id, second.Id });
-        var window = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
+        var window = fixture.Window.HostedQueueView!;
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await Task.Delay(150);
         await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
@@ -156,7 +154,6 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.Equal(Visibility.Visible, ((Border)fixture.Window.FindName("QueueResumeBanner")).Visibility);
         Assert.Contains("Còn", ((TextBlock)fixture.Window.FindName("QueueResumeSummaryText")).Text);
         Assert.Equal("Hàng đợi · có thể tiếp tục", ((Button)fixture.Window.FindName("ShellQueueButton")).Content);
-        window.Close();
     });
 
     [Fact]
@@ -177,7 +174,7 @@ public sealed class ProjectTranslationQueueUiTests
         };
 
         await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id, second.Id });
-        var window = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
+        var window = fixture.Window.HostedQueueView!;
         ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
         await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -199,7 +196,6 @@ public sealed class ProjectTranslationQueueUiTests
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
         }
         Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob?.Status);
-        window.Close();
     });
 
     [Fact]

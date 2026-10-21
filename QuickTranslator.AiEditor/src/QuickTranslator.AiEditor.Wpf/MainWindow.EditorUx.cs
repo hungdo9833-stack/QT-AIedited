@@ -23,16 +23,13 @@ public partial class MainWindow
                 ShowTranslationWorkspace((mode ?? CurrentEditorMode) == EditorMode.Review);
                 break;
             case WorkspaceId.Chapters:
-                MarkActiveNavigation(id);
-                OnOpenChapterManager(this, new RoutedEventArgs());
+                ShowChaptersWorkspace();
                 break;
             case WorkspaceId.Queue:
-                MarkActiveNavigation(id);
-                _ = OpenQueueStatusAsync();
+                ShowQueueWorkspace();
                 break;
             case WorkspaceId.Publish:
-                MarkActiveNavigation(id);
-                _ = OpenProjectPublicationAsync();
+                _ = ShowPublicationWorkspaceAsync();
                 break;
             case WorkspaceId.Reader:
                 ShowReaderWorkspace();

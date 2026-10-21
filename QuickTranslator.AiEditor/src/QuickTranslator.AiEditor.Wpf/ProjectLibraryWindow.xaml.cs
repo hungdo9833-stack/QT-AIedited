@@ -3,7 +3,7 @@ using QuickTranslator.AiEditor.Core.Projects;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
-internal enum ProjectLibraryAction { Continue, Create, Locate, Remove, Delete }
+internal enum ProjectLibraryAction { Continue, Create, Locate, Remove, Delete, QuickTranslate }
 
 internal sealed record ProjectLibraryCard(Guid ProjectId, string Title, string Author, ProjectStatus? Status,
     string ManifestPath, string? CoverPath, int ChapterCount, int CompletedChapterCount, double Progress,

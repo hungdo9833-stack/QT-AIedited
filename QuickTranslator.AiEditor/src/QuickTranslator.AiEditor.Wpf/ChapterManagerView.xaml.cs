@@ -48,6 +48,7 @@ public partial class ChapterManagerView : UserControl
     internal IReadOnlyList<ChapterManagerWindow.ChapterManagerRow> CurrentRows => _rows;
     internal int RefreshCount => _refreshCount;
     internal int CatalogSubscriptionCount => _attached ? 1 : 0;
+    internal bool HasImportTxtCommand => _commands.ImportTxt is not null;
     internal bool UsesRecyclingVirtualization => VirtualizingPanel.GetIsVirtualizing(ChapterGrid) &&
         VirtualizingPanel.GetVirtualizationMode(ChapterGrid) == VirtualizationMode.Recycling;
 
@@ -207,7 +208,7 @@ public partial class ChapterManagerView : UserControl
         ChapterManagerWindow.ChapterManagerRow[] rows = SelectedRows().Where(row => !row.IsDeleted).OrderBy(row => row.DisplayOrder).ToArray();
         if (rows.Length == 0) return;
         await RunAsync(() => _commands.Queue(rows.Select(row => row.ChapterId).ToArray()),
-            $"Đã bắt đầu dịch {rows.Length:N0} chương. Theo dõi tiến độ trong cửa sổ Hàng đợi.");
+            $"Đã bắt đầu dịch {rows.Length:N0} chương. Theo dõi tiến độ ở mục Hàng đợi.");
     }
 
     private async void OnResegment(object sender, RoutedEventArgs e)

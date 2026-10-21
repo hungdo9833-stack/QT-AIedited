@@ -57,9 +57,14 @@ public partial class ProjectTranslationQueueView : UserControl
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Attach();
-        if (!_autoStartPending) return;
+        await StartPendingPlanAsync();
+    }
+
+    internal Task StartPendingPlanAsync()
+    {
+        if (!_autoStartPending) return Task.CompletedTask;
         _autoStartPending = false;
-        await StartPlanAsync();
+        return StartPlanAsync();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e) => Detach();
@@ -85,6 +90,7 @@ public partial class ProjectTranslationQueueView : UserControl
     }
 
     internal IReadOnlyList<QueueRow> CurrentRows => _rows;
+    internal ProjectTranslationCoordinator Coordinator => _coordinator;
     internal int RowObjectCreationCount => _rowObjectCreationCount;
     internal int RefreshCount => _refreshCount;
     internal int ProgressSubscriptionCount => _attached ? 1 : 0;

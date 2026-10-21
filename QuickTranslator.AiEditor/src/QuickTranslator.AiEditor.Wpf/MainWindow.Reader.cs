@@ -604,12 +604,14 @@ public partial class MainWindow
         { OnOpenBatchReplace(sender, e); e.Handled = true; return; }
         if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.PageUp)
         {
+            NavigateTo(WorkspaceId.Editor, CurrentEditorMode);
             OnPreviousProjectChapter(sender, e);
             e.Handled = true;
             return;
         }
         if (Keyboard.Modifiers == ModifierKeys.Alt && key == Key.PageDown)
         {
+            NavigateTo(WorkspaceId.Editor, CurrentEditorMode);
             OnNextProjectChapter(sender, e);
             e.Handled = true;
             return;
@@ -718,7 +720,7 @@ public partial class MainWindow
                     c.ChapterId.ToString("N"),
                     $"{ProjectStateDot(c.TranslationState)} Chương {c.Number:0000} · {c.VietnameseTitle}",
                     $"{ProjectStateLabel(c.TranslationState)} · {c.CompletedSegmentCount}/{c.SegmentCount} đoạn",
-                    () => LoadProjectChapterAsync(c.ChapterId)))
+                    () => OpenHostedChapterInEditorAsync(c.ChapterId)))
                 .ToArray();
         }
 
@@ -744,13 +746,13 @@ public partial class MainWindow
             new("open-settings-data", "Thiết lập · Data QuickTranslator", "Thiết lập", () => { ShowSettingsWorkspace("Traditional"); return Task.CompletedTask; }),
             new("open-settings-appearance", "Thiết lập · Giao diện", "Thiết lập", () => { ShowSettingsWorkspace("Appearance"); return Task.CompletedTask; }),
             new("open-library", "Mở Thư viện Project", "Project", () => { OnShowProjectLibrary(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("open-queue", "Mở Hàng đợi Project", "Cửa sổ riêng", OpenQueueStatusAsync),
+            new("open-queue", "Mở Hàng đợi Project", "Workspace", () => { NavigateTo(WorkspaceId.Queue); return Task.CompletedTask; }),
             new("toggle-sidebar", "Ẩn / Hiện cột Mục lục bên trái", "Ctrl+B", () => { OnToggleProjectSidebar(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("toggle-inspector", "Ẩn / Hiện bảng Inspector bên phải", "Ctrl+Shift+I", () => { OnToggleInspector(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("open-chapters", "Mở Quản lý chương (Chapter Manager)", "Chọn dải chương, đổi tên, lọc", () => { OnOpenChapterManager(this, new RoutedEventArgs()); return Task.CompletedTask; }),
+            new("open-chapters", "Mở Quản lý chương (Chapter Manager)", "Chọn dải chương, đổi tên, lọc", () => { NavigateTo(WorkspaceId.Chapters); return Task.CompletedTask; }),
             new("open-import", "Nhập nhiều chương từ tệp TXT", "Bulk Import Preview", () => OpenDetectedBulkImportAsync()),
             new("open-gpu", "Mở Quản lý GPU (Local + Remote SSH)", "Dual-GPU Runtime", () => { OnOpenGpuManager(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("open-publish", "Xuất bản toàn bộ truyện (TXT / PDF)", "Kiểm tra & ghép chương", OpenProjectPublicationAsync),
+            new("open-publish", "Xuất bản toàn bộ truyện (TXT / PDF)", "Kiểm tra & ghép chương", () => { NavigateTo(WorkspaceId.Publish); return Task.CompletedTask; }),
             new("edit-source", "Sửa nguyên văn chương", "Hành động nâng cao", () => { OnBeginSourceEdit(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("split-segment", "Tách đoạn", "Cấu trúc đoạn", () => { OnSplitSegment(this, new RoutedEventArgs()); return Task.CompletedTask; }),
             new("merge-segment", "Gộp đoạn", "Cấu trúc đoạn", () => { OnMergeSegments(this, new RoutedEventArgs()); return Task.CompletedTask; }),

@@ -312,13 +312,8 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    private WorkspaceId _activeInWindowWorkspace = WorkspaceId.Editor;
-
-    // Window-backed destinations preserve the active in-window workspace until Phase 4 rehosts them.
     private void MarkActiveNavigation(WorkspaceId workspace)
     {
-        if (workspace is WorkspaceId.Editor or WorkspaceId.Reader or WorkspaceId.Resources or WorkspaceId.Settings)
-            _activeInWindowWorkspace = workspace;
         var routes = new Dictionary<WorkspaceId, Button>
         {
             [WorkspaceId.Editor] = TranslateNavButton,
@@ -330,17 +325,27 @@ public partial class MainWindow
             [WorkspaceId.Settings] = SettingsNavButton
         };
         foreach ((WorkspaceId id, Button button) in routes)
-            NavState.SetIsActive(button, id == _activeInWindowWorkspace);
+            NavState.SetIsActive(button, id == workspace);
     }
 
     private void ApplyWorkspaceVisibility(WorkspaceId workspace)
     {
         bool editorHost = workspace is WorkspaceId.Editor or WorkspaceId.Reader;
         EditorWorkspaceRoot.Visibility = editorHost ? Visibility.Visible : Visibility.Collapsed;
+        ChaptersWorkspaceRoot.Visibility = workspace == WorkspaceId.Chapters ? Visibility.Visible : Visibility.Collapsed;
+        QueueWorkspaceRoot.Visibility = workspace == WorkspaceId.Queue ? Visibility.Visible : Visibility.Collapsed;
+        PublishWorkspaceRoot.Visibility = workspace == WorkspaceId.Publish ? Visibility.Visible : Visibility.Collapsed;
         ResourcesWorkspaceRoot.Visibility = workspace == WorkspaceId.Resources ? Visibility.Visible : Visibility.Collapsed;
         SettingsWorkspaceRoot.Visibility = workspace == WorkspaceId.Settings ? Visibility.Visible : Visibility.Collapsed;
         EditorContextHeader.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
         ChapterModeBar.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
+        if (workspace == WorkspaceId.Chapters) _hostedChapterManagerView?.Attach(); else _hostedChapterManagerView?.Detach();
+        if (workspace == WorkspaceId.Queue) _hostedQueueView?.Attach(); else _hostedQueueView?.Detach();
+        if (workspace == WorkspaceId.Publish) _hostedPublicationView?.Attach(); else _hostedPublicationView?.Detach();
+        ChaptersWorkspaceEmpty.Visibility = _hostedChapterManagerView is null ? Visibility.Visible : Visibility.Collapsed;
+        PublishWorkspaceEmpty.Visibility = _hostedPublicationView is null ? Visibility.Visible : Visibility.Collapsed;
+        UpdateQueueWorkspaceEmptyState();
+        _ = RefreshStartScreenAsync();
         ApplyPanelPolicy();
     }
 
@@ -423,15 +428,14 @@ public partial class MainWindow
 
     private async Task OpenQueueStatusAsync()
     {
-        if (_projectSession is null) { SetStatus("Hãy mở Project trước khi xem hàng đợi."); return; }
+        if (_projectSession is null) { NavigateTo(WorkspaceId.Queue); return; }
         ProjectTranslationCoordinator coordinator = await EnsureProjectTranslationCoordinatorAsync();
         if (coordinator.CurrentJob is null)
         {
-            SetStatus("Chưa có hàng đợi. Hãy chọn các chương cần dịch trong Quản lý chương.");
-            OnOpenChapterManager(this, new RoutedEventArgs());
+            NavigateTo(WorkspaceId.Queue);
             return;
         }
-        ShowProjectTranslationWindow(coordinator, null);
+        HostProjectTranslationView(coordinator, null);
     }
 
     private async void OnResumeProjectTranslationFromShell(object sender, RoutedEventArgs e)
@@ -445,30 +449,14 @@ public partial class MainWindow
                 RefreshShellQueueStatus();
                 return;
             }
-            ShowProjectTranslationWindow(coordinator, null);
-            if (_projectTranslationWindow is not null)
-                await _projectTranslationWindow.ResumeNowAsync();
+            HostProjectTranslationView(coordinator, null);
+            if (_hostedQueueView is not null)
+                await _hostedQueueView.ResumeNowAsync();
         }
         catch (Exception ex) { ShowError(ex); }
     }
 
-    private async Task OpenProjectPublicationAsync()
-    {
-        if (_projectSession is null) { SetStatus("Hãy mở Project trước khi xuất bản."); return; }
-        if (!BeginUiOperation(allowDuringTranslation: true)) return;
-        try
-        {
-            if (_service is not null) await SaveCurrentAsync();
-            var service = new ProjectPublicationService(_projectRepository, _projectCatalog);
-            var window = new ProjectPublicationWindow(_projectSession, service, LoadProjectChapterAsync) { Owner = this };
-            ClampWindowToWorkArea(window, 760, 570);
-            window.ShowDialog();
-            if (window.LastExportPath is string path)
-                SetStatus("Đã xuất toàn bộ chương thành một file: " + path);
-        }
-        catch (Exception ex) { ShowError(ex); }
-        finally { EndUiOperation(); }
-    }
+    private Task OpenProjectPublicationAsync() => ShowPublicationWorkspaceAsync();
 
     private void OnOpenInspectorSettings(object sender, RoutedEventArgs e)
     {

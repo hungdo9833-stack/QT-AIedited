@@ -243,7 +243,7 @@ public sealed class ProductionShellUiTests
         Assert.Equal(5, snapshot.Chapters.Count());
         Guid[] queued = snapshot.Chapters.Take(3).Select(chapter => chapter.ChapterId).ToArray();
         await fixture.TaskCall("OpenProjectTranslationQueueAsync", queued);
-        var queueWindow = fixture.Get<ProjectTranslationQueueWindow>("_projectTranslationWindow");
+        var queueWindow = fixture.Window.HostedQueueView!;
         try
         {
             Assert.Equal(3, queueWindow.CurrentRows.Count);
@@ -270,7 +270,7 @@ public sealed class ProductionShellUiTests
             Assert.Contains("标题1", ((TextBlock)fixture.Window.FindName("ShellChapterText")).Text);
             Assert.Equal(snapshot.Chapters[0].ChapterId, fixture.Service.GetSnapshot().Id);
         }
-        finally { queueWindow.Close(); }
+        finally { fixture.Window.NavigateTo(WorkspaceId.Editor); }
     });
 
     [Fact]

@@ -11,6 +11,11 @@ public partial class MainWindow
     // The dispatcher owns the operation lock; overlapping commands are rejected, never queued invisibly.
     private async Task<bool> RunWorkspaceTransitionAsync(Func<Task> commit)
     {
+        if (_hostedPublicationView?.IsBusy == true)
+        {
+            SetStatus("Xuất bản đang chạy. Hãy chờ hoàn tất hoặc hủy tác vụ trước khi đóng/chuyển Project.");
+            return false;
+        }
         if (!BeginUiOperation(allowDuringTranslation: true)) return false;
         _transitioning = true;
         _autosave.Stop();

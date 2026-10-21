@@ -8,27 +8,7 @@ public partial class MainWindow
 {
     private void OnOpenChapterManager(object sender, RoutedEventArgs e)
     {
-        if (_projectSession is null)
-        {
-            ShowError(new InvalidOperationException("Hãy mở Project trước khi quản lý chương."));
-            return;
-        }
-        if (_chapterManagerWindow is { IsVisible: true })
-        {
-            _chapterManagerWindow.Activate();
-            return;
-        }
-        ProjectSession session = _projectSession;
-        _chapterManagerWindow = new(session, _projectCatalog, new(
-            Open: LoadProjectChapterAsync,
-            Rename: RenameProjectChapterAsync,
-            SoftDelete: SoftDeleteFromManagerAsync,
-            Restore: RestoreFromManagerAsync,
-            Resegment: ResegmentFromManagerAsync,
-            Queue: OpenProjectTranslationQueueAsync,
-            TranslateTitles: TranslateChapterTitlesFromManagerAsync)) { Owner = this };
-        _chapterManagerWindow.Closed += (_, _) => _chapterManagerWindow = null;
-        _chapterManagerWindow.Show();
+        NavigateTo(WorkspaceId.Chapters);
     }
 
     private async Task SoftDeleteFromManagerAsync(IReadOnlyList<Guid> chapterIds)
@@ -103,8 +83,7 @@ public partial class MainWindow
                 $"• Cảnh báo: {preview.WarningCount:N0}" +
                 (warnings.Length == 0 ? "" : "\n\n" + warnings) +
                 "\n\nChỉ vùng chưa dịch được chia lại; nháp, approvals và lịch sử giữ nguyên theo anchor. Áp dụng cho toàn bộ lựa chọn?";
-            Window owner = _chapterManagerWindow is null ? this : _chapterManagerWindow;
-            if (ThemedDialog.Show(owner, message, "Preview chia lại đoạn", MessageBoxButton.YesNo,
+            if (ThemedDialog.Show(this, message, "Preview chia lại đoạn", MessageBoxButton.YesNo,
                     preview.ProtectedChapters > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information,
                     MessageBoxResult.No) != MessageBoxResult.Yes)
                 throw new OperationCanceledException("Đã hủy chia lại đoạn trước khi ghi dữ liệu.");

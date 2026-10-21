@@ -107,9 +107,9 @@
                 <StackPanel>
                     <TextBlock Text="WORKSPACE" Margin="14,4,8,8" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
                     <Button x:Name="TranslateNavButton" Content="Biên tập" ui:ButtonIcon.Glyph="&#xE8C1;" Tag="Translate" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Biên tập / Kiểm tra &amp; Duyệt (Ctrl+1 / Ctrl+2)"/>
-                    <Button x:Name="ChaptersNavButton" Content="Chương ↗" ui:ButtonIcon.Glyph="&#xE8FD;" Tag="Chapters" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Mở trong cửa sổ riêng"/>
-                    <Button x:Name="QueueNavButton" Content="Hàng đợi ↗" ui:ButtonIcon.Glyph="&#xE9D5;" Tag="Queue" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Mở trong cửa sổ riêng"/>
-                    <Button x:Name="PublishNavButton" Content="Xuất bản ↗" ui:ButtonIcon.Glyph="&#xEDE1;" Tag="Publish" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Mở trong cửa sổ riêng"/>
+                    <Button x:Name="ChaptersNavButton" Content="Chương" ui:ButtonIcon.Glyph="&#xE8FD;" Tag="Chapters" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
+                    <Button x:Name="QueueNavButton" Content="Hàng đợi" ui:ButtonIcon.Glyph="&#xE9D5;" Tag="Queue" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
+                    <Button x:Name="PublishNavButton" Content="Xuất bản" ui:ButtonIcon.Glyph="&#xEDE1;" Tag="Publish" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
                     <Button x:Name="ReaderNavButton" Content="Đọc" ui:ButtonIcon.Glyph="&#xE736;" Tag="Reader" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Chế độ đọc toàn chương"/>
                 </StackPanel>
             </DockPanel>
@@ -701,6 +701,37 @@
                 </TabItem>
             </TabControl>
            </DockPanel>
+           <Grid x:Name="ChaptersWorkspaceRoot" Visibility="Collapsed">
+               <ContentControl x:Name="ChaptersWorkspaceHost"/>
+               <Border x:Name="ChaptersWorkspaceEmpty" Style="{StaticResource Card}" Padding="24" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
+                   <StackPanel>
+                       <TextBlock Text="Chưa mở Project." Style="{StaticResource SectionTitle}" HorizontalAlignment="Center"/>
+                       <TextBlock Text="Mở hoặc tạo Project để quản lý chương." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" Margin="0,6,0,12"/>
+                       <Button Content="Mở Project…" Click="OnOpenProject" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center"/>
+                   </StackPanel>
+               </Border>
+           </Grid>
+           <Grid x:Name="QueueWorkspaceRoot" Visibility="Collapsed">
+               <ContentControl x:Name="QueueWorkspaceHost"/>
+               <Border x:Name="QueueWorkspaceEmpty" Style="{StaticResource Card}" Padding="24" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
+                   <StackPanel>
+                       <TextBlock Text="Chưa có hàng đợi." Style="{StaticResource SectionTitle}" HorizontalAlignment="Center"/>
+                       <TextBlock Text="Chọn các chương cần dịch để tạo hàng đợi Project." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" Margin="0,6,0,12"/>
+                       <Button Content="Chọn chương để dịch" Click="OnOpenChapterManager" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center"/>
+                   </StackPanel>
+               </Border>
+           </Grid>
+           <Grid x:Name="PublishWorkspaceRoot" Visibility="Collapsed">
+               <ContentControl x:Name="PublishWorkspaceHost"/>
+               <Border x:Name="PublishWorkspaceEmpty" Style="{StaticResource Card}" Padding="24" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
+                   <StackPanel>
+                       <TextBlock Text="Chưa mở Project." Style="{StaticResource SectionTitle}" HorizontalAlignment="Center"/>
+                       <TextBlock Text="Mở Project để kiểm tra và xuất bản toàn bộ chương." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" Margin="0,6,0,12"/>
+                       <Button Content="Mở Project…" Click="OnOpenProject" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center"/>
+                   </StackPanel>
+               </Border>
+           </Grid>
+           <ContentControl x:Name="StartScreenHost" Visibility="Collapsed" Margin="0,72,0,0" Panel.ZIndex="10"/>
            <Grid x:Name="ResourcesWorkspaceRoot" Margin="8" Visibility="Collapsed">
                <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition/></Grid.ColumnDefinitions>
                <ListBox x:Name="ResourcesNavigation" SelectionChanged="OnResourcesNavigationChanged" SelectedIndex="0" Background="{DynamicResource SurfaceBrush}" BorderThickness="0" Padding="6" AutomationProperties.Name="Danh sách nhóm tài nguyên">

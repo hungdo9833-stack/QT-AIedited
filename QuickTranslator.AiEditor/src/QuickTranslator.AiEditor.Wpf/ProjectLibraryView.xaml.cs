@@ -29,6 +29,7 @@ public partial class ProjectLibraryView : UserControl
             _startScreenMode = value;
             UpdateHeaderMode();
             UpdateButtons();
+            QuickTranslateButton.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
@@ -123,4 +124,5 @@ public partial class ProjectLibraryView : UserControl
     private void OnLocate(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.Locate, true);
     private void OnRemove(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.Remove, true);
     private void OnDelete(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.Delete, true);
+    private void OnQuickTranslate(object sender, RoutedEventArgs e) => Request(ProjectLibraryAction.QuickTranslate, false);
 }

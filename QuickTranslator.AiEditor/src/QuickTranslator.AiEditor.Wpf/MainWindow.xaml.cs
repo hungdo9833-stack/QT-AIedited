@@ -721,6 +721,12 @@ public partial class MainWindow : Window
         if (_allowClose) return;
         e.Cancel = true;
         if (_closing) return;
+        if (_hostedPublicationView?.IsBusy == true)
+        {
+            _hostedPublicationView.HandleHostClosing(e);
+            SetStatus("Đang hủy tác vụ xuất bản an toàn. Ứng dụng vẫn mở; hãy đóng lại sau khi tác vụ dừng.");
+            return;
+        }
         if (HasPendingSourceEdit)
         {
             SetStatus("Nguyên văn đang sửa chưa được lưu. Hãy lưu hoặc hủy sửa nguồn trước khi đóng ứng dụng.");
@@ -780,7 +786,7 @@ public partial class MainWindow : Window
     private void OnWindowClosed(object? sender, EventArgs e)
     {
         _progressTimer.Stop(); _readerSaveTimer.Stop();
-        _chapterManagerWindow?.Close();
+        DropHostedProjectViews();
         _textCleanerWindow?.Close();
         _sourceOccurrencesWindow?.Close();
         ClearProjectTranslationCoordinator();

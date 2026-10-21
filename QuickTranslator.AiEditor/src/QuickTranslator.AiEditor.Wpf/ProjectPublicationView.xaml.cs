@@ -44,6 +44,7 @@ public partial class ProjectPublicationView : UserControl
     internal string? LastExportPath { get; private set; }
     internal ProjectPublicationInspection? CurrentInspection => _inspection;
     internal int InspectionLoadCount => _inspectionLoadCount;
+    internal bool IsBusy => _busy;
     internal bool ShowCloseButton
     {
         get => _showCloseButton;

@@ -25,17 +25,22 @@ public sealed class NavigationRoutesTests
     public Task Every_in_window_route_has_one_matching_active_navigation_item() => StaHost.Run(() =>
     {
         using var fixture = new WorkspaceFixture();
-        var expected = new Dictionary<WorkspaceId, string>
+        var expected = new Dictionary<WorkspaceId, (string Nav, string Root)>
         {
-            [WorkspaceId.Editor] = "TranslateNavButton",
-            [WorkspaceId.Reader] = "ReaderNavButton",
-            [WorkspaceId.Resources] = "ResourcesNavButton",
-            [WorkspaceId.Settings] = "SettingsNavButton"
+            [WorkspaceId.Editor] = ("TranslateNavButton", "EditorWorkspaceRoot"),
+            [WorkspaceId.Chapters] = ("ChaptersNavButton", "ChaptersWorkspaceRoot"),
+            [WorkspaceId.Queue] = ("QueueNavButton", "QueueWorkspaceRoot"),
+            [WorkspaceId.Publish] = ("PublishNavButton", "PublishWorkspaceRoot"),
+            [WorkspaceId.Reader] = ("ReaderNavButton", "EditorWorkspaceRoot"),
+            [WorkspaceId.Resources] = ("ResourcesNavButton", "ResourcesWorkspaceRoot"),
+            [WorkspaceId.Settings] = ("SettingsNavButton", "SettingsWorkspaceRoot")
         };
         string[] names = ["TranslateNavButton", "ChaptersNavButton", "QueueNavButton", "PublishNavButton",
             "ReaderNavButton", "ResourcesNavButton", "SettingsNavButton"];
+        string[] roots = ["EditorWorkspaceRoot", "ChaptersWorkspaceRoot", "QueueWorkspaceRoot",
+            "PublishWorkspaceRoot", "ResourcesWorkspaceRoot", "SettingsWorkspaceRoot"];
 
-        foreach ((WorkspaceId route, string activeName) in expected)
+        foreach ((WorkspaceId route, (string activeName, string rootName)) in expected)
         {
             fixture.Window.NavigateTo(route);
             Assert.Equal(route, fixture.Window.CurrentWorkspace);
@@ -43,20 +48,17 @@ public sealed class NavigationRoutesTests
                 .Where(NavState.GetIsActive).ToArray();
             Assert.Single(active);
             Assert.Same(fixture.Window.FindName(activeName), active[0]);
-        }
-
-        fixture.Window.NavigateTo(WorkspaceId.Editor, EditorMode.Translate);
-        foreach (WorkspaceId external in new[] { WorkspaceId.Chapters, WorkspaceId.Queue, WorkspaceId.Publish })
-        {
-            fixture.Call("MarkActiveNavigation", external);
-            Assert.True(NavState.GetIsActive((Button)fixture.Window.FindName("TranslateNavButton")));
+            FrameworkElement[] visibleRoots = roots.Select(name => (FrameworkElement)fixture.Window.FindName(name))
+                .Where(root => root.Visibility == Visibility.Visible).ToArray();
+            Assert.Single(visibleRoots);
+            Assert.Same(fixture.Window.FindName(rootName), visibleRoots[0]);
         }
         Assert.Equal(Enum.GetValues<WorkspaceId>().Length, names.Length);
         return Task.CompletedTask;
     });
 
     [Fact]
-    public Task Window_backed_routes_are_reachable_and_preserve_the_in_window_active_item() => StaHost.Run(async () =>
+    public Task Phase_four_routes_are_hosted_in_the_main_window() => StaHost.Run(async () =>
     {
         using (var fixture = new WorkspaceFixture())
         {
@@ -64,8 +66,8 @@ public sealed class NavigationRoutesTests
             fixture.Window.NavigateTo(WorkspaceId.Queue);
             fixture.Window.NavigateTo(WorkspaceId.Publish);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert.Equal(WorkspaceId.Editor, fixture.Window.CurrentWorkspace);
-            Assert.True(NavState.GetIsActive((Button)fixture.Window.FindName("TranslateNavButton")));
+            Assert.Equal(WorkspaceId.Publish, fixture.Window.CurrentWorkspace);
+            Assert.True(NavState.GetIsActive((Button)fixture.Window.FindName("PublishNavButton")));
         }
 
         using var projectFixture = new WorkspaceFixture();
@@ -73,11 +75,11 @@ public sealed class NavigationRoutesTests
         projectFixture.Window.Show();
         projectFixture.Window.NavigateTo(WorkspaceId.Chapters);
         await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-        ChapterManagerWindow manager = projectFixture.Get<ChapterManagerWindow>("_chapterManagerWindow");
-        Assert.True(manager.IsVisible);
-        Assert.Equal(WorkspaceId.Editor, projectFixture.Window.CurrentWorkspace);
-        Assert.True(NavState.GetIsActive((Button)projectFixture.Window.FindName("TranslateNavButton")));
-        manager.Close();
+        ChapterManagerView manager = projectFixture.Window.HostedChapterManagerView!;
+        Assert.NotNull(manager);
+        Assert.Same(manager, ((ContentControl)projectFixture.Window.FindName("ChaptersWorkspaceHost")).Content);
+        Assert.Equal(WorkspaceId.Chapters, projectFixture.Window.CurrentWorkspace);
+        Assert.True(NavState.GetIsActive((Button)projectFixture.Window.FindName("ChaptersNavButton")));
     });
 
     [Fact]
