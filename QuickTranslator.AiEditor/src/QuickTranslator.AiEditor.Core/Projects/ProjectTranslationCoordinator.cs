@@ -14,7 +14,7 @@ public sealed class ProjectTranslationCoordinator
     private static readonly ConcurrentDictionary<Guid, Guid> ActiveProjects = new();
     private readonly ProjectSession _session;
     private readonly ProjectRepository _repository;
-    private readonly IOllamaClient _client;
+    private readonly ILlmClient _client;
     private readonly IReadOnlyList<ProjectTranslationWorkerDefinition> _workerDefinitions;
     private readonly ProjectTranslationJobStore _store;
     private readonly Func<CancellationToken, Task<ProjectTranslationEnvironment>> _environmentLoader;
@@ -32,7 +32,7 @@ public sealed class ProjectTranslationCoordinator
     private bool _interruptionRequested;
     private int _progressChangesSinceSave;
 
-    public ProjectTranslationCoordinator(ProjectSession session, ProjectRepository repository, IOllamaClient client,
+    public ProjectTranslationCoordinator(ProjectSession session, ProjectRepository repository, ILlmClient client,
         Func<CancellationToken, Task<ProjectTranslationEnvironment>> environmentLoader,
         ProjectTranslationJobStore? store = null)
     {
@@ -127,7 +127,7 @@ public sealed class ProjectTranslationCoordinator
             Status = ProjectTranslationJobStatus.Draft,
             ModelOptions = _workerDefinitions.Count > 0 ? _workerDefinitions[0].ModelOptions with { } : environment.ModelOptions with { },
             Backend = _workerDefinitions.Count > 0 ? _workerDefinitions[0].Backend with { } :
-                (environment.Backend ?? OllamaBackendSnapshot.LocalDefault(environment.ModelOptions.Model)) with { },
+                (environment.Backend ?? GpuBackendSnapshot.LocalDefault(environment.ModelOptions.Model)) with { },
             PromptPreset = environment.PromptPreset with { },
             ProjectResourceRevision = environment.Resources.Revision,
             CreatedAt = now,
@@ -941,7 +941,7 @@ public sealed class ProjectTranslationCoordinator
                 return;
             }
             bool failed = status is QueueStatus.CompletedWithErrors or QueueStatus.Faulted;
-            bool uncertainRemote = failed && workerDefinition?.Backend.Kind == OllamaBackendKind.Remote;
+            bool uncertainRemote = failed && workerDefinition?.Backend.Kind == GpuBackendKind.Remote;
             await PersistProgressAsync(job =>
             {
                 UpdateItem(job, chapterId, after, uncertainRemote ? ProjectTranslationItemStatus.NeedsReview :
@@ -1083,8 +1083,8 @@ public sealed class ProjectTranslationCoordinator
         }
         if (job.Workers.Count == 0)
         {
-            OllamaBackendSnapshot current = environment.Backend ??
-                OllamaBackendSnapshot.LocalDefault(environment.ModelOptions.Model);
+            GpuBackendSnapshot current = environment.Backend ??
+                GpuBackendSnapshot.LocalDefault(environment.ModelOptions.Model);
             string? backendConflict = ValidateEnvironment(job, environment);
             if (backendConflict is not null && !acceptChangedBackendOrWorkers)
                 throw new InvalidOperationException(backendConflict);
@@ -1213,12 +1213,12 @@ public sealed class ProjectTranslationCoordinator
 
     private static string? ValidateEnvironment(ProjectTranslationJob job, ProjectTranslationEnvironment environment)
     {
-        OllamaBackendSnapshot planned = job.Backend ?? OllamaBackendSnapshot.LocalDefault(job.ModelOptions.Model);
-        OllamaBackendSnapshot current = environment.Backend ?? OllamaBackendSnapshot.LocalDefault(environment.ModelOptions.Model);
+        GpuBackendSnapshot planned = job.Backend ?? GpuBackendSnapshot.LocalDefault(job.ModelOptions.Model);
+        GpuBackendSnapshot current = environment.Backend ?? GpuBackendSnapshot.LocalDefault(environment.ModelOptions.Model);
         if (planned.ProfileId != current.ProfileId || planned.Kind != current.Kind ||
             !string.Equals(planned.Endpoint, current.Endpoint, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(planned.Model, current.Model, StringComparison.Ordinal))
-            return "Backend/model Ollama đã đổi sau khi tạo Queue Plan. Hãy xác nhận server mới và tạo lại Queue Plan; job cũ không tự gửi request.";
+            return "Backend/model đã đổi sau khi tạo Queue Plan. Hãy xác nhận server mới và tạo lại Queue Plan; job cũ không tự gửi request.";
         return null;
     }
 
@@ -1520,7 +1520,7 @@ public sealed class ProjectTranslationCoordinator
     {
         IOException => "Không đọc hoặc lưu được checkpoint của chapter.",
         UnauthorizedAccessException => "Không có quyền ghi checkpoint của chapter.",
-        OllamaRequestException request when request.Kind == OllamaErrorKind.Connection => "GPU mất kết nối; kết quả request hiện tại chưa xác định.",
+        LlmRequestException request when request.Kind == LlmErrorKind.Connection => "GPU mất kết nối; kết quả request hiện tại chưa xác định.",
         _ => error.Message
     };
 

@@ -15,16 +15,16 @@ public sealed class GpuConnectionManagerTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         string path = Path.Combine(_root, "profiles.json");
-        var store = new OllamaProfileStore(path, new Protector());
+        var store = new GpuProfileStore(path, new Protector());
         var remote = RemoteProfile();
         remote.Ssh!.Authentication = SshAuthenticationKind.PrivateKey;
         remote.Ssh.Password = null;
         remote.Ssh.PrivateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic-key-only\n-----END OPENSSH PRIVATE KEY-----";
         remote.Ssh!.PrivateKeyPassphrase = "key-secret";
-        var catalog = new OllamaProfileCatalog { ActiveProfileId = remote.Id, Profiles = [remote] };
+        var catalog = new GpuProfileCatalog { ActiveProfileId = remote.Id, Profiles = [remote] };
 
         await store.SaveAsync(catalog);
-        OllamaProfileCatalog reopened = await store.LoadAsync();
+        GpuProfileCatalog reopened = await store.LoadAsync();
         string json = await File.ReadAllTextAsync(path);
 
         Assert.Contains("synthetic-key-only", reopened.Profiles[0].Ssh!.PrivateKey, StringComparison.Ordinal);
@@ -63,14 +63,12 @@ public sealed class GpuConnectionManagerTests : IDisposable
         var client = new FakeBackendClient();
         await using var manager = new GpuConnectionManager(ssh, (profile, endpoint) =>
         {
-            Assert.Equal(BackendApi.OpenAiCompatible, profile.Api);
             Assert.Equal("http://127.0.0.1:43117/api/chat", endpoint.ToString());
             return client;
         });
-        OllamaBackendProfile profile = RemoteProfile();
-        profile.Api = BackendApi.OpenAiCompatible;
+        GpuBackendProfile profile = RemoteProfile();
         profile.ParallelRequests = 4;
-        profile.Ssh!.RemoteOllamaPort = 11436;
+        profile.Ssh!.ServerPort = 11436;
 
         await manager.ConnectAsync(profile);
 
@@ -84,7 +82,7 @@ public sealed class GpuConnectionManagerTests : IDisposable
         var ssh = new FakeSshConnectionService();
         await using var manager = new GpuConnectionManager(ssh, (_, _) => new FakeBackendClient(),
             healthInterval: TimeSpan.FromMilliseconds(10));
-        OllamaBackendProfile profile = RemoteProfile();
+        GpuBackendProfile profile = RemoteProfile();
         await manager.ConnectAsync(profile);
 
         ssh.Sessions[0].Connected = false;
@@ -101,7 +99,7 @@ public sealed class GpuConnectionManagerTests : IDisposable
     {
         var service = new RejectingSshService();
         await using var manager = new GpuConnectionManager(service, (_, _) => new FakeBackendClient());
-        OllamaBackendProfile profile = RemoteProfile();
+        GpuBackendProfile profile = RemoteProfile();
 
         SshHostKeyVerificationException error = await Assert.ThrowsAsync<SshHostKeyVerificationException>(() => manager.ConnectAsync(profile));
 
@@ -128,26 +126,26 @@ public sealed class GpuConnectionManagerTests : IDisposable
     public async Task Ssh_profile_never_uses_saved_endpoint_before_runtime_tunnel_is_attached()
     {
         Directory.CreateDirectory(_root);
-        var store = new OllamaProfileStore(Path.Combine(_root, "manager.json"), new Protector());
+        var store = new GpuProfileStore(Path.Combine(_root, "manager.json"), new Protector());
         var remote = RemoteProfile();
         await store.SaveAsync(new() { ActiveProfileId = remote.Id, Profiles = [remote] });
-        using var manager = new OllamaBackendManager(store);
+        using var manager = new GpuBackendManager(store);
         await manager.LoadAsync();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => manager.TranslateAsync("must-not-leave", new()));
 
         var runtime = new FakeBackendClient();
         await manager.AttachRuntimeClientAsync(remote.Id, runtime);
-        OllamaCompletion completion = await manager.TranslateAsync("synthetic", new());
+        LlmCompletion completion = await manager.TranslateAsync("synthetic", new());
         Assert.Equal("ok", completion.Text);
         await manager.DetachRuntimeClientAsync(remote.Id);
         Assert.False(runtime.Disposed);
         await Assert.ThrowsAsync<InvalidOperationException>(() => manager.TranslateAsync("must-not-leave-2", new()));
     }
 
-    private static OllamaBackendProfile RemoteProfile() => new()
+    private static GpuBackendProfile RemoteProfile() => new()
     {
-        Id = Guid.NewGuid(), Name = "EZYCloudX RTX 3090 Ti", Kind = OllamaBackendKind.Remote,
+        Id = Guid.NewGuid(), Name = "EZYCloudX RTX 3090 Ti", Kind = GpuBackendKind.Remote,
         Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b", RemoteDisclosureAccepted = true,
         HourlyPrice = 0.42m,
         Ssh = new() { Host = "gpu.example.test", Port = 2222, Username = "ubuntu", Password = "ssh-secret",
@@ -163,20 +161,20 @@ public sealed class GpuConnectionManagerTests : IDisposable
         Assert.True(condition());
     }
 
-    private sealed class Protector : IOllamaSecretProtector
+    private sealed class Protector : ISecretProtector
     {
         public string Protect(string value) => "protected:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
         public string Unprotect(string value) => Encoding.UTF8.GetString(Convert.FromBase64String(value[10..]));
     }
 
-    private sealed class FakeBackendClient : IOllamaBackendClient
+    private sealed class FakeBackendClient : ILlmBackendClient
     {
         public bool Disposed { get; private set; }
         public int CheckCalls { get; private set; }
         public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default)
         { CheckCalls++; return Task.CompletedTask; }
         public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default) =>
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default) =>
             Task.FromResult(FakeClient.Completion("ok"));
         public void Dispose() => Disposed = true;
     }
@@ -220,7 +218,7 @@ public sealed class GpuConnectionManagerTests : IDisposable
         }
         public Task UploadFileAsync(string localPath, string remotePath, IProgress<long>? progress = null,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort, CancellationToken cancellationToken = default)
+        public Task<ISshTunnel> OpenServerTunnelAsync(int remotePort, CancellationToken cancellationToken = default)
         { RemotePort = remotePort; Tunnel = new(); return Task.FromResult<ISshTunnel>(Tunnel); }
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
     }

@@ -32,7 +32,7 @@ public sealed class ProjectTranslationJob
     public long Revision { get; set; }
     public ProjectTranslationJobStatus Status { get; set; } = ProjectTranslationJobStatus.Draft;
     public ModelOptions ModelOptions { get; set; } = new();
-    public OllamaBackendSnapshot? Backend { get; set; }
+    public GpuBackendSnapshot? Backend { get; set; }
     public PromptPreset PromptPreset { get; set; } = PromptPreset.Default;
     public long ProjectResourceRevision { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -134,7 +134,7 @@ public sealed class ProjectTranslationWorkerState
     public Guid WorkerId { get; set; }
     public Guid ProfileId { get; set; }
     public string Name { get; set; } = "";
-    public OllamaBackendSnapshot Backend { get; set; } = OllamaBackendSnapshot.LocalDefault("translategemma:12b");
+    public GpuBackendSnapshot Backend { get; set; } = GpuBackendSnapshot.LocalDefault("translategemma:12b");
     public ModelOptions ModelOptions { get; set; } = new();
     public SegmenterOptions SegmentationOptions { get; set; } = new();
     public string BackendIdentity { get; set; } = "";
@@ -180,11 +180,11 @@ public sealed class ProjectTranslationWorkerState
     }
 }
 
-public sealed record OllamaBackendSnapshot(Guid ProfileId, OllamaBackendKind Kind, string ProfileName,
+public sealed record GpuBackendSnapshot(Guid ProfileId, GpuBackendKind Kind, string ProfileName,
     string Endpoint, string Model)
 {
-    public static OllamaBackendSnapshot LocalDefault(string model) => new(OllamaBackendProfile.DefaultLocalId,
-        OllamaBackendKind.Local, "Ollama Local", OllamaClient.DefaultEndpoint.ToString(), model);
+    public static GpuBackendSnapshot LocalDefault(string model) => new(GpuBackendProfile.DefaultLocalId,
+        GpuBackendKind.Local, "llama-server Local", LlamaServerClient.DefaultEndpoint.ToString(), model);
 
     public void Validate()
     {
@@ -192,14 +192,14 @@ public sealed record OllamaBackendSnapshot(Guid ProfileId, OllamaBackendKind Kin
             ProfileName.Length > 100 || string.IsNullOrWhiteSpace(Model) || Model.Length > 200 ||
             !Uri.TryCreate(Endpoint, UriKind.Absolute, out Uri? endpoint))
             throw new InvalidDataException("Backend snapshot của translation queue không hợp lệ.");
-        _ = Kind == OllamaBackendKind.Local
-            ? OllamaClient.ValidateLocalEndpoint(endpoint)
-            : OllamaClient.ValidateRemoteEndpoint(endpoint);
+        _ = Kind == GpuBackendKind.Local
+            ? LlamaServerClient.ValidateLocalEndpoint(endpoint)
+            : LlamaServerClient.ValidateRemoteEndpoint(endpoint);
     }
 }
 
 public sealed record ProjectTranslationEnvironment(ModelOptions ModelOptions, PromptPreset PromptPreset,
-    ProjectResources Resources, OllamaBackendSnapshot? Backend = null,
+    ProjectResources Resources, GpuBackendSnapshot? Backend = null,
     BookIntelligence.IBookKnowledgeContextProvider? BookKnowledgeContext = null);
 
 public sealed record ProjectTranslationProgress(ProjectTranslationJobStatus Status, int TotalChapters,
@@ -207,12 +207,12 @@ public sealed record ProjectTranslationProgress(ProjectTranslationJobStatus Stat
     Guid? CurrentChapterId, string? CurrentChapterTitle, int CurrentCompletedSegments,
     int CurrentTotalSegments, string? Error);
 
-public sealed record ProjectTranslationWorkerDefinition(Guid WorkerId, OllamaBackendSnapshot Backend,
-    IOllamaClient Client, ModelOptions ModelOptions, SegmenterOptions SegmentationOptions,
+public sealed record ProjectTranslationWorkerDefinition(Guid WorkerId, GpuBackendSnapshot Backend,
+    ILlmClient Client, ModelOptions ModelOptions, SegmenterOptions SegmentationOptions,
     decimal? HourlyPrice = null, string BackendIdentity = "", int Slots = 1)
 {
-    public ProjectTranslationWorkerDefinition(Guid workerId, OllamaBackendSnapshot backend,
-        IOllamaClient client, ModelOptions modelOptions, decimal? hourlyPrice = null, string backendIdentity = "",
+    public ProjectTranslationWorkerDefinition(Guid workerId, GpuBackendSnapshot backend,
+        ILlmClient client, ModelOptions modelOptions, decimal? hourlyPrice = null, string backendIdentity = "",
         int slots = 1)
         : this(workerId, backend, client, modelOptions, new SegmenterOptions(), hourlyPrice, backendIdentity, slots) { }
 

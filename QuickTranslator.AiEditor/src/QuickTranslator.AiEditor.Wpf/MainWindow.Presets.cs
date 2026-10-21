@@ -148,7 +148,7 @@ public partial class MainWindow
                 service = new(chapter, _translationClient, _store);
             }
             string preview = service.PreviewPrompt(_selectedId ?? service.GetSnapshot().Segments[0].Id, preset, ReadTerms(), ContextNotesInput.Text);
-            ShowTextWindow("Prompt thực tế cho đoạn đang chọn (hoặc đoạn đầu) — chưa gửi Ollama", preview);
+            ShowTextWindow("Prompt thực tế cho đoạn đang chọn (hoặc đoạn đầu) — chưa gửi tới AI", preview);
         }
         catch (Exception ex) { ShowError(ex); }
     }

@@ -22,19 +22,19 @@ internal sealed class MemoryStore : IChapterStore
         Task.FromResult(new ChapterLoadResult(DocumentJson.Clone(LastSaved!), path));
 }
 
-internal sealed class FakeClient : IOllamaClient
+internal sealed class FakeClient : ILlmClient
 {
     public int Calls { get; private set; }
     public List<string> Prompts { get; } = [];
-    public Func<int, CancellationToken, Task<OllamaCompletion>> Respond { get; set; } =
+    public Func<int, CancellationToken, Task<LlmCompletion>> Respond { get; set; } =
         (_, _) => Task.FromResult(Completion("Một bản dịch thử nghiệm."));
 
-    public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
+    public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
     {
         Calls++;
         Prompts.Add(prompt);
         return Respond(Calls, cancellationToken);
     }
 
-    public static OllamaCompletion Completion(string text) => new(text, true, "stop", new() { InputTokens = 200, OutputTokens = 80 });
+    public static LlmCompletion Completion(string text) => new(text, true, "stop", new() { InputTokens = 200, OutputTokens = 80 });
 }

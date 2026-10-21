@@ -7,21 +7,21 @@ namespace QuickTranslator.AiEditor.Tests;
 public sealed class MockApiWorkflowTests
 {
     [Fact]
-    public async Task MockHttp_ToService_ToDisk_ToReview_WorksWithoutOllamaOrGpu()
+    public async Task MockHttp_ToService_ToDisk_ToReview_WorksWithoutServerOrGpu()
     {
         string directory = Path.Combine(Path.GetTempPath(), "qtaie-api-tests-" + Guid.NewGuid().ToString("N"));
         try
         {
             int calls = 0;
-            using var http = new HttpClient(new OllamaClientTests.FakeHandler((_, _) =>
+            using var http = new HttpClient(new LlamaServerClientTests.FakeHandler((_, _) =>
             {
                 calls++;
-                return Task.FromResult(OllamaClientTests.JsonResponse("""
-                    {"message":{"role":"assistant","content":"Xin chào, người bạn cũ."},"done":true,
-                     "done_reason":"stop","prompt_eval_count":100,"eval_count":20,"total_duration":1000000000}
+                return Task.FromResult(LlamaServerClientTests.JsonResponse("""
+                    {"choices":[{"message":{"role":"assistant","content":"Xin chào, người bạn cũ."},"finish_reason":"stop"}],
+                     "usage":{"prompt_tokens":100,"completion_tokens":20},"timings":{"prompt_ms":10,"predicted_ms":200}}
                     """));
             }));
-            using var client = new OllamaClient(http);
+            using var client = new LlamaServerClient(http, LlamaServerClient.DefaultEndpoint, 1);
             var store = new ChapterFileStore(directory);
             var chapter = TranslationService.CreateChapter("Chương giả lập", "你好，老朋友。\r\n再见。",
                 new() { MinimumHanCharacters = 3, TargetHanCharacters = 5, MaximumHanCharacters = 6 });

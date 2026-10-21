@@ -101,7 +101,7 @@ public sealed class TranslationQueue(TranslationService service)
                     {
                         // The service checkpointed the conflicting segment; continue with the next eligible segment.
                     }
-                    catch (OllamaRequestException) { /* Segment error is already checkpointed. Continue the chapter without an automatic retry. */ }
+                    catch (LlmRequestException) { /* Segment error is already checkpointed. Continue the chapter without an automatic retry. */ }
                     // Disk errors and unexpected exceptions stop the entire queue; continuing could lose results.
                 }
                 service.AdvanceQueue();

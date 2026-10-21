@@ -95,15 +95,15 @@ public sealed class AddressingLedgerUiTests
     });
 
     /// <summary>A provider stand-in that reads the prompt it is sent (tasks found by their prompt block) and answers them.</summary>
-    private sealed class PromptMock(Func<IReadOnlyList<AddressingTask>> candidates) : IJsonSchemaOllamaClient
+    private sealed class PromptMock(Func<IReadOnlyList<AddressingTask>> candidates) : IJsonSchemaLlmClient
     {
         public int Calls { get; private set; }
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, System.Text.Json.JsonElement schema, CancellationToken ct = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, System.Text.Json.JsonElement schema, CancellationToken ct = default)
         {
             Calls++;
             var request = AddressingAiSurvey.PlanRequests(AddressingAiSurvey.TasksInPrompt(prompt, candidates()), "mock").Single();
-            return Task.FromResult(new OllamaCompletion(Reply(request), true, "stop", new GenerationMetrics()));
+            return Task.FromResult(new LlmCompletion(Reply(request), true, "stop", new GenerationMetrics()));
         }
     }
 

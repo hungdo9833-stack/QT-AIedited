@@ -42,10 +42,10 @@ try
     ModelOptions options = environment.ModelOptions;
     var workerList = new List<ProjectTranslationWorkerDefinition>
     {
-        new(Guid.NewGuid(), OllamaBackendSnapshot.LocalDefault(options.Model), local, options with { })
+        new(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault(options.Model), local, options with { })
     };
     if (workerCount == 2)
-        workerList.Add(new(Guid.NewGuid(), new OllamaBackendSnapshot(Guid.NewGuid(), OllamaBackendKind.Remote,
+        workerList.Add(new(Guid.NewGuid(), new GpuBackendSnapshot(Guid.NewGuid(), GpuBackendKind.Remote,
                 "Synthetic Remote", "http://127.0.0.1:43117/api/chat", options.Model), remote,
             options with { }, 0.45m, "synthetic-confirmed-host"));
     ProjectTranslationWorkerDefinition[] workers = workerList.ToArray();
@@ -148,29 +148,29 @@ static async Task<double> MeasureCancellationAsync()
     }
 }
 
-file sealed class ImmediateClient(string name) : IOllamaClient
+file sealed class ImmediateClient(string name) : ILlmClient
 {
     private int _calls;
     private long _firstRequestTimestamp;
     public int Calls => Volatile.Read(ref _calls);
     public long FirstRequestTimestamp => Volatile.Read(ref _firstRequestTimestamp);
 
-    public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+    public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Interlocked.CompareExchange(ref _firstRequestTimestamp, Stopwatch.GetTimestamp(), 0);
         int call = Interlocked.Increment(ref _calls);
-        return Task.FromResult(new OllamaCompletion($"{name} synthetic {call}", true, "stop",
+        return Task.FromResult(new LlmCompletion($"{name} synthetic {call}", true, "stop",
             new GenerationMetrics { InputTokens = 100, OutputTokens = 40, ClientElapsed = TimeSpan.FromMilliseconds(1) }));
     }
 }
 
-file sealed class HangingClient : IOllamaClient
+file sealed class HangingClient : ILlmClient
 {
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+    public async Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
         CancellationToken cancellationToken = default)
     {
         Started.TrySetResult();

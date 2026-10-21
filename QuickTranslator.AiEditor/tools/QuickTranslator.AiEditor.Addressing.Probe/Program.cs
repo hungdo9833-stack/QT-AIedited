@@ -315,13 +315,13 @@ static string MockMarkdown(AddressingRunResult run, IReadOnlyList<AddressingTask
 /// two participants at each paragraph break, answers "" in larger scenes, and injects known faults (an unlisted name on
 /// every 13th turn, an unquoted term on every 17th) so verification is exercised on real text.
 /// </summary>
-sealed class MockSceneClient(IReadOnlyList<AddressingTask> tasks) : IJsonSchemaOllamaClient
+sealed class MockSceneClient(IReadOnlyList<AddressingTask> tasks) : IJsonSchemaLlmClient
 {
     private readonly Dictionary<string, AddressingTask> _byId = tasks.ToDictionary(t => t.TaskId, StringComparer.Ordinal);
     private int _turn;
-    public Task<OllamaCompletion> TranslateAsync(string prompt, QuickTranslator.AiEditor.Core.Models.ModelOptions options, CancellationToken ct = default) =>
+    public Task<LlmCompletion> TranslateAsync(string prompt, QuickTranslator.AiEditor.Core.Models.ModelOptions options, CancellationToken ct = default) =>
         throw new NotSupportedException();
-    public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, QuickTranslator.AiEditor.Core.Models.ModelOptions options, JsonElement schema, CancellationToken ct = default)
+    public Task<LlmCompletion> TranslateStructuredAsync(string prompt, QuickTranslator.AiEditor.Core.Models.ModelOptions options, JsonElement schema, CancellationToken ct = default)
     {
         var scenes = new JsonArray();
         var inPrompt = AddressingAiSurvey.TasksInPrompt(prompt, _byId.Values);
@@ -347,7 +347,7 @@ sealed class MockSceneClient(IReadOnlyList<AddressingTask> tasks) : IJsonSchemaO
             scenes.Add(new JsonObject { ["task_id"] = "T" + (index + 1), ["turns"] = turns, ["reason"] = "MOCK" }); // Short id, as the prompt asks.
         }
         string json = new JsonObject { ["pairs"] = new JsonArray(), ["characters"] = new JsonArray(), ["scenes"] = scenes, ["identities"] = new JsonArray() }.ToJsonString();
-        return Task.FromResult(new OllamaCompletion(json, true, "stop", new QuickTranslator.AiEditor.Core.Models.GenerationMetrics()));
+        return Task.FromResult(new LlmCompletion(json, true, "stop", new QuickTranslator.AiEditor.Core.Models.GenerationMetrics()));
     }
     private static string Other(AddressingTask task, string name) => task.Participants[0] == name ? task.Participants[1] : task.Participants[0];
 }

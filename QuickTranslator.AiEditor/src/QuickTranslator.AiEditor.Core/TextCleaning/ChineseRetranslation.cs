@@ -10,7 +10,7 @@ public enum ChineseRetranslationMode
 
 public enum ChineseRetranslationMethod
 {
-    Ollama,
+    LlamaServer,
     VietPhrase,
     HanViet
 }
@@ -78,7 +78,7 @@ public static class ChineseRetranslationPreviewBuilder
         string after = string.Concat(before.AsSpan(0, start), replacement, before.AsSpan(start + length));
         string source = method switch
         {
-            ChineseRetranslationMethod.Ollama => "Dịch lại bằng Ollama",
+            ChineseRetranslationMethod.LlamaServer => "Dịch lại bằng llama-server",
             ChineseRetranslationMethod.VietPhrase => "Dịch lại bằng VietPhrase",
             _ => "Dịch lại bằng Hán Việt"
         };

@@ -21,7 +21,7 @@ public sealed class ProjectTranslationRestartUiTests
             var remoteClient = new BackendClient("remote resumed");
             await using var connections = new GpuConnectionManager(ssh, (_, _) => remoteClient,
                 healthInterval: TimeSpan.FromHours(1));
-            OllamaBackendManager backends = await LoadBackendsAsync(scenario.Root);
+            GpuBackendManager backends = await LoadBackendsAsync(scenario.Root);
             using var fixture = new WorkspaceFixture(scenario.Root, backends, connections);
             await fixture.OpenProjectAsync();
             fixture.Call("InitializeProjectTranslationCoordinator", fixture.Project);
@@ -57,7 +57,7 @@ public sealed class ProjectTranslationRestartUiTests
             var ssh = new OfflineSshService();
             await using var connections = new GpuConnectionManager(ssh, (_, _) => new BackendClient("unused"),
                 healthInterval: TimeSpan.FromHours(1));
-            OllamaBackendManager backends = await LoadBackendsAsync(scenario.Root);
+            GpuBackendManager backends = await LoadBackendsAsync(scenario.Root);
             using var fixture = new WorkspaceFixture(scenario.Root, backends, connections);
             await fixture.OpenProjectAsync();
             fixture.Call("InitializeProjectTranslationCoordinator", fixture.Project);
@@ -78,8 +78,8 @@ public sealed class ProjectTranslationRestartUiTests
         StaHost.Run(async () =>
         {
             RestartScenario scenario = await CreateScenarioAsync();
-            OllamaBackendManager backends = await LoadBackendsAsync(scenario.Root);
-            OllamaBackendProfile changed = backends.GetProfile(scenario.RemoteProfileId);
+            GpuBackendManager backends = await LoadBackendsAsync(scenario.Root);
+            GpuBackendProfile changed = backends.GetProfile(scenario.RemoteProfileId);
             changed.Ssh!.HostKeyFingerprint = Fingerprint('B');
             await backends.SaveProfileAsync(changed, activate: false);
             var ssh = new RecordingSshService();
@@ -116,7 +116,7 @@ public sealed class ProjectTranslationRestartUiTests
         const string localModel = "translategemma:12b";
         const string remoteModel = "index-translate:9b";
         string fingerprint = Fingerprint('A');
-        OllamaBackendProfile remote = RemoteProfile(remoteModel, fingerprint);
+        GpuBackendProfile remote = RemoteProfile(remoteModel, fingerprint);
         await using (var profileScope = new AsyncBackendScope(await LoadBackendsAsync(root)))
             await profileScope.Manager.SaveProfileAsync(remote, activate: false);
 
@@ -133,15 +133,15 @@ public sealed class ProjectTranslationRestartUiTests
         var workers = new[]
         {
             new ProjectTranslationWorkerDefinition(localWorker,
-                OllamaBackendSnapshot.LocalDefault(localModel), new FakeClient(), localOptions, localSegments,
-                BackendIdentity: "local:" + OllamaBackendProfile.DefaultLocalId.ToString("N")),
+                GpuBackendSnapshot.LocalDefault(localModel), new FakeClient(), localOptions, localSegments,
+                BackendIdentity: "local:" + GpuBackendProfile.DefaultLocalId.ToString("N")),
             new ProjectTranslationWorkerDefinition(remoteWorker,
-                new(remote.Id, OllamaBackendKind.Remote, remote.Name, remote.Endpoint, remoteModel),
+                new(remote.Id, GpuBackendKind.Remote, remote.Name, remote.Endpoint, remoteModel),
                 new FakeClient(), remoteOptions, remoteSegments, BackendIdentity: BackendIdentity(remote))
         };
         Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(
             new ProjectTranslationEnvironment(localOptions with { }, preset with { }, resources.Clone(),
-                OllamaBackendSnapshot.LocalDefault(localModel)));
+                GpuBackendSnapshot.LocalDefault(localModel)));
         var coordinator = new ProjectTranslationCoordinator(session, repository, workers, Load);
         ProjectTranslationJob ready = await new ProjectTranslationJobStore(session)
             .SaveNewAsync(await coordinator.PlanAsync(chapterIds));
@@ -176,11 +176,11 @@ public sealed class ProjectTranslationRestartUiTests
         Assert.Equal(expected.CompletedSegments, actual.Items.Sum(item => item.CompletedSegments));
     }
 
-    private static OllamaBackendProfile RemoteProfile(string model, string fingerprint) => new()
+    private static GpuBackendProfile RemoteProfile(string model, string fingerprint) => new()
     {
         Id = Guid.NewGuid(),
         Name = "GPU Remote verified",
-        Kind = OllamaBackendKind.Remote,
+        Kind = GpuBackendKind.Remote,
         Endpoint = "https://gpu.example.test/api/chat",
         Model = model,
         Runtime = new AiRuntimeProfile
@@ -194,22 +194,22 @@ public sealed class ProjectTranslationRestartUiTests
         {
             Host = "gpu.example.test", Port = 22, Username = "qtstudio",
             Authentication = SshAuthenticationKind.Password, Password = "synthetic-only",
-            HostKeyFingerprint = fingerprint, RemoteOllamaPort = 11434
+            HostKeyFingerprint = fingerprint, ServerPort = 11434
         }
     };
 
-    private static async Task<OllamaBackendManager> LoadBackendsAsync(string root)
+    private static async Task<GpuBackendManager> LoadBackendsAsync(string root)
     {
-        var manager = new OllamaBackendManager(new OllamaProfileStore(
+        var manager = new GpuBackendManager(new GpuProfileStore(
             Path.Combine(root, "app", "ollama-profiles.json"), new PlainProtector()));
         await manager.LoadAsync();
         return manager;
     }
 
-    private static string BackendIdentity(OllamaBackendProfile profile)
+    private static string BackendIdentity(GpuBackendProfile profile)
     {
         GpuSshSettings ssh = profile.Ssh!;
-        string value = $"{profile.Id:N}|{ssh.Host.ToLowerInvariant()}|{ssh.Port}|{ssh.Username}|{ssh.RemoteOllamaPort}|{ssh.HostKeyFingerprint}";
+        string value = $"{profile.Id:N}|{ssh.Host.ToLowerInvariant()}|{ssh.Port}|{ssh.Username}|{ssh.ServerPort}|{ssh.HostKeyFingerprint}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
 
@@ -218,15 +218,15 @@ public sealed class ProjectTranslationRestartUiTests
     private sealed record RestartScenario(string Root, Guid JobId, Guid RemoteProfileId,
         string RemoteFingerprint, Guid[] WorkerIds, string[] Models, int CompletedSegments, long Revision);
 
-    private sealed class PlainProtector : IOllamaSecretProtector
+    private sealed class PlainProtector : ISecretProtector
     {
         public string Protect(string value) => value;
         public string Unprotect(string value) => value;
     }
 
-    private sealed class AsyncBackendScope(OllamaBackendManager manager) : IAsyncDisposable
+    private sealed class AsyncBackendScope(GpuBackendManager manager) : IAsyncDisposable
     {
-        public OllamaBackendManager Manager { get; } = manager;
+        public GpuBackendManager Manager { get; } = manager;
         public ValueTask DisposeAsync() { Manager.Dispose(); return ValueTask.CompletedTask; }
     }
 
@@ -257,7 +257,7 @@ public sealed class ProjectTranslationRestartUiTests
             CancellationToken cancellationToken = default) => Task.FromResult(new SshCommandResult(0, "", ""));
         public Task UploadFileAsync(string localPath, string remotePath, IProgress<long>? progress = null,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort,
+        public Task<ISshTunnel> OpenServerTunnelAsync(int remotePort,
             CancellationToken cancellationToken = default) => Task.FromResult<ISshTunnel>(new SshTunnel());
         public ValueTask DisposeAsync() { IsConnected = false; return ValueTask.CompletedTask; }
     }
@@ -269,10 +269,10 @@ public sealed class ProjectTranslationRestartUiTests
         public ValueTask DisposeAsync() { IsStarted = false; return ValueTask.CompletedTask; }
     }
 
-    private sealed class BackendClient(string response) : IOllamaBackendClient
+    private sealed class BackendClient(string response) : ILlmBackendClient
     {
         public int Calls { get; private set; }
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             Calls++;

@@ -33,7 +33,7 @@ public sealed record AddressingSurveyResult(AddressingLedgerState State, int Req
 /// that is "Hoàn thành"). One try per request, a per-click request limit, checkpoint after every request; pressing again
 /// continues where it stopped and never resends what is done.
 /// </summary>
-public sealed class AddressingSurveyRunner(IJsonSchemaOllamaClient client)
+public sealed class AddressingSurveyRunner(IJsonSchemaLlmClient client)
 {
     private const int MaximumRounds = 4;
 

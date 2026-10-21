@@ -53,7 +53,7 @@ public sealed class ChineseRetranslationTests
         ChineseTextOccurrence occurrence = Assert.Single(Scan(chapter));
 
         BatchReplacementPreviewItem preview = ChineseRetranslationPreviewBuilder.Build(chapter, occurrence,
-            ChineseRetranslationMode.EntireSegment, ChineseRetranslationMethod.Ollama,
+            ChineseRetranslationMode.EntireSegment, ChineseRetranslationMethod.LlamaServer,
             "Bản dịch lại hoàn chỉnh.");
         BatchReplacementEngine.ApplyToChapter(chapter, [preview], true,
             BatchReplacementScope.CurrentChapter, Guid.NewGuid(), DateTimeOffset.UtcNow);
@@ -88,9 +88,9 @@ public sealed class ChineseRetranslationTests
         ChineseTextOccurrence occurrence = Assert.Single(Scan(chapter));
 
         Assert.Throws<InvalidDataException>(() => ChineseRetranslationPreviewBuilder.Build(chapter, occurrence,
-            ChineseRetranslationMode.ResidualHanOnly, ChineseRetranslationMethod.Ollama, ""));
+            ChineseRetranslationMode.ResidualHanOnly, ChineseRetranslationMethod.LlamaServer, ""));
         Assert.Throws<InvalidDataException>(() => ChineseRetranslationPreviewBuilder.Build(chapter, occurrence,
-            ChineseRetranslationMode.ResidualHanOnly, ChineseRetranslationMethod.Ollama, "老公"));
+            ChineseRetranslationMode.ResidualHanOnly, ChineseRetranslationMethod.LlamaServer, "老公"));
     }
 
     private static ChapterDocument Chapter(string draft)

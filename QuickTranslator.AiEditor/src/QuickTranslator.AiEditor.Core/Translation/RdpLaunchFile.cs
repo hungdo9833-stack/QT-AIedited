@@ -43,7 +43,7 @@ public static class RdpLaunchFile
             username.Any(char.IsControl) || string.IsNullOrEmpty(password) || password.Any(c => c is '\r' or '\n' or '\0'))
             throw new ArgumentException("Thông tin máy thuê không hợp lệ để mở Remote Desktop.");
         string address = host.Contains(':') ? $"[{host}]:{port}" : $"{host}:{port}";
-        string blob = Convert.ToHexString(WindowsDpapiOllamaSecretProtector.ProtectBytes(Encoding.Unicode.GetBytes(password)));
+        string blob = Convert.ToHexString(WindowsDpapiSecretProtector.ProtectBytes(Encoding.Unicode.GetBytes(password)));
         return string.Join("\r\n",
             "full address:s:" + address,
             "username:s:" + username.Trim(),

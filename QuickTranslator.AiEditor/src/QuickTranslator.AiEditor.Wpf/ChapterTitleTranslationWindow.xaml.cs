@@ -168,7 +168,7 @@ public partial class ChapterTitleTranslationWindow : Window
     }
 
     private ChapterTitleTranslationMethod SelectedMethod() => Enum.Parse<ChapterTitleTranslationMethod>(
-        (MethodInput.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Ollama", true);
+        (MethodInput.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? nameof(ChapterTitleTranslationMethod.LlamaServer), true);
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {

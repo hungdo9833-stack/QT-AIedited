@@ -65,7 +65,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
                     <TextBlock x:Name="AutosaveStatusText" Text="✓ Đã tự lưu" TextWrapping="NoWrap" Foreground="{DynamicResource SuccessBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,14,0" AutomationProperties.LiveSetting="Polite"/>
-                    <Button Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)" AutomationProperties.Name="Backend dịch · mở Quản lý GPU"><TextBlock x:Name="OllamaBackendStatus" Text="Local · llama-server Local · Index-Translate-9B-Q4_K_M" TextWrapping="NoWrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
+                    <Button Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)" AutomationProperties.Name="Backend dịch · mở Quản lý GPU"><TextBlock x:Name="GpuBackendStatus" Text="Local · llama-server Local · Index-Translate-9B-Q4_K_M" TextWrapping="NoWrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
                     <TextBlock x:Name="SavePathText" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="14,0,0,0" MaxWidth="420"/>
                 </StackPanel>
                 <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
@@ -883,11 +883,11 @@
                                         <Border Style="{StaticResource Card}">
                                             <StackPanel>
                                                 <DockPanel>
-                                                    <Button DockPanel.Dock="Right" Content="Profile mới" Click="OnNewOllamaProfile"/>
-                                                    <TextBlock Text="Local / Remote Ollama" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center"/>
+                                                    <Button DockPanel.Dock="Right" Content="Profile mới" Click="OnNewGpuProfile"/>
+                                                    <TextBlock Text="GPU máy này / máy thuê (llama-server)" FontWeight="SemiBold" FontSize="16" VerticalAlignment="Center"/>
                                                 </DockPanel>
                                                 <TextBlock Text="Cấu hình đã lưu" Style="{StaticResource FieldLabel}"/>
-                                                <ComboBox x:Name="OllamaProfileInput" DisplayMemberPath="Label" MinWidth="340" HorizontalAlignment="Left"/>
+                                                <ComboBox x:Name="GpuProfileInput" DisplayMemberPath="Label" MinWidth="340" HorizontalAlignment="Left"/>
                                                 <Grid Margin="0,8,0,0">
                                                     <Grid.ColumnDefinitions>
                                                         <ColumnDefinition Width="*"/>
@@ -895,28 +895,28 @@
                                                     </Grid.ColumnDefinitions>
                                                     <StackPanel Margin="0,0,8,0">
                                                         <TextBlock Text="Tên cấu hình" Style="{StaticResource FieldLabel}"/>
-                                                        <TextBox x:Name="OllamaProfileNameInput"/>
+                                                        <TextBox x:Name="GpuProfileNameInput"/>
                                                     </StackPanel>
                                                     <StackPanel Grid.Column="1">
                                                         <TextBlock Text="Nguồn xử lý" Style="{StaticResource FieldLabel}"/>
-                                                        <ComboBox x:Name="OllamaBackendKindInput" SelectedIndex="0">
+                                                        <ComboBox x:Name="GpuBackendKindInput" SelectedIndex="0">
                                                             <ComboBoxItem Tag="Local">Local · GPU máy này</ComboBoxItem>
                                                             <ComboBoxItem Tag="Remote">Remote · máy GPU thuê</ComboBoxItem>
                                                         </ComboBox>
                                                     </StackPanel>
                                                 </Grid>
                                                 <TextBlock Text="Remote URL" Style="{StaticResource FieldLabel}"/>
-                                                <TextBox x:Name="OllamaEndpointInput" Text="http://127.0.0.1:11434/api/chat"/>
+                                                <TextBox x:Name="GpuEndpointInput" Text="http://127.0.0.1:11434/api/chat"/>
                                                 <TextBlock Text="Bearer token (nếu reverse proxy yêu cầu)" Style="{StaticResource FieldLabel}"/>
-                                                <PasswordBox x:Name="OllamaTokenInput" PasswordChar="●"/>
-                                                <TextBlock x:Name="OllamaRemotePrivacyText" Visibility="Collapsed" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Text="Remote sẽ nhận prompt và nguyên văn segment. Chỉ dùng HTTPS hợp lệ hoặc HTTP qua IP mạng riêng được bảo vệ; QT Studio không bỏ qua lỗi chứng chỉ."/>
+                                                <PasswordBox x:Name="GpuTokenInput" PasswordChar="●"/>
+                                                <TextBlock x:Name="GpuRemotePrivacyText" Visibility="Collapsed" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Text="Remote sẽ nhận prompt và nguyên văn segment. Chỉ dùng HTTPS hợp lệ hoặc HTTP qua IP mạng riêng được bảo vệ; QT Studio không bỏ qua lỗi chứng chỉ."/>
                                                 <TextBlock Text="Model" Style="{StaticResource FieldLabel}"/>
                                                 <ComboBox x:Name="ModelInput" Text="translategemma:12b" IsEditable="True" IsTextSearchEnabled="True" MinWidth="300" HorizontalAlignment="Left"/>
                                                 <WrapPanel Margin="0,8,0,0">
-                                                    <Button Content="Kiểm tra kết nối" Click="OnTestOllamaConnection"/>
-                                                    <Button Content="Làm mới model" Click="OnRefreshOllamaModels"/>
-                                                    <Button Content="Lưu &amp; sử dụng" Click="OnSaveOllamaProfile"/>
-                                                    <TextBlock x:Name="OllamaConnectionStatus" VerticalAlignment="Center" Margin="8" TextWrapping="Wrap"/>
+                                                    <Button Content="Kiểm tra kết nối" Click="OnTestGpuConnection"/>
+                                                    <Button Content="Làm mới model" Click="OnRefreshGpuModels"/>
+                                                    <Button Content="Lưu &amp; sử dụng" Click="OnSaveGpuProfile"/>
+                                                    <TextBlock x:Name="GpuConnectionStatus" VerticalAlignment="Center" Margin="8" TextWrapping="Wrap"/>
                                                 </WrapPanel>
                                             </StackPanel>
                                         </Border>

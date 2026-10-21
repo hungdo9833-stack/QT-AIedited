@@ -41,7 +41,7 @@ public partial class MainWindow
 
     private async Task InitializeProjectsAsync()
     {
-        await EnsureOllamaBackendsLoadedAsync();
+        await EnsureGpuBackendsLoadedAsync();
         _projectLibraryReady = false;
         try
         {
@@ -75,7 +75,7 @@ public partial class MainWindow
     {
         var candidate = (await _projectRepository.OpenAsync(path)).Session;
         var assets = await ReadProjectAssetsAsync(candidate);
-        await PrepareOllamaProfileForProjectAsync(assets.Translation.OllamaProfileId);
+        await PrepareGpuProfileForProjectAsync(assets.Translation.GpuProfileId);
         ChapterDocument? chapter = candidate.Manifest.CurrentChapterId is Guid current
             ? (await _projectRepository.LoadChapterAsync(candidate, current)).Chapter : null;
         // Validate the service before touching the live context.
@@ -175,7 +175,7 @@ public partial class MainWindow
         {
             Model = ReadModelOptions(), Segmentation = ReadSegmenterOptions(),
             SelectedPromptPresetId = _presetsReady ? _presetManager.Selected.Id : null,
-            OllamaProfileId = SelectedOllamaProfileId,
+            GpuProfileId = SelectedGpuProfileId,
             TraditionalDataDirectory = TraditionalDataDirectoryInput.Text,
             BookKnowledgeContextEnabled = _bookKnowledgeContextEnabled
         });
@@ -207,13 +207,13 @@ public partial class MainWindow
 
     private void ApplyProjectDefaults(ProjectTranslationSettings settings)
     {
-        SelectOllamaProfileInUi(settings.OllamaProfileId);
+        SelectGpuProfileInUi(settings.GpuProfileId);
         Guid preset = settings.SelectedPromptPresetId is Guid selected &&
             _presetManager.Presets.Any(x => x.Id == selected)
             ? selected : PromptPreset.Default.Id;
         _presetManager.Select(preset);
         RefreshPresetEditor();
-        UpdateOllamaBackendStatus();
+        UpdateGpuBackendStatus();
     }
 
     private async Task<ChapterDocument> RegisterChapterIfNeededAsync(ChapterDocument chapter)

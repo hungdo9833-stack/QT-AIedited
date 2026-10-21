@@ -85,21 +85,21 @@ public sealed class GpuManagerUiTests
             Assert.False(expander.IsExpanded);
 
             var configured = (TextBox)window.FindName("ModelInput");
-            Assert.Equal(OllamaBackendProfile.DefaultLocalModel, configured.Text);
+            Assert.Equal(GpuBackendProfile.DefaultLocalModel, configured.Text);
 
             var list = (ListBox)window.FindName("ProfileList");
-            var remote = new OllamaBackendProfile
+            var remote = new GpuBackendProfile
             {
                 Name = "GPU Remote Test",
-                Kind = OllamaBackendKind.Remote,
+                Kind = GpuBackendKind.Remote,
                 Endpoint = "http://127.0.0.1:11434",
                 Model = "translategemma:12b"
             };
             await backends.SaveProfileAsync(remote, activate: false);
-            list.SelectedItem = list.Items.Cast<OllamaBackendProfile>().FirstOrDefault(p => p.Id == remote.Id) ?? remote;
+            list.SelectedItem = list.Items.Cast<GpuBackendProfile>().FirstOrDefault(p => p.Id == remote.Id) ?? remote;
             window.GetType().GetMethod("OnProfileSelected", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
                 .Invoke(window, [list, null!]);
-            if (list.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote })
+            if (list.SelectedItem is GpuBackendProfile { Kind: GpuBackendKind.Remote })
             {
                 Assert.False(expander.IsExpanded);
                 Assert.False(((Expander)window.FindName("AdvancedRuntimeExpander")).IsExpanded);
@@ -156,11 +156,11 @@ public sealed class GpuManagerUiTests
         }
     }
 
-    private static OllamaBackendManager CreateBackendManager(string root) => new(
-        new OllamaProfileStore(Path.Combine(root, "profiles.json"), new TestProtector()),
+    private static GpuBackendManager CreateBackendManager(string root) => new(
+        new GpuProfileStore(Path.Combine(root, "profiles.json"), new TestProtector()),
         _ => new StubClient());
 
-    private sealed class TestProtector : IOllamaSecretProtector
+    private sealed class TestProtector : ISecretProtector
     {
         public string Protect(string value) => value;
         public string Unprotect(string value) => value;
@@ -172,12 +172,12 @@ public sealed class GpuManagerUiTests
             Task.FromException<ISshSession>(new InvalidOperationException("test only"));
     }
 
-    private sealed class StubClient : IOllamaBackendClient
+    private sealed class StubClient : ILlmBackendClient
     {
         public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>([]);
-        public Task<OllamaCompletion> TranslateAsync(string prompt, QuickTranslator.AiEditor.Core.Models.ModelOptions options,
+        public Task<LlmCompletion> TranslateAsync(string prompt, QuickTranslator.AiEditor.Core.Models.ModelOptions options,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public void Dispose() { }
     }

@@ -57,7 +57,7 @@ public sealed class TranslationServiceTests
     {
         var (service, client, store, chapter) = Create();
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<OllamaCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<LlmCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
         client.Respond = (_, _) => { started.SetResult(); return release.Task; };
         var request = service.TranslateAsync(chapter.Segments[0].Id);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));

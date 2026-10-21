@@ -3,7 +3,7 @@ using System.Text;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
 
-public enum RemoteEndpointKind { Unreachable, Ssh, Rdp, Http, Ollama, Unknown }
+public enum RemoteEndpointKind { Unreachable, Ssh, Rdp, Http, Unknown }
 
 public sealed record RemoteHostProbeResult(RemoteEndpointKind Kind, string? Banner, bool LooksLikeWindows,
     IReadOnlyList<int> OpenCompanionPorts, string Message);
@@ -65,9 +65,7 @@ public sealed class RemoteHostProbe
         string reply = Printable(http);
         if (reply.StartsWith("HTTP/", StringComparison.Ordinal))
         {
-            return reply.Contains("Ollama is running", StringComparison.OrdinalIgnoreCase)
-                ? new(RemoteEndpointKind.Ollama, null, false, [], "Cổng này là Ollama trực tiếp (không qua SSH, không mã hóa).")
-                : new(RemoteEndpointKind.Http, null, reply.Contains("Microsoft", StringComparison.OrdinalIgnoreCase), [],
+            return new(RemoteEndpointKind.Http, null, reply.Contains("Microsoft", StringComparison.OrdinalIgnoreCase), [],
                     "Cổng này là dịch vụ web, không phải SSH.");
         }
 

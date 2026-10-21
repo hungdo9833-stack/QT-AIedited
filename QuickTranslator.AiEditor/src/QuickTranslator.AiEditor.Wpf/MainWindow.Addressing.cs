@@ -16,7 +16,7 @@ public partial class MainWindow
         }
         if (_addressingLedgerWindow is { IsVisible: true }) { _addressingLedgerWindow.Activate(); return; }
         // Accepted rules are committed by the review service; this only refreshes the in-memory editor state.
-        _addressingLedgerWindow = new AddressingLedgerWindow(_projectSession, _projectRepository, ApplyAddressingResources, _ollamaBackends.Profiles)
+        _addressingLedgerWindow = new AddressingLedgerWindow(_projectSession, _projectRepository, ApplyAddressingResources, _gpuBackends.Profiles)
             { Owner = IsVisible ? this : null };
         _addressingLedgerWindow.Closed += (_, _) => _addressingLedgerWindow = null;
         _addressingLedgerWindow.Show();

@@ -7,7 +7,7 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Core.Importing;
 
-public enum ChapterTitleTranslationMethod { Ollama, HanViet, VietPhrase, KeepChinese }
+public enum ChapterTitleTranslationMethod { LlamaServer, HanViet, VietPhrase, KeepChinese }
 public enum ChapterTitleTranslationStatus { Pending, Translating, Completed, Failed, Protected }
 
 public sealed record ChapterTitleTranslationSource(Guid Id, int? ChapterNumber, string ChineseTitle,
@@ -178,7 +178,7 @@ public sealed class ChapterTitleTranslationService
                 if (checkpoint is not null) await checkpoint(draft, CancellationToken.None).ConfigureAwait(false);
                 throw;
             }
-            catch (Exception error) when (error is InvalidDataException or OllamaRequestException or TimeoutException or IOException)
+            catch (Exception error) when (error is InvalidDataException or LlmRequestException or TimeoutException or IOException)
             {
                 foreach (ChapterTitleTranslationItem item in batch)
                 {
@@ -247,7 +247,7 @@ public static class ChapterTitleBatchPlanner
     }
 }
 
-public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, ModelOptions options,
+public sealed class LlamaServerChapterTitleTranslationBackend(ILlmClient client, ModelOptions options,
     IReadOnlyList<ConfirmedTerm>? glossary = null) : IChapterTitleTranslationBackend
 {
     public async Task<IReadOnlyList<ChapterTitleBackendOutput>> TranslateBatchAsync(
@@ -278,7 +278,7 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
             catch (InvalidDataException retryError)
             {
                 throw new InvalidDataException(
-                    "Ollama trả JSON tiêu đề không hợp lệ sau khi QT Studio đã thử lại bằng batch nhỏ. " +
+                    "llama-server trả JSON tiêu đề không hợp lệ sau khi QT Studio đã thử lại bằng batch nhỏ. " +
                     "Hãy tăng Output Tokens hoặc dùng Dịch lại mục lỗi. " + retryError.Message, firstError);
             }
         }
@@ -298,7 +298,7 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
             "không giải thích, không Markdown, không bỏ mục.\n" +
             (isRetry ? "Đây là lần thử lại batch nhỏ: bắt buộc đóng đầy đủ dấu ngoặc JSON.\n" : "") +
             "Thuật ngữ đã xác nhận:\n" + terms + "\nDữ liệu:\n" + input;
-        OllamaCompletion completion = await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
+        LlmCompletion completion = await client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<ChapterTitleBackendOutput> output = Parse(completion.Text);
         ValidateExpectedIds(titles, output);
         return output;
@@ -314,7 +314,7 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
             catch (Exception error) when (error is JsonException or InvalidDataException) { lastError = error; }
         }
         throw new InvalidDataException(
-            "Ollama không trả được JSON tiêu đề hoàn chỉnh; phản hồi có thể kèm giải thích hoặc bị cắt do giới hạn Output Tokens.",
+            "llama-server không trả được JSON tiêu đề hoàn chỉnh; phản hồi có thể kèm giải thích hoặc bị cắt do giới hạn Output Tokens.",
             lastError);
     }
 
@@ -338,7 +338,7 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
             if (TryParseIdMap(root, out IReadOnlyList<ChapterTitleBackendOutput>? mapped)) return mapped!;
         }
         if (root.ValueKind == JsonValueKind.Array) return ParseCollection(root);
-        throw new InvalidDataException("JSON Ollama không chứa danh sách id và translated_title.");
+        throw new InvalidDataException("JSON llama-server không chứa danh sách id và translated_title.");
     }
 
     private static IReadOnlyList<ChapterTitleBackendOutput> ParseCollection(JsonElement collection)
@@ -346,12 +346,12 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
         if (collection.ValueKind == JsonValueKind.Object &&
             TryParseIdMap(collection, out IReadOnlyList<ChapterTitleBackendOutput>? mapped)) return mapped!;
         if (collection.ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException("Trường kết quả của Ollama không phải JSON array.");
+            throw new InvalidDataException("Trường kết quả của llama-server không phải JSON array.");
         var result = new List<ChapterTitleBackendOutput>();
         foreach (JsonElement item in collection.EnumerateArray())
         {
             if (!TryParseItem(item, out ChapterTitleBackendOutput parsed))
-                throw new InvalidDataException("Ollama trả mục tiêu đề thiếu id hoặc translated_title.");
+                throw new InvalidDataException("llama-server trả mục tiêu đề thiếu id hoặc translated_title.");
             result.Add(parsed);
         }
         return result;
@@ -450,10 +450,10 @@ public sealed class OllamaChapterTitleTranslationBackend(IOllamaClient client, M
     {
         if (output.Any(item => item.Id == Guid.Empty || string.IsNullOrWhiteSpace(item.TranslatedTitle)) ||
             output.GroupBy(item => item.Id).Any(group => group.Count() != 1))
-            throw new InvalidDataException("Ollama trả ID trùng hoặc tiêu đề rỗng.");
+            throw new InvalidDataException("llama-server trả ID trùng hoặc tiêu đề rỗng.");
         HashSet<Guid> expected = input.Select(item => item.Id).ToHashSet();
         if (output.Count != expected.Count || output.Any(item => !expected.Remove(item.Id)) || expected.Count != 0)
-            throw new InvalidDataException("Ollama trả thiếu, thừa hoặc sai ID; batch chưa được áp dụng.");
+            throw new InvalidDataException("llama-server trả thiếu, thừa hoặc sai ID; batch chưa được áp dụng.");
     }
 }
 

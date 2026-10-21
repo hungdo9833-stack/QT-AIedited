@@ -21,7 +21,7 @@ public sealed class ReviewSampleTests
             var resources = new ProjectResourceStore(project);
             var edit = await resources.LoadAsync();
             edit.Characters.Profiles = [new() { ChineseName = "王秀兰", VietnameseName = "Vương Tú Lan", NormalizationEnabled = false }];
-            edit.Context = "Dữ liệu tổng hợp cho kiểm thử. Không gửi Ollama thật.";
+            edit.Context = "Dữ liệu tổng hợp cho kiểm thử. Không gửi tới server AI thật.";
             var current = await resources.SaveAsync(edit);
             var registered = (await repository.LoadChapterAsync(project, one.Id)).Chapter;
             var service = new TranslationService(registered,

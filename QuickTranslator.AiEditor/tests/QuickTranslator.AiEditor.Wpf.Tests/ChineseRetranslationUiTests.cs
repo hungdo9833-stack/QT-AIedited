@@ -104,7 +104,7 @@ public sealed class ChineseRetranslationUiTests
                 .Select(item => item.GetType().GetProperty("Label")?.GetValue(item)?.ToString() ?? "").ToArray()).ToArray();
             Assert.Contains(labels, values => values.Any(label => label.Contains("Toàn bộ dự án")));
             Assert.Contains(labels, values => values.Any(label => label.Contains("toàn bộ đoạn")));
-            Assert.Contains(labels, values => values.Any(label => label.Contains("Ollama")) &&
+            Assert.Contains(labels, values => values.Any(label => label.Contains("llama-server")) &&
                                               values.Any(label => label.Contains("VietPhrase")) &&
                                               values.Any(label => label.Contains("Hán Việt")));
             options.Close();

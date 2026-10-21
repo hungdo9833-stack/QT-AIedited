@@ -17,11 +17,11 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow : Window
 {
-    private readonly OllamaBackendManager _ollamaBackends;
+    private readonly GpuBackendManager _gpuBackends;
     private readonly GpuConnectionManager _gpuConnections;
     private readonly GpuTranslationPreferences _gpuPreferences = new();
     private readonly LocalLlamaServerHost _localLlama;
-    private readonly IOllamaClient _translationClient;
+    private readonly ILlmClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
     private readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private TranslationService? _service;
@@ -39,14 +39,14 @@ public partial class MainWindow : Window
 
     // Integration tests construct controls on an STA dispatcher without loading any real user stores.
     internal MainWindow(string? startupProjectPath, bool initializeApplication,
-        OllamaBackendManager? ollamaBackends = null, GpuConnectionManager? gpuConnections = null,
-        LocalLlamaServerHost? localLlama = null, IOllamaClient? translationClient = null)
+        GpuBackendManager? gpuBackends = null, GpuConnectionManager? gpuConnections = null,
+        LocalLlamaServerHost? localLlama = null, ILlmClient? translationClient = null)
     {
         _startupProjectPath = startupProjectPath;
-        _ollamaBackends = ollamaBackends ?? new OllamaBackendManager();
+        _gpuBackends = gpuBackends ?? new GpuBackendManager();
         _gpuConnections = gpuConnections ?? new GpuConnectionManager();
         _localLlama = localLlama ?? new LocalLlamaServerHost();
-        _translationClient = translationClient ?? _ollamaBackends;
+        _translationClient = translationClient ?? _gpuBackends;
         InitializeComponent();
         ClampWindowToWorkArea(this, 1600, 950);
         _projectCatalog = new(_projectRepository);
@@ -197,7 +197,7 @@ public partial class MainWindow : Window
         Task? request = null;
         try
         {
-            await EnsureOllamaBackendReadyAsync();
+            await EnsureGpuBackendReadyAsync();
             if (!BeginUiOperation()) return;
             try { await SaveSelectedSettingsAsync(); } finally { EndUiOperation(); }
             var options = ReadModelOptions();
@@ -533,7 +533,7 @@ public partial class MainWindow : Window
             if (attempt?.Metrics is GenerationMetrics metrics)
                 info.AppendLine($"Token vào/ra: {metrics.InputTokens?.ToString() ?? "không có"}/{metrics.OutputTokens?.ToString() ?? "không có"}; " +
                     $"thời gian client: {metrics.ClientElapsed.TotalSeconds:0.0}s" +
-                    (metrics.TotalDurationNanoseconds is long ns ? $"; Ollama: {ns / 1_000_000_000d:0.0}s" : ""));
+                    (metrics.TotalDurationNanoseconds is long ns ? $"; server: {ns / 1_000_000_000d:0.0}s" : ""));
             if (attempt is not null)
             {
                 foreach (var issue in attempt.Issues) info.AppendLine("Cảnh báo: " + issue.Message);
@@ -756,7 +756,7 @@ public partial class MainWindow : Window
                 if (_queue?.IsRunning == true) await _queue.CancelAsync();
                 try { await _activeRequest; }
                 catch (OperationCanceledException) { SetStatus("Request đã hủy; đang lưu bản nháp trước khi đóng."); }
-                catch (OllamaRequestException ex) { ShowError(ex); }
+                catch (LlmRequestException ex) { ShowError(ex); }
             }
             if (_projectSession is not null)
             {
@@ -797,7 +797,7 @@ public partial class MainWindow : Window
         _projectCatalog.Dispose();
         _gpuConnections.DisposeAsync().AsTask().GetAwaiter().GetResult();
         _localLlama.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _ollamaBackends.Dispose();
+        _gpuBackends.Dispose();
     }
     private sealed record SegmentItem(Guid Id, string Label)
     {

@@ -44,7 +44,7 @@ public sealed class ChapterTitleTranslationTests : IDisposable
             new ChapterTitleTranslationSource(Guid.NewGuid(), 2, "第2章 风波"),
             new ChapterTitleTranslationSource(Guid.NewGuid(), null, "番外")
         };
-        ChapterTitleTranslationDraft draft = ChapterTitleTranslationDraft.Create(Guid.NewGuid(), "source", ChapterTitleTranslationMethod.Ollama, sources);
+        ChapterTitleTranslationDraft draft = ChapterTitleTranslationDraft.Create(Guid.NewGuid(), "source", ChapterTitleTranslationMethod.LlamaServer, sources);
 
         await new ChapterTitleTranslationService().TranslateAsync(draft, new EchoBackend(reverse: true), Options);
 
@@ -71,7 +71,7 @@ public sealed class ChapterTitleTranslationTests : IDisposable
     public async Task Numbered_chapter_without_a_name_is_composed_without_calling_ai()
     {
         ChapterTitleTranslationDraft draft = ChapterTitleTranslationDraft.Create(Guid.NewGuid(), "missing-name",
-            ChapterTitleTranslationMethod.Ollama,
+            ChapterTitleTranslationMethod.LlamaServer,
             [new ChapterTitleTranslationSource(Guid.NewGuid(), 12, "第十二章")]);
         var backend = new EchoBackend();
 
@@ -135,7 +135,7 @@ public sealed class ChapterTitleTranslationTests : IDisposable
     }
 
     [Fact]
-    public async Task Ollama_prompt_uses_confirmed_glossary_and_parser_accepts_out_of_order_json()
+    public async Task Llama_server_prompt_uses_confirmed_glossary_and_parser_accepts_out_of_order_json()
     {
         Guid first = Guid.NewGuid(), second = Guid.NewGuid();
         string response = JsonSerializer.Serialize(new[]
@@ -144,7 +144,7 @@ public sealed class ChapterTitleTranslationTests : IDisposable
             new { id = first, translated_title = "Thanh Mộc Đường" }
         }, DocumentJson.Options);
         var client = new CaptureClient(response);
-        var backend = new OllamaChapterTitleTranslationBackend(client, Options, [new("青木堂", "Thanh Mộc Đường")]);
+        var backend = new LlamaServerChapterTitleTranslationBackend(client, Options, [new("青木堂", "Thanh Mộc Đường")]);
 
         IReadOnlyList<ChapterTitleBackendOutput> output = await backend.TranslateBatchAsync(
             [new(first, "青木堂"), new(second, "风波")]);
@@ -155,7 +155,7 @@ public sealed class ChapterTitleTranslationTests : IDisposable
     }
 
     [Fact]
-    public void Ollama_parser_accepts_prose_fence_container_and_common_property_casing()
+    public void Llama_server_parser_accepts_prose_fence_container_and_common_property_casing()
     {
         Guid id = Guid.NewGuid();
         string response = $$"""
@@ -165,20 +165,20 @@ public sealed class ChapterTitleTranslationTests : IDisposable
             ```
             """;
 
-        ChapterTitleBackendOutput item = Assert.Single(OllamaChapterTitleTranslationBackend.Parse(response));
+        ChapterTitleBackendOutput item = Assert.Single(LlamaServerChapterTitleTranslationBackend.Parse(response));
 
         Assert.Equal(id, item.Id);
         Assert.Equal("Thanh Mộc Đường", item.TranslatedTitle);
     }
 
     [Fact]
-    public async Task Ollama_backend_retries_malformed_large_response_as_smaller_verified_batches()
+    public async Task Llama_server_backend_retries_malformed_large_response_as_smaller_verified_batches()
     {
         ChapterTitleBackendInput[] input = Enumerable.Range(1, 20)
             .Select(number => new ChapterTitleBackendInput(Guid.NewGuid(), $"标题{number}"))
             .ToArray();
         var client = new MalformedThenValidClient();
-        var backend = new OllamaChapterTitleTranslationBackend(client, Options);
+        var backend = new LlamaServerChapterTitleTranslationBackend(client, Options);
 
         IReadOnlyList<ChapterTitleBackendOutput> output = await backend.TranslateBatchAsync(input);
 
@@ -282,7 +282,7 @@ public sealed class ChapterTitleTranslationTests : IDisposable
     }
 
     private static ChapterTitleTranslationDraft Draft(int count) => ChapterTitleTranslationDraft.Create(Guid.NewGuid(),
-        "synthetic", ChapterTitleTranslationMethod.Ollama, Enumerable.Range(1, count).Select(number =>
+        "synthetic", ChapterTitleTranslationMethod.LlamaServer, Enumerable.Range(1, count).Select(number =>
             new ChapterTitleTranslationSource(Guid.NewGuid(), number, $"第{number}章 标题{number}")));
 
     public void Dispose()
@@ -325,7 +325,7 @@ public sealed class ChapterTitleTranslationTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             Calls++;
-            if (Calls == 1) throw new OllamaRequestException(OllamaErrorKind.Timeout, "timeout");
+            if (Calls == 1) throw new LlmRequestException(LlmErrorKind.Timeout, "timeout");
             return Task.FromResult<IReadOnlyList<ChapterTitleBackendOutput>>(titles
                 .Select(title => new ChapterTitleBackendOutput(title.Id, "Việt " + title.ChineseName)).ToArray());
         }
@@ -344,23 +344,23 @@ public sealed class ChapterTitleTranslationTests : IDisposable
         }
     }
 
-    private sealed class CaptureClient(string response) : IOllamaClient
+    private sealed class CaptureClient(string response) : ILlmClient
     {
         public string Prompt { get; private set; } = "";
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             Prompt = prompt;
-            return Task.FromResult(new OllamaCompletion(response, true, "stop", new GenerationMetrics()));
+            return Task.FromResult(new LlmCompletion(response, true, "stop", new GenerationMetrics()));
         }
     }
 
-    private sealed class MalformedThenValidClient : IOllamaClient
+    private sealed class MalformedThenValidClient : ILlmClient
     {
         public int Calls { get; private set; }
         public List<int> RequestSizes { get; } = [];
 
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             Calls++;
@@ -369,7 +369,7 @@ public sealed class ChapterTitleTranslationTests : IDisposable
             RequestSizes.Add(ids.Length);
             string response = Calls == 1 ? "JSON bị cắt: [{\"id\":" :
                 JsonSerializer.Serialize(ids.Select(id => new { id, translated_title = "Tên Việt" }), DocumentJson.Options);
-            return Task.FromResult(new OllamaCompletion(response, true, "stop", new GenerationMetrics()));
+            return Task.FromResult(new LlmCompletion(response, true, "stop", new GenerationMetrics()));
         }
     }
 }

@@ -15,7 +15,7 @@ public sealed class LocalLlamaServerHostTests : IDisposable
         var launcher = new FakeLauncher(process);
         await using var host = Host(launcher, _ => new(HttpStatusCode.OK));
 
-        Uri endpoint = await host.StartAsync(OllamaBackendProfile.CreateDefaultLocal());
+        Uri endpoint = await host.StartAsync(GpuBackendProfile.CreateDefaultLocal());
 
         Assert.Equal("http://127.0.0.1:12001/api/chat", endpoint.ToString());
         Assert.Contains("-hf", launcher.Info!.ArgumentList);
@@ -32,7 +32,7 @@ public sealed class LocalLlamaServerHostTests : IDisposable
     {
         var launcher = new FakeLauncher();
         await using var host = Host(launcher, _ => new(HttpStatusCode.OK));
-        OllamaBackendProfile profile = OllamaBackendProfile.CreateDefaultLocal();
+        GpuBackendProfile profile = GpuBackendProfile.CreateDefaultLocal();
         await host.StartAsync(profile);
         await host.StartAsync(profile);
         profile.ParallelRequests = 2;
@@ -55,7 +55,7 @@ public sealed class LocalLlamaServerHostTests : IDisposable
         await using var host = Host(launcher, _ => throw new HttpRequestException());
 
         InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            host.StartAsync(OllamaBackendProfile.CreateDefaultLocal()));
+            host.StartAsync(GpuBackendProfile.CreateDefaultLocal()));
 
         Assert.Contains("17", error.Message);
         Assert.Contains("synthetic last line", error.Message);

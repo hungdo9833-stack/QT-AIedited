@@ -6,13 +6,13 @@ namespace QuickTranslator.AiEditor.Core.Translation;
 
 public sealed class TranslationQualityChecker
 {
-    public IReadOnlyList<TranslationIssue> Check(string source, OllamaCompletion completion, ModelOptions options)
+    public IReadOnlyList<TranslationIssue> Check(string source, LlmCompletion completion, ModelOptions options)
     {
         var issues = new List<TranslationIssue>();
         string text = completion.Text;
         if (string.IsNullOrWhiteSpace(text))
         {
-            issues.Add(new(IssueCode.EmptyOutput, IssueSeverity.Error, "Ollama trả bản dịch rỗng. Hãy dịch lại hoặc tự viết bản nháp."));
+            issues.Add(new(IssueCode.EmptyOutput, IssueSeverity.Error, "Model trả bản dịch rỗng. Hãy dịch lại hoặc tự viết bản nháp."));
             return issues;
         }
         if (completion.Done != true || completion.DoneReason is "length" or "max_tokens" ||

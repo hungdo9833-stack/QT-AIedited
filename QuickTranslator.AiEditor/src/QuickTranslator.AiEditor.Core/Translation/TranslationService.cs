@@ -11,7 +11,7 @@ public sealed partial class TranslationService
     private readonly SemaphoreSlim _translationGate = new(1, 1);
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private ChapterDocument _chapter;
-    private readonly IOllamaClient _client;
+    private readonly ILlmClient _client;
     private readonly IChapterStore _store;
     private readonly IGlossaryProvider _glossary;
     private readonly IContextMemory _memory;
@@ -52,7 +52,7 @@ public sealed partial class TranslationService
         }
     }
 
-    public TranslationService(ChapterDocument chapter, IOllamaClient client, IChapterStore store,
+    public TranslationService(ChapterDocument chapter, ILlmClient client, IChapterStore store,
         IGlossaryProvider? glossary = null, IContextMemory? memory = null, TimeProvider? clock = null)
     {
         _chapter = DocumentJson.Clone(chapter);

@@ -73,11 +73,11 @@ public sealed class CorpusIntegrityTests : IDisposable
 
 
 
-    private sealed class EmptyFindings : IOllamaClient
+    private sealed class EmptyFindings : ILlmClient
     {
         public int Calls;
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
-        { Calls++; return Task.FromResult(new OllamaCompletion("{\"characters\":[],\"relationships\":[],\"glossary\":[]}", true, "stop", new())); }
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
+        { Calls++; return Task.FromResult(new LlmCompletion("{\"characters\":[],\"relationships\":[],\"glossary\":[]}", true, "stop", new())); }
     }
 
     private async Task<(ProjectSession, BookIntelligenceStore, BookIntelligenceState)> Scenario(int count)
@@ -91,10 +91,10 @@ public sealed class CorpusIntegrityTests : IDisposable
     }
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
     private sealed class ImmediateProgress<T>(Action<T> action) : IProgress<T> { public void Report(T value) => action(value); }
-    private sealed class NeverCall : IOllamaClient
+    private sealed class NeverCall : ILlmClient
     {
         public int Calls;
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException("Provider must not be called."); }
     }
 }

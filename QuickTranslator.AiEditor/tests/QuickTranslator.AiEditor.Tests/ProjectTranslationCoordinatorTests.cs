@@ -550,8 +550,8 @@ public sealed class ProjectTranslationCoordinatorTests
     {
         await WithProjectAsync(1, async context =>
         {
-            OllamaBackendSnapshot local = OllamaBackendSnapshot.LocalDefault(context.Environment.ModelOptions.Model);
-            OllamaBackendSnapshot current = local;
+            GpuBackendSnapshot local = GpuBackendSnapshot.LocalDefault(context.Environment.ModelOptions.Model);
+            GpuBackendSnapshot current = local;
             Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(
                 context.Environment with { Backend = current });
             var client = new ProjectQueueFakeClient();
@@ -559,7 +559,7 @@ public sealed class ProjectTranslationCoordinatorTests
             ProjectTranslationJob plan = await coordinator.PlanAsync(context.ChapterIds);
             Assert.Equal(local, plan.Backend);
 
-            current = new(Guid.NewGuid(), OllamaBackendKind.Remote, "GPU thuê", "https://gpu.example.com/api/chat",
+            current = new(Guid.NewGuid(), GpuBackendKind.Remote, "GPU thuê", "https://gpu.example.com/api/chat",
                 context.Environment.ModelOptions.Model);
             await coordinator.StartAsync(plan);
 
@@ -574,8 +574,8 @@ public sealed class ProjectTranslationCoordinatorTests
     {
         await WithProjectAsync(1, async context =>
         {
-            OllamaBackendSnapshot local = OllamaBackendSnapshot.LocalDefault(context.Environment.ModelOptions.Model);
-            OllamaBackendSnapshot current = local;
+            GpuBackendSnapshot local = GpuBackendSnapshot.LocalDefault(context.Environment.ModelOptions.Model);
+            GpuBackendSnapshot current = local;
             Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(
                 context.Environment with { Backend = current });
             var store = new ProjectTranslationJobStore(context.Session);
@@ -585,7 +585,7 @@ public sealed class ProjectTranslationCoordinatorTests
             saved.Status = ProjectTranslationJobStatus.Interrupted;
             saved = await store.SaveAsync(saved);
 
-            current = new(Guid.NewGuid(), OllamaBackendKind.Remote, "GPU sau restart",
+            current = new(Guid.NewGuid(), GpuBackendKind.Remote, "GPU sau restart",
                 "https://gpu.example.com/api/chat", context.Environment.ModelOptions.Model);
             var client = new ProjectQueueFakeClient();
             var reopened = new ProjectTranslationCoordinator(context.Session, context.Repository, client, Load,
@@ -832,7 +832,7 @@ public sealed class ProjectTranslationCoordinatorTests
             Assert.Single(result.Items, item => item.Status == ProjectTranslationItemStatus.NeedsReview);
             Assert.Equal(5, result.Items.Count(item => item.Status == ProjectTranslationItemStatus.Completed));
             Assert.Equal(ProjectTranslationWorkerStatus.Offline,
-                result.Workers.Single(worker => worker.Backend.Kind == OllamaBackendKind.Remote).Status);
+                result.Workers.Single(worker => worker.Backend.Kind == GpuBackendKind.Remote).Status);
             Assert.True(local.Calls >= 5);
             Assert.Equal(1, remote.Calls);
         });
@@ -882,7 +882,7 @@ public sealed class ProjectTranslationCoordinatorTests
             var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
                 context.LoadEnvironment);
             await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
-            Guid remoteId = coordinator.CurrentJob!.Workers.Single(worker => worker.Backend.Kind == OllamaBackendKind.Remote).WorkerId;
+            Guid remoteId = coordinator.CurrentJob!.Workers.Single(worker => worker.Backend.Kind == GpuBackendKind.Remote).WorkerId;
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.RetryWorkerAsync(remoteId, false));
             await coordinator.RetryWorkerAsync(remoteId, true);
@@ -1238,20 +1238,20 @@ public sealed class ProjectTranslationCoordinatorTests
         });
     }
 
-    private static ProjectTranslationWorkerDefinition SingleWorker(TestProject context, IOllamaClient client, int slots)
+    private static ProjectTranslationWorkerDefinition SingleWorker(TestProject context, ILlmClient client, int slots)
     {
         ModelOptions options = context.Environment.ModelOptions;
-        return new ProjectTranslationWorkerDefinition(Guid.NewGuid(), OllamaBackendSnapshot.LocalDefault(options.Model),
+        return new ProjectTranslationWorkerDefinition(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault(options.Model),
             client, options with { }) with { Slots = slots };
     }
 
-    private static ProjectTranslationWorkerDefinition[] Workers(TestProject context, IOllamaClient local, IOllamaClient remote)
+    private static ProjectTranslationWorkerDefinition[] Workers(TestProject context, ILlmClient local, ILlmClient remote)
     {
         ModelOptions options = context.Environment.ModelOptions;
         return
         [
-            new(Guid.NewGuid(), OllamaBackendSnapshot.LocalDefault(options.Model), local, options with { }),
-            new(Guid.NewGuid(), new OllamaBackendSnapshot(Guid.NewGuid(), OllamaBackendKind.Remote,
+            new(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault(options.Model), local, options with { }),
+            new(Guid.NewGuid(), new GpuBackendSnapshot(Guid.NewGuid(), GpuBackendKind.Remote,
                 "EZYCloudX RTX 3090 Ti", "http://127.0.0.1:43117/api/chat", options.Model), remote,
                 options with { }, 0.45m)
         ];
@@ -1317,11 +1317,11 @@ public sealed class ProjectTranslationCoordinatorTests
     private sealed record TestProject(ProjectSession Session, ProjectRepository Repository, IReadOnlyList<Guid> ChapterIds,
         Func<CancellationToken, Task<ProjectTranslationEnvironment>> LoadEnvironment, ProjectTranslationEnvironment Environment)
     {
-        public ProjectTranslationCoordinator Coordinator(IOllamaClient client) =>
+        public ProjectTranslationCoordinator Coordinator(ILlmClient client) =>
             new(Session, Repository, client, LoadEnvironment);
     }
 
-    private sealed class ProjectQueueFakeClient : IOllamaClient
+    private sealed class ProjectQueueFakeClient : ILlmClient
     {
         private int _calls;
         private int _concurrency;
@@ -1335,7 +1335,7 @@ public sealed class ProjectTranslationCoordinatorTests
         public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseFirst { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public async Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             int call = Interlocked.Increment(ref _calls);
@@ -1351,8 +1351,8 @@ public sealed class ProjectTranslationCoordinatorTests
                     FirstStarted.TrySetResult();
                     if (BlockFirst) await ReleaseFirst.Task.WaitAsync(cancellationToken);
                 }
-                if (FailCalls.Contains(call)) throw new OllamaRequestException(OllamaErrorKind.Http, "Synthetic Ollama failure.");
-                OllamaCompletion completion = FakeClient.Completion($"Bản dịch tuần tự {call}.");
+                if (FailCalls.Contains(call)) throw new LlmRequestException(LlmErrorKind.Http, "Synthetic Ollama failure.");
+                LlmCompletion completion = FakeClient.Completion($"Bản dịch tuần tự {call}.");
                 AfterCompletion?.Invoke(call);
                 return completion;
             }
@@ -1360,7 +1360,7 @@ public sealed class ProjectTranslationCoordinatorTests
         }
     }
 
-    private sealed class SlotFakeClient(int targetConcurrency) : IOllamaClient
+    private sealed class SlotFakeClient(int targetConcurrency) : ILlmClient
     {
         private int _calls;
         private int _concurrency;
@@ -1374,7 +1374,7 @@ public sealed class ProjectTranslationCoordinatorTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public async Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             int call = Interlocked.Increment(ref _calls);
@@ -1390,7 +1390,7 @@ public sealed class ProjectTranslationCoordinatorTests
                 lock (FailCalls)
                 {
                     if (FailCalls.Contains(call))
-                        throw new OllamaRequestException(OllamaErrorKind.Http, "Synthetic slot failure.");
+                        throw new LlmRequestException(LlmErrorKind.Http, "Synthetic slot failure.");
                 }
                 return FakeClient.Completion($"slot translated {call}");
             }
@@ -1399,7 +1399,7 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     private sealed class MetricsSlotFakeClient(TimeSpan delay, int outputTokens, double evaluationSeconds,
-        int blockCall = 0) : IOllamaClient
+        int blockCall = 0) : ILlmClient
     {
         private int _calls;
         public int Calls => Volatile.Read(ref _calls);
@@ -1409,7 +1409,7 @@ public sealed class ProjectTranslationCoordinatorTests
         public TaskCompletionSource ReleaseBlocked { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public async Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             int call = Interlocked.Increment(ref _calls);
@@ -1417,8 +1417,8 @@ public sealed class ProjectTranslationCoordinatorTests
             if (call == blockCall) await ReleaseBlocked.Task.WaitAsync(cancellationToken);
             await Task.Delay(delay, cancellationToken);
             if (FailCalls.Contains(call))
-                throw new OllamaRequestException(OllamaErrorKind.Http, "Synthetic metrics failure.");
-            return new OllamaCompletion($"metrics translated {call}", true, "stop", new GenerationMetrics
+                throw new LlmRequestException(LlmErrorKind.Http, "Synthetic metrics failure.");
+            return new LlmCompletion($"metrics translated {call}", true, "stop", new GenerationMetrics
             {
                 InputTokens = outputTokens * 2,
                 OutputTokens = outputTokens,
@@ -1443,7 +1443,7 @@ public sealed class ProjectTranslationCoordinatorTests
         public void Exit() => Interlocked.Decrement(ref _current);
     }
 
-    private sealed class ParallelFakeClient(string name, ParallelConcurrency concurrency, int delayMilliseconds) : IOllamaClient
+    private sealed class ParallelFakeClient(string name, ParallelConcurrency concurrency, int delayMilliseconds) : ILlmClient
     {
         private int _calls;
         public int Calls => Volatile.Read(ref _calls);
@@ -1453,7 +1453,7 @@ public sealed class ProjectTranslationCoordinatorTests
         public TaskCompletionSource FirstStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public async Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             int call = Interlocked.Increment(ref _calls);
@@ -1468,7 +1468,7 @@ public sealed class ProjectTranslationCoordinatorTests
                 }
                 if (delayMilliseconds > 0) await Task.Delay(delayMilliseconds, cancellationToken);
                 if (FailWithConnection)
-                    throw new OllamaRequestException(OllamaErrorKind.Connection, "synthetic remote disconnect");
+                    throw new LlmRequestException(LlmErrorKind.Connection, "synthetic remote disconnect");
                 return FakeClient.Completion($"{name} translated {call}");
             }
             finally { concurrency.Exit(); }

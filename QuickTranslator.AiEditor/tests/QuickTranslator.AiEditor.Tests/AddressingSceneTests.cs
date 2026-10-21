@@ -304,15 +304,15 @@ public sealed class AddressingSceneTests : IDisposable
         }
     }
 
-    private sealed class Mock(Func<string, string> reply) : IJsonSchemaOllamaClient
+    private sealed class Mock(Func<string, string> reply) : IJsonSchemaLlmClient
     {
         public int Calls { get; private set; }
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
         {
             Calls++;
             Assert.Equal(AddressingAiSurvey.Schema.GetRawText(), schema.GetRawText());
-            return Task.FromResult(new OllamaCompletion(reply(prompt), true, "stop", new GenerationMetrics { InputTokens = 1200, OutputTokens = 400 }));
+            return Task.FromResult(new LlmCompletion(reply(prompt), true, "stop", new GenerationMetrics { InputTokens = 1200, OutputTokens = 400 }));
         }
     }
 

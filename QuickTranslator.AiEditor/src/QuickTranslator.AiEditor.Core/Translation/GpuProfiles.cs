@@ -12,7 +12,8 @@ public sealed class GpuSshSettings
     public string Username { get; set; } = "";
     public SshAuthenticationKind Authentication { get; set; }
     public string? HostKeyFingerprint { get; set; }
-    public int RemoteOllamaPort { get; set; } = 11434;
+    [System.Text.Json.Serialization.JsonPropertyName("remoteOllamaPort")] // Persisted compatibility: keep the former SSH field name.
+    public int ServerPort { get; set; } = 11434;
     // Windows rentals: the provider's Remote Desktop port, used to set SSH up on it when SSH is closed.
     public int? RdpPort { get; set; }
     [JsonIgnore] public string? Password { get; set; }
@@ -24,7 +25,7 @@ public sealed class GpuSshSettings
         if (string.IsNullOrWhiteSpace(Host) || Host.Length > 253 || Host.Any(char.IsWhiteSpace) ||
             Host.Contains('/') || Host.Contains('@') || Host.Any(char.IsControl) || Port is < 1 or > 65535 ||
             string.IsNullOrWhiteSpace(Username) || Username.Length > 128 || Username.Any(char.IsControl) ||
-            !Enum.IsDefined(Authentication) || RemoteOllamaPort is < 1 or > 65535 || RdpPort is < 1 or > 65535)
+            !Enum.IsDefined(Authentication) || ServerPort is < 1 or > 65535 || RdpPort is < 1 or > 65535)
             throw new InvalidDataException("Cấu hình SSH thiếu host, port hoặc username hợp lệ.");
         if (requireTrustedHost && string.IsNullOrWhiteSpace(HostKeyFingerprint))
             throw new InvalidOperationException("Chưa có SSH host-key fingerprint đã đối chiếu ngoài băng.");
@@ -46,7 +47,7 @@ public sealed class GpuSshSettings
     public GpuSshSettings Clone() => new()
     {
         Host = Host, Port = Port, Username = Username, Authentication = Authentication,
-        HostKeyFingerprint = HostKeyFingerprint, RemoteOllamaPort = RemoteOllamaPort,
+        HostKeyFingerprint = HostKeyFingerprint, ServerPort = ServerPort,
         RdpPort = RdpPort, Password = Password, PrivateKey = PrivateKey, PrivateKeyPassphrase = PrivateKeyPassphrase
     };
 

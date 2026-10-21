@@ -69,7 +69,7 @@ public sealed class ImportedChapterQueueRegressionTests : IDisposable
         ModelOptions model = Model("p0-fake");
         PromptPreset preset = PromptPreset.Default with { UpdatedAt = DateTimeOffset.UnixEpoch };
         var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(),
-            OllamaBackendSnapshot.LocalDefault(model.Model), client, model,
+            GpuBackendSnapshot.LocalDefault(model.Model), client, model,
             Segmentation(18, 24, 30));
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync();
         Task<ProjectTranslationEnvironment> Load(CancellationToken _) => Task.FromResult(
@@ -176,12 +176,12 @@ public sealed class ImportedChapterQueueRegressionTests : IDisposable
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 
-    private sealed class RecordingClient : IOllamaClient
+    private sealed class RecordingClient : ILlmClient
     {
         private int _requestCount;
         public int RequestCount => Volatile.Read(ref _requestCount);
 
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _requestCount);

@@ -152,7 +152,7 @@ public sealed class RemoteLlamaSetupTests : IDisposable
         private SshCommandResult Install() { _installed = true; return new(0, "ok", ""); }
         public Task UploadFileAsync(string localPath, string remotePath, IProgress<long>? progress = null, CancellationToken cancellationToken = default)
         { Uploads.Add((localPath, remotePath)); progress?.Report(new FileInfo(localPath).Length); return Task.CompletedTask; }
-        public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ISshTunnel> OpenServerTunnelAsync(int remotePort, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

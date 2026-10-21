@@ -55,7 +55,7 @@ public partial class MainWindow
         foreach (var input in new[] { TemperatureInput, ContextInput, OutputTokensInput, TimeoutInput,
                      MinimumInput, TargetInput, MaximumInput, CharacterProjectNameInput })
             input.TextChanged += OnSettingsInputChanged;
-        InitializeOllamaBackendUi();
+        InitializeGpuBackendUi();
         NormalizeAfterTranslationCheck.Checked += OnSettingsInputChanged;
         NormalizeAfterTranslationCheck.Unchecked += OnSettingsInputChanged;
         StorySettingCombo.SelectionChanged += OnSettingsInputChanged;

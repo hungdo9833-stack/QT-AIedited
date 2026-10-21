@@ -42,7 +42,7 @@ public sealed class TranslationQueueTests
     {
         var (service, client, store, chapter) = Create();
         var started = Signal();
-        var release = new TaskCompletionSource<OllamaCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<LlmCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
         client.Respond = (call, _) => { if (call != 1) return Task.FromResult(FakeClient.Completion("Đoạn tiếp theo.")); started.SetResult(); return release.Task; };
         var queue = new TranslationQueue(service);
         var run = queue.StartAsync();
@@ -112,7 +112,7 @@ public sealed class TranslationQueueTests
     {
         var (service, client, _, chapter) = Create();
         client.Respond = (call, _) => call == 2
-            ? throw new OllamaRequestException(OllamaErrorKind.Http, "Synthetic error.")
+            ? throw new LlmRequestException(LlmErrorKind.Http, "Synthetic error.")
             : Task.FromResult(FakeClient.Completion("Bản dịch đủ dấu câu."));
         var queue = new TranslationQueue(service);
         await queue.StartAsync();
@@ -147,8 +147,8 @@ public sealed class TranslationQueueTests
         var queue = new TranslationQueue(service);
         await queue.StartAsync();
         Assert.Equal(1, client.Calls);
-        client.Respond = (_, _) => throw new OllamaRequestException(OllamaErrorKind.Http, "Synthetic error.");
-        await Assert.ThrowsAsync<OllamaRequestException>(() => service.TranslateAsync(chapter.Segments[0].Id));
+        client.Respond = (_, _) => throw new LlmRequestException(LlmErrorKind.Http, "Synthetic error.");
+        await Assert.ThrowsAsync<LlmRequestException>(() => service.TranslateAsync(chapter.Segments[0].Id));
         int calls = client.Calls;
         await queue.StartAsync(QueueMode.FailedSegments);
         Assert.Equal(calls, client.Calls);

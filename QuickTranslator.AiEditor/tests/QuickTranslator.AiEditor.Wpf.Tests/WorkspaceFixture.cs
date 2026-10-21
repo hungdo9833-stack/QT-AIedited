@@ -51,20 +51,20 @@ internal sealed class WorkspaceFixture : IDisposable
     private readonly bool _deleteRoot;
     public string Root { get; }
     public MainWindow Window { get; }
-    public OllamaBackendManager BackendManager { get; }
+    public GpuBackendManager BackendManager { get; }
     public ProjectRepository Repository { get; } = new();
     public FakeClient Client { get; } = new();
     public ProjectSession Project { get; private set; } = null!;
     public TranslationService Service => Get<TranslationService>("_service");
 
-    public WorkspaceFixture(string? root = null, OllamaBackendManager? backendManager = null,
+    public WorkspaceFixture(string? root = null, GpuBackendManager? backendManager = null,
         GpuConnectionManager? gpuConnections = null, bool deleteRoot = true)
     {
         Root = root ?? Path.Combine(Path.GetTempPath(), "qtaie-safety-wpf-" + Guid.NewGuid().ToString("N"));
         _deleteRoot = deleteRoot;
         Directory.CreateDirectory(Root);
-        BackendManager = backendManager ?? new OllamaBackendManager(
-            new OllamaProfileStore(Path.Combine(Root, "app", "ollama-profiles.json"), new TestProtector()));
+        BackendManager = backendManager ?? new GpuBackendManager(
+            new GpuProfileStore(Path.Combine(Root, "app", "ollama-profiles.json"), new TestProtector()));
         Window = new MainWindow(null, initializeApplication: false, BackendManager, gpuConnections)
             { WorkspaceConfirmation = (_, _) => true };
         Set("_store", new ChapterFileStore(Path.Combine(Root, "Standalone")));
@@ -149,7 +149,7 @@ internal sealed class WorkspaceFixture : IDisposable
         if (_deleteRoot) Directory.Delete(resolved, recursive: true);
     }
 
-    private sealed class TestProtector : IOllamaSecretProtector
+    private sealed class TestProtector : ISecretProtector
     {
         public string Protect(string value) => value;
         public string Unprotect(string value) => value;

@@ -48,8 +48,8 @@ public sealed class AddressingLedgerWindow : Window
     internal AddressingCompletion? Preview { get; private set; }
     internal string CompletionText => _completion.Text;
     // Survey (step 2/2b): one button runs the whole pipeline into the Project's ledger; nothing is written to profiles.
-    private readonly IReadOnlyList<OllamaBackendProfile> _profiles;
-    private readonly ComboBox _backend = new() { Width = 190, DisplayMemberPath = nameof(OllamaBackendProfile.Name) };
+    private readonly IReadOnlyList<GpuBackendProfile> _profiles;
+    private readonly ComboBox _backend = new() { Width = 190, DisplayMemberPath = nameof(GpuBackendProfile.Name) };
     private readonly ComboBox _model = new() { Width = 190, IsEditable = true, Margin = new Thickness(6, 0, 0, 0) };
     private readonly TextBox _maxRequests = new() { Text = "10", Width = 45, Margin = new Thickness(4, 0, 0, 0), VerticalContentAlignment = VerticalAlignment.Center };
     private readonly Button _survey = WithGlyph(new() { Content = "Khảo sát / chạy tiếp", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) }, Glyphs.Play);
@@ -62,8 +62,8 @@ public sealed class AddressingLedgerWindow : Window
     internal string SurveyStatus => _surveyStatus.Text;
     /// <summary>Asked before any source text leaves the computer; tests answer it.</summary>
     internal Func<string, bool> ConfirmSend { get; set; }
-    /// <summary>Builds the provider for one click with its request limit (Gemini via the key vault, or the selected Ollama profile).</summary>
-    internal Func<OllamaBackendProfile, ModelOptions, int, IJsonSchemaOllamaClient> BackendFactory { get; set; }
+    /// <summary>Builds the provider for one click with its request limit (Gemini via the key vault, or the selected GPU profile).</summary>
+    internal Func<GpuBackendProfile, ModelOptions, int, IJsonSchemaLlmClient> BackendFactory { get; set; }
     private Dictionary<string, AddressingTask> _tasks = [];
     private bool _updatingLock;
     internal AddressingLedgerState State { get; private set; } = new();
@@ -72,7 +72,7 @@ public sealed class AddressingLedgerWindow : Window
     internal AddressingProposal? Selected => (_tabs.SelectedIndex == 0 ? _characters : _pairs).SelectedItem is AddressingRow row ? row.Proposal : null;
 
     public AddressingLedgerWindow(ProjectSession session, ProjectRepository repository, Action<ProjectResources> applyResources,
-        IReadOnlyList<OllamaBackendProfile>? profiles = null)
+        IReadOnlyList<GpuBackendProfile>? profiles = null)
     {
         _session = session; _repository = repository; _applyResources = applyResources; _service = new AddressingReviewService(session);
         _profiles = [GeminiSurveyProfile.Create(), .. (profiles ?? []).Where(p => p.Id != GeminiSurveyProfile.Id)];
@@ -80,7 +80,7 @@ public sealed class AddressingLedgerWindow : Window
         BackendFactory = (profile, options, maximumRequests) =>
         {
             var budget = new SemanticSurveyBudget(maximumRequests, 100_000_000);
-            if (profile.Id != GeminiSurveyProfile.Id) return SemanticSurveyBackend.Ollama(profile, options, budget);
+            if (profile.Id != GeminiSurveyProfile.Id) return SemanticSurveyBackend.LlamaServer(profile, options, budget);
             string key = GeminiApiKeyVault.ResolveForSurvey();
             if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Nhập Gemini key trong Cài đặt → AI & hiệu năng trước khi khảo sát.");
             return SemanticSurveyBackend.Gemini(key, GeminiSurveyProjectScope.Resolve(key, Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_PROJECT_ID")), options, budget);
@@ -410,14 +410,14 @@ public sealed class AddressingLedgerWindow : Window
 
     private void PopulateModels()
     {
-        if (_backend.SelectedItem is not OllamaBackendProfile profile) return;
+        if (_backend.SelectedItem is not GpuBackendProfile profile) return;
         _model.ItemsSource = profile.Id == GeminiSurveyProfile.Id
             ? new[] { "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite" } : new[] { profile.Model };
         _model.SelectedIndex = 0;
     }
 
     /// <summary>Same model options as the other survey windows: Gemini gets a large context and output budget.</summary>
-    private static ModelOptions SurveyOptions(OllamaBackendProfile profile, string model)
+    private static ModelOptions SurveyOptions(GpuBackendProfile profile, string model)
     {
         var runtime = (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).ModelOptions;
         bool gemini = profile.Id == GeminiSurveyProfile.Id;
@@ -448,7 +448,7 @@ public sealed class AddressingLedgerWindow : Window
 
     private ModelOptions? SelectedSurveyOptions()
     {
-        if (_backend.SelectedItem is not OllamaBackendProfile profile || string.IsNullOrWhiteSpace(_model.Text)) return null;
+        if (_backend.SelectedItem is not GpuBackendProfile profile || string.IsNullOrWhiteSpace(_model.Text)) return null;
         try { return SurveyOptions(profile, _model.Text); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return null; }
     }
@@ -465,7 +465,7 @@ public sealed class AddressingLedgerWindow : Window
         "RequestBudget" => "Đã dùng hết số request của lần này: bấm Khảo sát lần nữa để chạy tiếp.",
         "RetryNextRun" => "Một số câu trả lời không qua kiểm chứng: bấm Khảo sát lần nữa để hỏi lại (mỗi nhiệm vụ tối đa 2 lần).",
         "Cancelled" => "Đã dừng theo yêu cầu. Phần đã xong được giữ lại.",
-        "ProviderRefusal" => "AI từ chối nội dung của một request (thường do nội dung nhạy cảm). Phần đó được giữ lại, không gửi lại; thử Ollama cục bộ cho truyện này.",
+        "ProviderRefusal" => "AI từ chối nội dung của một request (thường do nội dung nhạy cảm). Phần đó được giữ lại, không gửi lại; thử GPU máy này (llama-server) cho truyện này.",
         "ContextBudgetExceeded" => "Một nhiệm vụ không vừa context của model kể cả khi gửi riêng: tăng Context trong Quản lý GPU (Thiết lập nâng cao) hoặc chọn model có context lớn hơn.",
         _ => $"Dừng vì lỗi {code}. Phần đã xong được giữ lại; thử lại sau hoặc đổi model."
     };
@@ -481,7 +481,7 @@ public sealed class AddressingLedgerWindow : Window
     /// </summary>
     internal async Task SurveyAsync()
     {
-        if (CurrentResources is null || _backend.SelectedItem is not OllamaBackendProfile profile || _surveyCancel is not null) return;
+        if (CurrentResources is null || _backend.SelectedItem is not GpuBackendProfile profile || _surveyCancel is not null) return;
         LastError = null;
         if (!int.TryParse(_maxRequests.Text, out int maximum) || maximum is < 1 or > 1000) { LastError = "Số request phải từ 1 đến 1000."; _surveyStatus.Text = LastError; return; }
         ModelOptions options;

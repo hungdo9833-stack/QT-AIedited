@@ -226,7 +226,7 @@ public sealed class GeminiSurveyClientTests
                 delays.Add(delay); now = now.Add(delay); return Task.CompletedTask;
             });
 
-        OllamaCompletion result = await client.TranslateAsync("Khảo sát", Options());
+        LlmCompletion result = await client.TranslateAsync("Khảo sát", Options());
 
         Assert.Equal(2, calls);
         Assert.Contains(delays, delay => delay == TimeSpan.FromSeconds(7));

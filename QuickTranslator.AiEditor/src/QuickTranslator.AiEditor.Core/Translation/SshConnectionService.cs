@@ -21,7 +21,7 @@ public interface ISshSession : IAsyncDisposable
         CancellationToken cancellationToken = default);
     Task UploadFileAsync(string localPath, string remotePath, IProgress<long>? progress = null,
         CancellationToken cancellationToken = default);
-    Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort, CancellationToken cancellationToken = default);
+    Task<ISshTunnel> OpenServerTunnelAsync(int remotePort, CancellationToken cancellationToken = default);
 }
 
 public interface ISshConnectionService
@@ -145,7 +145,7 @@ public sealed class SshConnectionService : ISshConnectionService
             return value;
         }
 
-        public Task<ISshTunnel> OpenOllamaTunnelAsync(int remotePort, CancellationToken cancellationToken = default)
+        public Task<ISshTunnel> OpenServerTunnelAsync(int remotePort, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!IsConnected) throw new InvalidOperationException("SSH chưa kết nối.");

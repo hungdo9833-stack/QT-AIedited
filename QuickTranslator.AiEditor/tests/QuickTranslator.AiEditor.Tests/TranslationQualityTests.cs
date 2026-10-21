@@ -18,7 +18,7 @@ public sealed class TranslationQualityTests
     [Fact]
     public void LengthStop_OrOutputTokenLimit_IsFlaggedAsPossiblyTruncated()
     {
-        var result = new OllamaCompletion("Văn bản chưa kết thúc", true, "length", new() { OutputTokens = 1536 });
+        var result = new LlmCompletion("Văn bản chưa kết thúc", true, "length", new() { OutputTokens = 1536 });
         Assert.Contains(_checker.Check("你好。", result, new()), i => i.Code == IssueCode.TruncatedOutput);
         var notDone = result with { Done = false, DoneReason = "stop", Metrics = new() { OutputTokens = 10 } };
         Assert.Contains(_checker.Check("你好。", notDone, new()), i => i.Code == IssueCode.TruncatedOutput);

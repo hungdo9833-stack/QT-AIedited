@@ -38,7 +38,7 @@ public sealed class AddressingSurveyRunnerTests : IDisposable
     private static readonly ModelOptions Options = new() { Model = "mock-runner", ContextSize = 32768, MaximumOutputTokens = 4096 };
 
     /// <summary>A model that reads the prompt it is sent and answers every task correctly, with the short ids.</summary>
-    private sealed class Mock(Func<IReadOnlyList<AddressingTask>> candidates) : IJsonSchemaOllamaClient
+    private sealed class Mock(Func<IReadOnlyList<AddressingTask>> candidates) : IJsonSchemaLlmClient
     {
         public int Calls { get; private set; }
         public Func<int, Exception?> Fail { get; set; } = _ => null;
@@ -46,8 +46,8 @@ public sealed class AddressingSurveyRunnerTests : IDisposable
         /// <summary>Identity answers: "same" with this primary and rendering, or null for "different".</summary>
         public Func<AddressingTask, (string Primary, string SecondaryVi)?> Identity { get; set; } = _ => null;
         public List<string> Sent { get; } = [];
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
         {
             Calls++;
             if (Fail(Calls) is { } error) throw error;
@@ -89,7 +89,7 @@ public sealed class AddressingSurveyRunnerTests : IDisposable
                             ["secondary_vi"] = "", ["sample_ids"] = ids }) });
             }
             string json = new JsonObject { ["pairs"] = pairs, ["characters"] = characters, ["scenes"] = scenes, ["identities"] = identities }.ToJsonString();
-            return Task.FromResult(new OllamaCompletion(json, true, "stop", new GenerationMetrics { InputTokens = 1000, OutputTokens = 300 }));
+            return Task.FromResult(new LlmCompletion(json, true, "stop", new GenerationMetrics { InputTokens = 1000, OutputTokens = 300 }));
         }
     }
 

@@ -41,7 +41,7 @@ public sealed class TranslationPromptBuilder
     {
         preset.Validate();
         var prompt = new StringBuilder();
-        // A single user message leaves model-specific chat template rendering to Ollama.
+        // A single user message leaves model-specific chat template rendering to llama-server (--jinja).
         if (glossary.Count > 0)
         {
             prompt.AppendLine("Reference glossary (reference only, do not translate this list):");

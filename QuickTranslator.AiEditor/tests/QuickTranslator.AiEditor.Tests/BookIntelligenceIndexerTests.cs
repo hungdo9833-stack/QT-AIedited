@@ -65,13 +65,13 @@ public sealed class BookIntelligenceIndexerTests : IDisposable
         if (Directory.Exists(path)) Directory.Delete(path, true);
     }
 
-    private sealed class SurveyClient(Func<string, string> response) : IOllamaClient
+    private sealed class SurveyClient(Func<string, string> response) : ILlmClient
     {
         public int Calls { get; private set; }
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
         {
             Calls++;
-            return Task.FromResult(new OllamaCompletion(response(prompt), true, "stop", new()));
+            return Task.FromResult(new LlmCompletion(response(prompt), true, "stop", new()));
         }
     }
 }

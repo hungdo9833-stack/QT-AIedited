@@ -22,9 +22,9 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
         SegmenterOptions remoteSegmentation = Segmentation(350, 550, 750);
         ProjectTranslationWorkerDefinition[] workers =
         [
-            new(Guid.NewGuid(), OllamaBackendSnapshot.LocalDefault(localModel.Model), localClient,
+            new(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault(localModel.Model), localClient,
                 localModel, localSegmentation),
-            new(Guid.NewGuid(), new OllamaBackendSnapshot(Guid.NewGuid(), OllamaBackendKind.Remote,
+            new(Guid.NewGuid(), new GpuBackendSnapshot(Guid.NewGuid(), GpuBackendKind.Remote,
                 "RTX 5060 Ti Remote", "http://127.0.0.1:43117/api/chat", remoteModel.Model), remoteClient,
                 remoteModel, remoteSegmentation)
         ];
@@ -74,7 +74,7 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
         var client = new CapturingClient();
         SegmenterOptions segmentation = Segmentation(80, 120, 160);
         var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(),
-            OllamaBackendSnapshot.LocalDefault("local-model"), client, Model("local-model", 4096, 1024, 0.1, 300), segmentation);
+            GpuBackendSnapshot.LocalDefault("local-model"), client, Model("local-model", 4096, 1024, 0.1, 300), segmentation);
         var coordinator = new ProjectTranslationCoordinator(session, _repository, [worker], load);
 
         await coordinator.StartAsync(await coordinator.PlanAsync(ids));
@@ -96,7 +96,7 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
         ChapterDocument before = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
         var client = new CapturingClient();
         var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(),
-            OllamaBackendSnapshot.LocalDefault("local-model"), client, Model("local-model", 4096, 1024, 0.1, 300),
+            GpuBackendSnapshot.LocalDefault("local-model"), client, Model("local-model", 4096, 1024, 0.1, 300),
             Segmentation(80, 120, 160));
         _repository.FaultPoint = point =>
         {
@@ -153,12 +153,12 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 
-    private sealed class CapturingClient : IOllamaClient
+    private sealed class CapturingClient : ILlmClient
     {
         private readonly object _sync = new();
         private readonly List<ModelOptions> _options = [];
         public IReadOnlyList<ModelOptions> Options { get { lock (_sync) return _options.ToArray(); } }
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
             lock (_sync) _options.Add(options with { });

@@ -66,7 +66,7 @@ public partial class MainWindow
                 {
                     // Cancellation is the expected completion path while leaving the current workspace.
                 }
-                catch (OllamaRequestException ex) { ShowError(ex); }
+                catch (LlmRequestException ex) { ShowError(ex); }
             }
             if (completion is not null) await completion;
             if (ReferenceEquals(request, _activeRequest) && request is { IsCompleted: true })
@@ -96,7 +96,7 @@ public partial class MainWindow
         {
             try { await request; }
             catch (OperationCanceledException) { SetStatus("Request đã hủy; đang lưu bản nháp trước khi chuyển."); }
-            catch (OllamaRequestException ex) { ShowError(ex); } // Recorded by source service; disk errors still block switching.
+            catch (LlmRequestException ex) { ShowError(ex); } // Recorded by source service; disk errors still block switching.
         }
         if (completion is not null) await completion;
         if (ReferenceEquals(request, _activeRequest) && request is { IsCompleted: true })

@@ -4,6 +4,8 @@ using System.Security.Cryptography;
 using System.Text;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Segmentation;
+using QuickTranslator.AiEditor.Core.Importing;
+using QuickTranslator.AiEditor.Core.TextCleaning;
 
 namespace QuickTranslator.AiEditor.Core.Persistence;
 
@@ -14,6 +16,8 @@ public static class DocumentJson
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        options.Converters.Add(new RenamedEnumConverter<ChapterTitleTranslationMethod>(ChapterTitleTranslationMethod.LlamaServer));
+        options.Converters.Add(new RenamedEnumConverter<ChineseRetranslationMethod>(ChineseRetranslationMethod.LlamaServer));
         options.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false));
         return options;
     }
@@ -163,4 +167,17 @@ public static class DocumentJson
     }
 
     private static string SourceHash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+}
+
+internal sealed class RenamedEnumConverter<TEnum>(TEnum serverValue) : JsonConverter<TEnum> where TEnum : struct, Enum
+{
+    public override TEnum Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        string value = reader.GetString() ?? throw new JsonException("Enum value is null.");
+        if (value.Equals("Ollama", StringComparison.OrdinalIgnoreCase)) return serverValue; // Persisted compatibility: accept the former backend enum value.
+        return Enum.TryParse(value, ignoreCase: true, out TEnum parsed) ? parsed : throw new JsonException($"Unknown {typeof(TEnum).Name} value '{value}'.");
+    }
+
+    public override void Write(Utf8JsonWriter writer, TEnum value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToString());
 }

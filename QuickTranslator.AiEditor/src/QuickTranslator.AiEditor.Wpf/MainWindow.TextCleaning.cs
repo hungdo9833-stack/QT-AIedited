@@ -310,15 +310,15 @@ public partial class MainWindow
             string source = choice.Mode == ChineseRetranslationMode.EntireSegment
                 ? segment.SourceText : occurrence.Text;
             string translated;
-            if (choice.Method == ChineseRetranslationMethod.Ollama)
+            if (choice.Method == ChineseRetranslationMethod.LlamaServer)
             {
-                await EnsureOllamaBackendsLoadedAsync();
-                await EnsureOllamaBackendReadyAsync(cancellationToken);
-                OllamaBackendProfile profile = _ollamaBackends.ActiveProfile;
+                await EnsureGpuBackendsLoadedAsync();
+                await EnsureGpuBackendReadyAsync(cancellationToken);
+                GpuBackendProfile profile = _gpuBackends.ActiveProfile;
                 AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
                 string prompt = BuildChineseRetranslationPrompt(chapter, segment, occurrence, choice.Mode,
                     _presetManager.Selected);
-                OllamaCompletion completion = await _translationClient.TranslateAsync(prompt,
+                LlmCompletion completion = await _translationClient.TranslateAsync(prompt,
                     runtime.ModelOptions, cancellationToken);
                 translated = CleanRetranslationOutput(completion.Text);
             }
@@ -440,7 +440,7 @@ public partial class MainWindow
                     ChapterDocument chapter = loadedChapters.Single(item => item.Id == target.ChapterId);
                     string method = choice.Method switch
                     {
-                        ChineseRetranslationMethod.Ollama => "Ollama",
+                        ChineseRetranslationMethod.LlamaServer => "llama-server",
                         ChineseRetranslationMethod.VietPhrase => "VietPhrase",
                         _ => "Hán Việt"
                     };
@@ -672,7 +672,7 @@ public partial class MainWindow
         var method = new ComboBox { MinWidth = 330, DisplayMemberPath = nameof(RetranslationMethodOption.Label) };
         method.ItemsSource = new[]
         {
-            new RetranslationMethodOption(ChineseRetranslationMethod.Ollama, "Ollama · profile AI đang chọn"),
+            new RetranslationMethodOption(ChineseRetranslationMethod.LlamaServer, "llama-server · profile AI đang chọn"),
             new RetranslationMethodOption(ChineseRetranslationMethod.VietPhrase, "VietPhrase · Data QuickTranslator"),
             new RetranslationMethodOption(ChineseRetranslationMethod.HanViet, "Hán Việt · Data QuickTranslator")
         };

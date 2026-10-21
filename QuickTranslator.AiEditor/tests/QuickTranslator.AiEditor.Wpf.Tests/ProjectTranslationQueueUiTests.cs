@@ -95,7 +95,7 @@ public sealed class ProjectTranslationQueueUiTests
         var first = await fixture.AddChapterAsync("Một", 1);
         var second = await fixture.AddChapterAsync("Hai", 2);
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<OllamaCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<LlmCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Client.Respond = (call, _) =>
         {
             if (call == 1) { started.TrySetResult(); return release.Task; }
@@ -123,7 +123,7 @@ public sealed class ProjectTranslationQueueUiTests
         var first = await fixture.AddChapterAsync("Một", 1);
         var second = await fixture.AddChapterAsync("Hai", 2);
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<OllamaCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<LlmCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Client.Respond = (_, _) =>
         {
             started.TrySetResult();
@@ -168,7 +168,7 @@ public sealed class ProjectTranslationQueueUiTests
         var second = await fixture.AddChapterAsync("Hai", 2);
         var third = await fixture.AddChapterAsync("Ba", 3);
         var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var releaseSecond = new TaskCompletionSource<OllamaCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecond = new TaskCompletionSource<LlmCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Client.Respond = (call, _) =>
         {
             if (call == 1) return Task.FromResult(FakeClient.Completion("Chương một đã dịch xong."));

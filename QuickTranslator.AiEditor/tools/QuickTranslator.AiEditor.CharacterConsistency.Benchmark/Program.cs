@@ -8,7 +8,7 @@ var promptBuilder = new TranslationPromptBuilder();
 PromptPreset preset = PromptPreset.Default;
 
 Console.WriteLine("Character Consistency Lock V1 - CPU/fake-provider benchmark");
-Console.WriteLine($"Synthetic workload: {chapters} chapters x {segmentsPerChapter} segments; no Ollama/GPU request.");
+Console.WriteLine($"Synthetic workload: {chapters} chapters x {segmentsPerChapter} segments; no AI/GPU request.");
 foreach (int characterCount in new[] { 50, 200, 1_000 })
 {
     CharacterProject project = CreateProject(characterCount);

@@ -184,7 +184,7 @@ public sealed class BatchReplacementTests : IDisposable
     }
 
     [Fact]
-    public async Task ServiceRejectsStalePreviewAndDoesNotCallOllamaForReplacement()
+    public async Task ServiceRejectsStalePreviewAndDoesNotCallTheModelForReplacement()
     {
         var chapter = Chapter("王秀兰 đến.");
         var client = new FakeClient();
@@ -198,7 +198,7 @@ public sealed class BatchReplacementTests : IDisposable
     }
 
     [Fact]
-    public async Task AutomaticCleanerStoresRawAiAndUsesConfirmedSnapshotWithoutSecondOllamaCall()
+    public async Task AutomaticCleanerStoresRawAiAndUsesConfirmedSnapshotWithoutSecondModelCall()
     {
         var chapter = TranslationService.CreateChapter("Tự làm sạch", "王秀兰来了。");
         chapter.ConfirmedTerms = [new("王秀兰", "Vương Tú Lan")];

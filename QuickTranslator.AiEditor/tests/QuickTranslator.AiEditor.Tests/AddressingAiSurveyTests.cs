@@ -292,17 +292,17 @@ public sealed class AddressingAiSurveyTests : IDisposable
         Assert.False(ambiguous.EvidenceValid); Assert.Empty(ambiguous.Issues);
     }
 
-    private sealed class Fake(Func<string, string> reply) : IJsonSchemaOllamaClient
+    private sealed class Fake(Func<string, string> reply) : IJsonSchemaLlmClient
     {
         public int Calls { get; private set; }
         public Func<int, Exception?> Fail { get; set; } = _ => null;
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
         {
             Calls++;
             Assert.Equal(AddressingAiSurvey.Schema.GetRawText(), schema.GetRawText());
             if (Fail(Calls) is { } error) throw error;
-            return Task.FromResult(new OllamaCompletion(reply(prompt), true, "stop", new GenerationMetrics { InputTokens = 900, OutputTokens = 300 }));
+            return Task.FromResult(new LlmCompletion(reply(prompt), true, "stop", new GenerationMetrics { InputTokens = 900, OutputTokens = 300 }));
         }
     }
     private async Task<AddressingLedgerStore> Store()

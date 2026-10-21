@@ -55,7 +55,7 @@ public sealed record GeminiSurveyLimits(int RequestsPerMinute, int InputTokensPe
 /// Project persistence remain owned by AdaptiveBookIntelligenceAnalyzer.
 /// The API key is never serialized, logged, read from a response, or included in request URLs.
 /// </summary>
-public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
+public sealed class GeminiSurveyClient : IJsonSchemaLlmClient, IDisposable
 {
     private const int MaximumAttempts = 4;
     private static readonly Regex ModelName = new(@"^gemini-[a-zA-Z0-9._-]+$",
@@ -107,10 +107,10 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
         _inFlight = new SemaphoreSlim(_limits.MaxInFlight, _limits.MaxInFlight);
     }
 
-    public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+    public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
         CancellationToken cancellationToken = default) => GenerateAsync(prompt, options, null, cancellationToken);
 
-    public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
+    public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
         JsonElement responseSchema, CancellationToken cancellationToken = default)
     {
         if (responseSchema.ValueKind != JsonValueKind.Object)
@@ -118,7 +118,7 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
         return GenerateAsync(prompt, options, responseSchema.Clone(), cancellationToken);
     }
 
-    private async Task<OllamaCompletion> GenerateAsync(string prompt, ModelOptions options,
+    private async Task<LlmCompletion> GenerateAsync(string prompt, ModelOptions options,
         JsonElement? schema, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
@@ -215,7 +215,7 @@ public sealed class GeminiSurveyClient : IJsonSchemaOllamaClient, IDisposable
                         if (usage.TryGetProperty("thoughtsTokenCount", out JsonElement thoughts) &&
                             thoughts.TryGetInt32(out int thinking)) output = (output ?? 0) + thinking;
                     }
-                    return new OllamaCompletion(result, true, "stop",
+                    return new LlmCompletion(result, true, "stop",
                         new GenerationMetrics { InputTokens = input, OutputTokens = output, ClientElapsed = stopwatch.Elapsed });
                 }
                 catch (JsonException ex)

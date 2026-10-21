@@ -462,7 +462,7 @@ public partial class ImportPreviewWindow : Window
     }
 
     private ChapterTitleTranslationMethod SelectedTitleMethod() => Enum.Parse<ChapterTitleTranslationMethod>(
-        (TitleMethodInput.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "Ollama", true);
+        (TitleMethodInput.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? nameof(ChapterTitleTranslationMethod.LlamaServer), true);
 
     private async Task RestoreTitleDraftAsync(CancellationToken cancellationToken)
     {

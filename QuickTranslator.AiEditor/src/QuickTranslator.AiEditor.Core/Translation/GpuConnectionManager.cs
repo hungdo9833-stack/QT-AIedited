@@ -8,11 +8,11 @@ public sealed class GpuConnectionHandle : IAsyncDisposable
     private readonly ISshSession _session;
     private readonly ISshTunnel _tunnel;
     private bool _disposed;
-    internal GpuConnectionHandle(OllamaBackendProfile profile, ISshSession session, ISshTunnel tunnel,
-        IOllamaBackendClient client)
+    internal GpuConnectionHandle(GpuBackendProfile profile, ISshSession session, ISshTunnel tunnel,
+        ILlmBackendClient client)
     { Profile = profile.Clone(); _session = session; _tunnel = tunnel; Client = client; }
-    public OllamaBackendProfile Profile { get; }
-    public IOllamaBackendClient Client { get; }
+    public GpuBackendProfile Profile { get; }
+    public ILlmBackendClient Client { get; }
     public ISshSession Session => _session;
     public Uri TunnelEndpoint => new($"http://127.0.0.1:{_tunnel.LocalPort}/api/chat");
     public bool IsConnected => !_disposed && _session.IsConnected && _tunnel.IsStarted;
@@ -29,7 +29,7 @@ public sealed class GpuConnectionHandle : IAsyncDisposable
 public sealed class GpuConnectionManager : IAsyncDisposable
 {
     private readonly ISshConnectionService _ssh;
-    private readonly Func<OllamaBackendProfile, Uri, IOllamaBackendClient> _clientFactory;
+    private readonly Func<GpuBackendProfile, Uri, ILlmBackendClient> _clientFactory;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly TimeSpan _healthInterval;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
@@ -38,7 +38,7 @@ public sealed class GpuConnectionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _monitorCancellations = new();
 
     public GpuConnectionManager(ISshConnectionService? ssh = null,
-        Func<OllamaBackendProfile, Uri, IOllamaBackendClient>? clientFactory = null,
+        Func<GpuBackendProfile, Uri, ILlmBackendClient>? clientFactory = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null, TimeSpan? healthInterval = null)
     {
         _ssh = ssh ?? new SshConnectionService();
@@ -47,7 +47,7 @@ public sealed class GpuConnectionManager : IAsyncDisposable
             var tunnelProfile = profile.Clone();
             tunnelProfile.Endpoint = endpoint.ToString();
             tunnelProfile.Token = null;
-            return OllamaClient.Create(tunnelProfile);
+            return LlamaServerClient.Create(tunnelProfile);
         });
         _delay = delay ?? Task.Delay;
         _healthInterval = healthInterval ?? TimeSpan.FromSeconds(10);
@@ -59,7 +59,7 @@ public sealed class GpuConnectionManager : IAsyncDisposable
     public bool TryGetConnection(Guid profileId, out GpuConnectionHandle? handle) =>
         _connections.TryGetValue(profileId, out handle);
 
-    public async Task<GpuConnectionHandle> ConnectAsync(OllamaBackendProfile profile,
+    public async Task<GpuConnectionHandle> ConnectAsync(GpuBackendProfile profile,
         CancellationToken cancellationToken = default)
     {
         GpuConnectionHandle handle = await ConnectCoreAsync(profile, cancellationToken).ConfigureAwait(false);
@@ -67,13 +67,13 @@ public sealed class GpuConnectionManager : IAsyncDisposable
         return handle;
     }
 
-    private async Task<GpuConnectionHandle> ConnectCoreAsync(OllamaBackendProfile profile,
+    private async Task<GpuConnectionHandle> ConnectCoreAsync(GpuBackendProfile profile,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
-        OllamaBackendProfile copy = profile.Clone();
+        GpuBackendProfile copy = profile.Clone();
         copy.Validate();
-        if (copy.Kind != OllamaBackendKind.Remote || copy.Ssh is null)
+        if (copy.Kind != GpuBackendKind.Remote || copy.Ssh is null)
             throw new InvalidOperationException("GPU Connection Manager chỉ kết nối profile Remote có cấu hình SSH.");
         await _connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -83,18 +83,18 @@ public sealed class GpuConnectionManager : IAsyncDisposable
             ISshSession session = await _ssh.ConnectAsync(copy.Ssh, cancellationToken).ConfigureAwait(false);
             try
             {
-                ISshTunnel tunnel = await session.OpenOllamaTunnelAsync(copy.Ssh.RemoteOllamaPort, cancellationToken).ConfigureAwait(false);
+                ISshTunnel tunnel = await session.OpenServerTunnelAsync(copy.Ssh.ServerPort, cancellationToken).ConfigureAwait(false);
                 Uri endpoint = new($"http://127.0.0.1:{tunnel.LocalPort}/api/chat");
-                IOllamaBackendClient client = _clientFactory(copy, endpoint);
-                if (copy.Api == BackendApi.OpenAiCompatible)
+                ILlmBackendClient client = _clientFactory(copy, endpoint);
+                try
                 {
-                    try { await client.CheckConnectionAsync(copy.Model, TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false); }
-                    catch
-                    {
-                        client.Dispose();
-                        await tunnel.DisposeAsync().ConfigureAwait(false);
-                        throw;
-                    }
+                    await client.CheckConnectionAsync(copy.Model, TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    client.Dispose();
+                    await tunnel.DisposeAsync().ConfigureAwait(false);
+                    throw;
                 }
                 var handle = new GpuConnectionHandle(copy, session, tunnel, client);
                 if (_connections.TryRemove(copy.Id, out var old)) await old.DisposeAsync().ConfigureAwait(false);
@@ -118,7 +118,7 @@ public sealed class GpuConnectionManager : IAsyncDisposable
         finally { _connectionGate.Release(); }
     }
 
-    public async Task<GpuConnectionHandle> ReconnectAsync(OllamaBackendProfile profile, int maximumAttempts = 3,
+    public async Task<GpuConnectionHandle> ReconnectAsync(GpuBackendProfile profile, int maximumAttempts = 3,
         CancellationToken cancellationToken = default)
     {
         if (maximumAttempts is < 1 or > 5) throw new ArgumentOutOfRangeException(nameof(maximumAttempts));
@@ -161,7 +161,7 @@ public sealed class GpuConnectionManager : IAsyncDisposable
         if (_connections.TryRemove(profileId, out var connection)) await connection.DisposeAsync().ConfigureAwait(false);
     }
 
-    private void StartMonitor(OllamaBackendProfile profile)
+    private void StartMonitor(GpuBackendProfile profile)
     {
         var cancellation = new CancellationTokenSource();
         if (_monitorCancellations.TryGetValue(profile.Id, out var old)) { old.Cancel(); old.Dispose(); }
@@ -169,7 +169,7 @@ public sealed class GpuConnectionManager : IAsyncDisposable
         _ = MonitorConnectionAsync(profile, cancellation.Token);
     }
 
-    private async Task MonitorConnectionAsync(OllamaBackendProfile profile, CancellationToken cancellationToken)
+    private async Task MonitorConnectionAsync(GpuBackendProfile profile, CancellationToken cancellationToken)
     {
         try
         {
@@ -223,6 +223,6 @@ public sealed class GpuConnectionManager : IAsyncDisposable
     private static string SafeMessage(Exception error) => error switch
     {
         TimeoutException => "Kết nối SSH quá thời gian chờ.",
-        _ => "Không kết nối được SSH hoặc Ollama tunnel. Kiểm tra host, quyền truy cập và trạng thái server."
+        _ => "Không kết nối được SSH hoặc llama-server tunnel. Kiểm tra host, quyền truy cập và trạng thái server."
     };
 }

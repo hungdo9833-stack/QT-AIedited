@@ -11,7 +11,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class GpuManagerWindow : Window
 {
-    private readonly OllamaBackendManager _backends;
+    private readonly GpuBackendManager _backends;
     private readonly GpuConnectionManager _connections;
     private readonly GpuTranslationPreferences _preferences;
     private readonly LocalLlamaServerHost _local;
@@ -20,13 +20,13 @@ public partial class GpuManagerWindow : Window
     // The same package provider as the local GPU: the zips it keeps on this PC are what gets uploaded to the rental.
     private readonly RemoteLlamaSetup _remoteLlama = new(new LlamaCppPackageProvider());
     private int? _rdpPort;
-    private readonly ObservableCollection<OllamaBackendProfile> _profiles = [];
+    private readonly ObservableCollection<GpuBackendProfile> _profiles = [];
     private string? _loadedPrivateKey;
     private CancellationTokenSource? _setupCancellation;
     private bool _busy;
     private bool _loadingMode;
 
-    internal GpuManagerWindow(OllamaBackendManager backends, GpuConnectionManager connections,
+    internal GpuManagerWindow(GpuBackendManager backends, GpuConnectionManager connections,
         GpuTranslationPreferences? preferences = null, LocalLlamaServerHost? localLlama = null)
     {
         _backends = backends; _connections = connections;
@@ -63,7 +63,7 @@ public partial class GpuManagerWindow : Window
 
     private void OnUseForRemote(object sender, RoutedEventArgs e)
     {
-        if (ProfileList.SelectedItem is not OllamaBackendProfile { Kind: OllamaBackendKind.Remote } profile)
+        if (ProfileList.SelectedItem is not GpuBackendProfile { Kind: GpuBackendKind.Remote } profile)
         { StatusText.Text = "Hãy chọn một profile Remote."; return; }
         _preferences.RemoteProfileId = profile.Id;
         StatusText.Text = $"Đã chọn “{profile.Name}” làm worker Remote cho chế độ Parallel.";
@@ -71,15 +71,15 @@ public partial class GpuManagerWindow : Window
 
     private void RefreshProfiles(Guid? selected = null)
     {
-        Guid target = selected ?? (ProfileList.SelectedItem as OllamaBackendProfile)?.Id ?? _backends.ActiveProfile.Id;
+        Guid target = selected ?? (ProfileList.SelectedItem as GpuBackendProfile)?.Id ?? _backends.ActiveProfile.Id;
         _profiles.Clear();
-        foreach (OllamaBackendProfile profile in _backends.Profiles) _profiles.Add(profile);
+        foreach (GpuBackendProfile profile in _backends.Profiles) _profiles.Add(profile);
         ProfileList.SelectedItem = _profiles.FirstOrDefault(profile => profile.Id == target) ?? _profiles.FirstOrDefault();
     }
 
     private void OnProfileSelected(object sender, SelectionChangedEventArgs e)
     {
-        if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
+        if (ProfileList.SelectedItem is not GpuBackendProfile profile) return;
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         NameInput.Text = profile.Name; ModelInput.Text = runtime.ModelOptions.Model;
         RuntimeTemperatureInput.Text = runtime.ModelOptions.Temperature.ToString(CultureInfo.InvariantCulture);
@@ -90,10 +90,8 @@ public partial class GpuManagerWindow : Window
         RuntimeTargetInput.Text = runtime.SegmentationOptions.TargetHanCharacters.ToString(CultureInfo.InvariantCulture);
         RuntimeMaximumInput.Text = runtime.SegmentationOptions.MaximumHanCharacters.ToString(CultureInfo.InvariantCulture);
         RuntimeTextElementsInput.Text = runtime.SegmentationOptions.MaximumTextElements.ToString(CultureInfo.InvariantCulture);
-        bool remote = profile.Kind == OllamaBackendKind.Remote;
-        ServerApiInput.SelectedIndex = profile.Api == BackendApi.OpenAiCompatible ? 1 : 0;
-        ServerApiInput.IsEnabled = remote;
-        ModelLabel.Text = remote ? "Model Ollama" : "Model GGUF (chủ/repo:quant hoặc file .gguf)";
+        bool remote = profile.Kind == GpuBackendKind.Remote;
+        ModelLabel.Text = remote ? "Model llama-server" : "Model GGUF (chủ/repo:quant hoặc file .gguf)";
         ChooseGgufButton.Visibility = remote ? Visibility.Collapsed : Visibility.Visible;
         ParallelRequestsInput.Text = profile.ParallelRequests.ToString(CultureInfo.InvariantCulture);
         AdvancedConnectionExpander.IsEnabled = remote;
@@ -109,40 +107,39 @@ public partial class GpuManagerWindow : Window
             UsernameInput.Text = ssh.Username; AuthenticationInput.SelectedIndex = ssh.Authentication == SshAuthenticationKind.Password ? 0 : 1;
             PasswordInput.Password = ssh.Password ?? ""; PrivateKeyInput.Password = string.IsNullOrEmpty(ssh.PrivateKey) ? "" : "••••••••";
             PrivateKeyPassphraseInput.Password = ssh.PrivateKeyPassphrase ?? ""; _loadedPrivateKey = ssh.PrivateKey;
-            FingerprintInput.Text = ssh.HostKeyFingerprint ?? ""; RemoteOllamaPortInput.Text = ssh.RemoteOllamaPort.ToString(CultureInfo.InvariantCulture);
+            FingerprintInput.Text = ssh.HostKeyFingerprint ?? ""; ServerPortInput.Text = ssh.ServerPort.ToString(CultureInfo.InvariantCulture);
             _rdpPort = ssh.RdpPort;
         }
         else
         {
             HostInput.Text = ""; PortInput.Text = "22"; UsernameInput.Text = "ubuntu"; AuthenticationInput.SelectedIndex = 0;
             PasswordInput.Password = PrivateKeyInput.Password = PrivateKeyPassphraseInput.Password = ""; _loadedPrivateKey = null;
-            FingerprintInput.Text = ""; RemoteOllamaPortInput.Text = "11434";
+            FingerprintInput.Text = ""; ServerPortInput.Text = "11434";
             _rdpPort = null;
         }
         HourlyPriceInput.Text = (profile.HourlyPrice ?? 0).ToString(CultureInfo.InvariantCulture);
         StatusText.Text = remote ? _connections.GetStatus(profile.Id).Message : _local.Status.Message;
         ApplyAuthenticationUi();
         ApplyConnectionUi();
-        ApplyServerApiUi();
+        ApplyServerUi();
     }
 
     private void OnAuthenticationChanged(object sender, SelectionChangedEventArgs e) => ApplyAuthenticationUi();
     private void OnConnectionTypeChanged(object sender, SelectionChangedEventArgs e) => ApplyConnectionUi();
-    private void OnServerApiChanged(object sender, SelectionChangedEventArgs e) => ApplyServerApiUi();
-    private void ApplyServerApiUi()
+    private void ApplyServerUi()
     {
         if (AutoSetupButton is null) return;
-        bool remote = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote };
+        bool remote = ProfileList.SelectedItem is GpuBackendProfile { Kind: GpuBackendKind.Remote };
         ParallelRequestsInput.IsEnabled = true;
         AutoSetupButton.IsEnabled = remote;
-        StartOllamaButton.IsEnabled = true;
-        StartOllamaButton.Content = remote ? "Khởi động lại llama-server" : "Khởi động llama-server";
+        StartServerButton.IsEnabled = true;
+        StartServerButton.Content = remote ? "Khởi động lại llama-server" : "Khởi động llama-server";
         PullModelButton.IsEnabled = remote;
     }
     private void ApplyConnectionUi()
     {
         if (SshConnectionPanel is null || DirectConnectionPanel is null) return;
-        bool remote = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote };
+        bool remote = ProfileList.SelectedItem is GpuBackendProfile { Kind: GpuBackendKind.Remote };
         bool ssh = remote && ConnectionTypeInput.SelectedIndex != 1;
         SshConnectionPanel.Visibility = ssh ? Visibility.Visible : Visibility.Collapsed;
         DirectConnectionPanel.Visibility = remote && !ssh ? Visibility.Visible : Visibility.Collapsed;
@@ -157,7 +154,7 @@ public partial class GpuManagerWindow : Window
 
     private void OnNewProfile(object sender, RoutedEventArgs e)
     {
-        var profile = new OllamaBackendProfile { Name = "GPU Remote mới", Kind = OllamaBackendKind.Remote,
+        var profile = new GpuBackendProfile { Name = "GPU Remote mới", Kind = GpuBackendKind.Remote,
             Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b",
             Runtime = AiRuntimeProfile.CreateDefault("translategemma:12b"), Ssh = new() };
         _profiles.Add(profile); ProfileList.SelectedItem = profile;
@@ -168,11 +165,11 @@ public partial class GpuManagerWindow : Window
 
     private async void OnSaveProfile(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        OllamaBackendProfile profile = ReadProfile();
-        if (profile.Kind == OllamaBackendKind.Remote && !profile.RemoteDisclosureAccepted &&
+        GpuBackendProfile profile = ReadProfile();
+        if (profile.Kind == GpuBackendKind.Remote && !profile.RemoteDisclosureAccepted &&
             ThemedDialog.Show(this, "Remote GPU sẽ nhận prompt và nguyên văn segment. Xác nhận lưu profile Remote?",
                 "Quyền gửi dữ liệu", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
-        profile.RemoteDisclosureAccepted = profile.Kind == OllamaBackendKind.Remote;
+        profile.RemoteDisclosureAccepted = profile.Kind == GpuBackendKind.Remote;
         bool isActive = _backends.ActiveProfile.Id == profile.Id;
         await _backends.SaveProfileAsync(profile, activate: isActive);
         RefreshProfiles(profile.Id);
@@ -183,7 +180,7 @@ public partial class GpuManagerWindow : Window
 
     private async void OnDeleteProfile(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
+        if (ProfileList.SelectedItem is not GpuBackendProfile profile) return;
         if (ThemedDialog.Show(this, $"Xóa profile “{profile.Name}”?", "Xóa profile",
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await _backends.DetachRuntimeClientAsync(profile.Id);
@@ -194,27 +191,27 @@ public partial class GpuManagerWindow : Window
 
     private async void OnConnect(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        OllamaBackendProfile profile = ReadProfile();
-        if (profile.Kind == OllamaBackendKind.Local)
+        GpuBackendProfile profile = ReadProfile();
+        if (profile.Kind == GpuBackendKind.Local)
         {
             StatusText.Text = _local.Status.Message; return;
         }
         if (profile.Ssh is null)
         {
             await _backends.SaveProfileAsync(profile, activate: false);
-            using IOllamaBackendClient client = OllamaClient.Create(profile);
+            using ILlmBackendClient client = LlamaServerClient.Create(profile);
             await client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10));
             await _backends.ActivateAsync(profile.Id);
             _preferences.RemoteProfileId = profile.Id;
             RefreshProfiles(profile.Id);
-            StatusText.Text = "Connected · Ollama Active · Model Installed · Ready.";
+            StatusText.Text = "Connected · llama-server Active · Model Installed · Ready.";
             return;
         }
         await ConnectSshAsync(profile);
     });
 
     /// <summary>Opens the SSH tunnel for the profile, asking once to trust a new host key. Returns whether it is connected.</summary>
-    private async Task<bool> ConnectSshAsync(OllamaBackendProfile profile, bool trustNewHostKey = false)
+    private async Task<bool> ConnectSshAsync(GpuBackendProfile profile, bool trustNewHostKey = false)
     {
         try
         {
@@ -235,7 +232,7 @@ public partial class GpuManagerWindow : Window
                     $"Máy chủ trả về SSH Host Key Fingerprint:\n{error.ObservedFingerprint}\n\nTin cậy fingerprint này, lưu profile và kết nối ngay?",
                     "Xác nhận SSH Fingerprint (1 chạm)", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
-                OllamaBackendProfile confirmedProfile = ReadProfile();
+                GpuBackendProfile confirmedProfile = ReadProfile();
                 confirmedProfile.RemoteDisclosureAccepted = true;
                 await _backends.SaveProfileAsync(confirmedProfile, activate: false);
                 GpuConnectionHandle handle = await _connections.ConnectAsync(confirmedProfile);
@@ -252,9 +249,9 @@ public partial class GpuManagerWindow : Window
 
     private async void OnDisconnect(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        if (ProfileList.SelectedItem is not OllamaBackendProfile profile) return;
+        if (ProfileList.SelectedItem is not GpuBackendProfile profile) return;
         await _backends.DetachRuntimeClientAsync(profile.Id);
-        if (profile.Kind == OllamaBackendKind.Local)
+        if (profile.Kind == GpuBackendKind.Local)
         {
             await _local.StopAsync();
             StatusText.Text = _local.Status.Message;
@@ -267,27 +264,24 @@ public partial class GpuManagerWindow : Window
 
     private async void OnInspect(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
-        OllamaBackendProfile profile = ReadProfile();
-        if (profile.Kind == OllamaBackendKind.Local)
+        GpuBackendProfile profile = ReadProfile();
+        if (profile.Kind == GpuBackendKind.Local)
         {
             InspectionText.Text = _local.Status.Message; return;
         }
         if (profile.Ssh is null)
         {
-            using IOllamaBackendClient client = OllamaClient.Create(profile);
+            using ILlmBackendClient client = LlamaServerClient.Create(profile);
             IReadOnlyList<string> models = await client.ListModelsAsync(TimeSpan.FromSeconds(10));
             await client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10));
-            InspectionText.Text = profile.Api == BackendApi.OpenAiCompatible
-                ? "llama-server phản hồi · Models: " +
-                  (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models))
-                : $"Endpoint phản hồi · Model sẵn sàng: {profile.Model}\nModels: " +
-                  (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models));
+            InspectionText.Text = "llama-server phản hồi · Models: " +
+                (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models));
             return;
         }
         if (!_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
             throw new InvalidOperationException("Hãy kết nối SSH trước khi kiểm tra server.");
         RemoteLlamaInspection inspection = await _remoteLlama.InspectAsync(handle.Session, handle.TunnelEndpoint,
-            profile.Ssh.RemoteOllamaPort);
+            profile.Ssh.ServerPort);
         InspectionText.Text = DescribeInspection(inspection);
     });
 
@@ -310,7 +304,7 @@ public partial class GpuManagerWindow : Window
     /// <summary>Fills the connection fields from the provider's .rdp file; the password still has to be typed.</summary>
     internal void ApplyRdpFile(RdpConnectionFile file)
     {
-        if (ProfileList.SelectedItem is not OllamaBackendProfile { Kind: OllamaBackendKind.Remote })
+        if (ProfileList.SelectedItem is not GpuBackendProfile { Kind: GpuBackendKind.Remote })
         { StatusText.Text = "Hãy chọn hoặc thêm một profile GPU Remote trước khi nhập file RDP."; return; }
         // A different machine has a different host key, so the pinned fingerprint must not carry over.
         if (!string.Equals(HostInput.Text.Trim(), file.Host, StringComparison.OrdinalIgnoreCase)) FingerprintInput.Text = "";
@@ -339,11 +333,9 @@ public partial class GpuManagerWindow : Window
         _setupCancellation = cancellation;
         try
         {
-            OllamaBackendProfile profile = ReadProfile();
-            if (profile.Kind != OllamaBackendKind.Remote || profile.Ssh is null)
+            GpuBackendProfile profile = ReadProfile();
+            if (profile.Kind != GpuBackendKind.Remote || profile.Ssh is null)
             { StatusText.Text = "Cài đặt tự động dành cho profile GPU Remote qua SSH."; return; }
-            ServerApiInput.SelectedIndex = 1;
-            profile.Api = BackendApi.OpenAiCompatible;
             string model = profile.Model;
             SshReadiness readiness = await EnsureSshReachableAsync(profile, cancellation.Token);
             if (readiness == SshReadiness.Failed) return;
@@ -359,11 +351,11 @@ public partial class GpuManagerWindow : Window
             await using ISshSession? session = await ConnectSetupSessionAsync(profile,
                 readiness == SshReadiness.Bootstrapped, cancellation.Token);
             if (session is null) return;
-            await using ISshTunnel tunnel = await session.OpenOllamaTunnelAsync(ssh.RemoteOllamaPort, cancellation.Token);
+            await using ISshTunnel tunnel = await session.OpenServerTunnelAsync(ssh.ServerPort, cancellation.Token);
             Uri endpoint = new($"http://127.0.0.1:{tunnel.LocalPort}/api/chat");
             var progress = new Progress<RemoteLlamaSetupProgress>(UpdateAutoSetupProgress);
             RemoteLlamaSetupResult result = await _remoteLlama.RunAsync(session, endpoint, model,
-                ssh.RemoteOllamaPort, profile.ParallelRequests, profile.Runtime!.ModelOptions.ContextSize,
+                ssh.ServerPort, profile.ParallelRequests, profile.Runtime!.ModelOptions.ContextSize,
                 progress, cancellation.Token);
             if (result.Inspection is not null) InspectionText.Text = DescribeInspection(result.Inspection);
             ModelPullProgress.IsIndeterminate = false;
@@ -395,7 +387,7 @@ public partial class GpuManagerWindow : Window
         StatusText.Text = step.Message + " · có thể hủy";
     }
 
-    private async Task<ISshSession?> ConnectSetupSessionAsync(OllamaBackendProfile profile, bool trustNewHostKey,
+    private async Task<ISshSession?> ConnectSetupSessionAsync(GpuBackendProfile profile, bool trustNewHostKey,
         CancellationToken cancellationToken)
     {
         try { return await _setupSsh.ConnectAsync(profile.Ssh!, cancellationToken); }
@@ -406,7 +398,7 @@ public partial class GpuManagerWindow : Window
                     $"Máy chủ trả về SSH Host Key Fingerprint:\n{error.ObservedFingerprint}\n\nTin cậy fingerprint này và tiếp tục cài llama-server?",
                     "Xác nhận SSH Fingerprint", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return null;
-            OllamaBackendProfile confirmed = ReadProfile(); confirmed.RemoteDisclosureAccepted = true;
+            GpuBackendProfile confirmed = ReadProfile(); confirmed.RemoteDisclosureAccepted = true;
             await _backends.SaveProfileAsync(confirmed, activate: false);
             return await _setupSsh.ConnectAsync(confirmed.Ssh!, cancellationToken);
         }
@@ -418,7 +410,7 @@ public partial class GpuManagerWindow : Window
     /// setup command from the clipboard. It puts SSH on that same public port next to Remote Desktop, and this check
     /// continues by itself once SSH answers there.
     /// </summary>
-    private async Task<SshReadiness> EnsureSshReachableAsync(OllamaBackendProfile profile, CancellationToken cancellationToken)
+    private async Task<SshReadiness> EnsureSshReachableAsync(GpuBackendProfile profile, CancellationToken cancellationToken)
     {
         GpuSshSettings ssh = profile.Ssh!;
         int rdpPort = ssh.RdpPort ?? RdpConnectionFile.DefaultPort;
@@ -503,9 +495,9 @@ public partial class GpuManagerWindow : Window
 
     private enum SshReadiness { Failed, AlreadyAvailable, Bootstrapped }
 
-    private async void OnStartOllama(object sender, RoutedEventArgs e)
+    private async void OnStartServer(object sender, RoutedEventArgs e)
     {
-        if (ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Local })
+        if (ProfileList.SelectedItem is GpuBackendProfile { Kind: GpuBackendKind.Local })
         {
             if (_busy) return;
             _busy = true;
@@ -535,7 +527,7 @@ public partial class GpuManagerWindow : Window
     private void OnCancelSetup(object sender, RoutedEventArgs e)
     {
         _setupCancellation?.Cancel();
-        StatusText.Text = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Local }
+        StatusText.Text = ProfileList.SelectedItem is GpuBackendProfile { Kind: GpuBackendKind.Local }
             ? "Đang yêu cầu hủy khởi động llama-server…" : "Đang yêu cầu hủy thao tác Remote…";
     }
 
@@ -553,19 +545,18 @@ public partial class GpuManagerWindow : Window
         if (dialog.ShowDialog(this) == true) ModelInput.Text = dialog.FileName;
     }
 
-    private OllamaBackendProfile ReadProfile()
+    private GpuBackendProfile ReadProfile()
     {
-        OllamaBackendProfile original = ProfileList.SelectedItem as OllamaBackendProfile
+        GpuBackendProfile original = ProfileList.SelectedItem as GpuBackendProfile
             ?? throw new InvalidOperationException("Chưa chọn profile.");
         // The provider's panel shows "address:port" as one text, so accept it pasted into the address box.
         (string host, int? pastedPort) = RemoteAddress.Split(HostInput.Text);
         if (pastedPort is int port) { HostInput.Text = host; PortInput.Text = port.ToString(CultureInfo.InvariantCulture); }
         AiRuntimeProfile runtime = ReadRuntimeProfile();
-        if (original.Kind == OllamaBackendKind.Local)
+        if (original.Kind == GpuBackendKind.Local)
         {
-            OllamaBackendProfile local = original.Clone();
+            GpuBackendProfile local = original.Clone();
             local.Name = NameInput.Text; local.Runtime = runtime; local.Model = runtime.ModelOptions.Model;
-            local.Api = BackendApi.OpenAiCompatible;
             local.ParallelRequests = ReadInt(ParallelRequestsInput, "Số request song song");
             local.Endpoint = _local.Endpoint?.ToString() ?? "http://127.0.0.1:11450/api/chat";
             local.Validate(); return local;
@@ -573,7 +564,6 @@ public partial class GpuManagerWindow : Window
         var profile = original.Clone(); profile.Name = NameInput.Text; profile.Runtime = runtime;
         profile.Runtime = runtime;
         profile.Model = runtime.ModelOptions.Model;
-        profile.Api = ServerApiInput.SelectedIndex == 1 ? BackendApi.OpenAiCompatible : BackendApi.Ollama;
         profile.ParallelRequests = ReadInt(ParallelRequestsInput, "Số request song song");
         profile.HourlyPrice = decimal.Parse(HourlyPriceInput.Text, CultureInfo.InvariantCulture);
         if (ConnectionTypeInput.SelectedIndex == 1)
@@ -592,7 +582,7 @@ public partial class GpuManagerWindow : Window
                 Authentication = AuthenticationInput.SelectedIndex == 1 ? SshAuthenticationKind.PrivateKey : SshAuthenticationKind.Password,
                 Password = PasswordInput.Password, PrivateKey = _loadedPrivateKey,
                 PrivateKeyPassphrase = PrivateKeyPassphraseInput.Password, HostKeyFingerprint = FingerprintInput.Text,
-                RemoteOllamaPort = int.Parse(RemoteOllamaPortInput.Text, CultureInfo.InvariantCulture),
+                ServerPort = int.Parse(ServerPortInput.Text, CultureInfo.InvariantCulture),
                 RdpPort = _rdpPort
             };
         }

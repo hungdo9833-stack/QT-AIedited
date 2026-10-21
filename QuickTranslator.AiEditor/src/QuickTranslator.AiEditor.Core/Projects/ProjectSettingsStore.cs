@@ -28,7 +28,7 @@ public sealed class ProjectSettingsStore(ProjectSession session)
         JsonFileCodec.DecodeDirect<ProjectTranslationSettings>(bytes, value =>
         {
             if (value.Model is null || value.Segmentation is null || value.TraditionalDataDirectory is null ||
-                value.SelectedPromptPresetId == Guid.Empty || value.OllamaProfileId == Guid.Empty)
+                value.SelectedPromptPresetId == Guid.Empty || value.GpuProfileId == Guid.Empty)
                 throw new InvalidDataException("Thiết lập dịch thiếu dữ liệu.");
             value.Model.Validate(); value.Segmentation.Validate();
         }, "model", "segmentation", "ollamaProfileId");

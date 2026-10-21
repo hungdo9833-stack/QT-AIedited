@@ -64,7 +64,7 @@ public partial class MainWindow
 
     private async Task PrepareChapterAsync()
     {
-        await EnsureOllamaBackendReadyAsync();
+        await EnsureGpuBackendReadyAsync();
         if (_service is null)
         {
             var chapter = TranslationService.CreateChapter(TitleInput.Text, _importedOriginalText ?? ChapterInput.Text, ReadSegmenterOptions(), ReadModelOptions());

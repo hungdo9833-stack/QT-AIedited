@@ -265,12 +265,12 @@ internal static class Program
                 var remoteOptions = options with { ContextSize = 8192 };
                 ProjectTranslationWorkerDefinition[] workers =
                 [
-                    new(Guid.Parse("11111111-1111-4111-8111-111111111111"), OllamaBackendSnapshot.LocalDefault(options.Model),
+                    new(Guid.Parse("11111111-1111-4111-8111-111111111111"), GpuBackendSnapshot.LocalDefault(options.Model),
                         new SyntheticClient(), options, new SegmenterOptions { MinimumHanCharacters = 250,
                             TargetHanCharacters = 375, MaximumHanCharacters = 500 }, 0),
                     new(Guid.Parse("22222222-2222-4222-8222-222222222222"),
-                        new OllamaBackendSnapshot(Guid.Parse("33333333-3333-4333-8333-333333333333"),
-                            OllamaBackendKind.Remote, "RTX 5060 Ti Remote", "http://127.0.0.1:43117/api/chat", remoteOptions.Model),
+                        new GpuBackendSnapshot(Guid.Parse("33333333-3333-4333-8333-333333333333"),
+                            GpuBackendKind.Remote, "RTX 5060 Ti Remote", "http://127.0.0.1:43117/api/chat", remoteOptions.Model),
                         new SyntheticClient(), remoteOptions, new SegmenterOptions { MinimumHanCharacters = 350,
                             TargetHanCharacters = 550, MaximumHanCharacters = 750 }, 0.45m, "synthetic-ssh-host")
                 ];
@@ -353,13 +353,13 @@ internal static class Program
 
     private static GpuManagerWindow CreateGpuManager(string root)
     {
-        var store = new OllamaProfileStore(Path.Combine(root, "gpu-profiles.json"), new SyntheticProtector());
-        var manager = new OllamaBackendManager(store, _ => new SyntheticBackendClient());
+        var store = new GpuProfileStore(Path.Combine(root, "gpu-profiles.json"), new SyntheticProtector());
+        var manager = new GpuBackendManager(store, _ => new SyntheticBackendClient());
         manager.LoadAsync().GetAwaiter().GetResult();
-        var remote = new OllamaBackendProfile
+        var remote = new GpuBackendProfile
         {
             Id = Guid.Parse("33333333-3333-4333-8333-333333333333"), Name = "RTX 5060 Ti Remote",
-            Kind = OllamaBackendKind.Remote, Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b",
+            Kind = GpuBackendKind.Remote, Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b",
             Runtime = new AiRuntimeProfile
             {
                 ModelOptions = new ModelOptions { Model = "translategemma:12b", ContextSize = 8192,
@@ -370,7 +370,7 @@ internal static class Program
             HourlyPrice = 0.45m, RemoteDisclosureAccepted = true,
             Ssh = new() { Host = "gpu-rental.example", Port = 22022, Username = "ubuntu",
                 Authentication = SshAuthenticationKind.Password, Password = "synthetic",
-                HostKeyFingerprint = "SHA256:abcdefghijklmnopqrstuv", RemoteOllamaPort = 11434 }
+                HostKeyFingerprint = "SHA256:abcdefghijklmnopqrstuv", ServerPort = 11434 }
         };
         manager.SaveProfileAsync(remote, activate: true).GetAwaiter().GetResult();
         var preferences = new GpuTranslationPreferences { Mode = GpuTranslationMode.ParallelLocalRemote,
@@ -387,7 +387,7 @@ internal static class Program
             (method, _) => Task.FromResult(new ChapterTitleRuntime(new KeepChineseChapterTitleTranslationBackend(),
                 new ModelOptions(), null, "none")), Path.Combine(root, "title-draft.json"));
         ChapterTitleTranslationDraft draft = ChapterTitleTranslationDraft.Create(session.Manifest.ProjectId,
-            "smoke-titles", ChapterTitleTranslationMethod.Ollama, sources, Guid.NewGuid(), "translategemma:12b");
+            "smoke-titles", ChapterTitleTranslationMethod.LlamaServer, sources, Guid.NewGuid(), "translategemma:12b");
         for (int index = 0; index < draft.Items.Count; index++)
         {
             ChapterTitleTranslationItem item = draft.Items[index];
@@ -562,25 +562,25 @@ internal static class Program
     private static object? Invoke(object target, string name, params object?[] args) =>
         target.GetType().GetMethod(name, PrivateInstance)!.Invoke(target, args);
 
-    private sealed class SyntheticClient : IOllamaClient
+    private sealed class SyntheticClient : ILlmClient
     {
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
-            CancellationToken cancellationToken = default) => Task.FromResult(new OllamaCompletion(
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default) => Task.FromResult(new LlmCompletion(
                 "Bản dịch tổng hợp.", true, "stop", new GenerationMetrics()));
     }
 
-    private sealed class SyntheticBackendClient : IOllamaBackendClient
+    private sealed class SyntheticBackendClient : ILlmBackendClient
     {
         public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>(["translategemma:12b"]);
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
-            CancellationToken cancellationToken = default) => Task.FromResult(new OllamaCompletion(
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default) => Task.FromResult(new LlmCompletion(
                 "Bản dịch tổng hợp.", true, "stop", new GenerationMetrics()));
         public void Dispose() { }
     }
 
-    private sealed class SyntheticProtector : IOllamaSecretProtector
+    private sealed class SyntheticProtector : ISecretProtector
     {
         public string Protect(string value) => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(value));
         public string Unprotect(string value) => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(value));

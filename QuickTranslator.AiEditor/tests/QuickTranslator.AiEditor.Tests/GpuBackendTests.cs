@@ -8,7 +8,7 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
 
-public sealed class OllamaBackendTests : IDisposable
+public sealed class GpuBackendTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "qtaie-m65-" + Guid.NewGuid().ToString("N"));
 
@@ -19,7 +19,7 @@ public sealed class OllamaBackendTests : IDisposable
     [InlineData("http://192.168.20.3:11434/api/chat")]
     public void Remote_endpoint_accepts_https_or_private_http_and_normalizes_chat_path(string value)
     {
-        Uri endpoint = OllamaClient.ValidateRemoteEndpoint(new(value));
+        Uri endpoint = LlamaServerClient.ValidateRemoteEndpoint(new(value));
 
         Assert.Equal("/api/chat", endpoint.AbsolutePath);
     }
@@ -31,70 +31,67 @@ public sealed class OllamaBackendTests : IDisposable
     [InlineData("https://gpu.example.com/api/chat?redirect=true")]
     [InlineData("ftp://gpu.example.com/api/chat")]
     public void Public_http_or_unexpected_remote_endpoint_is_rejected(string value) =>
-        Assert.Throws<ArgumentException>(() => OllamaClient.ValidateRemoteEndpoint(new(value)));
+        Assert.Throws<ArgumentException>(() => LlamaServerClient.ValidateRemoteEndpoint(new(value)));
 
     [Fact]
     public void Remote_transport_disables_redirects_and_keeps_platform_certificate_validation()
     {
-        using SocketsHttpHandler handler = OllamaClient.CreateRemoteHandler();
+        using SocketsHttpHandler handler = LlamaServerClient.CreateRemoteHandler();
 
         Assert.False(handler.AllowAutoRedirect);
         Assert.Null(handler.SslOptions.RemoteCertificateValidationCallback);
     }
 
     [Fact]
-    public void Api_and_parallel_requests_are_validated_and_cloned()
+    public void Parallel_requests_are_validated_and_cloned()
     {
-        var profile = new OllamaBackendProfile
+        var profile = new GpuBackendProfile
         {
-            Name = "llama-server", Kind = OllamaBackendKind.Remote, Api = BackendApi.OpenAiCompatible,
+            Name = "llama-server", Kind = GpuBackendKind.Remote,
             ParallelRequests = 4, Endpoint = "http://127.0.0.1:11436", Model = "alias"
         };
 
         profile.Validate();
-        OllamaBackendProfile clone = profile.Clone();
-
-        Assert.Equal(BackendApi.OpenAiCompatible, clone.Api);
-        Assert.Equal(4, clone.ParallelRequests);
+        Assert.Equal(4, profile.Clone().ParallelRequests);
         profile.ParallelRequests = 0;
         Assert.Throws<InvalidDataException>(profile.Validate);
         profile.ParallelRequests = 9;
         Assert.Throws<InvalidDataException>(profile.Validate);
-        profile.ParallelRequests = 1;
-        profile.Api = (BackendApi)99;
-        Assert.Throws<InvalidDataException>(profile.Validate);
     }
 
-    [Fact]
-    public void Local_profile_accepts_open_ai_compatible_api()
+    /// <summary>A profile file as the Ollama-era app wrote it: the "api" discriminator and the Ollama port.</summary>
+    private async Task<string> WriteOllamaEraLocalProfileAsync(string name, string model, Action<AiRuntimeProfile>? runtime = null)
     {
-        OllamaBackendProfile profile = OllamaBackendProfile.CreateDefaultLocal();
-        profile.Api = BackendApi.OpenAiCompatible;
-
-        profile.Validate();
-        Assert.Equal(BackendApi.OpenAiCompatible, profile.Api);
+        Directory.CreateDirectory(_root);
+        string path = Path.Combine(_root, name);
+        GpuBackendProfile profile = GpuBackendProfile.CreateDefaultLocal();
+        profile.Runtime = AiRuntimeProfile.CreateDefault(GpuBackendProfile.DefaultLocalModel);
+        runtime?.Invoke(profile.Runtime);
+        await new GpuProfileStore(path, new FakeProtector()).SaveAsync(new GpuProfileCatalog { Profiles = [profile], ActiveProfileId = profile.Id });
+        JsonObject root = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        JsonObject stored = root["profiles"]!.AsArray()[0]!.AsObject();
+        stored["name"] = "Ollama Local";
+        stored["api"] = "Ollama";
+        stored["parallelRequests"] = 1;
+        stored["endpoint"] = "http://127.0.0.1:11434/api/chat";
+        stored["model"] = model;
+        stored["runtime"]!["modelOptions"]!["model"] = model;
+        await File.WriteAllTextAsync(path, root.ToJsonString(), new UTF8Encoding(false));
+        return path;
     }
 
     [Fact]
     public async Task Old_ollama_local_profile_is_migrated_once_to_default_gguf()
     {
-        Directory.CreateDirectory(_root);
-        string path = Path.Combine(_root, "old-local.json");
-        var store = new OllamaProfileStore(path, new FakeProtector());
-        OllamaBackendProfile old = OllamaBackendProfile.CreateDefaultLocal();
-        old.Name = "Ollama Local";
-        old.Api = BackendApi.Ollama;
-        old.ParallelRequests = 1;
-        old.Endpoint = OllamaClient.DefaultEndpoint.ToString();
-        old.Model = "translategemma:12b";
-        old.Runtime = AiRuntimeProfile.CreateDefault(old.Model);
-        await store.SaveAsync(new OllamaProfileCatalog { Profiles = [old], ActiveProfileId = old.Id });
+        string path = await WriteOllamaEraLocalProfileAsync("old-local.json", "translategemma:12b");
+        var store = new GpuProfileStore(path, new FakeProtector());
 
-        OllamaProfileCatalog migrated = await store.LoadAsync();
-        OllamaBackendProfile local = Assert.Single(migrated.Profiles);
+        GpuProfileCatalog migrated = await store.LoadAsync();
+        GpuBackendProfile local = Assert.Single(migrated.Profiles);
 
-        Assert.Equal(BackendApi.OpenAiCompatible, local.Api);
-        Assert.Equal(OllamaBackendProfile.DefaultLocalModel, local.Model);
+        Assert.Equal("llama-server Local", local.Name);
+        Assert.Equal(LlamaServerClient.DefaultEndpoint.ToString(), local.Endpoint);
+        Assert.Equal(GpuBackendProfile.DefaultLocalModel, local.Model);
         Assert.Equal(4, local.ParallelRequests);
         Assert.Equal(8192, local.Runtime!.ModelOptions.ContextSize);
         Assert.Equal(3072, local.Runtime.ModelOptions.MaximumOutputTokens);
@@ -106,116 +103,98 @@ public sealed class OllamaBackendTests : IDisposable
     [Fact]
     public async Task Old_ollama_local_profile_with_hf_gguf_tag_keeps_its_model_and_runtime()
     {
-        Directory.CreateDirectory(_root);
-        string path = Path.Combine(_root, "old-local-hf.json");
-        var store = new OllamaProfileStore(path, new FakeProtector());
-        OllamaBackendProfile old = OllamaBackendProfile.CreateDefaultLocal();
-        old.Api = BackendApi.Ollama;
-        old.ParallelRequests = 1;
-        old.Endpoint = OllamaClient.DefaultEndpoint.ToString();
-        old.Model = "hf.co/IndexTeam/Index-Translate-9B-GGUF:Q4_K_M";
-        old.Runtime = AiRuntimeProfile.CreateDefault(old.Model);
-        old.Runtime.ModelOptions = old.Runtime.ModelOptions with { Temperature = 0.1, MaximumOutputTokens = 2048 };
-        await store.SaveAsync(new OllamaProfileCatalog { Profiles = [old], ActiveProfileId = old.Id });
+        string path = await WriteOllamaEraLocalProfileAsync("old-local-hf.json", "hf.co/IndexTeam/Index-Translate-9B-GGUF:Q4_K_M",
+            runtime => runtime.ModelOptions = runtime.ModelOptions with { Temperature = 0.1, MaximumOutputTokens = 2048 });
 
-        OllamaBackendProfile local = Assert.Single((await store.LoadAsync()).Profiles);
+        GpuBackendProfile local = Assert.Single((await new GpuProfileStore(path, new FakeProtector()).LoadAsync()).Profiles);
 
-        Assert.Equal(BackendApi.OpenAiCompatible, local.Api);
         Assert.Equal(4, local.ParallelRequests);
         Assert.Equal("IndexTeam/Index-Translate-9B-GGUF:Q4_K_M", local.Model);
         Assert.Equal(2048, local.Runtime!.ModelOptions.MaximumOutputTokens);
     }
 
     [Fact]
-    public void Factory_selects_open_ai_compatible_client_for_remote_profile()
+    public async Task Local_slots_chosen_by_the_user_survive_reload()
     {
-        var profile = new OllamaBackendProfile
+        Directory.CreateDirectory(_root);
+        string path = Path.Combine(_root, "local-slots.json");
+        var store = new GpuProfileStore(path, new FakeProtector());
+        GpuBackendProfile local = GpuBackendProfile.CreateDefaultLocal();
+        local.ParallelRequests = 2;
+        await store.SaveAsync(new GpuProfileCatalog { Profiles = [local], ActiveProfileId = local.Id });
+
+        Assert.Equal(2, Assert.Single((await store.LoadAsync()).Profiles).ParallelRequests);
+    }
+
+    [Fact]
+    public void Factory_creates_llama_server_client_for_remote_profile()
+    {
+        var profile = new GpuBackendProfile
         {
-            Name = "llama-server", Kind = OllamaBackendKind.Remote, Api = BackendApi.OpenAiCompatible,
+            Name = "llama-server", Kind = GpuBackendKind.Remote,
             ParallelRequests = 4, Endpoint = "http://127.0.0.1:11436", Model = "alias"
         };
 
-        using IOllamaBackendClient client = OllamaClient.Create(profile);
+        using ILlmBackendClient client = LlamaServerClient.Create(profile);
 
-        Assert.IsType<OpenAiCompatibleClient>(client);
-    }
-
-    [Fact]
-    public async Task Remote_client_authenticates_tags_and_chat_and_requires_an_installed_non_cloud_model()
-    {
-        var requests = new List<(string Path, string? Authorization, string? Body)>();
-        using var http = new HttpClient(new OllamaClientTests.FakeHandler(async (request, token) =>
-        {
-            string? body = request.Content is null ? null : await request.Content.ReadAsStringAsync(token);
-            requests.Add((request.RequestUri!.AbsolutePath, request.Headers.Authorization?.ToString(), body));
-            return request.RequestUri.AbsolutePath == "/api/tags"
-                ? OllamaClientTests.JsonResponse("{\"models\":[{\"name\":\"translategemma:12b\",\"size\":8000000000}]}")
-                : OllamaClientTests.JsonResponse("{\"message\":{\"content\":\"Bản dịch remote.\"},\"done\":true}");
-        }, autoLocalTags: false)) { Timeout = Timeout.InfiniteTimeSpan };
-        using var client = new OllamaClient(http, new("https://gpu.example.com"), OllamaBackendKind.Remote, "secret-token");
-
-        IReadOnlyList<string> models = await client.ListModelsAsync(TimeSpan.FromSeconds(1));
-        OllamaCompletion result = await client.TranslateAsync("synthetic-private-prompt", new());
-
-        Assert.Equal(["translategemma:12b"], models);
-        Assert.Equal("Bản dịch remote.", result.Text);
-        Assert.Equal(["/api/tags", "/api/chat"], requests.Select(request => request.Path));
-        Assert.All(requests, request => Assert.Equal("Bearer secret-token", request.Authorization));
-        Assert.Null(requests[0].Body);
-        Assert.Contains("synthetic-private-prompt", requests[1].Body, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Missing_remote_model_never_sends_prompt()
-    {
-        int chatCalls = 0;
-        using var http = new HttpClient(new OllamaClientTests.FakeHandler((request, _) =>
-        {
-            if (request.RequestUri!.AbsolutePath == "/api/tags")
-                return Task.FromResult(OllamaClientTests.JsonResponse("{\"models\":[]}"));
-            chatCalls++;
-            return Task.FromResult(OllamaClientTests.JsonResponse("{}"));
-        }, autoLocalTags: false));
-        using var client = new OllamaClient(http, new("https://gpu.example.com"), OllamaBackendKind.Remote, null);
-
-        OllamaRequestException error = await Assert.ThrowsAsync<OllamaRequestException>(() =>
-            client.TranslateAsync("must-not-leave", new()));
-
-        Assert.Equal(OllamaErrorKind.Http, error.Kind);
-        Assert.Equal(0, chatCalls);
+        Assert.IsType<LlamaServerClient>(client);
     }
 
     [Fact]
     public async Task Remote_timeout_or_disconnect_is_reported_without_fallback_request()
     {
         int timeoutCalls = 0;
-        using (var timeoutHttp = new HttpClient(new OllamaClientTests.FakeHandler(async (_, token) =>
+        using (var timeoutHttp = new HttpClient(new LlamaServerClientTests.FakeHandler(async (_, token) =>
         {
             timeoutCalls++;
             await Task.Delay(Timeout.Infinite, token);
-            return OllamaClientTests.JsonResponse("{}");
-        }, autoLocalTags: false)) { Timeout = Timeout.InfiniteTimeSpan })
-        using (var timeoutClient = new OllamaClient(timeoutHttp, new("https://gpu.example.com"), OllamaBackendKind.Remote))
+            return LlamaServerClientTests.JsonResponse("{}");
+        })) { Timeout = Timeout.InfiniteTimeSpan })
+        using (var timeoutClient = new LlamaServerClient(timeoutHttp, new("https://gpu.example.com"), 1))
         {
-            OllamaRequestException timeout = await Assert.ThrowsAsync<OllamaRequestException>(() =>
+            LlmRequestException timeout = await Assert.ThrowsAsync<LlmRequestException>(() =>
                 timeoutClient.TranslateAsync("private-timeout-prompt", new() { RequestTimeout = TimeSpan.FromMilliseconds(50) }));
-            Assert.Equal(OllamaErrorKind.Timeout, timeout.Kind);
+            Assert.Equal(LlmErrorKind.Timeout, timeout.Kind);
             Assert.Equal(1, timeoutCalls);
         }
 
         int disconnectCalls = 0;
-        using var disconnectHttp = new HttpClient(new OllamaClientTests.FakeHandler((_, _) =>
+        using var disconnectHttp = new HttpClient(new LlamaServerClientTests.FakeHandler((_, _) =>
         {
             disconnectCalls++;
             throw new HttpRequestException("synthetic disconnect");
-        }, autoLocalTags: false));
-        using var disconnectClient = new OllamaClient(disconnectHttp, new("https://gpu.example.com"), OllamaBackendKind.Remote);
+        }));
+        using var disconnectClient = new LlamaServerClient(disconnectHttp, new("https://gpu.example.com"), 1);
 
-        OllamaRequestException disconnected = await Assert.ThrowsAsync<OllamaRequestException>(() =>
+        LlmRequestException disconnected = await Assert.ThrowsAsync<LlmRequestException>(() =>
             disconnectClient.TranslateAsync("private-disconnect-prompt", new()));
-        Assert.Equal(OllamaErrorKind.Connection, disconnected.Kind);
+        Assert.Equal(LlmErrorKind.Connection, disconnected.Kind);
         Assert.Contains("không tự chuyển provider", disconnected.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, disconnectCalls);
+    }
+
+    [Fact]
+    public async Task Ssh_server_port_keeps_the_persisted_field_name_of_existing_profile_files()
+    {
+        Directory.CreateDirectory(_root);
+        string path = Path.Combine(_root, "ssh-port.json");
+        var store = new GpuProfileStore(path, new FakeProtector());
+        var remote = new GpuBackendProfile
+        {
+            Id = Guid.NewGuid(), Name = "Rental", Kind = GpuBackendKind.Remote, ParallelRequests = 4,
+            Endpoint = "http://127.0.0.1:11436", Model = "IndexTeam/Index-Translate-9B-GGUF:Q4_K_M",
+            Ssh = new GpuSshSettings
+            {
+                Host = "net4.example.com", Port = 48673, Username = "admin", Authentication = SshAuthenticationKind.Password,
+                Password = "secret", HostKeyFingerprint = "SHA256:4KYTCoAicuQi0v6wqwqShPdDv0iZskCrZr/8bmX/AUw", ServerPort = 11436
+            }
+        };
+        GpuBackendProfile local = GpuBackendProfile.CreateDefaultLocal();
+        await store.SaveAsync(new GpuProfileCatalog { ActiveProfileId = local.Id, Profiles = [local, remote] });
+
+        // Files written before the rename carry "remoteOllamaPort"; the same key must still be read and written.
+        Assert.Contains("\"remoteOllamaPort\": 11436", await File.ReadAllTextAsync(path), StringComparison.Ordinal);
+        Assert.Equal(11436, (await store.LoadAsync()).Profiles.Single(profile => profile.Id == remote.Id).Ssh!.ServerPort);
     }
 
     [Fact]
@@ -224,12 +203,11 @@ public sealed class OllamaBackendTests : IDisposable
         Directory.CreateDirectory(_root);
         string path = Path.Combine(_root, "ollama-profiles.json");
         var protector = new FakeProtector();
-        var store = new OllamaProfileStore(path, protector);
-        OllamaBackendProfile local = OllamaBackendProfile.CreateDefaultLocal();
-        var remote = new OllamaBackendProfile
+        var store = new GpuProfileStore(path, protector);
+        GpuBackendProfile local = GpuBackendProfile.CreateDefaultLocal();
+        var remote = new GpuBackendProfile
         {
-            Id = Guid.NewGuid(), Name = "EZYCloudX 3090 Ti", Kind = OllamaBackendKind.Remote,
-            Api = BackendApi.OpenAiCompatible, ParallelRequests = 4,
+            Id = Guid.NewGuid(), Name = "EZYCloudX 3090 Ti", Kind = GpuBackendKind.Remote, ParallelRequests = 4,
             Endpoint = "https://gpu.example.com", Model = "translategemma:12b",
             Token = "plain-api-token", RemoteDisclosureAccepted = true,
             Runtime = new AiRuntimeProfile
@@ -240,14 +218,13 @@ public sealed class OllamaBackendTests : IDisposable
                     TargetHanCharacters = 550, MaximumHanCharacters = 750, MaximumTextElements = 3000 }
             }
         };
-        var catalog = new OllamaProfileCatalog { ActiveProfileId = remote.Id, Profiles = [local, remote] };
+        var catalog = new GpuProfileCatalog { ActiveProfileId = remote.Id, Profiles = [local, remote] };
 
         await store.SaveAsync(catalog);
-        OllamaProfileCatalog reopened = await store.LoadAsync();
+        GpuProfileCatalog reopened = await store.LoadAsync();
 
         Assert.Equal(remote.Id, reopened.ActiveProfileId);
         Assert.Equal("plain-api-token", reopened.Profiles.Single(profile => profile.Id == remote.Id).Token);
-        Assert.Equal(BackendApi.OpenAiCompatible, reopened.Profiles.Single(profile => profile.Id == remote.Id).Api);
         Assert.Equal(4, reopened.Profiles.Single(profile => profile.Id == remote.Id).ParallelRequests);
         AiRuntimeProfile runtime = reopened.Profiles.Single(profile => profile.Id == remote.Id).Runtime!;
         Assert.Equal(8192, runtime.ModelOptions.ContextSize);
@@ -261,15 +238,15 @@ public sealed class OllamaBackendTests : IDisposable
     public async Task Backend_manager_switches_profiles_without_sending_remote_content_before_consent()
     {
         Directory.CreateDirectory(_root);
-        var store = new OllamaProfileStore(Path.Combine(_root, "profiles.json"), new FakeProtector());
+        var store = new GpuProfileStore(Path.Combine(_root, "profiles.json"), new FakeProtector());
         var clients = new Dictionary<Guid, RecordingBackendClient>();
-        IOllamaBackendClient Factory(OllamaBackendProfile profile) => clients[profile.Id] = new(profile.Id);
-        using var manager = new OllamaBackendManager(store, Factory);
+        ILlmBackendClient Factory(GpuBackendProfile profile) => clients[profile.Id] = new(profile.Id);
+        using var manager = new GpuBackendManager(store, Factory);
         await manager.LoadAsync();
-        OllamaBackendProfile local = manager.ActiveProfile;
-        var remote = new OllamaBackendProfile
+        GpuBackendProfile local = manager.ActiveProfile;
+        var remote = new GpuBackendProfile
         {
-            Id = Guid.NewGuid(), Name = "Remote", Kind = OllamaBackendKind.Remote,
+            Id = Guid.NewGuid(), Name = "Remote", Kind = GpuBackendKind.Remote,
             Endpoint = "https://gpu.example.com", Model = "translategemma:12b", Token = "token"
         };
         await manager.SaveProfileAsync(remote, activate: false);
@@ -294,7 +271,7 @@ public sealed class OllamaBackendTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         string path = Path.Combine(_root, "incomplete-profiles.json");
-        Guid localId = OllamaBackendProfile.DefaultLocalId;
+        Guid localId = GpuBackendProfile.DefaultLocalId;
         await File.WriteAllTextAsync(path, $$"""
         {
           "schemaVersion": 1,
@@ -313,35 +290,47 @@ public sealed class OllamaBackendTests : IDisposable
         """, new UTF8Encoding(false));
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
-            new OllamaProfileStore(path, new FakeProtector()).LoadAsync());
+            new GpuProfileStore(path, new FakeProtector()).LoadAsync());
     }
 
     [Fact]
     public async Task Old_profile_file_without_api_fields_uses_compatible_defaults()
     {
-        Directory.CreateDirectory(_root);
-        string path = Path.Combine(_root, "old-profiles.json");
-        var store = new OllamaProfileStore(path, new FakeProtector());
-        OllamaBackendProfile local = OllamaBackendProfile.CreateDefaultLocal();
-        await store.SaveAsync(new OllamaProfileCatalog { ActiveProfileId = local.Id, Profiles = [local] });
+        string path = await WriteOllamaEraLocalProfileAsync("old-profiles.json", "hf.co/IndexTeam/Index-Translate-9B-GGUF:Q4_K_M");
         JsonObject root = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
         JsonObject stored = root["profiles"]!.AsArray()[0]!.AsObject();
         stored.Remove("api");
         stored.Remove("parallelRequests");
         await File.WriteAllTextAsync(path, root.ToJsonString(), new UTF8Encoding(false));
 
-        OllamaProfileCatalog reopened = await store.LoadAsync();
+        GpuProfileCatalog reopened = await new GpuProfileStore(path, new FakeProtector()).LoadAsync();
 
-        // A file written before the API fields existed means an Ollama local profile: it is moved to llama-server.
-        Assert.Equal(BackendApi.OpenAiCompatible, reopened.Profiles[0].Api);
+        // Before the api field existed the local profile was Ollama on port 11434: it is moved to llama-server.
         Assert.Equal(4, reopened.Profiles[0].ParallelRequests);
+        Assert.Equal(LlamaServerClient.DefaultEndpoint.ToString(), reopened.Profiles[0].Endpoint);
+    }
+
+    [Fact]
+    public async Task Old_profile_file_is_read_once_into_the_new_file_and_kept_as_backup()
+    {
+        string legacy = await WriteOllamaEraLocalProfileAsync("ollama-profiles.json", "translategemma:12b");
+        string before = await File.ReadAllTextAsync(legacy);
+        string current = Path.Combine(_root, "gpu-profiles.json");
+        var store = new GpuProfileStore(current, new FakeProtector(), legacy);
+
+        GpuBackendProfile local = Assert.Single((await store.LoadAsync()).Profiles);
+
+        Assert.Equal(GpuBackendProfile.DefaultLocalModel, local.Model);
+        Assert.True(File.Exists(current));
+        Assert.Equal(before, await File.ReadAllTextAsync(legacy));
+        Assert.DoesNotContain("\"api\"", await File.ReadAllTextAsync(current), StringComparison.Ordinal);
     }
 
     [Fact]
     public void Windows_dpapi_round_trip_does_not_contain_plain_secret()
     {
         if (!OperatingSystem.IsWindows()) return;
-        var protector = new WindowsDpapiOllamaSecretProtector();
+        var protector = new WindowsDpapiSecretProtector();
 
         string encrypted;
         try
@@ -365,20 +354,20 @@ public sealed class OllamaBackendTests : IDisposable
         if (Directory.Exists(_root)) Directory.Delete(_root, true);
     }
 
-    private sealed class FakeProtector : IOllamaSecretProtector
+    private sealed class FakeProtector : ISecretProtector
     {
         public string Protect(string value) => "protected:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
         public string Unprotect(string value) => Encoding.UTF8.GetString(Convert.FromBase64String(value["protected:".Length..]));
     }
 
-    private sealed class RecordingBackendClient(Guid id) : IOllamaBackendClient
+    private sealed class RecordingBackendClient(Guid id) : ILlmBackendClient
     {
         public Guid Id { get; } = id;
         public List<string> Prompts { get; } = [];
         public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>(["translategemma:12b"]);
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default)
         {
             Prompts.Add(prompt);
             return Task.FromResult(FakeClient.Completion("translated"));

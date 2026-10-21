@@ -18,7 +18,7 @@ public partial class MainWindow
             return;
         }
 
-        await EnsureOllamaBackendsLoadedAsync();
+        await EnsureGpuBackendsLoadedAsync();
         var preview = new ImportPreviewWindow(_projectSession, CreateChapterTitleRuntimeAsync, initialTxtPath) { Owner = this };
         ClampWindowToWorkArea(preview, 1380, 860);
         if (preview.ShowDialog() != true || preview.ConfirmedPlan is not ImportPreviewPlan plan) return;

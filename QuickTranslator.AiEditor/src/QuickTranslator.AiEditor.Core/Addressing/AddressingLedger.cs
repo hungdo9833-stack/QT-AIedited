@@ -155,10 +155,10 @@ public sealed class AddressingApplyStore(ProjectSession session)
 public sealed record AddressingRunResult(AddressingLedgerState State, int RequestsSent, int Planned, string? StoppedBy);
 
 /// <summary>
-/// Runs planned requests through one selected backend (Gemini via SemanticSurveyBackend, or Ollama): one try per
+/// Runs planned requests through one selected backend (Gemini via SemanticSurveyBackend, or llama-server): one try per
 /// request, a per-run request budget, checkpoint after every request, stop on service/quota/config failures.
 /// </summary>
-public sealed class AddressingAiEngine(IJsonSchemaOllamaClient client)
+public sealed class AddressingAiEngine(IJsonSchemaLlmClient client)
 {
     public async Task<AddressingRunResult> RunAsync(AddressingLedgerStore store, IReadOnlyList<AddressingTask> tasks, ModelOptions options,
         int maximumRequests, AddressingSettings? settings = null, IProgress<string>? progress = null, CancellationToken ct = default)

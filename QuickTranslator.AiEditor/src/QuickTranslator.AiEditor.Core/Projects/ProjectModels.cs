@@ -1,4 +1,5 @@
 using QuickTranslator.AiEditor.Core.Models;
+using System.Text.Json.Serialization;
 
 namespace QuickTranslator.AiEditor.Core.Projects;
 
@@ -81,7 +82,8 @@ public sealed class ProjectTranslationSettings
     public ModelOptions Model { get; set; } = new();
     public SegmenterOptions Segmentation { get; set; } = new();
     public Guid? SelectedPromptPresetId { get; set; }
-    public Guid? OllamaProfileId { get; set; }
+    [JsonPropertyName("ollamaProfileId")] // Persisted compatibility: keep the former project-settings field name.
+    public Guid? GpuProfileId { get; set; }
     public string TraditionalDataDirectory { get; set; } = "";
     public bool BookKnowledgeContextEnabled { get; set; }
 }

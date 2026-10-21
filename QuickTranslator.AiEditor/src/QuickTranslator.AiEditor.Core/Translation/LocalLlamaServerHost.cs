@@ -58,13 +58,13 @@ public sealed class LocalLlamaServerHost : IAsyncDisposable
         new(LocalLlamaServerState.Stopped, "llama-server máy này: đã dừng");
     public event EventHandler<LocalLlamaServerStatus>? StatusChanged;
 
-    public async Task<Uri> StartAsync(OllamaBackendProfile profile, IProgress<string>? progress = null,
+    public async Task<Uri> StartAsync(GpuBackendProfile profile, IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(profile);
         profile = profile.Clone();
         profile.Validate();
-        if (profile.Kind != OllamaBackendKind.Local || profile.Api != BackendApi.OpenAiCompatible)
+        if (profile.Kind != GpuBackendKind.Local)
             throw new InvalidOperationException("llama-server chỉ chạy profile Local dùng API OpenAI Compatible.");
         GgufModelReference model = GgufModelReference.Parse(profile.Model);
         var wanted = new LocalConfiguration(model.ToString(), profile.ParallelRequests,

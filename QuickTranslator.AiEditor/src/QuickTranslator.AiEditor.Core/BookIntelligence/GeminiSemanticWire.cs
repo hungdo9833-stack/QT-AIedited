@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
-/// <summary>Optional response translation owned by a backend. Ollama returns the internal contract unchanged.</summary>
+/// <summary>Optional response translation owned by a backend. llama-server returns the internal contract unchanged.</summary>
 public interface ISemanticResponseDecoder
 {
     string DecodeResponse(string providerText, int wireVersion);

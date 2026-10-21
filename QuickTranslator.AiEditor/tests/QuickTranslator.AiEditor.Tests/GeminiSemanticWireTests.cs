@@ -168,7 +168,7 @@ public sealed class GeminiSemanticWireTests : IDisposable
             Assert.DoesNotContain("FAKE-ONLY", gemini.Bodies.Single());
         }
         var ollama = new Handler(_ => throw new InvalidOperationException("not reached"));
-        using var local = SemanticSurveyBackend.Ollama(OllamaBackendProfile.CreateDefaultLocal(), options with { Model = "mock-model" }, new(1), ollama);
+        using var local = SemanticSurveyBackend.LlamaServer(GpuBackendProfile.CreateDefaultLocal(), options with { Model = "mock-model" }, new(1), ollama);
         Assert.Equal("internal", local.WireFormat);
         Assert.Equal("{\"x\":1}", local.DecodeResponse("{\"x\":1}", 2));
     }

@@ -41,11 +41,10 @@
      <TextBlock Text="CẤU HÌNH GPU ĐANG CHỌN" FontWeight="SemiBold"/>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
       <StackPanel Margin="0,0,8,0"><TextBlock Text="Tên hiển thị" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NameInput"/></StackPanel>
-      <StackPanel Grid.Column="1"><TextBlock x:Name="ModelLabel" Text="Model Ollama" Style="{StaticResource FieldLabel}"/><DockPanel><Button x:Name="ChooseGgufButton" DockPanel.Dock="Right" Content="Chọn file .gguf…" Click="OnChooseGguf" Visibility="Collapsed"/><TextBox x:Name="ModelInput" Text="translategemma:12b"/></DockPanel></StackPanel>
+      <StackPanel Grid.Column="1"><TextBlock x:Name="ModelLabel" Text="Model llama-server" Style="{StaticResource FieldLabel}"/><DockPanel><Button x:Name="ChooseGgufButton" DockPanel.Dock="Right" Content="Chọn file .gguf…" Click="OnChooseGguf" Visibility="Collapsed"/><TextBox x:Name="ModelInput" Text="IndexTeam/Index-Translate-9B-GGUF:Q4_K_M"/></DockPanel></StackPanel>
      </Grid>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-      <StackPanel Margin="0,0,8,0"><TextBlock Text="Loại server" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="ServerApiInput" SelectedIndex="0" SelectionChanged="OnServerApiChanged"><ComboBoxItem Content="Ollama"/><ComboBoxItem Content="llama-server (OpenAI)"/></ComboBox></StackPanel>
-      <StackPanel Grid.Column="1"><TextBlock Text="Số request song song" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ParallelRequestsInput" Text="1" ToolTip="Từ 1 đến 8"/></StackPanel>
+      <StackPanel Grid.Column="1"><TextBlock Text="Số request song song" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ParallelRequestsInput" Text="4" ToolTip="Từ 1 đến 8"/></StackPanel>
      </Grid>
       <Expander x:Name="AdvancedRuntimeExpander" Header="Thiết lập nâng cao · context, đầu ra và cỡ đoạn" IsExpanded="False" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}">
        <StackPanel>
@@ -69,7 +68,7 @@
      <Border Style="{StaticResource Card}" Margin="0,5,0,0"><StackPanel>
       <TextBlock Text="Loại kết nối Remote" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="ConnectionTypeInput" SelectionChanged="OnConnectionTypeChanged"><ComboBoxItem Content="SSH tunnel (khuyên dùng)"/><ComboBoxItem Content="HTTPS / private network trực tiếp"/></ComboBox>
       <StackPanel x:Name="DirectConnectionPanel" Visibility="Collapsed">
-       <TextBlock Text="Ollama endpoint" Style="{StaticResource FieldLabel}"/><TextBox x:Name="EndpointInput" Text="https://"/>
+       <TextBlock Text="llama-server endpoint" Style="{StaticResource FieldLabel}"/><TextBox x:Name="EndpointInput" Text="https://"/>
        <TextBlock Text="Bearer token" Style="{StaticResource FieldLabel}"/><PasswordBox x:Name="TokenInput" PasswordChar="●"/>
        <TextBlock Text="Direct Remote chỉ chấp nhận HTTPS hợp lệ hoặc HTTP trên địa chỉ private/loopback. QT Studio không bỏ qua lỗi chứng chỉ." Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap"/>
       </StackPanel>
@@ -84,7 +83,7 @@
        <StackPanel x:Name="PrivateKeyPanel" Visibility="Collapsed"><TextBlock Text="SSH private key" Style="{StaticResource FieldLabel}"/><DockPanel><Button DockPanel.Dock="Right" Content="Chọn file key…" Click="OnChoosePrivateKey"/><PasswordBox x:Name="PrivateKeyInput" PasswordChar="●"/><PasswordBox x:Name="PrivateKeyPassphraseInput" PasswordChar="●" ToolTip="Passphrase của private key (nếu có)" AutomationProperties.Name="Passphrase của private key" AutomationProperties.HelpText="Passphrase của private key (nếu có)"/></DockPanel></StackPanel>
        <TextBlock Text="SSH host-key fingerprint" Style="{StaticResource FieldLabel}"/><TextBox x:Name="FingerprintInput" ToolTip="Đối chiếu SHA256 fingerprint bằng kênh độc lập trước khi lưu."/>
        <TextBlock Text="QT Studio chặn host key mới hoặc đã thay đổi cho tới khi fingerprint được xác minh." Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="3,5"/>
-       <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel Margin="0,0,8,0"><TextBlock Text="Ollama port trên server" Style="{StaticResource FieldLabel}"/><TextBox x:Name="RemoteOllamaPortInput" Text="11434"/></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="Giá thuê / giờ (ước tính)" Style="{StaticResource FieldLabel}"/><TextBox x:Name="HourlyPriceInput" Text="0"/></StackPanel></Grid>
+       <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel Margin="0,0,8,0"><TextBlock Text="llama-server port" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ServerPortInput" Text="11434"/></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="Giá thuê / giờ (ước tính)" Style="{StaticResource FieldLabel}"/><TextBox x:Name="HourlyPriceInput" Text="0"/></StackPanel></Grid>
       </StackPanel>
      </StackPanel></Border>
     </Expander>
@@ -93,11 +92,11 @@
      <TextBlock x:Name="InspectionText" Text="Chưa kiểm tra." TextWrapping="Wrap" Margin="3,9" Foreground="{DynamicResource MutedBrush}"/>
      <TextBlock Text="Dùng model, số luồng và context trong cấu hình GPU đang chọn." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,7"/>
      <WrapPanel Margin="0,0,0,6"><Button x:Name="AutoSetupButton" Content="Tự nhận diện &amp; cài llama-server" Click="OnAutoSetup" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE713;" ToolTip="Chỉ hỗ trợ máy thuê Windows; tải llama.cpp từ máy này, không cài driver NVIDIA."/><Button x:Name="ImportRdpButton" Content="Nhập file RDP…" Click="OnImportRdp" ui:ButtonIcon.Glyph="&#xE8E5;" ToolTip="Lấy IP, cổng và tên đăng nhập từ file .rdp mà nhà cho thuê Windows gửi. Mật khẩu trong file không được đọc."/></WrapPanel>
-     <WrapPanel><Button x:Name="StartOllamaButton" Content="Khởi động lại llama-server" Click="OnStartOllama" ui:ButtonIcon.Glyph="&#xE768;"/><Button x:Name="PullModelButton" Content="Áp dụng model/luồng" Click="OnPullModel" ui:ButtonIcon.Glyph="&#xE8B5;"/><Button x:Name="CancelSetupButton" Content="Hủy thao tác" Click="OnCancelSetup" IsEnabled="False"/></WrapPanel>
+     <WrapPanel><Button x:Name="StartServerButton" Content="Khởi động lại llama-server" Click="OnStartServer" ui:ButtonIcon.Glyph="&#xE768;"/><Button x:Name="PullModelButton" Content="Áp dụng model/luồng" Click="OnPullModel" ui:ButtonIcon.Glyph="&#xE8B5;"/><Button x:Name="CancelSetupButton" Content="Hủy thao tác" Click="OnCancelSetup" IsEnabled="False"/></WrapPanel>
      <ProgressBar x:Name="ModelPullProgress" Height="7" Margin="3,8,3,2" Minimum="0" Maximum="100" Visibility="Collapsed"/>
      <TextBlock Text="Sẵn sàng chỉ hiển thị sau khi /health và /v1/models phản hồi qua SSH tunnel; kiểm tra server không phải benchmark suy luận." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,6"/>
     </StackPanel></Border>
-    <TextBlock Text="Chi phí chỉ là ước tính. Ngắt SSH hoặc Ollama không đồng nghĩa nhà cung cấp ngừng tính phí." Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="5"/>
+    <TextBlock Text="Chi phí chỉ là ước tính. Ngắt SSH hoặc llama-server không đồng nghĩa nhà cung cấp ngừng tính phí." Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="5"/>
    </StackPanel>
   </ScrollViewer>
  </Grid>

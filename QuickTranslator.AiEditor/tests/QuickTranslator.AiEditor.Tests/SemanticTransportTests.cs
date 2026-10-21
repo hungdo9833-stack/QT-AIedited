@@ -29,13 +29,14 @@ public sealed class SemanticTransportTests
         }
     }
     [Fact]
-    public async Task Ollama_model_metadata_counts_against_http_limit_before_source_is_sent()
+    public async Task Llama_server_request_counts_against_http_limit_and_no_request_is_sent_past_it()
     {
-        var handler = new Handler(_ => Json("{\"models\":[{\"name\":\"mock-model\",\"size\":1}]}"));
-        var options = new ModelOptions { Model = "mock-model", ContextSize = 32768 };
-        using var client = SemanticSurveyBackend.Ollama(OllamaBackendProfile.CreateDefaultLocal(), options, new(1), handler);
+        var handler = new Handler(_ => Json("{\"choices\":[{\"message\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"));
+        var options = new ModelOptions { Model = GpuBackendProfile.DefaultLocalModel, ContextSize = 32768 };
+        using var client = SemanticSurveyBackend.LlamaServer(GpuBackendProfile.CreateDefaultLocal(), options, new(1), handler);
+        await client.TranslateStructuredAsync("first", options, SemanticSurveyContract.ResponseSchema);
         await Assert.ThrowsAsync<SemanticTransportBudgetException>(() => client.TranslateStructuredAsync("source not sent", options, SemanticSurveyContract.ResponseSchema));
-        Assert.Equal("/api/tags", Assert.Single(handler.Calls).AbsolutePath); Assert.Equal(1, client.Transport.RequestsUsed);
+        Assert.Equal("/v1/chat/completions", Assert.Single(handler.Calls).AbsolutePath); Assert.Equal(1, client.Transport.RequestsUsed);
     }
     [Fact]
     public async Task Token_reservation_prevents_http_before_network_and_model_cannot_change()

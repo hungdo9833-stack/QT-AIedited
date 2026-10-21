@@ -6,7 +6,7 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
 
-public sealed class OpenAiCompatibleClientTests
+public sealed class LlamaServerClientTests
 {
     [Fact]
     public async Task Translate_sends_llama_server_shape_and_maps_reply_metrics()
@@ -23,9 +23,9 @@ public sealed class OpenAiCompatibleClientTests
                  "timings":{"prompt_ms":12.5,"predicted_ms":34.25}}
                 """);
         })) { Timeout = Timeout.InfiniteTimeSpan };
-        using var client = new OpenAiCompatibleClient(http, new("https://gpu.example.com/api/chat"), 2, "secret");
+        using var client = new LlamaServerClient(http, new("https://gpu.example.com/api/chat"), 2, "secret");
 
-        OllamaCompletion result = await client.TranslateAsync("private prompt", new ModelOptions
+        LlmCompletion result = await client.TranslateAsync("private prompt", new ModelOptions
         {
             Model = "alias", Temperature = 0.1, ContextSize = 32768, MaximumOutputTokens = 4096
         });
@@ -58,7 +58,7 @@ public sealed class OpenAiCompatibleClientTests
             body = await request.Content!.ReadAsStringAsync(cancellationToken);
             return JsonResponse("""{"choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}""");
         }));
-        using var client = new OpenAiCompatibleClient(http, new("http://127.0.0.1:11436/api/chat"), 1);
+        using var client = new LlamaServerClient(http, new("http://127.0.0.1:11436/api/chat"), 1);
         using JsonDocument schema = JsonDocument.Parse("""{"type":"object","required":["answer"]}""");
 
         await client.TranslateStructuredAsync("prompt", new(), schema.RootElement);
@@ -81,7 +81,7 @@ public sealed class OpenAiCompatibleClientTests
                 ? JsonResponse("""{"status":"ok"}""")
                 : JsonResponse("""{"models":[{"name":"served-alias","model":"C:\\models\\book.gguf"}],"data":[{"id":"served-alias"}]}"""));
         }));
-        using var client = new OpenAiCompatibleClient(http, new("http://10.0.0.5:11436/api/chat"), 1);
+        using var client = new LlamaServerClient(http, new("http://10.0.0.5:11436/api/chat"), 1);
 
         await client.CheckConnectionAsync("different-profile-name", TimeSpan.FromSeconds(1));
         IReadOnlyList<string> models = await client.ListModelsAsync(TimeSpan.FromSeconds(1));
@@ -95,11 +95,11 @@ public sealed class OpenAiCompatibleClientTests
     {
         using var http = new HttpClient(new FakeHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadGateway))));
-        using var client = new OpenAiCompatibleClient(http, new("https://gpu.example.com"), 1);
+        using var client = new LlamaServerClient(http, new("https://gpu.example.com"), 1);
 
-        OllamaRequestException error = await Assert.ThrowsAsync<OllamaRequestException>(() =>
+        LlmRequestException error = await Assert.ThrowsAsync<LlmRequestException>(() =>
             client.TranslateAsync("prompt", new()));
-        Assert.Equal(OllamaErrorKind.Http, error.Kind);
+        Assert.Equal(LlmErrorKind.Http, error.Kind);
         Assert.Contains("llama-server", error.Message);
     }
 
@@ -111,14 +111,14 @@ public sealed class OpenAiCompatibleClientTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return JsonResponse("{}");
         })) { Timeout = Timeout.InfiniteTimeSpan };
-        using var client = new OpenAiCompatibleClient(http, new("https://gpu.example.com"), 1);
+        using var client = new LlamaServerClient(http, new("https://gpu.example.com"), 1);
 
-        OllamaRequestException timeout = await Assert.ThrowsAsync<OllamaRequestException>(() =>
+        LlmRequestException timeout = await Assert.ThrowsAsync<LlmRequestException>(() =>
             client.TranslateAsync("prompt", new() { RequestTimeout = TimeSpan.FromMilliseconds(50) }));
-        Assert.Equal(OllamaErrorKind.Timeout, timeout.Kind);
+        Assert.Equal(LlmErrorKind.Timeout, timeout.Kind);
 
         using var cancellation = new CancellationTokenSource();
-        Task<OllamaCompletion> pending = client.TranslateAsync("prompt", new(), cancellation.Token);
+        Task<LlmCompletion> pending = client.TranslateAsync("prompt", new(), cancellation.Token);
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
     }
@@ -141,9 +141,9 @@ public sealed class OpenAiCompatibleClientTests
             Interlocked.Decrement(ref active);
             return JsonResponse("""{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}""");
         })) { Timeout = Timeout.InfiniteTimeSpan };
-        using var client = new OpenAiCompatibleClient(http, new("https://gpu.example.com"), parallelRequests);
+        using var client = new LlamaServerClient(http, new("https://gpu.example.com"), parallelRequests);
 
-        Task<OllamaCompletion>[] requests = Enumerable.Range(0, 3)
+        Task<LlmCompletion>[] requests = Enumerable.Range(0, 3)
             .Select(index => client.TranslateAsync("prompt " + index, new())).ToArray();
         await allStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(expectedMaximum, Volatile.Read(ref calls));
@@ -163,10 +163,10 @@ public sealed class OpenAiCompatibleClientTests
         } while (Interlocked.CompareExchange(ref maximum, candidate, current) != current);
     }
 
-    private static HttpResponseMessage JsonResponse(string body) => new(HttpStatusCode.OK)
+    internal static HttpResponseMessage JsonResponse(string body) => new(HttpStatusCode.OK)
     { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
-    private sealed class FakeHandler(
+    internal sealed class FakeHandler(
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,

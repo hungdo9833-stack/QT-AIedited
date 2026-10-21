@@ -95,7 +95,7 @@ public sealed class AuditPhase2PerformanceTests : IDisposable
         {
             ProjectId = Guid.NewGuid(), Status = ProjectTranslationJobStatus.Running,
             CreatedAt = now, UpdatedAt = now,
-            Backend = OllamaBackendSnapshot.LocalDefault("translategemma:12b"),
+            Backend = GpuBackendSnapshot.LocalDefault("translategemma:12b"),
             Items = Enumerable.Range(1, count).Select(number => new ProjectTranslationItem
             {
                 ChapterId = Guid.NewGuid(), Number = number, Order = number, Title = "Chương " + number,

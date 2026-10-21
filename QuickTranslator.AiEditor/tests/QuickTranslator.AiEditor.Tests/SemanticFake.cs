@@ -5,11 +5,11 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
 
-internal sealed class SemanticFake(Func<string, CancellationToken, Task<OllamaCompletion>> respond) : IJsonSchemaOllamaClient
+internal sealed class SemanticFake(Func<string, CancellationToken, Task<LlmCompletion>> respond) : IJsonSchemaLlmClient
 {
     public List<string> Prompts { get; } = [];
-    public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => TranslateStructuredAsync(prompt, options, default, ct);
-    public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+    public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => TranslateStructuredAsync(prompt, options, default, ct);
+    public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
     { Prompts.Add(prompt); return respond(prompt, ct); }
-    public static OllamaCompletion Completion(SemanticResponse response) => new(SemanticFixture.Json(response), true, "stop", new() { InputTokens = 100, OutputTokens = 30 });
+    public static LlmCompletion Completion(SemanticResponse response) => new(SemanticFixture.Json(response), true, "stop", new() { InputTokens = 100, OutputTokens = 30 });
 }

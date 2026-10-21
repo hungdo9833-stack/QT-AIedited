@@ -59,12 +59,12 @@ public partial class MainWindow
             ? selectedId : PromptPreset.Default.Id;
         presets.Select(presetId);
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync(cancellationToken);
-        OllamaBackendProfile profile = _ollamaBackends.GetProfile(translation.OllamaProfileId);
+        GpuBackendProfile profile = _gpuBackends.GetProfile(translation.GpuProfileId);
         // A persisted multi-worker queue pins each backend independently. The globally active
         // editor profile is not required to match a particular worker after restart.
         bool pinnedWorkers = _projectTranslationCoordinator?.CurrentJob?.Workers.Count > 0;
-        if (!pinnedWorkers && _ollamaBackends.ActiveProfile.Id != profile.Id)
-            throw new InvalidOperationException("Profile Ollama của Project chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại backend.");
+        if (!pinnedWorkers && _gpuBackends.ActiveProfile.Id != profile.Id)
+            throw new InvalidOperationException("Profile GPU của Project chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại backend.");
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         IBookKnowledgeContextProvider? knowledge = null;
         if (translation.BookKnowledgeContextEnabled)
@@ -85,7 +85,7 @@ public partial class MainWindow
             ProjectTranslationJob? resumable = recovered?.Status is ProjectTranslationJobStatus.Completed or
                 ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled ? null : recovered;
             await ApplyTranslationModeAsync(resumable);
-            await EnsureOllamaBackendReadyAsync();
+            await EnsureGpuBackendReadyAsync();
             await SaveCurrentAsync();
             await SaveProjectAssetsAsync();
             ProjectTranslationCoordinator coordinator = resumable?.Workers.Count > 0 || resumable is null
@@ -116,39 +116,39 @@ public partial class MainWindow
         Guid profileId;
         if (recovered?.Workers.Count > 0 && !_gpuPreferences.ModeExplicitlySelected)
         {
-            profileId = recovered.Workers.FirstOrDefault(worker => worker.Backend.Kind == OllamaBackendKind.Remote)?.ProfileId
-                ?? OllamaBackendProfile.DefaultLocalId;
+            profileId = recovered.Workers.FirstOrDefault(worker => worker.Backend.Kind == GpuBackendKind.Remote)?.ProfileId
+                ?? GpuBackendProfile.DefaultLocalId;
             _gpuPreferences.Mode = recovered.Workers.Count > 1
                 ? GpuTranslationMode.ParallelLocalRemote
-                : recovered.Workers[0].Backend.Kind == OllamaBackendKind.Remote
+                : recovered.Workers[0].Backend.Kind == GpuBackendKind.Remote
                     ? GpuTranslationMode.RemoteOnly : GpuTranslationMode.LocalOnly;
-            if (profileId != OllamaBackendProfile.DefaultLocalId) _gpuPreferences.RemoteProfileId = profileId;
+            if (profileId != GpuBackendProfile.DefaultLocalId) _gpuPreferences.RemoteProfileId = profileId;
         }
         else
         {
-            if (recovered?.Workers.FirstOrDefault(worker => worker.Backend.Kind == OllamaBackendKind.Remote) is { } remote &&
+            if (recovered?.Workers.FirstOrDefault(worker => worker.Backend.Kind == GpuBackendKind.Remote) is { } remote &&
                 _gpuPreferences.RemoteProfileId is null)
                 _gpuPreferences.RemoteProfileId = remote.ProfileId;
             profileId = _gpuPreferences.Mode == GpuTranslationMode.LocalOnly
-            ? OllamaBackendProfile.DefaultLocalId
-            : _gpuPreferences.RemoteProfileId ?? _ollamaBackends.ActiveProfile.Id;
+            ? GpuBackendProfile.DefaultLocalId
+            : _gpuPreferences.RemoteProfileId ?? _gpuBackends.ActiveProfile.Id;
         }
-        OllamaBackendProfile profile = _ollamaBackends.GetProfile(profileId);
-        if (_ollamaBackends.ActiveProfile.Id != profileId) await _ollamaBackends.ActivateAsync(profileId);
-        _selectedOllamaProfileId = profileId;
-        _projectOllamaProfileMissing = false;
-        SelectOllamaProfileInUi(profileId);
+        GpuBackendProfile profile = _gpuBackends.GetProfile(profileId);
+        if (_gpuBackends.ActiveProfile.Id != profileId) await _gpuBackends.ActivateAsync(profileId);
+        _selectedGpuProfileId = profileId;
+        _projectGpuProfileMissing = false;
+        SelectGpuProfileInUi(profileId);
     }
 
     private async Task<ProjectTranslationCoordinator> RebuildParallelCoordinatorAsync(ProjectTranslationJob? recovered,
         bool closeWindow = true, bool loadExisting = true, bool useCurrentWorkers = false)
     {
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
-        if (_translationClient is OllamaBackendManager &&
-            (recovered?.Workers.Any(worker => worker.Backend.Kind == OllamaBackendKind.Local) == true ||
+        if (_translationClient is GpuBackendManager &&
+            (recovered?.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Local) == true ||
              _gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote))
         {
-            OllamaBackendProfile localProfile = _ollamaBackends.GetProfile(OllamaBackendProfile.DefaultLocalId);
+            GpuBackendProfile localProfile = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
             await _localLlama.StartAsync(localProfile);
         }
         if (closeWindow) DropHostedQueueView();
@@ -165,7 +165,7 @@ public partial class MainWindow
         }
         else
         {
-            OllamaBackendProfile local = _ollamaBackends.GetProfile(OllamaBackendProfile.DefaultLocalId);
+            GpuBackendProfile local = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
             if (_gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote)
             {
                 AiRuntimeProfile runtime = local.Runtime ?? AiRuntimeProfile.CreateDefault(local.Model);
@@ -177,7 +177,7 @@ public partial class MainWindow
             {
                 Guid remoteId = _gpuPreferences.RemoteProfileId
                     ?? throw new InvalidOperationException("Mở GPU Manager, kết nối và chọn một profile Remote trước khi dùng Remote/Parallel.");
-                OllamaBackendProfile remote = _ollamaBackends.GetProfile(remoteId);
+                GpuBackendProfile remote = _gpuBackends.GetProfile(remoteId);
                 AiRuntimeProfile runtime = remote.Runtime ?? AiRuntimeProfile.CreateDefault(remote.Model);
                 definitions.Add(CreateWorkerDefinition(StableWorkerId(remote.Id),
                     BackendSnapshot(remote, runtime.ModelOptions.Model), runtime.ModelOptions,
@@ -197,25 +197,25 @@ public partial class MainWindow
         return coordinator;
     }
 
-    private ProjectTranslationWorkerDefinition CreateWorkerDefinition(Guid workerId, OllamaBackendSnapshot backend,
+    private ProjectTranslationWorkerDefinition CreateWorkerDefinition(Guid workerId, GpuBackendSnapshot backend,
         ModelOptions options, SegmenterOptions segmentation, decimal? hourlyPrice, string? expectedIdentity = null)
     {
-        if (backend.Kind == OllamaBackendKind.Local)
+        if (backend.Kind == GpuBackendKind.Local)
         {
             string identity = "local:" + backend.ProfileId.ToString("N");
             EnsureBackendIdentity(expectedIdentity, identity, backend.ProfileName);
-            IOllamaClient client;
-            if (_translationClient is OllamaBackendManager)
+            ILlmClient client;
+            if (_translationClient is GpuBackendManager)
             {
                 Uri endpoint = _localLlama.Endpoint ?? throw new InvalidOperationException("llama-server Local chưa chạy.");
-                IOllamaBackendClient localClient = new OpenAiCompatibleClient(new HttpClient(), endpoint,
-                    _ollamaBackends.GetProfile(backend.ProfileId).ParallelRequests, ownsHttpClient: true);
+                ILlmBackendClient localClient = new LlamaServerClient(new HttpClient(), endpoint,
+                    _gpuBackends.GetProfile(backend.ProfileId).ParallelRequests, ownsHttpClient: true);
                 _projectTranslationOwnedClients.Add(localClient);
                 client = localClient;
             }
             else client = _translationClient; // Deterministic injected provider used by integration tests.
-            int localSlots = _translationClient is OllamaBackendManager
-                ? _ollamaBackends.GetProfile(backend.ProfileId).ParallelRequests : 1;
+            int localSlots = _translationClient is GpuBackendManager
+                ? _gpuBackends.GetProfile(backend.ProfileId).ParallelRequests : 1;
             return new(workerId, backend, client, options with { }, segmentation with { }, hourlyPrice, identity, localSlots);
         }
         if (!_gpuConnections.TryGetConnection(backend.ProfileId, out GpuConnectionHandle? connection) ||
@@ -223,9 +223,8 @@ public partial class MainWindow
             throw new InvalidOperationException($"GPU Remote “{backend.ProfileName}” chưa có SSH tunnel. Mở GPU Manager và bấm Kết nối.");
         string remoteIdentity = SshBackendIdentity(connection.Profile);
         EnsureBackendIdentity(expectedIdentity, remoteIdentity, backend.ProfileName);
-        // Slots follow the connected profile: its client was built with the same number of parallel requests. Ollama
-        // serves one request at a time, so extra slots there would only queue up behind each other.
-        int slots = connection.Profile.Api == BackendApi.OpenAiCompatible ? connection.Profile.ParallelRequests : 1;
+        // Slots follow the connected profile: its client was built with the same number of parallel requests.
+        int slots = connection.Profile.ParallelRequests;
         return new(workerId, backend, connection.Client, options with { }, segmentation with { }, hourlyPrice, remoteIdentity, slots);
     }
 
@@ -235,10 +234,10 @@ public partial class MainWindow
             throw new InvalidOperationException($"Danh tính SSH của “{name}” đã đổi sau khi tạo Queue Plan. Job bị chặn để tránh gửi nguyên văn sang máy khác.");
     }
 
-    private static string SshBackendIdentity(OllamaBackendProfile profile)
+    private static string SshBackendIdentity(GpuBackendProfile profile)
     {
         GpuSshSettings ssh = profile.Ssh ?? throw new InvalidOperationException("Profile Remote thiếu cấu hình SSH.");
-        string value = $"{profile.Id:N}|{ssh.Host.ToLowerInvariant()}|{ssh.Port}|{ssh.Username}|{ssh.RemoteOllamaPort}|{ssh.HostKeyFingerprint}";
+        string value = $"{profile.Id:N}|{ssh.Host.ToLowerInvariant()}|{ssh.Port}|{ssh.Username}|{ssh.ServerPort}|{ssh.HostKeyFingerprint}";
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value)));
     }
 
@@ -273,11 +272,11 @@ public partial class MainWindow
         {
             await ApplyTranslationModeAsync(recovered);
             foreach (ProjectTranslationWorkerState worker in recovered.Workers
-                         .Where(value => value.Backend.Kind == OllamaBackendKind.Remote)
+                         .Where(value => value.Backend.Kind == GpuBackendKind.Remote)
                          .DistinctBy(value => value.ProfileId))
             {
-                OllamaBackendProfile remote = _ollamaBackends.GetProfile(worker.ProfileId);
-                if (remote.Kind != OllamaBackendKind.Remote || remote.Ssh is null ||
+                GpuBackendProfile remote = _gpuBackends.GetProfile(worker.ProfileId);
+                if (remote.Kind != GpuBackendKind.Remote || remote.Ssh is null ||
                     !remote.RemoteDisclosureAccepted)
                     throw new InvalidOperationException(
                         $"GPU Remote “{worker.Name}” cần được xác nhận và kết nối lại trong AI & hiệu năng.");
@@ -301,7 +300,7 @@ public partial class MainWindow
                         $"Không thể khôi phục GPU Remote “{remote.Name}”. Job vẫn được giữ nguyên để tiếp tục sau khi kết nối lại.",
                         error);
                 }
-                await _ollamaBackends.AttachRuntimeClientAsync(remote.Id, connection.Client);
+                await _gpuBackends.AttachRuntimeClientAsync(remote.Id, connection.Client);
             }
         }
         return await RebuildParallelCoordinatorAsync(recovered, closeWindow: false, loadExisting: true,

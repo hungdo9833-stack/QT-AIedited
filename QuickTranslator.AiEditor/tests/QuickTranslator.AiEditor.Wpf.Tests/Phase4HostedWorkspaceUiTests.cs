@@ -73,7 +73,7 @@ public sealed class Phase4HostedWorkspaceUiTests : IDisposable
         ChapterDocument first = await fixture.AddChapterAsync("Một", 1);
         ChapterDocument second = await fixture.AddChapterAsync("Hai", 2);
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource<OllamaCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<LlmCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Client.Respond = (_, _) => { started.TrySetResult(); return release.Task; };
 
         await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id, second.Id });

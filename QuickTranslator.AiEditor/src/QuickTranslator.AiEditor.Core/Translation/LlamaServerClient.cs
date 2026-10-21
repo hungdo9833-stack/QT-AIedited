@@ -8,8 +8,9 @@ using QuickTranslator.AiEditor.Core.Models;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
 
-public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOllamaClient
+public sealed class LlamaServerClient : ILlmBackendClient, IJsonSchemaLlmClient
 {
+    public static Uri DefaultEndpoint { get; } = new("http://127.0.0.1:11450/api/chat");
     private readonly HttpClient _httpClient;
     private readonly Uri _chatEndpoint;
     private readonly Uri _modelsEndpoint;
@@ -18,12 +19,12 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
     private readonly bool _ownsHttpClient;
     private readonly SemaphoreSlim _requestGate;
 
-    public OpenAiCompatibleClient(HttpClient httpClient, Uri endpoint, int parallelRequests,
+    public LlamaServerClient(HttpClient httpClient, Uri endpoint, int parallelRequests,
         string? bearerToken = null, bool ownsHttpClient = false)
     {
         if (parallelRequests is < 1 or > 8) throw new ArgumentOutOfRangeException(nameof(parallelRequests));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        Uri normalized = OllamaClient.ValidateRemoteEndpoint(endpoint);
+        Uri normalized = ValidateRemoteEndpoint(endpoint);
         _chatEndpoint = WithPath(normalized, "/v1/chat/completions");
         _modelsEndpoint = WithPath(normalized, "/v1/models");
         _healthEndpoint = WithPath(normalized, "/health");
@@ -34,10 +35,80 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
         _requestGate = new SemaphoreSlim(parallelRequests, parallelRequests);
     }
 
-    public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options,
+    public static ILlmBackendClient Create(GpuBackendProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        GpuBackendProfile copy = profile.Clone();
+        copy.Validate();
+        HttpMessageHandler handler = copy.Kind == GpuBackendKind.Local
+            ? CreateLocalHandler()
+            : CreateRemoteHandler();
+        return new LlamaServerClient(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan },
+            new Uri(copy.Endpoint), copy.ParallelRequests,
+            copy.Kind == GpuBackendKind.Local ? null : copy.Token, ownsHttpClient: true);
+    }
+
+    internal static SocketsHttpHandler CreateLocalHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        UseProxy = false,
+        ConnectTimeout = TimeSpan.FromSeconds(5)
+    };
+
+    internal static SocketsHttpHandler CreateRemoteHandler() => new()
+    {
+        AllowAutoRedirect = false,
+        ConnectTimeout = TimeSpan.FromSeconds(8)
+    };
+
+    public static Uri ValidateLocalEndpoint(Uri endpoint)
+    {
+        Uri normalized = ValidateEndpoint(endpoint, localOnly: true);
+        return new UriBuilder(normalized) { Host = "127.0.0.1", Path = "/api/chat" }.Uri;
+    }
+
+    public static Uri ValidateRemoteEndpoint(Uri endpoint)
+    {
+        Uri normalized = ValidateEndpoint(endpoint, localOnly: false);
+        if (normalized.Scheme == "http" && !IsPrivateHost(normalized.Host))
+            throw new ArgumentException("HTTP chỉ được phép cho địa chỉ loopback hoặc IP mạng riêng. Server Internet phải dùng HTTPS hợp lệ.");
+        return new UriBuilder(normalized) { Path = "/api/chat" }.Uri;
+    }
+
+    private static Uri ValidateEndpoint(Uri endpoint, bool localOnly)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        if (!endpoint.IsAbsoluteUri || endpoint.UserInfo.Length != 0 || endpoint.Query.Length != 0 ||
+            endpoint.Fragment.Length != 0 || endpoint.Scheme is not ("http" or "https"))
+            throw new ArgumentException("llama-server cần URL HTTP(S) tuyệt đối, không chứa user/password, query hoặc fragment.");
+        string path = endpoint.AbsolutePath.TrimEnd('/');
+        if (path.Length > 0 && path is not "/api" and not "/api/chat" and not "/v1")
+            throw new ArgumentException("URL llama-server chỉ nhận địa chỉ server, /api, /api/chat hoặc /v1.");
+        string host = endpoint.Host.Trim('[', ']');
+        if (localOnly && (!IPAddress.TryParse(host, out IPAddress? address) || !IPAddress.IsLoopback(address)) &&
+            !host.Equals("localhost", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Profile local chỉ cho phép llama-server trên máy này.");
+        if (localOnly && endpoint.Scheme != "http")
+            throw new ArgumentException("Profile local phải dùng HTTP loopback.");
+        return new UriBuilder(endpoint) { Path = "", Query = "", Fragment = "" }.Uri;
+    }
+
+    private static bool IsPrivateHost(string host)
+    {
+        host = host.Trim('[', ']');
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!IPAddress.TryParse(host, out IPAddress? address)) return false;
+        if (IPAddress.IsLoopback(address)) return true;
+        byte[] bytes = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            return bytes[0] == 10 || bytes[0] == 192 && bytes[1] == 168 || bytes[0] == 172 && bytes[1] is >= 16 and <= 31;
+        return address.IsIPv6LinkLocal || bytes[0] is 0xFC or 0xFD;
+    }
+
+    public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
         CancellationToken cancellationToken = default) => SendAsync(prompt, options, null, cancellationToken);
 
-    public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
+    public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options,
         JsonElement responseSchema, CancellationToken cancellationToken = default)
     {
         if (responseSchema.ValueKind != JsonValueKind.Object)
@@ -45,7 +116,7 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
         return SendAsync(prompt, options, responseSchema.Clone(), cancellationToken);
     }
 
-    private async Task<OllamaCompletion> SendAsync(string prompt, ModelOptions options,
+    private async Task<LlmCompletion> SendAsync(string prompt, ModelOptions options,
         JsonElement? responseSchema, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
@@ -80,15 +151,15 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
                 using HttpResponseMessage response = await _httpClient.SendAsync(request,
                     HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
-                    throw new OllamaRequestException(OllamaErrorKind.Http,
+                    throw new LlmRequestException(LlmErrorKind.Http,
                         $"HTTP {(int)response.StatusCode}: llama-server không xử lý được yêu cầu. Kiểm tra server, model và bộ nhớ.");
                 ChatResponse? reply = await response.Content.ReadFromJsonAsync<ChatResponse>(
                     cancellationToken: timeout.Token).ConfigureAwait(false);
                 Choice? choice = reply?.Choices?.FirstOrDefault();
                 if (choice?.Message is null)
-                    throw new OllamaRequestException(OllamaErrorKind.InvalidResponse,
+                    throw new LlmRequestException(LlmErrorKind.InvalidResponse,
                         "Phản hồi llama-server thiếu choices[0].message; bản nháp hiện có vẫn được giữ.");
-                return new OllamaCompletion(choice.Message.Content ?? "", true, choice.FinishReason, new GenerationMetrics
+                return new LlmCompletion(choice.Message.Content ?? "", true, choice.FinishReason, new GenerationMetrics
                 {
                     InputTokens = reply?.Usage?.PromptTokens,
                     OutputTokens = reply?.Usage?.CompletionTokens,
@@ -100,17 +171,17 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (OperationCanceledException ex)
             {
-                throw new OllamaRequestException(OllamaErrorKind.Timeout,
+                throw new LlmRequestException(LlmErrorKind.Timeout,
                     $"llama-server quá thời gian chờ ({options.RequestTimeout.TotalSeconds:0} giây). Có thể tăng timeout hoặc giảm kích thước đoạn.", ex);
             }
             catch (HttpRequestException ex)
             {
-                throw new OllamaRequestException(OllamaErrorKind.Connection,
+                throw new LlmRequestException(LlmErrorKind.Connection,
                     "Không kết nối được llama-server. Kiểm tra URL, TLS, firewall, SSH tunnel và trạng thái máy GPU; không tự chuyển provider.", ex);
             }
             catch (JsonException ex)
             {
-                throw new OllamaRequestException(OllamaErrorKind.InvalidResponse,
+                throw new LlmRequestException(LlmErrorKind.InvalidResponse,
                     "llama-server trả dữ liệu sai định dạng JSON.", ex);
             }
         }
@@ -132,17 +203,17 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
                 await EnsureSuccessAsync(_healthEndpoint, "/health", linked.Token).ConfigureAwait(false);
                 IReadOnlyList<string> found = await ReadModelsAsync(linked.Token).ConfigureAwait(false);
                 if (found.Count == 0)
-                    throw new OllamaRequestException(OllamaErrorKind.InvalidResponse,
+                    throw new LlmRequestException(LlmErrorKind.InvalidResponse,
                         $"llama-server phản hồi nhưng /v1/models không cho biết model nào (profile đang chọn: {model.Trim()}).");
                 // llama-server commonly exposes a GGUF path or alias, so a name mismatch is intentionally accepted.
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (OperationCanceledException ex)
-            { throw new OllamaRequestException(OllamaErrorKind.Timeout, "llama-server không phản hồi kiểm tra kết nối đúng thời hạn.", ex); }
+            { throw new LlmRequestException(LlmErrorKind.Timeout, "llama-server không phản hồi kiểm tra kết nối đúng thời hạn.", ex); }
             catch (HttpRequestException ex)
-            { throw new OllamaRequestException(OllamaErrorKind.Connection, "Không kết nối được llama-server để kiểm tra /health và /v1/models.", ex); }
+            { throw new LlmRequestException(LlmErrorKind.Connection, "Không kết nối được llama-server để kiểm tra /health và /v1/models.", ex); }
             catch (JsonException ex)
-            { throw new OllamaRequestException(OllamaErrorKind.InvalidResponse, "llama-server trả danh sách model sai định dạng JSON.", ex); }
+            { throw new LlmRequestException(LlmErrorKind.InvalidResponse, "llama-server trả danh sách model sai định dạng JSON.", ex); }
         }
         finally { _requestGate.Release(); }
     }
@@ -159,11 +230,11 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
             try { return await ReadModelsAsync(linked.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (OperationCanceledException ex)
-            { throw new OllamaRequestException(OllamaErrorKind.Timeout, "llama-server không trả danh sách model đúng thời hạn.", ex); }
+            { throw new LlmRequestException(LlmErrorKind.Timeout, "llama-server không trả danh sách model đúng thời hạn.", ex); }
             catch (HttpRequestException ex)
-            { throw new OllamaRequestException(OllamaErrorKind.Connection, "Không kết nối được llama-server để lấy danh sách model.", ex); }
+            { throw new LlmRequestException(LlmErrorKind.Connection, "Không kết nối được llama-server để lấy danh sách model.", ex); }
             catch (JsonException ex)
-            { throw new OllamaRequestException(OllamaErrorKind.InvalidResponse, "llama-server trả danh sách model sai định dạng JSON.", ex); }
+            { throw new LlmRequestException(LlmErrorKind.InvalidResponse, "llama-server trả danh sách model sai định dạng JSON.", ex); }
         }
         finally { _requestGate.Release(); }
     }
@@ -175,12 +246,12 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
         using HttpResponseMessage response = await _httpClient.SendAsync(request,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
-            throw new OllamaRequestException(OllamaErrorKind.Http,
+            throw new LlmRequestException(LlmErrorKind.Http,
                 $"HTTP {(int)response.StatusCode}: llama-server không trả được /v1/models.");
         ModelList? list = await response.Content.ReadFromJsonAsync<ModelList>(cancellationToken: cancellationToken)
             .ConfigureAwait(false);
         if (list is null || list.Models is null && list.Data is null)
-            throw new OllamaRequestException(OllamaErrorKind.InvalidResponse,
+            throw new LlmRequestException(LlmErrorKind.InvalidResponse,
                 "llama-server không trả danh sách model hợp lệ qua /v1/models.");
         return (list.Models ?? []).Select(item => item.Name ?? item.Model)
             .Concat((list.Data ?? []).Select(item => item.Id))
@@ -195,7 +266,7 @@ public sealed class OpenAiCompatibleClient : IOllamaBackendClient, IJsonSchemaOl
         using HttpResponseMessage response = await _httpClient.SendAsync(request,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
-            throw new OllamaRequestException(OllamaErrorKind.Http,
+            throw new LlmRequestException(LlmErrorKind.Http,
                 $"HTTP {(int)response.StatusCode}: llama-server không sẵn sàng tại {name}.");
     }
 

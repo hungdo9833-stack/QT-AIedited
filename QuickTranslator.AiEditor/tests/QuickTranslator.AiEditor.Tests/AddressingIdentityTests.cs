@@ -86,17 +86,17 @@ public sealed class AddressingIdentityTests : IDisposable
         Assert.False(different.EvidenceValid); Assert.Empty(different.Issues); Assert.Equal("Different", different.Status);
     }
 
-    private sealed class IdentityMock(IReadOnlyList<AddressingTask> tasks, string verdict) : IJsonSchemaOllamaClient
+    private sealed class IdentityMock(IReadOnlyList<AddressingTask> tasks, string verdict) : IJsonSchemaLlmClient
     {
         public int Calls { get; private set; }
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
         {
             Calls++; Assert.Equal(AddressingAiSurvey.Schema.GetRawText(), schema.GetRawText());
             var sent = AddressingAiSurvey.TasksInPrompt(prompt, tasks); Assert.NotEmpty(sent);
             var reply = Reply(AddressingAiSurvey.PlanRequests(sent, options.Model).Single(), verdict, "", "");
             for (int i = 0; i < sent.Count; i++) reply["identities"]![i]!["task_id"] = "T" + (i + 1);
-            return Task.FromResult(new OllamaCompletion(reply.ToJsonString(), true, "stop", new GenerationMetrics { InputTokens = 100, OutputTokens = 30 }));
+            return Task.FromResult(new LlmCompletion(reply.ToJsonString(), true, "stop", new GenerationMetrics { InputTokens = 100, OutputTokens = 30 }));
         }
     }
 

@@ -94,13 +94,13 @@ public sealed class AddressingPackingTests : IDisposable
         Assert.All(AddressingAiSurvey.PlanRequests(tasks, gemini.Model, null, gemini), r => Assert.Equal(10_240, r.OutputTokenLimit));
     }
 
-    private sealed class Recording : IJsonSchemaOllamaClient
+    private sealed class Recording : IJsonSchemaLlmClient
     {
         public List<(string Prompt, ModelOptions Options)> Calls { get; } = [];
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
         {
-            Calls.Add((prompt, options)); return Task.FromResult(new OllamaCompletion("{", true, "stop", new GenerationMetrics()));
+            Calls.Add((prompt, options)); return Task.FromResult(new LlmCompletion("{", true, "stop", new GenerationMetrics()));
         }
     }
 
@@ -140,13 +140,13 @@ public sealed class AddressingPackingTests : IDisposable
         Assert.Equal(16, new AddressingSettings().TasksPerRequest);
     }
 
-    private sealed class Cut(string text, string? reason = "stop") : IJsonSchemaOllamaClient
+    private sealed class Cut(string text, string? reason = "stop") : IJsonSchemaLlmClient
     {
         public int Calls { get; private set; }
-        public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<OllamaCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
+        public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<LlmCompletion> TranslateStructuredAsync(string prompt, ModelOptions options, JsonElement schema, CancellationToken ct = default)
         {
-            Calls++; return Task.FromResult(new OllamaCompletion(text, true, reason, new GenerationMetrics { InputTokens = 5000, OutputTokens = 6000 }));
+            Calls++; return Task.FromResult(new LlmCompletion(text, true, reason, new GenerationMetrics { InputTokens = 5000, OutputTokens = 6000 }));
         }
     }
 

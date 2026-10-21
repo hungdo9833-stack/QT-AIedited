@@ -24,12 +24,12 @@ public partial class MainWindow
                     method == ChapterTitleTranslationMethod.HanViet), new ModelOptions(), null,
                 method == ChapterTitleTranslationMethod.HanViet ? "Hán Việt" : "VietPhrase");
         }
-        await EnsureOllamaBackendsLoadedAsync();
-        OllamaBackendProfile profile = _ollamaBackends.ActiveProfile;
+        await EnsureGpuBackendsLoadedAsync();
+        GpuBackendProfile profile = _gpuBackends.ActiveProfile;
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         IReadOnlyList<ConfirmedTerm> glossary = _projectSession is null ? [] :
             (await new ProjectResourceStore(_projectSession).LoadAsync(cancellationToken)).Terms;
-        return new(new OllamaChapterTitleTranslationBackend(_ollamaBackends, runtime.ModelOptions, glossary),
+        return new(new LlamaServerChapterTitleTranslationBackend(_gpuBackends, runtime.ModelOptions, glossary),
             runtime.ModelOptions, profile.Id, runtime.ModelOptions.Model);
     }
 
