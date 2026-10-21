@@ -18,7 +18,7 @@ public sealed class WindowsGpuSetupTests
             SshOperation.ReadWindowsInfo, SshOperation.ReadNvidiaGpuWindows, SshOperation.ReadSystemDiskWindows,
             SshOperation.FindOllamaWindows, SshOperation.ReadOllamaServiceWindows, SshOperation.ListOllamaModelsWindows,
             SshOperation.FinalizeWindowsProvisionScript, SshOperation.StartWindowsProvision,
-            SshOperation.ReadWindowsProvisionStatus
+            SshOperation.ReadWindowsProvisionStatus, SshOperation.ConfirmWindowsMux
         })
         {
             string command = SshCommands.Resolve(operation);
@@ -50,6 +50,8 @@ public sealed class WindowsGpuSetupTests
         var scripts = new Dictionary<string, string>
         {
             ["provision"] = WindowsRemoteScripts.ProvisionScript, ["bootstrap"] = WindowsPortMux.BootstrapScript,
+            ["switch"] = WindowsPortMux.SwitchScript, ["revert"] = WindowsPortMux.RevertScript,
+            ["confirm"] = WindowsRemoteScripts.ConfirmMux,
             ["info"] = WindowsRemoteScripts.ReadInfo, ["gpu"] = WindowsRemoteScripts.ReadGpu,
             ["disk"] = WindowsRemoteScripts.ReadFreeDisk, ["find"] = WindowsRemoteScripts.FindOllama,
             ["service"] = WindowsRemoteScripts.ReadOllamaService, ["models"] = WindowsRemoteScripts.ListModels,
@@ -111,6 +113,15 @@ public sealed class WindowsGpuSetupTests
         Assert.Contains("IsInRole", script);
         Assert.Contains("RestartCount 99", script);
         Assert.Contains("-LocalPort $public", script);
+        // An unanswered firewall prompt must never be able to block the splitter: the program is allowed (and old block
+        // rules removed) before it first listens, and a timed rollback restores Remote Desktop if QT Studio never confirms.
+        Assert.True(script.IndexOf("New-NetFirewallRule -Name 'QTStudio-Mux-App'", StringComparison.Ordinal) <
+                    script.IndexOf("$testPort = 33998", StringComparison.Ordinal));
+        Assert.Contains("Get-NetFirewallApplicationFilter -Program $exe", script);
+        Assert.Contains("QTStudio Mux Revert", WindowsPortMux.SwitchScript);
+        Assert.Contains("AddMinutes(12)", WindowsPortMux.SwitchScript);
+        Assert.Contains("Set-ItemProperty -Path $key -Name PortNumber -Value $Public", WindowsPortMux.RevertScript);
+        Assert.Contains("Unregister-ScheduledTask -TaskName 'QTStudio Mux Revert'", WindowsRemoteScripts.ConfirmMux);
     }
 
     [Fact]
@@ -198,6 +209,9 @@ public sealed class WindowsGpuSetupTests
         int finalize = session.Executed.FindIndex(e => e.Operation == SshOperation.FinalizeWindowsProvisionScript);
         int start = session.Executed.FindIndex(e => e.Operation == SshOperation.StartWindowsProvision);
         Assert.True(finalize > 0 && start > finalize);
+        // The first thing a Windows run does over SSH is confirm to the port splitter that SSH works from outside.
+        int confirm = session.Executed.FindIndex(e => e.Operation == SshOperation.ConfirmWindowsMux);
+        Assert.True(confirm >= 0 && confirm < session.Executed.FindIndex(e => e.Operation == SshOperation.WriteWindowsProvisionChunk));
         Assert.DoesNotContain(session.Executed, e => e.Operation is SshOperation.InstallOllamaUbuntu);
     }
 

@@ -54,6 +54,10 @@ public static class WindowsRemoteScripts
     public const string ReadProvisionStatus =
         "$s='C:\\ProgramData\\QTStudio\\status.json';if(Test-Path $s){Get-Content -Raw $s}else{exit 1}";
 
+    /// <summary>Cancels the timed rollback of <see cref="WindowsPortMux"/>; harmless on a machine without it.</summary>
+    public const string ConfirmMux =
+        "Unregister-ScheduledTask -TaskName 'QTStudio Mux Revert' -Confirm:$false -ErrorAction SilentlyContinue;'confirmed'";
+
     public const string FinalizeProvisionScript =
         "$d='C:\\ProgramData\\QTStudio';" +
         "[IO.File]::WriteAllBytes(\"$d\\provision.ps1\",[Convert]::FromBase64String(([IO.File]::ReadAllText(\"$d\\provision.b64\")).Trim()));" +

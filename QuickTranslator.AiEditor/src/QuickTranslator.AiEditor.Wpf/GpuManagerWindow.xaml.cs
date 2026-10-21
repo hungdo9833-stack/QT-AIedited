@@ -379,7 +379,8 @@ public partial class GpuManagerWindow : Window
                 "2. Bạn đăng nhập, mở PowerShell bằng Run as administrator, nhấp chuột phải để dán rồi nhấn Enter.\n" +
                 $"3. Lệnh bật OpenSSH Server (chỉ nghe nội bộ) và chạy một bộ chia cổng để cổng {rdpPort} vừa phục vụ RDP vừa phục vụ SSH. " +
                 "Remote Desktop được dời sang cổng nội bộ khác và ngắt vài giây.\n" +
-                "4. Lệnh tự kiểm tra cả hai đường và tự hoàn lại cổng RDP cũ nếu có lỗi.\n" +
+                "4. Lệnh tự kiểm tra cả hai đường và tự hoàn lại cổng RDP cũ nếu có lỗi. Nếu QT Studio không xác nhận được SSH " +
+                "trong 12 phút, máy tự trả cổng về cho Remote Desktop. Nếu Windows hỏi về Firewall, bấm Allow access.\n" +
                 "5. QT Studio tự phát hiện SSH rồi làm tiếp.\n\n" +
                 "Lưu ý: từ lúc đó tài khoản quản trị cũng đăng nhập được bằng SSH qua cổng này, và nhật ký RDP sẽ thấy địa chỉ 127.0.0.1.",
                 "Máy Windows chỉ có cổng RDP", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)

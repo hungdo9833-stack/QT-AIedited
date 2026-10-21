@@ -29,7 +29,8 @@ public enum SshOperation
     WriteWindowsProvisionChunk,
     FinalizeWindowsProvisionScript,
     StartWindowsProvision,
-    ReadWindowsProvisionStatus
+    ReadWindowsProvisionStatus,
+    ConfirmWindowsMux
 }
 
 public interface ISshTunnel : IAsyncDisposable
@@ -249,6 +250,7 @@ internal static partial class SshCommands
         SshOperation.FinalizeWindowsProvisionScript => WindowsRemoteScripts.Encode(WindowsRemoteScripts.FinalizeProvisionScript),
         SshOperation.StartWindowsProvision => WindowsRemoteScripts.Encode(WindowsRemoteScripts.StartProvision),
         SshOperation.ReadWindowsProvisionStatus => WindowsRemoteScripts.Encode(WindowsRemoteScripts.ReadProvisionStatus),
+        SshOperation.ConfirmWindowsMux => WindowsRemoteScripts.Encode(WindowsRemoteScripts.ConfirmMux),
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
     };
 

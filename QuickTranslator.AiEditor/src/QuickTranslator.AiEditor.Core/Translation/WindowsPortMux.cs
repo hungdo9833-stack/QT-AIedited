@@ -96,7 +96,7 @@ public static class QtMux
 }
 """;
 
-    private const string SwitchScript = """
+    internal const string SwitchScript = """
 param([int]$Public, [int]$Rdp, [int]$Ssh)
 $ErrorActionPreference = 'Stop'
 $root = 'C:\ProgramData\QTStudio'
@@ -137,7 +137,12 @@ try {
   if (-not (IsSsh (Probe $Public $sshHello))) { throw 'SSH does not answer through the public port.' }
   if (-not (IsRdp (Probe $Public $rdpHello))) { throw 'Remote Desktop does not answer through the public port.' }
   @{ publicPort = $Public; rdpPort = $Rdp; sshPort = $Ssh } | ConvertTo-Json | Set-Content -Path "$root\mux\state.json" -Encoding ascii
-  Log 'ok'
+  # Dead man's switch: the checks above ran on this machine and cannot see its firewall from outside. Unless QT Studio
+  # confirms over SSH within 12 minutes, the public port goes back to Remote Desktop by itself.
+  $revertAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$root\mux\revert.ps1`" -Public $Public"
+  $revertTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(12)
+  Register-ScheduledTask -TaskName 'QTStudio Mux Revert' -Action $revertAction -Trigger $revertTrigger -Principal $principal -Settings (New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries) -Force | Out-Null
+  Log 'ok, waiting for QT Studio to confirm'
 } catch {
   Log ('failed, rolling back: ' + $_.Exception.Message)
   try { Unregister-ScheduledTask -TaskName 'QTStudio Mux' -Confirm:$false -ErrorAction SilentlyContinue } catch { }
@@ -146,6 +151,26 @@ try {
   Restart-Service -Name TermService -Force
   Log 'rolled back'
 }
+""";
+
+    internal const string RevertScript = """
+param([int]$Public)
+$root = 'C:\ProgramData\QTStudio'
+$key = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+Add-Content -Path "$root\logs\mux-switch.log" -Value ((Get-Date -Format s) + ' revert: QT Studio did not confirm, Remote Desktop gets the public port back')
+Unregister-ScheduledTask -TaskName 'QTStudio Mux' -Confirm:$false -ErrorAction SilentlyContinue
+Get-Process -Name qt-mux -ErrorAction SilentlyContinue | Stop-Process -Force
+Set-ItemProperty -Path $key -Name PortNumber -Value $Public
+Remove-Item "$root\mux\state.json" -Force -ErrorAction SilentlyContinue
+Restart-Service -Name TermService -Force
+Unregister-ScheduledTask -TaskName 'QTStudio Mux Revert' -Confirm:$false -ErrorAction SilentlyContinue
+""";
+
+    private const string BootstrapRevert = """
+
+'@
+  $revert = @'
+
 """;
 
     private const string BootstrapHead = """
@@ -223,6 +248,13 @@ try {
 
 '@
   Add-Type -TypeDefinition $source -OutputAssembly $exe -OutputType ConsoleApplication
+
+  # Allow the program before it ever listens: an unanswered Windows Firewall prompt (for example when the RDP
+  # session drops) turns into a block rule that beats any port rule.
+  $stale = @(Get-NetFirewallApplicationFilter -Program $exe -ErrorAction SilentlyContinue)
+  foreach ($filter in $stale) { $filter | Get-NetFirewallRule | Where-Object { $_.Action -eq 'Block' } | Remove-NetFirewallRule }
+  Remove-NetFirewallRule -Name 'QTStudio-Mux-App' -ErrorAction SilentlyContinue
+  New-NetFirewallRule -Name 'QTStudio-Mux-App' -DisplayName 'QT Studio port mux (program)' -Direction Inbound -Program $exe -Action Allow -Profile Any | Out-Null
   $testPort = 33998
   $test = Start-Process -FilePath $exe -ArgumentList @($testPort, $rdpPort, $sshPort) -WindowStyle Hidden -PassThru
   try {
@@ -246,6 +278,7 @@ try {
 
 '@
   Set-Content -Path "$root\mux\switch.ps1" -Value $switch -Encoding ascii
+  Set-Content -Path "$root\mux\revert.ps1" -Value $revert -Encoding ascii
   $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ("-NoProfile -ExecutionPolicy Bypass -File `"$root\mux\switch.ps1`" -Public $public -Rdp $rdpPort -Ssh $sshPort")
   $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
   Register-ScheduledTask -TaskName 'QTStudio Mux Switch' -Action $action -Principal $principal -Force | Out-Null
@@ -257,7 +290,7 @@ try {
 """;
 
     public static string BootstrapScript { get; } =
-        BootstrapHead + MuxSource + BootstrapMiddle + SwitchScript + BootstrapTail;
+        BootstrapHead + MuxSource + BootstrapMiddle + SwitchScript + BootstrapRevert + RevertScript + BootstrapTail;
 
     /// <summary>
     /// One line to paste into an administrator PowerShell on the rented machine. The script travels gzip-compressed
