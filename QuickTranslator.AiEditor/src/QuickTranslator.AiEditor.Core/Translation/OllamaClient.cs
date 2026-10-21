@@ -57,6 +57,9 @@ public sealed class OllamaClient : IOllamaBackendClient, IJsonSchemaOllamaClient
         copy.Validate();
         if (copy.Kind == OllamaBackendKind.Local) return CreateLocal();
         var handler = CreateRemoteHandler();
+        if (copy.Api == BackendApi.OpenAiCompatible)
+            return new OpenAiCompatibleClient(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan },
+                new(copy.Endpoint), copy.ParallelRequests, copy.Token, ownsHttpClient: true);
         return new OllamaClient(new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan }, new(copy.Endpoint),
             OllamaBackendKind.Remote, copy.Token, ownsHttpClient: true);
     }

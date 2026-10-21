@@ -57,6 +57,28 @@ public sealed class GpuConnectionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task Llama_server_tunnel_uses_configured_port_and_client_health_check()
+    {
+        var ssh = new FakeSshConnectionService();
+        var client = new FakeBackendClient();
+        await using var manager = new GpuConnectionManager(ssh, (profile, endpoint) =>
+        {
+            Assert.Equal(BackendApi.OpenAiCompatible, profile.Api);
+            Assert.Equal("http://127.0.0.1:43117/api/chat", endpoint.ToString());
+            return client;
+        });
+        OllamaBackendProfile profile = RemoteProfile();
+        profile.Api = BackendApi.OpenAiCompatible;
+        profile.ParallelRequests = 4;
+        profile.Ssh!.RemoteOllamaPort = 11436;
+
+        await manager.ConnectAsync(profile);
+
+        Assert.Equal(11436, ssh.Session!.RemotePort);
+        Assert.Equal(1, client.CheckCalls);
+    }
+
+    [Fact]
     public async Task Lost_tunnel_reconnects_with_a_new_session_without_resending_any_prompt()
     {
         var ssh = new FakeSshConnectionService();
@@ -277,7 +299,9 @@ public sealed class GpuConnectionManagerTests : IDisposable
     private sealed class FakeBackendClient : IOllamaBackendClient
     {
         public bool Disposed { get; private set; }
-        public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public int CheckCalls { get; private set; }
+        public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default)
+        { CheckCalls++; return Task.CompletedTask; }
         public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<OllamaCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default) =>
             Task.FromResult(FakeClient.Completion("ok"));

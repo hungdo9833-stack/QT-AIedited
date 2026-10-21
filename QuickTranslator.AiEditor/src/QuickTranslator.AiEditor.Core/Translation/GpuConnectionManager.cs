@@ -219,6 +219,16 @@ public sealed class GpuConnectionManager : IAsyncDisposable
                 ISshTunnel tunnel = await session.OpenOllamaTunnelAsync(copy.Ssh.RemoteOllamaPort, cancellationToken).ConfigureAwait(false);
                 Uri endpoint = new($"http://127.0.0.1:{tunnel.LocalPort}/api/chat");
                 IOllamaBackendClient client = _clientFactory(copy, endpoint);
+                if (copy.Api == BackendApi.OpenAiCompatible)
+                {
+                    try { await client.CheckConnectionAsync(copy.Model, TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false); }
+                    catch
+                    {
+                        client.Dispose();
+                        await tunnel.DisposeAsync().ConfigureAwait(false);
+                        throw;
+                    }
+                }
                 var handle = new GpuConnectionHandle(copy, session, tunnel, client);
                 if (_connections.TryRemove(copy.Id, out var old)) await old.DisposeAsync().ConfigureAwait(false);
                 _connections[copy.Id] = handle;

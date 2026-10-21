@@ -43,6 +43,10 @@
       <StackPanel Margin="0,0,8,0"><TextBlock Text="Tên hiển thị" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NameInput"/></StackPanel>
       <StackPanel Grid.Column="1"><TextBlock Text="Model Ollama" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ModelInput" Text="translategemma:12b"/></StackPanel>
      </Grid>
+     <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+      <StackPanel Margin="0,0,8,0"><TextBlock Text="Loại server" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="ServerApiInput" SelectedIndex="0" SelectionChanged="OnServerApiChanged"><ComboBoxItem Content="Ollama"/><ComboBoxItem Content="llama-server (OpenAI)"/></ComboBox></StackPanel>
+      <StackPanel Grid.Column="1"><TextBlock Text="Số request song song" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ParallelRequestsInput" Text="1" ToolTip="Từ 1 đến 8"/></StackPanel>
+     </Grid>
       <Expander x:Name="AdvancedRuntimeExpander" Header="Thiết lập nâng cao · context, đầu ra và cỡ đoạn" IsExpanded="False" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}">
        <StackPanel>
         <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -91,7 +95,7 @@
      <TextBox x:Name="DownloadModelInput" ToolTip="Nhập tên model Ollama bất kỳ, ví dụ llama3.2:3b hoặc hf.co/IndexTeam/Index-Translate-9B-GGUF:Q4_K_M."/>
      <TextBlock Text="Nhập tên model/tag chính xác để tải; không thay đổi model đang chọn để dịch." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,3,0,7"/>
      <WrapPanel Margin="0,0,0,6"><Button x:Name="AutoSetupButton" Content="Tự nhận diện &amp; cài tự động" Click="OnAutoSetup" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE713;" ToolTip="Nhận diện Ubuntu hoặc Windows, cài Ollama nếu thiếu và tải model đã chọn. Không cài driver NVIDIA."/><Button x:Name="ImportRdpButton" Content="Nhập file RDP…" Click="OnImportRdp" ui:ButtonIcon.Glyph="&#xE8E5;" ToolTip="Lấy IP, cổng và tên đăng nhập từ file .rdp mà nhà cho thuê Windows gửi. Mật khẩu trong file không được đọc."/></WrapPanel>
-     <WrapPanel><Button Content="Cài Ollama (Ubuntu)" Click="OnInstallOllama"/><Button Content="Khởi động Ollama" Click="OnStartOllama" ui:ButtonIcon.Glyph="&#xE768;"/><Button Content="Tải model vừa nhập" Click="OnPullModel" ui:ButtonIcon.Glyph="&#xE8B5;"/><Button x:Name="CancelSetupButton" Content="Hủy thao tác" Click="OnCancelSetup" IsEnabled="False"/></WrapPanel>
+     <WrapPanel><Button x:Name="InstallOllamaButton" Content="Cài Ollama (Ubuntu)" Click="OnInstallOllama"/><Button x:Name="StartOllamaButton" Content="Khởi động Ollama" Click="OnStartOllama" ui:ButtonIcon.Glyph="&#xE768;"/><Button x:Name="PullModelButton" Content="Tải model vừa nhập" Click="OnPullModel" ui:ButtonIcon.Glyph="&#xE8B5;"/><Button x:Name="CancelSetupButton" Content="Hủy thao tác" Click="OnCancelSetup" IsEnabled="False"/></WrapPanel>
      <ProgressBar x:Name="ModelPullProgress" Height="7" Margin="3,8,3,2" Minimum="0" Maximum="100" Visibility="Collapsed"/>
      <TextBlock Text="Ready chỉ được hiển thị sau khi endpoint và model phản hồi; kiểm tra server không phải benchmark suy luận." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,6"/>
     </StackPanel></Border>

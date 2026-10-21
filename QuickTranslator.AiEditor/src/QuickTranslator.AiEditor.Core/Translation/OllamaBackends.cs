@@ -10,6 +10,7 @@ using QuickTranslator.AiEditor.Core.Persistence;
 namespace QuickTranslator.AiEditor.Core.Translation;
 
 public enum OllamaBackendKind { Local, Remote }
+public enum BackendApi { Ollama, OpenAiCompatible }
 
 public sealed class OllamaBackendProfile
 {
@@ -17,6 +18,8 @@ public sealed class OllamaBackendProfile
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Ollama Local";
     public OllamaBackendKind Kind { get; set; }
+    public BackendApi Api { get; set; }
+    public int ParallelRequests { get; set; } = 1;
     public string Endpoint { get; set; } = OllamaClient.DefaultEndpoint.ToString();
     public string Model { get; set; } = "translategemma:12b";
     public AiRuntimeProfile? Runtime { get; set; }
@@ -41,7 +44,8 @@ public sealed class OllamaBackendProfile
         Runtime.Validate();
         Model = Runtime.ModelOptions.Model.Trim();
         if (Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Trim().Length > 100 ||
-            !Enum.IsDefined(Kind) || string.IsNullOrWhiteSpace(Model) || Model.Trim().Length > 200)
+            !Enum.IsDefined(Kind) || !Enum.IsDefined(Api) || ParallelRequests is < 1 or > 8 ||
+            string.IsNullOrWhiteSpace(Model) || Model.Trim().Length > 200)
             throw new InvalidDataException("Profile Ollama thiếu tên, ID, loại backend hoặc model hợp lệ.");
         if (!Uri.TryCreate(Endpoint, UriKind.Absolute, out Uri? endpoint))
             throw new InvalidDataException("Endpoint Ollama không phải URL tuyệt đối hợp lệ.");
@@ -52,6 +56,8 @@ public sealed class OllamaBackendProfile
         Model = Model.Trim();
         if (Kind == OllamaBackendKind.Local && !string.IsNullOrEmpty(Token))
             throw new InvalidDataException("Profile Local không lưu hoặc gửi token.");
+        if (Kind == OllamaBackendKind.Local && Api != BackendApi.Ollama)
+            throw new InvalidDataException("Profile Local chỉ hỗ trợ Ollama.");
         if (Token?.Length > 8192 || Token?.Any(char.IsControl) == true)
             throw new InvalidDataException("Token xác thực không hợp lệ.");
         if (HourlyPrice is < 0 or > 1_000_000) throw new InvalidDataException("Giá thuê GPU theo giờ không hợp lệ.");
@@ -62,7 +68,8 @@ public sealed class OllamaBackendProfile
 
     public OllamaBackendProfile Clone() => new()
     {
-        Id = Id, Name = Name, Kind = Kind, Endpoint = Endpoint, Model = Model,
+        Id = Id, Name = Name, Kind = Kind, Api = Api, ParallelRequests = ParallelRequests,
+        Endpoint = Endpoint, Model = Model,
         Runtime = (Runtime ?? AiRuntimeProfile.CreateDefault(Model)).Clone(),
         RemoteDisclosureAccepted = RemoteDisclosureAccepted, Token = Token, HourlyPrice = HourlyPrice, Ssh = Ssh?.Clone()
     };
@@ -198,7 +205,8 @@ public class OllamaProfileStore
         ActiveProfileId = catalog.ActiveProfileId,
         Profiles = catalog.Profiles.Select(profile => new StoredProfile
         {
-            Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Endpoint = profile.Endpoint,
+            Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Api = profile.Api,
+            ParallelRequests = profile.ParallelRequests, Endpoint = profile.Endpoint,
             Model = profile.Model, RemoteDisclosureAccepted = profile.RemoteDisclosureAccepted,
             Runtime = (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).Clone(),
             ProtectedToken = Protect(profile.Token), HourlyPrice = profile.HourlyPrice,
@@ -222,7 +230,8 @@ public class OllamaProfileStore
             ActiveProfileId = stored.ActiveProfileId,
             Profiles = stored.Profiles.Select(profile => new OllamaBackendProfile
             {
-                Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Endpoint = profile.Endpoint,
+                Id = profile.Id, Name = profile.Name, Kind = profile.Kind, Api = profile.Api,
+                ParallelRequests = profile.ParallelRequests, Endpoint = profile.Endpoint,
                 Model = profile.Model, RemoteDisclosureAccepted = profile.RemoteDisclosureAccepted,
                 Runtime = profile.Runtime!.Clone(),
                 Token = Unprotect(profile.ProtectedToken), HourlyPrice = profile.HourlyPrice,
@@ -263,6 +272,8 @@ public class OllamaProfileStore
         public Guid Id { get; set; }
         public string Name { get; set; } = "";
         public OllamaBackendKind Kind { get; set; }
+        public BackendApi Api { get; set; }
+        public int ParallelRequests { get; set; } = 1;
         public string Endpoint { get; set; } = "";
         public string Model { get; set; } = "";
         public AiRuntimeProfile? Runtime { get; set; }

@@ -86,6 +86,9 @@ public partial class GpuManagerWindow : Window
         RuntimeMaximumInput.Text = runtime.SegmentationOptions.MaximumHanCharacters.ToString(CultureInfo.InvariantCulture);
         RuntimeTextElementsInput.Text = runtime.SegmentationOptions.MaximumTextElements.ToString(CultureInfo.InvariantCulture);
         bool remote = profile.Kind == OllamaBackendKind.Remote;
+        ServerApiInput.SelectedIndex = profile.Api == BackendApi.OpenAiCompatible ? 1 : 0;
+        ServerApiInput.IsEnabled = remote;
+        ParallelRequestsInput.Text = profile.ParallelRequests.ToString(CultureInfo.InvariantCulture);
         AdvancedConnectionExpander.IsEnabled = remote;
         AdvancedConnectionExpander.IsExpanded = false;
         AdvancedRuntimeExpander.IsExpanded = false;
@@ -113,10 +116,23 @@ public partial class GpuManagerWindow : Window
         StatusText.Text = remote ? _connections.GetStatus(profile.Id).Message : "Ollama Local trên máy Windows này.";
         ApplyAuthenticationUi();
         ApplyConnectionUi();
+        ApplyServerApiUi();
     }
 
     private void OnAuthenticationChanged(object sender, SelectionChangedEventArgs e) => ApplyAuthenticationUi();
     private void OnConnectionTypeChanged(object sender, SelectionChangedEventArgs e) => ApplyConnectionUi();
+    private void OnServerApiChanged(object sender, SelectionChangedEventArgs e) => ApplyServerApiUi();
+    private void ApplyServerApiUi()
+    {
+        if (AutoSetupButton is null) return;
+        bool ollama = ServerApiInput.SelectedIndex != 1;
+        ParallelRequestsInput.IsEnabled = ProfileList.SelectedItem is OllamaBackendProfile { Kind: OllamaBackendKind.Remote };
+        AutoSetupButton.IsEnabled = ollama;
+        InstallOllamaButton.IsEnabled = ollama;
+        StartOllamaButton.IsEnabled = ollama;
+        PullModelButton.IsEnabled = ollama;
+        DownloadModelInput.IsEnabled = ollama;
+    }
     private void ApplyConnectionUi()
     {
         if (SshConnectionPanel is null || DirectConnectionPanel is null) return;
@@ -250,12 +266,23 @@ public partial class GpuManagerWindow : Window
             using IOllamaBackendClient client = OllamaClient.Create(profile);
             IReadOnlyList<string> models = await client.ListModelsAsync(TimeSpan.FromSeconds(10));
             await client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10));
-            InspectionText.Text = $"Endpoint phản hồi · Model sẵn sàng: {profile.Model}\nModels: " +
-                (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models));
+            InspectionText.Text = profile.Api == BackendApi.OpenAiCompatible
+                ? "llama-server phản hồi · Models: " +
+                  (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models))
+                : $"Endpoint phản hồi · Model sẵn sàng: {profile.Model}\nModels: " +
+                  (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models));
             return;
         }
         if (!_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
             throw new InvalidOperationException("Hãy kết nối SSH trước khi kiểm tra server.");
+        if (profile.Api == BackendApi.OpenAiCompatible)
+        {
+            IReadOnlyList<string> models = await handle.Client.ListModelsAsync(TimeSpan.FromSeconds(10));
+            await handle.Client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10));
+            InspectionText.Text = "llama-server phản hồi qua SSH tunnel · Models: " +
+                (models.Count == 0 ? "server không trả danh sách" : string.Join(", ", models));
+            return;
+        }
         InspectionText.Text = DescribeInspection(await _setup.InspectAsync(handle.Session));
     });
 
@@ -604,6 +631,8 @@ public partial class GpuManagerWindow : Window
         var profile = original.Clone(); profile.Name = NameInput.Text; profile.Runtime = runtime;
         profile.Runtime = runtime;
         profile.Model = runtime.ModelOptions.Model;
+        profile.Api = ServerApiInput.SelectedIndex == 1 ? BackendApi.OpenAiCompatible : BackendApi.Ollama;
+        profile.ParallelRequests = ReadInt(ParallelRequestsInput, "Số request song song");
         profile.HourlyPrice = decimal.Parse(HourlyPriceInput.Text, CultureInfo.InvariantCulture);
         if (ConnectionTypeInput.SelectedIndex == 1)
         {

@@ -2,6 +2,7 @@ using System.Net;
 using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Translation;
 
@@ -39,6 +40,52 @@ public sealed class OllamaBackendTests : IDisposable
 
         Assert.False(handler.AllowAutoRedirect);
         Assert.Null(handler.SslOptions.RemoteCertificateValidationCallback);
+    }
+
+    [Fact]
+    public void Api_and_parallel_requests_are_validated_and_cloned()
+    {
+        var profile = new OllamaBackendProfile
+        {
+            Name = "llama-server", Kind = OllamaBackendKind.Remote, Api = BackendApi.OpenAiCompatible,
+            ParallelRequests = 4, Endpoint = "http://127.0.0.1:11436", Model = "alias"
+        };
+
+        profile.Validate();
+        OllamaBackendProfile clone = profile.Clone();
+
+        Assert.Equal(BackendApi.OpenAiCompatible, clone.Api);
+        Assert.Equal(4, clone.ParallelRequests);
+        profile.ParallelRequests = 0;
+        Assert.Throws<InvalidDataException>(profile.Validate);
+        profile.ParallelRequests = 9;
+        Assert.Throws<InvalidDataException>(profile.Validate);
+        profile.ParallelRequests = 1;
+        profile.Api = (BackendApi)99;
+        Assert.Throws<InvalidDataException>(profile.Validate);
+    }
+
+    [Fact]
+    public void Local_profile_rejects_open_ai_compatible_api()
+    {
+        OllamaBackendProfile profile = OllamaBackendProfile.CreateDefaultLocal();
+        profile.Api = BackendApi.OpenAiCompatible;
+
+        Assert.Throws<InvalidDataException>(profile.Validate);
+    }
+
+    [Fact]
+    public void Factory_selects_open_ai_compatible_client_for_remote_profile()
+    {
+        var profile = new OllamaBackendProfile
+        {
+            Name = "llama-server", Kind = OllamaBackendKind.Remote, Api = BackendApi.OpenAiCompatible,
+            ParallelRequests = 4, Endpoint = "http://127.0.0.1:11436", Model = "alias"
+        };
+
+        using IOllamaBackendClient client = OllamaClient.Create(profile);
+
+        Assert.IsType<OpenAiCompatibleClient>(client);
     }
 
     [Fact]
@@ -130,6 +177,7 @@ public sealed class OllamaBackendTests : IDisposable
         var remote = new OllamaBackendProfile
         {
             Id = Guid.NewGuid(), Name = "EZYCloudX 3090 Ti", Kind = OllamaBackendKind.Remote,
+            Api = BackendApi.OpenAiCompatible, ParallelRequests = 4,
             Endpoint = "https://gpu.example.com", Model = "translategemma:12b",
             Token = "plain-api-token", RemoteDisclosureAccepted = true,
             Runtime = new AiRuntimeProfile
@@ -147,6 +195,8 @@ public sealed class OllamaBackendTests : IDisposable
 
         Assert.Equal(remote.Id, reopened.ActiveProfileId);
         Assert.Equal("plain-api-token", reopened.Profiles.Single(profile => profile.Id == remote.Id).Token);
+        Assert.Equal(BackendApi.OpenAiCompatible, reopened.Profiles.Single(profile => profile.Id == remote.Id).Api);
+        Assert.Equal(4, reopened.Profiles.Single(profile => profile.Id == remote.Id).ParallelRequests);
         AiRuntimeProfile runtime = reopened.Profiles.Single(profile => profile.Id == remote.Id).Runtime!;
         Assert.Equal(8192, runtime.ModelOptions.ContextSize);
         Assert.Equal(550, runtime.SegmentationOptions.TargetHanCharacters);
@@ -212,6 +262,26 @@ public sealed class OllamaBackendTests : IDisposable
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             new OllamaProfileStore(path, new FakeProtector()).LoadAsync());
+    }
+
+    [Fact]
+    public async Task Old_profile_file_without_api_fields_uses_compatible_defaults()
+    {
+        Directory.CreateDirectory(_root);
+        string path = Path.Combine(_root, "old-profiles.json");
+        var store = new OllamaProfileStore(path, new FakeProtector());
+        OllamaBackendProfile local = OllamaBackendProfile.CreateDefaultLocal();
+        await store.SaveAsync(new OllamaProfileCatalog { ActiveProfileId = local.Id, Profiles = [local] });
+        JsonObject root = JsonNode.Parse(await File.ReadAllTextAsync(path))!.AsObject();
+        JsonObject stored = root["profiles"]!.AsArray()[0]!.AsObject();
+        stored.Remove("api");
+        stored.Remove("parallelRequests");
+        await File.WriteAllTextAsync(path, root.ToJsonString(), new UTF8Encoding(false));
+
+        OllamaProfileCatalog reopened = await store.LoadAsync();
+
+        Assert.Equal(BackendApi.Ollama, reopened.Profiles[0].Api);
+        Assert.Equal(1, reopened.Profiles[0].ParallelRequests);
     }
 
     [Fact]
