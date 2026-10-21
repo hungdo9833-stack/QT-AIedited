@@ -39,6 +39,7 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
                 if (worker.Status is ProjectTranslationWorkerStatus.Running or ProjectTranslationWorkerStatus.Pausing)
                     worker.Status = ProjectTranslationWorkerStatus.Interrupted;
                 worker.CurrentChapterId = null;
+                worker.RunningChapterIds.Clear();
                 worker.LastError = job.LastError;
             }
             job.CurrentChapterId = null;
@@ -147,6 +148,8 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
         BackendIdentity = worker.BackendIdentity,
         Status = worker.Status,
         CurrentChapterId = worker.CurrentChapterId,
+        RunningChapterIds = [.. worker.RunningChapterIds],
+        Slots = worker.Slots,
         CompletedChapters = worker.CompletedChapters,
         FailedChapters = worker.FailedChapters,
         CompletedHanCharacters = worker.CompletedHanCharacters,

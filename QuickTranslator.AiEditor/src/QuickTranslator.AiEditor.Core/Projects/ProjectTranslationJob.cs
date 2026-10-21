@@ -59,6 +59,11 @@ public sealed class ProjectTranslationJob
             throw new InvalidDataException("Danh sách worker của translation job không hợp lệ.");
         foreach (ProjectTranslationWorkerState worker in Workers) worker.Validate();
         foreach (ProjectTranslationItem item in Items) item.Validate();
+        if (Workers.SelectMany(worker => worker.RunningChapterIds).Distinct().Count() !=
+            Workers.Sum(worker => worker.RunningChapterIds.Count) ||
+            Workers.Any(worker => worker.RunningChapterIds.Any(chapterId =>
+                Items.All(item => item.ChapterId != chapterId || item.AssignedWorkerId != worker.WorkerId))))
+            throw new InvalidDataException("Danh sách chapter đang chạy của worker không hợp lệ.");
         if (Items.Any(item => item.AssignedWorkerId is Guid workerId && Workers.All(worker => worker.WorkerId != workerId)))
             throw new InvalidDataException("Item tham chiếu worker không tồn tại.");
         if (CurrentChapterId is Guid current && !Items.Any(item => item.ChapterId == current))
@@ -126,6 +131,8 @@ public sealed class ProjectTranslationWorkerState
     public string BackendIdentity { get; set; } = "";
     public ProjectTranslationWorkerStatus Status { get; set; } = ProjectTranslationWorkerStatus.Ready;
     public Guid? CurrentChapterId { get; set; }
+    public List<Guid> RunningChapterIds { get; set; } = [];
+    public int Slots { get; set; } = 1;
     public int CompletedChapters { get; set; }
     public int FailedChapters { get; set; }
     public long CompletedHanCharacters { get; set; }
@@ -145,7 +152,11 @@ public sealed class ProjectTranslationWorkerState
         if (WorkerId == Guid.Empty || ProfileId == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 100 ||
             Backend is null || ModelOptions is null || SegmentationOptions is null ||
             BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl) ||
-            !Enum.IsDefined(Status) || CompletedChapters < 0 ||
+            !Enum.IsDefined(Status) || RunningChapterIds is null || Slots is < 1 or > 8 ||
+            RunningChapterIds.Count > Slots ||
+            RunningChapterIds.Any(id => id == Guid.Empty) || RunningChapterIds.Distinct().Count() != RunningChapterIds.Count ||
+            RunningChapterIds.Count > 0 && CurrentChapterId is Guid current && !RunningChapterIds.Contains(current) ||
+            CompletedChapters < 0 ||
             FailedChapters < 0 || CompletedHanCharacters < 0 || ActiveSeconds < 0 || double.IsNaN(ActiveSeconds) ||
             double.IsInfinity(ActiveSeconds) || InputTokens < 0 || OutputTokens < 0 || EvaluationSeconds < 0 ||
             double.IsNaN(EvaluationSeconds) || double.IsInfinity(EvaluationSeconds) || ErrorSegments < 0 ||
@@ -189,16 +200,18 @@ public sealed record ProjectTranslationProgress(ProjectTranslationJobStatus Stat
 
 public sealed record ProjectTranslationWorkerDefinition(Guid WorkerId, OllamaBackendSnapshot Backend,
     IOllamaClient Client, ModelOptions ModelOptions, SegmenterOptions SegmentationOptions,
-    decimal? HourlyPrice = null, string BackendIdentity = "")
+    decimal? HourlyPrice = null, string BackendIdentity = "", int Slots = 1)
 {
     public ProjectTranslationWorkerDefinition(Guid workerId, OllamaBackendSnapshot backend,
-        IOllamaClient client, ModelOptions modelOptions, decimal? hourlyPrice = null, string backendIdentity = "")
-        : this(workerId, backend, client, modelOptions, new SegmenterOptions(), hourlyPrice, backendIdentity) { }
+        IOllamaClient client, ModelOptions modelOptions, decimal? hourlyPrice = null, string backendIdentity = "",
+        int slots = 1)
+        : this(workerId, backend, client, modelOptions, new SegmenterOptions(), hourlyPrice, backendIdentity, slots) { }
 
     public void Validate()
     {
         if (WorkerId == Guid.Empty || Backend is null || Client is null || ModelOptions is null || SegmentationOptions is null ||
-            HourlyPrice is < 0 or > 1_000_000 || BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl))
+            HourlyPrice is < 0 or > 1_000_000 || BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl) ||
+            Slots is < 1 or > 8)
             throw new InvalidDataException("Cấu hình worker translation không hợp lệ.");
         Backend.Validate(); ModelOptions.Validate(); SegmentationOptions.Validate();
         if (!string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
