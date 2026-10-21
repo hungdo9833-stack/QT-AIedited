@@ -286,6 +286,8 @@ try {
   Start-ScheduledTask -TaskName 'QTStudio Mux Switch'
 } catch {
   Write-Host ('[QT Studio] Loi: ' + $_.Exception.Message) -ForegroundColor Red
+  Write-Host '[QT Studio] Cua so nay se dong sau 5 phut.'
+  Start-Sleep -Seconds 300
 }
 """;
 
@@ -301,9 +303,17 @@ try {
         using var buffer = new MemoryStream();
         using (var gzip = new GZipStream(buffer, CompressionLevel.SmallestSize, leaveOpen: true))
             gzip.Write(Encoding.UTF8.GetBytes(BootstrapScript));
+        // The script is saved to a file so it can be started again with administrator rights when the session is not
+        // elevated (Windows then shows its own consent prompt in the same session).
         string loader = "$b=[Convert]::FromBase64String('" + Convert.ToBase64String(buffer.ToArray()) + "');" +
             "$g=New-Object IO.Compression.GZipStream((New-Object IO.MemoryStream(,$b)),[IO.Compression.CompressionMode]::Decompress);" +
-            "Invoke-Expression (New-Object IO.StreamReader($g,[Text.Encoding]::UTF8)).ReadToEnd()";
+            "$t=(New-Object IO.StreamReader($g,[Text.Encoding]::UTF8)).ReadToEnd();" +
+            "$f=Join-Path $env:TEMP 'qtstudio-setup.ps1';" +
+            "[IO.File]::WriteAllText($f,$t,(New-Object Text.UTF8Encoding($true)));" +
+            "$p=[Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent();" +
+            "if($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))" +
+            "{& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f}" +
+            "else{Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',('\"'+$f+'\"')}";
         return WindowsRemoteScripts.Encode(loader);
     }
 }

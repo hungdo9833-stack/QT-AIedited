@@ -52,6 +52,8 @@ public sealed class WindowsGpuSetupTests
             ["provision"] = WindowsRemoteScripts.ProvisionScript, ["bootstrap"] = WindowsPortMux.BootstrapScript,
             ["switch"] = WindowsPortMux.SwitchScript, ["revert"] = WindowsPortMux.RevertScript,
             ["confirm"] = WindowsRemoteScripts.ConfirmMux,
+            ["loader"] = Encoding.Unicode.GetString(Convert.FromBase64String(WindowsPortMux.BuildBootstrapCommand().Split(' ')[^1])),
+            ["altshell"] = RdpLaunchFile.AlternateShell,
             ["info"] = WindowsRemoteScripts.ReadInfo, ["gpu"] = WindowsRemoteScripts.ReadGpu,
             ["disk"] = WindowsRemoteScripts.ReadFreeDisk, ["find"] = WindowsRemoteScripts.FindOllama,
             ["service"] = WindowsRemoteScripts.ReadOllamaService, ["models"] = WindowsRemoteScripts.ListModels,
@@ -98,6 +100,50 @@ public sealed class WindowsGpuSetupTests
         using var gzip = new System.IO.Compression.GZipStream(new MemoryStream(packed), System.IO.Compression.CompressionMode.Decompress);
         using var reader = new StreamReader(gzip, Encoding.UTF8);
         Assert.Equal(WindowsPortMux.BootstrapScript, reader.ReadToEnd());
+    }
+
+    [Fact]
+    public void Loader_starts_the_setup_again_with_administrator_rights_when_the_session_is_not_elevated()
+    {
+        string loader = Encoding.Unicode.GetString(Convert.FromBase64String(WindowsPortMux.BuildBootstrapCommand().Split(' ')[^1]));
+        Assert.Contains("IsInRole", loader);
+        Assert.Contains("Start-Process powershell.exe -Verb RunAs", loader);
+    }
+
+    [Fact]
+    public void Rdp_launch_file_signs_in_without_prompts_and_runs_what_is_on_the_clipboard()
+    {
+        const string password = "S3cret-pass!";
+        string file = RdpLaunchFile.Build("203.0.113.7", 49217, "gpu-admin", password);
+
+        Assert.Contains("full address:s:203.0.113.7:49217", file);
+        Assert.Contains("username:s:gpu-admin", file);
+        Assert.Contains("prompt for credentials:i:0", file);
+        Assert.Contains("redirectclipboard:i:1", file);
+        Assert.Contains("alternate shell:s:" + RdpLaunchFile.AlternateShell, file);
+        Assert.DoesNotContain(password, file);
+        string blob = file.Split("\r\n").Single(l => l.StartsWith("password 51:b:", StringComparison.Ordinal))["password 51:b:".Length..];
+        Assert.True(blob.Length > 100 && blob.All(Uri.IsHexDigit), "The saved password must be a hex DPAPI blob.");
+        Assert.True(RdpLaunchFile.AlternateShell.Length <= 240, "The RDP alternate-shell field holds at most 256 characters.");
+        // The shell waits for clipboard text like 'powershell.exe*EncodedCommand*', which is what the bootstrap command is.
+        string command = WindowsPortMux.BuildBootstrapCommand();
+        Assert.True(command.StartsWith("powershell.exe", StringComparison.Ordinal) &&
+                    command.Contains("EncodedCommand", StringComparison.Ordinal));
+        Assert.Contains("'powershell.exe*EncodedCommand*'", RdpLaunchFile.AlternateShell);
+        Assert.Throws<ArgumentException>(() => RdpLaunchFile.Build("host\r\nfoo", 3389, "u", "p"));
+        Assert.Throws<ArgumentException>(() => RdpLaunchFile.Build("203.0.113.7", 3389, "u", "pass\nword"));
+    }
+
+    [Theory]
+    [InlineData("14.186.58.157:49217", "14.186.58.157", 49217)]
+    [InlineData("net4.thuepcpro.vn:49217", "net4.thuepcpro.vn", 49217)]
+    [InlineData("  gpu.example.test  ", "gpu.example.test", null)]
+    [InlineData("[2001:db8::1]:4000", "2001:db8::1", 4000)]
+    [InlineData("2001:db8::1", "2001:db8::1", null)]
+    [InlineData("host:notaport", "host:notaport", null)]
+    public void Address_split_accepts_host_with_port_as_pasted_from_a_provider_panel(string text, string host, int? port)
+    {
+        Assert.Equal((host, port), RemoteAddress.Split(text));
     }
 
     [Fact]

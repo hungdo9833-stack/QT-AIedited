@@ -61,7 +61,7 @@
        </StackPanel>
       </Expander>
     </StackPanel></Border>
-     <Expander x:Name="AdvancedConnectionExpander" Header="Thiết lập kết nối nâng cao · SSH / HTTPS / token" IsExpanded="False" Margin="3,7" Foreground="{DynamicResource MutedBrush}">
+     <Expander x:Name="AdvancedConnectionExpander" Header="Thông tin máy thuê · địa chỉ, tài khoản, mật khẩu (SSH / HTTPS / token)" IsExpanded="False" Margin="3,7" Foreground="{DynamicResource MutedBrush}">
      <Border Style="{StaticResource Card}" Margin="0,5,0,0"><StackPanel>
       <TextBlock Text="Loại kết nối Remote" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="ConnectionTypeInput" SelectionChanged="OnConnectionTypeChanged"><ComboBoxItem Content="SSH tunnel (khuyên dùng)"/><ComboBoxItem Content="HTTPS / private network trực tiếp"/></ComboBox>
       <StackPanel x:Name="DirectConnectionPanel" Visibility="Collapsed">

@@ -128,7 +128,7 @@ public sealed class GpuManagerUiTests
             ((TextBox)window.FindName("HostInput")).Text = "old.example.test";
 
             window.ApplyRdpFile(RdpConnectionFile.Parse(
-                "full address:s:203.0.113.7:33890\nusername:s:WIN-GPU\\Administrator"), @"C:\gpu.rdp");
+                "full address:s:203.0.113.7:33890\nusername:s:WIN-GPU\\Administrator"));
 
             Assert.Equal("203.0.113.7", ((TextBox)window.FindName("HostInput")).Text);
             Assert.Equal("33890", ((TextBox)window.FindName("PortInput")).Text);

@@ -15,9 +15,8 @@ public sealed class GpuSshSettings
     public SshAuthenticationKind Authentication { get; set; }
     public string? HostKeyFingerprint { get; set; }
     public int RemoteOllamaPort { get; set; } = 11434;
-    // Windows rentals: the provider's Remote Desktop port and .rdp file, used to switch on OpenSSH when SSH is closed.
+    // Windows rentals: the provider's Remote Desktop port, used to set SSH up on it when SSH is closed.
     public int? RdpPort { get; set; }
-    public string? RdpFilePath { get; set; }
     [JsonIgnore] public string? Password { get; set; }
     [JsonIgnore] public string? PrivateKey { get; set; }
     [JsonIgnore] public string? PrivateKeyPassphrase { get; set; }
@@ -50,7 +49,7 @@ public sealed class GpuSshSettings
     {
         Host = Host, Port = Port, Username = Username, Authentication = Authentication,
         HostKeyFingerprint = HostKeyFingerprint, RemoteOllamaPort = RemoteOllamaPort,
-        RdpPort = RdpPort, RdpFilePath = RdpFilePath, Password = Password, PrivateKey = PrivateKey, PrivateKeyPassphrase = PrivateKeyPassphrase
+        RdpPort = RdpPort, Password = Password, PrivateKey = PrivateKey, PrivateKeyPassphrase = PrivateKeyPassphrase
     };
 
     public static string NormalizeFingerprint(string value)

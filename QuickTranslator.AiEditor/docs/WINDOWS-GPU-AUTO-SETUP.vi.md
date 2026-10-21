@@ -11,9 +11,11 @@ tải model đã chọn và kiểm tra model trả lời được. Không bao gi
    Kết quả: `Ssh` (kèm cờ Windows nếu banner có `OpenSSH_for_Windows`), `Rdp`, `Http`, `Ollama`, `Unknown`, `Unreachable`.
 2. **Cổng là SSH** → vào bước 4.
 3. **Cổng là RDP (nhà cho thuê Windows thường chỉ chuyển tiếp đúng một cổng RDP)**:
-   - Nhập file `.rdp` (`RdpConnectionFile`) để lấy host, cổng RDP, user. Mật khẩu trong file không được đọc.
-   - QT Studio sao chép vào clipboard một dòng lệnh (`WindowsPortMux.BuildBootstrapCommand`, nén gzip, ~9 KB),
-     mở `mstsc` bằng file RDP; người dùng dán vào PowerShell (Run as administrator) trên máy thuê.
+   - Người dùng chỉ nhập địa chỉ (dán được cả `host:cổng`), tài khoản, mật khẩu; hoặc nhập file `.rdp` (`RdpConnectionFile`, mật khẩu trong file không được đọc).
+   - QT Studio sao chép vào clipboard lệnh bootstrap (`WindowsPortMux.BuildBootstrapCommand`, gzip) rồi tự mở `mstsc` bằng một file `.rdp` tạm
+     (`RdpLaunchFile`: mật khẩu là blob DPAPI của người dùng Windows hiện tại, file bị xóa sau 20 giây, `alternate shell` thay Explorer bằng
+     một PowerShell nhỏ chờ clipboard rồi chạy lệnh; clipboard được chuyển qua kênh RDP). Loader tự nâng quyền (UAC) nếu phiên chưa là admin.
+     Không còn bước dán tay; nếu sau 2 phút chưa có SSH (ví dụ phiên cũ đã tồn tại nên shell thay thế bị bỏ qua), giao diện hướng dẫn dán tay Ctrl+V.
    - Lệnh đó, theo thứ tự:
      1. Cài OpenSSH Server (Windows capability, dự phòng bằng zip Win32-OpenSSH), cấu hình `sshd` chỉ nghe `127.0.0.1:22222`.
      2. Biên dịch bộ chia cổng `qt-mux.exe` (C# 5, `Add-Type` của Windows PowerShell, không cần SDK).

@@ -113,6 +113,9 @@ public sealed class WindowsDpapiOllamaSecretProtector : IOllamaSecretProtector
         return new UTF8Encoding(false, true).GetString(ProtectOrUnprotect(Convert.FromBase64String(value), protect: false));
     }
 
+    /// <summary>Raw current-user DPAPI blob, for the one place that needs the binary form (an .rdp password).</summary>
+    internal static byte[] ProtectBytes(byte[] input) => ProtectOrUnprotect(input, protect: true);
+
     private static byte[] ProtectOrUnprotect(byte[] input, bool protect)
     {
         if (!OperatingSystem.IsWindows())
@@ -204,7 +207,7 @@ public class OllamaProfileStore
                 Host = profile.Ssh.Host, Port = profile.Ssh.Port, Username = profile.Ssh.Username,
                 Authentication = profile.Ssh.Authentication, HostKeyFingerprint = profile.Ssh.HostKeyFingerprint,
                 RemoteOllamaPort = profile.Ssh.RemoteOllamaPort, RdpPort = profile.Ssh.RdpPort,
-                RdpFilePath = profile.Ssh.RdpFilePath, ProtectedPassword = Protect(profile.Ssh.Password),
+                ProtectedPassword = Protect(profile.Ssh.Password),
                 ProtectedPrivateKey = Protect(profile.Ssh.PrivateKey),
                 ProtectedPrivateKeyPassphrase = Protect(profile.Ssh.PrivateKeyPassphrase)
             }
@@ -228,7 +231,7 @@ public class OllamaProfileStore
                     Host = profile.Ssh.Host, Port = profile.Ssh.Port, Username = profile.Ssh.Username,
                     Authentication = profile.Ssh.Authentication, HostKeyFingerprint = profile.Ssh.HostKeyFingerprint,
                     RemoteOllamaPort = profile.Ssh.RemoteOllamaPort, RdpPort = profile.Ssh.RdpPort,
-                    RdpFilePath = profile.Ssh.RdpFilePath, Password = Unprotect(profile.Ssh.ProtectedPassword),
+                    Password = Unprotect(profile.Ssh.ProtectedPassword),
                     PrivateKey = Unprotect(profile.Ssh.ProtectedPrivateKey),
                     PrivateKeyPassphrase = Unprotect(profile.Ssh.ProtectedPrivateKeyPassphrase)
                 }
@@ -278,7 +281,6 @@ public class OllamaProfileStore
         public string? HostKeyFingerprint { get; set; }
         public int RemoteOllamaPort { get; set; } = 11434;
         public int? RdpPort { get; set; }
-        public string? RdpFilePath { get; set; }
         public string? ProtectedPassword { get; set; }
         public string? ProtectedPrivateKey { get; set; }
         public string? ProtectedPrivateKeyPassphrase { get; set; }

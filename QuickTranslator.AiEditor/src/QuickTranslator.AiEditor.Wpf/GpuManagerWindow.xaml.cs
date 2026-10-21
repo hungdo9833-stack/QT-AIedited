@@ -20,7 +20,6 @@ public partial class GpuManagerWindow : Window
     private readonly RemoteHostProbe _probe = new();
     private readonly RemoteOllamaAutoSetup _autoSetup = new();
     private int? _rdpPort;
-    private string? _rdpFilePath;
     private readonly ObservableCollection<OllamaBackendProfile> _profiles = [];
     private string? _loadedPrivateKey;
     private CancellationTokenSource? _setupCancellation;
@@ -101,14 +100,14 @@ public partial class GpuManagerWindow : Window
             PasswordInput.Password = ssh.Password ?? ""; PrivateKeyInput.Password = string.IsNullOrEmpty(ssh.PrivateKey) ? "" : "••••••••";
             PrivateKeyPassphraseInput.Password = ssh.PrivateKeyPassphrase ?? ""; _loadedPrivateKey = ssh.PrivateKey;
             FingerprintInput.Text = ssh.HostKeyFingerprint ?? ""; RemoteOllamaPortInput.Text = ssh.RemoteOllamaPort.ToString(CultureInfo.InvariantCulture);
-            _rdpPort = ssh.RdpPort; _rdpFilePath = ssh.RdpFilePath;
+            _rdpPort = ssh.RdpPort;
         }
         else
         {
             HostInput.Text = ""; PortInput.Text = "22"; UsernameInput.Text = "ubuntu"; AuthenticationInput.SelectedIndex = 0;
             PasswordInput.Password = PrivateKeyInput.Password = PrivateKeyPassphraseInput.Password = ""; _loadedPrivateKey = null;
             FingerprintInput.Text = ""; RemoteOllamaPortInput.Text = "11434";
-            _rdpPort = null; _rdpFilePath = null;
+            _rdpPort = null;
         }
         HourlyPriceInput.Text = (profile.HourlyPrice ?? 0).ToString(CultureInfo.InvariantCulture);
         StatusText.Text = remote ? _connections.GetStatus(profile.Id).Message : "Ollama Local trên máy Windows này.";
@@ -140,6 +139,9 @@ public partial class GpuManagerWindow : Window
             Endpoint = "http://127.0.0.1:11434", Model = "translategemma:12b",
             Runtime = AiRuntimeProfile.CreateDefault("translategemma:12b"), Ssh = new() };
         _profiles.Add(profile); ProfileList.SelectedItem = profile;
+        // A new rental is set up by typing its address, account and password, so show those fields right away.
+        AdvancedConnectionExpander.IsExpanded = true;
+        HostInput.Focus();
     }
 
     private async void OnSaveProfile(object sender, RoutedEventArgs e) => await RunAsync(async () =>
@@ -191,7 +193,7 @@ public partial class GpuManagerWindow : Window
     });
 
     /// <summary>Opens the SSH tunnel for the profile, asking once to trust a new host key. Returns whether it is connected.</summary>
-    private async Task<bool> ConnectSshAsync(OllamaBackendProfile profile)
+    private async Task<bool> ConnectSshAsync(OllamaBackendProfile profile, bool trustNewHostKey = false)
     {
         try
         {
@@ -207,7 +209,8 @@ public partial class GpuManagerWindow : Window
         {
             FingerprintInput.Text = error.ObservedFingerprint;
             StatusText.Text = error.Message + " Fingerprint quan sát: " + error.ObservedFingerprint;
-            if (IsVisible && ThemedDialog.Show(this,
+            // The SSH server on this machine was created by QT Studio's own setup a moment ago, so its first key is trusted.
+            if (trustNewHostKey || IsVisible && ThemedDialog.Show(this,
                     $"Máy chủ trả về SSH Host Key Fingerprint:\n{error.ObservedFingerprint}\n\nTin cậy fingerprint này, lưu profile và kết nối ngay?",
                     "Xác nhận SSH Fingerprint (1 chạm)", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
@@ -267,13 +270,13 @@ public partial class GpuManagerWindow : Window
     {
         var dialog = new OpenFileDialog { Filter = "Remote Desktop|*.rdp|Tất cả tệp|*.*" };
         if (dialog.ShowDialog(this) != true) return;
-        try { ApplyRdpFile(RdpConnectionFile.Load(dialog.FileName), dialog.FileName); }
+        try { ApplyRdpFile(RdpConnectionFile.Load(dialog.FileName)); }
         catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException)
         { StatusText.Text = error.Message; }
     }
 
     /// <summary>Fills the connection fields from the provider's .rdp file; the password still has to be typed.</summary>
-    internal void ApplyRdpFile(RdpConnectionFile file, string path)
+    internal void ApplyRdpFile(RdpConnectionFile file)
     {
         if (ProfileList.SelectedItem is not OllamaBackendProfile { Kind: OllamaBackendKind.Remote })
         { StatusText.Text = "Hãy chọn hoặc thêm một profile GPU Remote trước khi nhập file RDP."; return; }
@@ -285,7 +288,7 @@ public partial class GpuManagerWindow : Window
         PortInput.Text = file.Port.ToString(CultureInfo.InvariantCulture);
         UsernameInput.Text = file.SshUsername ?? "Administrator";
         AuthenticationInput.SelectedIndex = 0;
-        _rdpPort = file.Port; _rdpFilePath = path;
+        _rdpPort = file.Port;
         AdvancedConnectionExpander.IsExpanded = true;
         StatusText.Text = $"Đã đọc file RDP: {file.Host} (RDP cổng {file.Port}), tài khoản {UsernameInput.Text}. " +
             "Nhập mật khẩu quản trị rồi bấm “Tự nhận diện & cài tự động”." +
@@ -308,15 +311,17 @@ public partial class GpuManagerWindow : Window
             if (profile.Kind != OllamaBackendKind.Remote || profile.Ssh is null)
             { StatusText.Text = "Cài đặt tự động dành cho profile GPU Remote qua SSH."; return; }
             string model = profile.Model;
-            if (!await EnsureSshReachableAsync(profile, cancellation.Token)) return;
-            if (ThemedDialog.Show(this,
+            SshReadiness readiness = await EnsureSshReachableAsync(profile, cancellation.Token);
+            if (readiness == SshReadiness.Failed) return;
+            // A machine QT Studio just prepared was confirmed in one dialog already, and its SSH server is our own.
+            if (readiness == SshReadiness.AlreadyAvailable && ThemedDialog.Show(this,
                     $"QT Studio sẽ kết nối SSH tới {profile.Ssh.Host}, nhận diện Ubuntu hoặc Windows, cài Ollama nếu máy chưa có và tải model “{model}”.\n\n" +
                     "Không cài hay nâng cấp driver NVIDIA. Nhà cung cấp có thể tính phí mạng và thời gian thuê trong lúc cài. Tiếp tục?",
                     "Xác nhận cài đặt tự động", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
             profile = ReadProfile(); // The port may have been corrected while checking.
             StatusText.Text = "Đang kết nối SSH…";
-            if (!await ConnectSshAsync(profile)) return;
+            if (!await ConnectSshAsync(profile, trustNewHostKey: readiness == SshReadiness.Bootstrapped)) return;
             if (!_connections.TryGetConnection(profile.Id, out GpuConnectionHandle? handle) || handle is null)
             { StatusText.Text = "Chưa có kết nối SSH."; return; }
 
@@ -349,71 +354,90 @@ public partial class GpuManagerWindow : Window
     }
 
     /// <summary>
-    /// Makes sure SSH answers. A Windows rental that only forwards the Remote Desktop port gets a one-line command
-    /// to paste into its own PowerShell: it puts SSH on that same public port next to Remote Desktop. The check
-    /// then continues by itself once SSH answers there.
+    /// Makes sure SSH answers. A Windows rental that only forwards the Remote Desktop port is prepared without any
+    /// manual step: QT Studio signs in over Remote Desktop with the account the user typed, and the session runs the
+    /// setup command from the clipboard. It puts SSH on that same public port next to Remote Desktop, and this check
+    /// continues by itself once SSH answers there.
     /// </summary>
-    private async Task<bool> EnsureSshReachableAsync(OllamaBackendProfile profile, CancellationToken cancellationToken)
+    private async Task<SshReadiness> EnsureSshReachableAsync(OllamaBackendProfile profile, CancellationToken cancellationToken)
     {
         GpuSshSettings ssh = profile.Ssh!;
         int rdpPort = ssh.RdpPort ?? RdpConnectionFile.DefaultPort;
         StatusText.Text = $"Đang nhận diện {ssh.Host}:{ssh.Port}…";
         RemoteHostProbeResult probe = await _probe.ProbeAsync(ssh.Host, ssh.Port, cancellationToken);
-        if (probe.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = probe.Message; return true; }
+        if (probe.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = probe.Message; return SshReadiness.AlreadyAvailable; }
         if (probe.Kind == RemoteEndpointKind.Rdp) rdpPort = ssh.Port; // The Remote Desktop port was typed as the SSH port.
         else
         {
-            if (rdpPort == ssh.Port) { StatusText.Text = probe.Message; return false; }
+            if (rdpPort == ssh.Port) { StatusText.Text = probe.Message; return SshReadiness.Failed; }
             RemoteHostProbeResult rdp = await _probe.ProbeAsync(ssh.Host, rdpPort, cancellationToken);
-            if (rdp.Kind == RemoteEndpointKind.Ssh) { PortInput.Text = rdpPort.ToString(CultureInfo.InvariantCulture); return true; }
+            if (rdp.Kind == RemoteEndpointKind.Ssh)
+            { PortInput.Text = rdpPort.ToString(CultureInfo.InvariantCulture); return SshReadiness.AlreadyAvailable; }
             if (rdp.Kind != RemoteEndpointKind.Rdp)
-            { StatusText.Text = probe.Message + $" Cổng RDP {rdpPort}: {rdp.Message}"; return false; }
+            { StatusText.Text = probe.Message + $" Cổng RDP {rdpPort}: {rdp.Message}"; return SshReadiness.Failed; }
         }
         // SSH will share the public Remote Desktop port, so that is the SSH port from now on.
         _rdpPort = rdpPort; PortInput.Text = rdpPort.ToString(CultureInfo.InvariantCulture);
 
+        // The only confirmation of the whole flow: everything below happens without further questions.
         if (ThemedDialog.Show(this,
-                $"{ssh.Host} chỉ mở cổng Remote Desktop (RDP) {rdpPort}, chưa có SSH, nên QT Studio chưa thể nhận diện và cài đặt.\n\n" +
-                "Nếu tiếp tục, QT Studio sẽ:\n" +
-                "1. Sao chép vào clipboard một dòng lệnh và mở Remote Desktop bằng file RDP của nhà cung cấp.\n" +
-                "2. Bạn đăng nhập, mở PowerShell bằng Run as administrator, nhấp chuột phải để dán rồi nhấn Enter.\n" +
-                $"3. Lệnh bật OpenSSH Server (chỉ nghe nội bộ) và chạy một bộ chia cổng để cổng {rdpPort} vừa phục vụ RDP vừa phục vụ SSH. " +
-                "Remote Desktop được dời sang cổng nội bộ khác và ngắt vài giây.\n" +
-                "4. Lệnh tự kiểm tra cả hai đường và tự hoàn lại cổng RDP cũ nếu có lỗi. Nếu QT Studio không xác nhận được SSH " +
-                "trong 12 phút, máy tự trả cổng về cho Remote Desktop. Nếu Windows hỏi về Firewall, bấm Allow access.\n" +
-                "5. QT Studio tự phát hiện SSH rồi làm tiếp.\n\n" +
-                "Lưu ý: từ lúc đó tài khoản quản trị cũng đăng nhập được bằng SSH qua cổng này, và nhật ký RDP sẽ thấy địa chỉ 127.0.0.1.",
-                "Máy Windows chỉ có cổng RDP", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-        { StatusText.Text = "Đã hủy. Chưa có SSH nên chưa cài được."; return false; }
+                $"{ssh.Host} chỉ mở cổng Remote Desktop {rdpPort}. QT Studio sẽ tự làm tiếp, bạn không cần thao tác trên máy thuê:\n\n" +
+                "1. Mở cửa sổ Remote Desktop, đăng nhập bằng tài khoản bạn vừa nhập và chạy lệnh cài đặt (lệnh cũng được chép vào clipboard). " +
+                "Nếu Windows hỏi “Unknown publisher” hoặc quyền (UAC), bấm Connect hoặc Yes. Đừng đóng cửa sổ và đừng sao chép gì khác trong lúc này.\n" +
+                $"2. Bật OpenSSH Server (chỉ nghe nội bộ) và chia cổng {rdpPort} cho cả Remote Desktop lẫn SSH. Remote Desktop ngắt vài giây. " +
+                "Nếu có lỗi hoặc QT Studio không xác nhận được SSH trong 12 phút, máy tự trả cổng lại cho Remote Desktop.\n" +
+                $"3. Nhận diện GPU, cài Ollama nếu thiếu và tải model “{profile.Model}”. Không cài hay nâng cấp driver NVIDIA.\n\n" +
+                "Nhà cung cấp tính phí theo giờ trong lúc cài. Sau bước này tài khoản quản trị cũng đăng nhập được bằng SSH qua cổng " +
+                $"{rdpPort}. Tiếp tục?",
+                "Cài đặt tự động trên máy Windows", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        { StatusText.Text = "Đã hủy."; return SshReadiness.Failed; }
 
-        try { Clipboard.SetDataObject(WindowsPortMux.BuildBootstrapCommand(), true); }
+        string command = WindowsPortMux.BuildBootstrapCommand();
+        try { Clipboard.SetDataObject(command, true); }
         catch (System.Runtime.InteropServices.ExternalException)
-        { StatusText.Text = "Không sao chép được vào clipboard. Đóng ứng dụng đang giữ clipboard rồi thử lại."; return false; }
-        LaunchRemoteDesktop(ssh.Host, rdpPort);
+        { StatusText.Text = "Không sao chép được vào clipboard. Đóng ứng dụng đang giữ clipboard rồi thử lại."; return SshReadiness.Failed; }
 
-        DateTime deadline = DateTime.UtcNow.AddMinutes(15);
-        while (DateTime.UtcNow < deadline)
+        string rdpFile = Path.Combine(Path.GetTempPath(), "qtstudio-" + Guid.NewGuid().ToString("N") + ".rdp");
+        System.Diagnostics.Process? remoteDesktop = null;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            TimeSpan left = deadline - DateTime.UtcNow;
-            StatusText.Text = "Đã sao chép lệnh. Hãy dán vào PowerShell (Run as administrator) trên máy thuê… " +
-                $"đang chờ SSH ở cổng {rdpPort} (còn {left.Minutes}:{left.Seconds:00}) · có thể hủy";
-            RemoteHostProbeResult check = await _probe.ProbeAsync(ssh.Host, rdpPort, cancellationToken);
-            if (check.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = "Đã thấy SSH trên máy thuê."; return true; }
-            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            File.WriteAllText(rdpFile, RdpLaunchFile.Build(ssh.Host, rdpPort, ssh.Username, ssh.Password ?? ""), System.Text.Encoding.ASCII);
+            try { remoteDesktop = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mstsc.exe", [rdpFile])); }
+            catch (System.ComponentModel.Win32Exception)
+            { StatusText.Text = "Không mở được Remote Desktop (mstsc.exe)."; return SshReadiness.Failed; }
+
+            DateTime started = DateTime.UtcNow, deadline = started.AddMinutes(15);
+            bool fileDeleted = false;
+            while (DateTime.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                TimeSpan elapsed = DateTime.UtcNow - started;
+                if (!fileDeleted && elapsed > TimeSpan.FromSeconds(20)) { TryDelete(rdpFile); fileDeleted = true; }
+                StatusText.Text = elapsed < TimeSpan.FromMinutes(2)
+                    ? "Đang đăng nhập Remote Desktop và chạy lệnh cài đặt trên máy thuê… nếu Windows hỏi “Unknown publisher” bấm Connect, hỏi quyền (UAC) bấm Yes · có thể hủy"
+                    : "Chưa thấy SSH. Nếu cửa sổ Remote Desktop đang mở nhưng không có gì chạy, mở PowerShell bằng Run as administrator trong đó, " +
+                      $"nhấn Ctrl+V rồi Enter (lệnh đang ở clipboard) · đang chờ cổng {rdpPort} · có thể hủy";
+                RemoteHostProbeResult check = await _probe.ProbeAsync(ssh.Host, rdpPort, cancellationToken);
+                if (check.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = "Đã thấy SSH trên máy thuê."; return SshReadiness.Bootstrapped; }
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+            StatusText.Text = $"Chưa thấy SSH ở cổng {rdpPort} sau 15 phút. Xem C:\\ProgramData\\QTStudio\\logs\\mux-switch.log trên máy thuê.";
+            return SshReadiness.Failed;
         }
-        StatusText.Text = $"Chưa thấy SSH ở cổng {rdpPort} sau 15 phút. Xem C:\\ProgramData\\QTStudio\\logs\\mux-switch.log trên máy thuê.";
-        return false;
+        finally
+        {
+            TryDelete(rdpFile);
+            try { if (remoteDesktop is { HasExited: false }) remoteDesktop.Kill(); } catch (InvalidOperationException) { }
+            remoteDesktop?.Dispose();
+        }
     }
 
-    private void LaunchRemoteDesktop(string host, int port)
+    private static void TryDelete(string path)
     {
-        var start = new System.Diagnostics.ProcessStartInfo("mstsc.exe");
-        if (_rdpFilePath is not null && File.Exists(_rdpFilePath)) start.ArgumentList.Add(_rdpFilePath);
-        else start.ArgumentList.Add($"/v:{host}:{port}");
-        try { System.Diagnostics.Process.Start(start)?.Dispose(); }
-        catch (System.ComponentModel.Win32Exception) { StatusText.Text = "Không mở được Remote Desktop (mstsc.exe)."; }
+        try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
+
+    private enum SshReadiness { Failed, AlreadyAvailable, Bootstrapped }
 
     private async void OnInstallOllama(object sender, RoutedEventArgs e) => await ConfirmSetupAsync(RemoteSetupAction.InstallOllamaUbuntu,
         "Cài Ollama bằng script chính thức trên Ubuntu? QT Studio sẽ không cài hoặc nâng cấp driver NVIDIA.");
@@ -562,6 +586,9 @@ public partial class GpuManagerWindow : Window
     {
         OllamaBackendProfile original = ProfileList.SelectedItem as OllamaBackendProfile
             ?? throw new InvalidOperationException("Chưa chọn profile.");
+        // The provider's panel shows "address:port" as one text, so accept it pasted into the address box.
+        (string host, int? pastedPort) = RemoteAddress.Split(HostInput.Text);
+        if (pastedPort is int port) { HostInput.Text = host; PortInput.Text = port.ToString(CultureInfo.InvariantCulture); }
         AiRuntimeProfile runtime = ReadRuntimeProfile();
         if (original.Kind == OllamaBackendKind.Local)
         {
@@ -590,7 +617,7 @@ public partial class GpuManagerWindow : Window
                 Password = PasswordInput.Password, PrivateKey = _loadedPrivateKey,
                 PrivateKeyPassphrase = PrivateKeyPassphraseInput.Password, HostKeyFingerprint = FingerprintInput.Text,
                 RemoteOllamaPort = int.Parse(RemoteOllamaPortInput.Text, CultureInfo.InvariantCulture),
-                RdpPort = _rdpPort, RdpFilePath = _rdpFilePath
+                RdpPort = _rdpPort
             };
         }
         profile.Validate(); return profile;
