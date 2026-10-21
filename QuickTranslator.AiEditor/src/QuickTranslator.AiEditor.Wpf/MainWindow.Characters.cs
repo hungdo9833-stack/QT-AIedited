@@ -123,7 +123,7 @@ public partial class MainWindow
         catch (Exception ex)
         {
             // Adjustment B: retain confirmed inputs in memory on write failure so user can retry Save.
-            _settingsDirty = true;
+            _resourcesDirty = true;
             RefreshCharacterGrid();
             ShowError(ex);
         }
@@ -148,7 +148,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            _settingsDirty = true;
+            _resourcesDirty = true;
             RefreshCharacterGrid();
             ShowError(ex);
         }
@@ -173,7 +173,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            _settingsDirty = true;
+            _resourcesDirty = true;
             RefreshCharacterGrid();
             ShowError(ex);
         }

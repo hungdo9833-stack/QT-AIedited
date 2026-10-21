@@ -300,14 +300,19 @@ public partial class MainWindow
         Dispatcher.BeginInvoke(() => { if (!_closing) ApplyShellTheme(ShellTheme.System); });
     }
 
-    // A command chosen from the "Thêm" popup closes it.
-    private void OnCommandOverflowClick(object sender, RoutedEventArgs e) { CommandOverflowToggle.IsChecked = false; StructureOverflowToggle.IsChecked = false; }
+    // A command chosen from any "Thêm" popup closes it; Esc closes them too.
+    private void CloseCommandOverflows()
+    {
+        foreach (var toggle in new[] { CommandOverflowToggle, StructureOverflowToggle, GlossaryOverflowToggle, CharactersOverflowToggle })
+            toggle.IsChecked = false;
+    }
+
+    private void OnCommandOverflowClick(object sender, RoutedEventArgs e) => CloseCommandOverflows();
 
     private void OnPopupContentPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key != Key.Escape) return;
-        CommandOverflowToggle.IsChecked = false;
-        StructureOverflowToggle.IsChecked = false;
+        CloseCommandOverflows();
         ReaderAppearancePopup.IsOpen = false;
         e.Handled = true;
     }
@@ -577,7 +582,7 @@ public partial class MainWindow
             UpdateInspectorLiveSelection(_lastLiveSelectionChinese);
             SetStatus($"Đã thêm nhanh nhân vật “{quick.Profile.VietnameseName}” từ Inspector.");
         }
-        catch (Exception ex) { _settingsDirty = true; ShowError(ex); }
+        catch (Exception ex) { _resourcesDirty = true; ShowError(ex); }
         finally { EndUiOperation(); }
     }
 
@@ -600,7 +605,7 @@ public partial class MainWindow
             UpdateInspectorLiveSelection(_lastLiveSelectionChinese);
             SetStatus($"Đã lưu thuật ngữ “{edited.Chinese} = {edited.Vietnamese}” từ Inspector.");
         }
-        catch (Exception ex) { _settingsDirty = true; ShowError(ex); }
+        catch (Exception ex) { _resourcesDirty = true; ShowError(ex); }
         finally { EndUiOperation(); }
     }
 

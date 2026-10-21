@@ -233,7 +233,7 @@ public partial class MainWindow
             _projectOllamaProfileMissing = false;
             RefreshOllamaProfileList(profile.Id);
             if (_projectSession is not null) await SaveProjectAssetsAsync();
-            _settingsDirty = false;
+            MarkSettingsSaved();
             UpdateOllamaBackendStatus();
             SetStatus($"Đã chuyển sang {BackendLabel(profile)}. Lần dịch mới hoặc Tiếp tục dịch sẽ dùng cấu hình này.");
         }

@@ -123,7 +123,7 @@ public sealed class ProductionShellUiTests
             Assert.Equal(ShellTheme.Light, ThemeManager.Current);
             Assert.False(Find<RadioButton>("ThemeSystemRadio").IsChecked);
 
-            void SetDirty(bool value) => typeof(MainWindow).GetProperty("_settingsDirty", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(fixture.Window, value);
+            void SetDirty(bool value) => typeof(MainWindow).GetProperty("_configurationDirty", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(fixture.Window, value);
             var dirty = Find<TextBlock>("SettingsDirtyText");
             SetDirty(true);
             Assert.Equal("Có thay đổi chưa lưu", dirty.Text);

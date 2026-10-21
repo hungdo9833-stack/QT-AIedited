@@ -160,7 +160,7 @@ public partial class MainWindow
                 RefreshCharacterGrid();
                 SetStatus("Đã cập nhật hồ sơ nhân vật hiện có; không tạo bản trùng.");
             }
-            catch (Exception ex) { _settingsDirty = true; RefreshCharacterGrid(); ShowError(ex); }
+            catch (Exception ex) { _resourcesDirty = true; RefreshCharacterGrid(); ShowError(ex); }
             return;
         }
 
@@ -188,7 +188,7 @@ public partial class MainWindow
         {
             // Keep the confirmed editor inputs available for an explicit save retry.
             // Some earlier writes may already have succeeded; rolling back only the UI would diverge.
-            _settingsDirty = true;
+            _resourcesDirty = true;
             RefreshCharacterGrid();
             ShowError(ex);
         }
@@ -312,7 +312,7 @@ public partial class MainWindow
                     int index = _characterProject.Profiles.FindIndex(p => p.Id == character.Id);
                     _characterProject.Profiles[index] = profile;
                     try { await SaveCharacterProjectAsync(); RefreshCharacterGrid(); }
-                    catch (Exception ex) { _settingsDirty = true; RefreshCharacterGrid(); ShowError(ex); }
+                    catch (Exception ex) { _resourcesDirty = true; RefreshCharacterGrid(); ShowError(ex); }
                 }
             }
             return;
@@ -332,7 +332,7 @@ public partial class MainWindow
             }
             SetStatus("Đã lưu thuật ngữ vào glossary của chương hiện tại.");
         }
-        catch (Exception ex) { _settingsDirty = true; ShowError(ex); }
+        catch (Exception ex) { _resourcesDirty = true; ShowError(ex); }
     }
 
     private async Task<bool> PersistCurrentGlossaryAsync()

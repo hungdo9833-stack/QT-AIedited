@@ -128,7 +128,7 @@ public partial class MainWindow
             }
             else await SaveSelectedSettingsAsync();
             if (_projectSession is not null) await SaveProjectAssetsAsync();
-            _settingsDirty = false;
+            MarkSettingsSaved();
             SetStatus("Đã lưu AI Runtime Profile của GPU đang chọn và tài nguyên Project. Chuyển chapter không đổi cấu hình runtime.");
         }
         catch (Exception ex) { ShowError(ex); }

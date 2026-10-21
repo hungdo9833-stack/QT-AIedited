@@ -14,21 +14,35 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow
 {
-    private bool _settingsDirtyValue;
-    // Every assignment also updates the footer indicator, so each settings page shows unsaved changes the same way.
-    private bool _settingsDirty
+    private bool _resourcesDirtyValue, _configurationDirtyValue;
+    // Tài nguyên (glossary, context, characters, preset) and Thiết lập (runtime configuration) track unsaved changes
+    // separately; every assignment updates that workspace's footer indicator.
+    private bool _resourcesDirty
     {
-        get => _settingsDirtyValue;
-        set { _settingsDirtyValue = value; UpdateSettingsDirtyIndicator(); }
+        get => _resourcesDirtyValue;
+        set { _resourcesDirtyValue = value; UpdateSettingsDirtyIndicator(); }
+    }
+    private bool _configurationDirty
+    {
+        get => _configurationDirtyValue;
+        set { _configurationDirtyValue = value; UpdateSettingsDirtyIndicator(); }
+    }
+    private bool _settingsDirty => _resourcesDirtyValue || _configurationDirtyValue;
+
+    // Both save buttons run the same full save, so a successful save leaves both scopes clean.
+    private void MarkSettingsSaved()
+    {
+        _resourcesDirtyValue = _configurationDirtyValue = false;
+        UpdateSettingsDirtyIndicator();
     }
 
     private void UpdateSettingsDirtyIndicator()
     {
         if (SettingsDirtyText is null || ResourcesDirtyText is null) return;
-        foreach (TextBlock indicator in new[] { SettingsDirtyText, ResourcesDirtyText })
+        foreach ((TextBlock indicator, bool dirty) in new[] { (SettingsDirtyText, _configurationDirtyValue), (ResourcesDirtyText, _resourcesDirtyValue) })
         {
-            indicator.Text = _settingsDirtyValue ? "Có thay đổi chưa lưu" : "Mọi thay đổi đã được lưu";
-            indicator.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, _settingsDirtyValue ? "WarningBrush" : "MutedBrush");
+            indicator.Text = dirty ? "Có thay đổi chưa lưu" : "Mọi thay đổi đã được lưu";
+            indicator.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, dirty ? "WarningBrush" : "MutedBrush");
             Accessibility.Announce(indicator);
         }
     }
@@ -52,9 +66,13 @@ public partial class MainWindow
         if (SettingsAiPanel is null || SettingsNavigation.SelectedItem is not ListBoxItem item) return;
         string selected = item.Tag?.ToString() ?? "Ai";
         SettingsAiPanel.Visibility = selected == "Ai" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsGeminiPanel.Visibility = selected == "Gemini" ? Visibility.Visible : Visibility.Collapsed;
         SettingsTraditionalPanel.Visibility = selected == "Traditional" ? Visibility.Visible : Visibility.Collapsed;
         SettingsAppearancePanel.Visibility = selected == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        if (_settingsDirty && _initialized) SetStatus("Thiết lập có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
+        SettingsAdvancedPanel.Visibility = selected == "Advanced" ? Visibility.Visible : Visibility.Collapsed;
+        // One primary per section: Data QuickTranslator has its own (Nạp / kiểm tra Data).
+        SetPrimaryStyle(SettingsSaveButton, selected != "Traditional");
+        if (_configurationDirty && _initialized) SetStatus("Thiết lập có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
     }
 
     private void OnResourcesNavigationChanged(object sender, SelectionChangedEventArgs e)
@@ -64,15 +82,25 @@ public partial class MainWindow
         SettingsPromptPanel.Visibility = selected == "Prompts" ? Visibility.Visible : Visibility.Collapsed;
         SettingsDictionaryPanel.Visibility = selected == "Dictionary" ? Visibility.Visible : Visibility.Collapsed;
         SettingsCharactersPanel.Visibility = selected == "Characters" ? Visibility.Visible : Visibility.Collapsed;
-        if (_settingsDirty && _initialized) SetStatus("Tài nguyên có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
+        // One primary per section: Nhân vật (Sổ xưng hô) and Prompt (Quản lý preset) have their own.
+        SetPrimaryStyle(ResourcesSaveButton, selected == "Dictionary");
+        if (_resourcesDirty && _initialized) SetStatus("Tài nguyên có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
+    }
+
+    private void SetPrimaryStyle(Button button, bool primary)
+    {
+        if (primary) button.SetResourceReference(StyleProperty, "PrimaryButton");
+        else button.ClearValue(StyleProperty);
     }
 
     private void OnSettingsInputChanged(object sender, RoutedEventArgs e)
     {
         if (!_initialized || _rendering || _syncingGlossary) return;
-        _settingsDirty = true;
+        bool resource = ReferenceEquals(sender, ContextNotesInput) || ReferenceEquals(sender, CharacterProjectNameInput) ||
+            ReferenceEquals(sender, NormalizeAfterTranslationCheck);
+        if (resource) _resourcesDirty = true; else _configurationDirty = true;
         UpdateSettingsCounters();
-        SetStatus("Thiết lập có thay đổi chưa lưu.");
+        SetStatus(resource ? "Tài nguyên có thay đổi chưa lưu." : "Thiết lập có thay đổi chưa lưu.");
     }
 
     private void UpdateSettingsCounters()
@@ -98,7 +126,7 @@ public partial class MainWindow
             }
             else SetGlossaryTerms(ParseGlossaryText(content));
             ReadTerms();
-            _settingsDirty = true;
+            _resourcesDirty = true;
             SetStatus("Đã nhập và kiểm tra từ điển trong bộ nhớ. Bấm Lưu để áp dụng.");
         }
         catch (Exception ex) { ShowError(ex); }
@@ -212,7 +240,7 @@ public partial class MainWindow
     {
         if (_syncingGlossary) return;
         TermsInput.Text = string.Join(Environment.NewLine, _glossaryRows.Select(t => t.Chinese + "=" + t.Vietnamese));
-        _settingsDirty = true;
+        _resourcesDirty = true;
         UpdateSettingsCounters();
         SetStatus("Từ điển có thay đổi chưa lưu.");
     }

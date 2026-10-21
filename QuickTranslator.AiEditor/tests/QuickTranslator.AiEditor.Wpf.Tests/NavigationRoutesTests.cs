@@ -134,13 +134,14 @@ public sealed class NavigationRoutesTests
         fixture.Window.NavigateTo(WorkspaceId.Resources);
         TextBox context = fixture.Text("ContextNotesInput");
         context.Text = "Ghi chú chưa lưu qua nhiều workspace.";
-        Assert.True(fixture.Get<bool>("_settingsDirtyValue"));
+        Assert.True(fixture.Get<bool>("_resourcesDirtyValue"));
 
         fixture.Call("ShowSettingsWorkspace", "Appearance");
         fixture.Call("ShowResourcesWorkspace", "Dictionary");
-        Assert.True(fixture.Get<bool>("_settingsDirtyValue"));
+        Assert.True(fixture.Get<bool>("_resourcesDirtyValue"));
         Assert.Equal("Ghi chú chưa lưu qua nhiều workspace.", context.Text);
-        Assert.Equal("Có thay đổi chưa lưu", ((TextBlock)fixture.Window.FindName("SettingsDirtyText")).Text);
+        Assert.False(fixture.Get<bool>("_configurationDirtyValue"));
+        Assert.Equal("Mọi thay đổi đã được lưu", ((TextBlock)fixture.Window.FindName("SettingsDirtyText")).Text);
         Assert.Equal("Có thay đổi chưa lưu", ((TextBlock)fixture.Window.FindName("ResourcesDirtyText")).Text);
         return Task.CompletedTask;
     });

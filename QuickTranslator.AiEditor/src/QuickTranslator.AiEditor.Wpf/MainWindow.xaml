@@ -777,8 +777,15 @@
                                        <Button Content="Thêm" ui:ButtonIcon.Glyph="&#xE710;" Click="OnAddGlossaryTerm"/>
                                        <Button Content="Sửa" Click="OnEditGlossaryTerm"/>
                                        <Button Content="Xóa" Click="OnDeleteGlossaryTerm" Style="{StaticResource DangerButton}"/>
-                                       <Button Content="Nhập TXT / JSON" Click="OnImportGlossary"/>
-                                       <Button Content="Xuất TXT" Click="OnExportGlossary"/>
+                                       <ToggleButton x:Name="GlossaryOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm: nhập / xuất từ điển" AutomationProperties.Name="Thêm lệnh từ điển" IsTabStop="True"/>
+                                       <Popup IsOpen="{Binding IsChecked, ElementName=GlossaryOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=GlossaryOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                                           <Border Margin="0,4,0,0" Padding="4" MinWidth="200" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
+                                               <StackPanel ButtonBase.Click="OnCommandOverflowClick">
+                                                   <Button x:Name="ImportGlossaryButton" Content="Nhập TXT / JSON" Click="OnImportGlossary" Style="{StaticResource MenuButton}"/>
+                                                   <Button x:Name="ExportGlossaryButton" Content="Xuất TXT" Click="OnExportGlossary" Style="{StaticResource MenuButton}"/>
+                                               </StackPanel>
+                                           </Border>
+                                       </Popup>
                                        <TextBlock x:Name="TermsCountText" VerticalAlignment="Center" Margin="8"/>
                                    </WrapPanel>
                                </StackPanel>
@@ -804,14 +811,21 @@
                            </WrapPanel>
                            <WrapPanel>
                                <Button x:Name="AddressingLedgerButton" Content="Sổ xưng hô · khảo sát &amp; Hoàn thành" ui:ButtonIcon.Glyph="&#xE716;" Click="OnOpenAddressingLedger" Style="{StaticResource PrimaryButton}" ToolTip="Khảo sát nhân vật, tên phụ, đại từ lời kể và xưng hô theo cặp bằng AI, rồi bấm Hoàn thành để ghi tất cả vào hồ sơ (có thể hoàn tác)"/>
-                               <Button x:Name="NewCharacterProjectButton" Content="Dự án mới" Click="OnNewCharacterProject"/>
                                <Button x:Name="AddCharacterButton" Content="Thêm" Click="OnAddCharacter"/>
                                <Button x:Name="EditCharacterButton" Content="Sửa" Click="OnEditCharacter"/>
                                <Button x:Name="DeleteCharacterButton" Content="Xóa" Click="OnDeleteCharacter" Style="{StaticResource DangerButton}"/>
                                <Button x:Name="SaveCharactersButton" Content="Lưu hồ sơ" Click="OnSaveCharacters"/>
-                               <Button x:Name="ImportCharactersButton" Content="Nhập JSON" Click="OnImportCharacters"/>
-                               <Button x:Name="ExportCharactersButton" Content="Xuất JSON" Click="OnExportCharacters"/>
                                <Button x:Name="PreviewCharactersButton" Content="Xem prompt khóa" Click="OnPreviewCharacters"/>
+                               <ToggleButton x:Name="CharactersOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm: dự án nhân vật mới, nhập / xuất JSON" AutomationProperties.Name="Thêm lệnh nhân vật" IsTabStop="True"/>
+                               <Popup IsOpen="{Binding IsChecked, ElementName=CharactersOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=CharactersOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                                   <Border Margin="0,4,0,0" Padding="4" MinWidth="200" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
+                                       <StackPanel ButtonBase.Click="OnCommandOverflowClick">
+                                           <Button x:Name="NewCharacterProjectButton" Content="Dự án nhân vật mới" Click="OnNewCharacterProject" Style="{StaticResource MenuButton}"/>
+                                           <Button x:Name="ImportCharactersButton" Content="Nhập JSON" Click="OnImportCharacters" Style="{StaticResource MenuButton}"/>
+                                           <Button x:Name="ExportCharactersButton" Content="Xuất JSON" Click="OnExportCharacters" Style="{StaticResource MenuButton}"/>
+                                       </StackPanel>
+                                   </Border>
+                               </Popup>
                            </WrapPanel>
                            <DataGrid x:Name="CharactersGrid" AutoGenerateColumns="False" IsReadOnly="False" SelectionMode="Single" SelectionChanged="OnCharacterSelected" Height="430" CanUserAddRows="False" AutomationProperties.Name="Danh sách nhân vật">
                                <DataGrid.Columns>
@@ -829,7 +843,7 @@
                    </ScrollViewer>
                    <Border Grid.Row="1" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,8" Margin="0,8,0,0">
                        <DockPanel>
-                           <Button x:Name="ResourcesSaveButton" DockPanel.Dock="Right" Content="Lưu tài nguyên" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu từ điển, ngữ cảnh, prompt và hồ sơ nhân vật"/>
+                           <Button x:Name="ResourcesSaveButton" DockPanel.Dock="Right" Content="Lưu tài nguyên" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu từ điển, ngữ cảnh, nhân vật và preset của Project (cấu hình AI đang sửa cũng được lưu cùng lúc)"/>
                            <TextBlock x:Name="ResourcesDirtyText" Text="Mọi thay đổi đã được lưu" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
                        </DockPanel>
                    </Border>
@@ -843,37 +857,26 @@
                         </Grid.ColumnDefinitions>
                         <ListBox x:Name="SettingsNavigation" SelectionChanged="OnSettingsNavigationChanged" SelectedIndex="0" Background="{DynamicResource SurfaceBrush}" BorderThickness="0" Padding="6" AutomationProperties.Name="Danh sách nhóm thiết lập">
                             <ListBoxItem Tag="Ai">AI Provider &amp; GPU</ListBoxItem>
+                            <ListBoxItem Tag="Gemini">Gemini credentials</ListBoxItem>
                             <ListBoxItem Tag="Traditional">Data QuickTranslator</ListBoxItem>
                             <ListBoxItem Tag="Appearance">Giao diện</ListBoxItem>
+                            <ListBoxItem Tag="Advanced">Nâng cao</ListBoxItem>
                         </ListBox>
                         <Grid Grid.Column="1" Margin="16,0,0,0">
                             <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <ScrollViewer x:Name="SettingsAiPanel">
                                 <StackPanel>
-                                    <TextBlock Text="AI &amp; hiệu năng" Style="{StaticResource SectionTitle}"/>
+                                    <TextBlock Text="AI Provider &amp; GPU" Style="{StaticResource SectionTitle}"/>
                                     <TextBlock Text="Chọn GPU và model tại một nơi. Thay đổi hợp lệ được áp dụng khi chương tiếp theo bắt đầu; khi đổi GPU đang chạy, hãy Tạm dừng rồi Tiếp tục." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
                                     <Button Content="Mở Quản lý GPU" Click="OnOpenGpuManager" HorizontalAlignment="Left" Margin="3,8"/>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
                                             <TextBlock Text="Một nơi cấu hình cho Local và Remote" FontWeight="SemiBold" FontSize="16"/>
                                             <TextBlock Text="Quản lý GPU là nguồn cấu hình chính cho model, context, độ dài đầu ra, cỡ đoạn và kết nối." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/>
-                                            <TextBlock Text="Các thông số SSH, HTTPS và token nằm trong Thiết lập nâng cao." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                            <TextBlock Text="Các thông số Remote GPU (SSH, HTTPS, token) nằm trong Quản lý GPU." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/>
                                         </StackPanel>
                                     </Border>
-                                    <Border Style="{StaticResource Card}">
-                                        <StackPanel>
-                                            <TextBlock Text="Gemini API — khảo sát truyện" FontWeight="SemiBold" FontSize="16"/>
-                                            <TextBlock Text="Nhập một API key Google AI Studio. Key được lưu riêng cho tài khoản Windows trong Credential Manager; không ghi vào Project, cấu hình dịch hoặc log." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,8"/>
-                                            <TextBlock Text="Gemini API key" Style="{StaticResource FieldLabel}"/>
-                                            <PasswordBox x:Name="GeminiApiKeyInput" PasswordChar="●" MaxLength="256" MinWidth="320" HorizontalAlignment="Left"/>
-                                            <WrapPanel Margin="0,8,0,0">
-                                                <Button Content="Lưu API key" Click="OnSaveGeminiApiKey"/>
-                                                <Button Content="Xóa key đã lưu" Click="OnRemoveGeminiApiKey" Margin="8,0,0,0"/>
-                                                <TextBlock x:Name="GeminiCredentialStatus" Loaded="OnGeminiCredentialStatusLoaded" Margin="10,5,0,0" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                                            </WrapPanel>
-                                            <TextBlock Text="Khảo sát: mở Project → Nhân vật &amp; xưng hô → Sổ xưng hô · khảo sát &amp; Hoàn thành, chọn Gemini Flash Pool và model (gemini-3.6-flash, gemini-3.8-flash hoặc gemini-3.5-flash-lite)." Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
-                                        </StackPanel>
-                                    </Border>
+                                    <!-- Legacy runtime inputs stay (hidden): ReadModelOptions and the segmenter still read them. -->
                                     <StackPanel Visibility="Collapsed">
                                         <Border Style="{StaticResource Card}">
                                             <StackPanel>
@@ -940,6 +943,25 @@
                                     </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>
+                            <ScrollViewer x:Name="SettingsGeminiPanel" Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock Text="Gemini credentials" Style="{StaticResource SectionTitle}"/>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <TextBlock Text="Gemini API — khảo sát truyện" FontWeight="SemiBold" FontSize="16"/>
+                                            <TextBlock Text="Nhập một API key Google AI Studio. Key được lưu riêng cho tài khoản Windows trong Credential Manager; không ghi vào Project, cấu hình dịch hoặc log." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,8"/>
+                                            <TextBlock Text="Gemini API key" Style="{StaticResource FieldLabel}"/>
+                                            <PasswordBox x:Name="GeminiApiKeyInput" PasswordChar="●" MaxLength="256" MinWidth="320" HorizontalAlignment="Left"/>
+                                            <WrapPanel Margin="0,8,0,0">
+                                                <Button Content="Lưu API key" Click="OnSaveGeminiApiKey"/>
+                                                <Button Content="Xóa key đã lưu" Click="OnRemoveGeminiApiKey" Margin="8,0,0,0"/>
+                                                <TextBlock x:Name="GeminiCredentialStatus" Loaded="OnGeminiCredentialStatusLoaded" Margin="10,5,0,0" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                            </WrapPanel>
+                                            <TextBlock Text="Khảo sát: Tài nguyên → Nhân vật &amp; xưng hô → Sổ xưng hô · khảo sát &amp; Hoàn thành, chọn Gemini Flash Pool và model (gemini-3.6-flash, gemini-3.8-flash hoặc gemini-3.5-flash-lite)." Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
                             <ScrollViewer x:Name="SettingsTraditionalPanel" Visibility="Collapsed">
                                 <StackPanel>
                                     <TextBlock Text="Data QuickTranslator truyền thống" Style="{StaticResource SectionTitle}"/>
@@ -961,8 +983,6 @@
                                                     <ComboBoxItem Tag="2">Cụm dài tối thiểu 3 chữ</ComboBoxItem>
                                                 </ComboBox>
                                             </WrapPanel>
-                                            <CheckBox x:Name="TraditionalAlignmentDiagnosticsInput" Content="Ghi log chẩn đoán alignment (chỉ offset, không ghi nội dung truyện)" Checked="OnTraditionalPreferenceChanged" Unchecked="OnTraditionalPreferenceChanged"/>
-                                            <TextBlock x:Name="AlignmentDiagnosticsPathText" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
                                             <TextBlock x:Name="TraditionalDataStatus" Text="Chưa chọn Data; các chức năng AI vẫn hoạt động." TextWrapping="Wrap" Margin="4"/>
                                             <TextBox x:Name="TraditionalDiagnosticsText" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="230" VerticalScrollBarVisibility="Auto"/>
                                         </StackPanel>
@@ -985,10 +1005,29 @@
                                     </Border>
                                 </StackPanel>
                             </ScrollViewer>
-                            <!-- One save for every settings page, always in the same place. API key and GPU profiles keep their own buttons (stored separately). -->
+                            <ScrollViewer x:Name="SettingsAdvancedPanel" Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock Text="Nâng cao" Style="{StaticResource SectionTitle}"/>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <TextBlock Text="Chẩn đoán alignment Hán Việt / VietPhrase" FontWeight="SemiBold"/>
+                                            <CheckBox x:Name="TraditionalAlignmentDiagnosticsInput" Content="Ghi log chẩn đoán alignment (chỉ offset, không ghi nội dung truyện)" Checked="OnTraditionalPreferenceChanged" Unchecked="OnTraditionalPreferenceChanged"/>
+                                            <TextBlock x:Name="AlignmentDiagnosticsPathText" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource MutedBrush}"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource Card}">
+                                        <StackPanel>
+                                            <TextBlock Text="Remote GPU / SSH" FontWeight="SemiBold"/>
+                                            <TextBlock Text="Kết nối máy GPU thuê (SSH, HTTPS, token, host key) được cấu hình trong Quản lý GPU." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
+                                            <Button Content="Mở Quản lý GPU" Click="OnOpenGpuManager" HorizontalAlignment="Left" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                            <!-- One save for every settings page, always in the same place. API key, GPU profiles and Data preferences keep their own buttons or save on change (stored separately). -->
                             <Border Grid.Row="1" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,8" Margin="0,8,0,0">
                                 <DockPanel>
-                                    <Button x:Name="SettingsSaveButton" DockPanel.Dock="Right" Content="Lưu thiết lập" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu thiết lập dịch, từ điển, ngữ cảnh và hồ sơ nhân vật"/>
+                                    <Button x:Name="SettingsSaveButton" DockPanel.Dock="Right" Content="Lưu thiết lập" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu cấu hình ứng dụng (tài nguyên Project đang sửa cũng được lưu cùng lúc)"/>
                                     <TextBlock x:Name="SettingsDirtyText" Text="Mọi thay đổi đã được lưu" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
                                 </DockPanel>
                             </Border>

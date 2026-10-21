@@ -156,7 +156,7 @@ public partial class MainWindow
             _bookIntelligenceState = assets.BookIntelligence;
             _bookKnowledgeContextEnabled = assets.Translation.BookKnowledgeContextEnabled;
             ApplyProjectDefaults(assets.Translation); SetGlossaryTerms(assets.Resources.Terms); ContextNotesInput.Text = assets.Resources.Context;
-            ApplyCurrentProjectResources(); _settingsDirty = false;
+            ApplyCurrentProjectResources(); MarkSettingsSaved();
         }
         finally { _rendering = prior; }
     }
