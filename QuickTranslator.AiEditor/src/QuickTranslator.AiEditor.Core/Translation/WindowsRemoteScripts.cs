@@ -158,37 +158,4 @@ try {
   Save 'error' 0 'error' $true $false $_.Exception.Message
 }
 """;
-
-    /// <summary>
-    /// One pasteable line for the rented machine's own PowerShell (for example after an RDP login): turns on the
-    /// Windows OpenSSH server so QT Studio can detect, install and tunnel without further manual steps.
-    /// </summary>
-    public static string BuildOpenSshBootstrapCommand(int sshPort = 22)
-    {
-        if (sshPort is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(sshPort));
-        string script = $$"""
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
-  try { Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0' | Out-Null }
-  catch {
-    $zip = "$env:TEMP\OpenSSH-Win64.zip"
-    & curl.exe -L --fail -o $zip 'https://github.com/PowerShell/Win32-OpenSSH/releases/latest/download/OpenSSH-Win64.zip'
-    Expand-Archive -Force $zip "$env:ProgramFiles"
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:ProgramFiles\OpenSSH-Win64\install-sshd.ps1"
-  }
-}
-if ({{sshPort}} -ne 22) {
-  $cfg = "$env:ProgramData\ssh\sshd_config"
-  if (-not (Test-Path $cfg)) { Start-Service sshd; Stop-Service sshd }
-  (Get-Content $cfg) -replace '^#?Port\s+\d+', 'Port {{sshPort}}' | Set-Content $cfg -Encoding ascii
-}
-Set-Service sshd -StartupType Automatic
-Restart-Service sshd
-Remove-NetFirewallRule -Name 'QTStudio-SSH' -ErrorAction SilentlyContinue
-New-NetFirewallRule -Name 'QTStudio-SSH' -DisplayName 'QT Studio SSH' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort {{sshPort}} | Out-Null
-'QT Studio: OpenSSH dang chay tren cong {{sshPort}}.'
-""";
-        return Encode(script);
-    }
 }

@@ -281,7 +281,8 @@ public partial class GpuManagerWindow : Window
         if (!string.Equals(HostInput.Text.Trim(), file.Host, StringComparison.OrdinalIgnoreCase)) FingerprintInput.Text = "";
         ConnectionTypeInput.SelectedIndex = 0;
         HostInput.Text = file.Host;
-        PortInput.Text = "22";
+        // Providers that forward only this port get SSH on it too (see WindowsPortMux), so it is also the SSH port.
+        PortInput.Text = file.Port.ToString(CultureInfo.InvariantCulture);
         UsernameInput.Text = file.SshUsername ?? "Administrator";
         AuthenticationInput.SelectedIndex = 0;
         _rdpPort = file.Port; _rdpFilePath = path;
@@ -348,59 +349,59 @@ public partial class GpuManagerWindow : Window
     }
 
     /// <summary>
-    /// Makes sure the SSH port answers. A Windows rental that only opens Remote Desktop gets a one-line OpenSSH
-    /// bootstrap to paste into its own PowerShell; the check then continues by itself once SSH appears.
+    /// Makes sure SSH answers. A Windows rental that only forwards the Remote Desktop port gets a one-line command
+    /// to paste into its own PowerShell: it puts SSH on that same public port next to Remote Desktop. The check
+    /// then continues by itself once SSH answers there.
     /// </summary>
     private async Task<bool> EnsureSshReachableAsync(OllamaBackendProfile profile, CancellationToken cancellationToken)
     {
         GpuSshSettings ssh = profile.Ssh!;
-        int sshPort = ssh.Port;
         int rdpPort = ssh.RdpPort ?? RdpConnectionFile.DefaultPort;
         StatusText.Text = $"Đang nhận diện {ssh.Host}:{ssh.Port}…";
         RemoteHostProbeResult probe = await _probe.ProbeAsync(ssh.Host, ssh.Port, cancellationToken);
         if (probe.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = probe.Message; return true; }
-        if (probe.Kind == RemoteEndpointKind.Rdp)
-        {
-            // The Remote Desktop port was typed where the SSH port belongs: remember it and look for SSH on 22.
-            rdpPort = ssh.Port; sshPort = 22;
-            _rdpPort = rdpPort; PortInput.Text = "22";
-        }
+        if (probe.Kind == RemoteEndpointKind.Rdp) rdpPort = ssh.Port; // The Remote Desktop port was typed as the SSH port.
         else
         {
             if (rdpPort == ssh.Port) { StatusText.Text = probe.Message; return false; }
             RemoteHostProbeResult rdp = await _probe.ProbeAsync(ssh.Host, rdpPort, cancellationToken);
+            if (rdp.Kind == RemoteEndpointKind.Ssh) { PortInput.Text = rdpPort.ToString(CultureInfo.InvariantCulture); return true; }
             if (rdp.Kind != RemoteEndpointKind.Rdp)
             { StatusText.Text = probe.Message + $" Cổng RDP {rdpPort}: {rdp.Message}"; return false; }
         }
+        // SSH will share the public Remote Desktop port, so that is the SSH port from now on.
+        _rdpPort = rdpPort; PortInput.Text = rdpPort.ToString(CultureInfo.InvariantCulture);
 
         if (ThemedDialog.Show(this,
-                $"{ssh.Host} đang mở Remote Desktop (RDP) nhưng chưa có SSH, nên QT Studio chưa thể nhận diện và cài đặt.\n\n" +
+                $"{ssh.Host} chỉ mở cổng Remote Desktop (RDP) {rdpPort}, chưa có SSH, nên QT Studio chưa thể nhận diện và cài đặt.\n\n" +
                 "Nếu tiếp tục, QT Studio sẽ:\n" +
-                "1. Sao chép vào clipboard một dòng lệnh bật OpenSSH Server trên Windows (không cài thứ gì khác).\n" +
-                "2. Mở Remote Desktop bằng file RDP của nhà cung cấp.\n" +
-                "3. Bạn đăng nhập, mở PowerShell bằng Run as administrator, nhấp chuột phải để dán rồi nhấn Enter.\n" +
-                $"4. QT Studio tự phát hiện SSH ở cổng {sshPort} rồi làm tiếp.\n\n" +
-                "Lưu ý: nhà cung cấp phải cho phép truy cập cổng SSH đó từ Internet.",
-                "Máy Windows chưa bật SSH", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                "1. Sao chép vào clipboard một dòng lệnh và mở Remote Desktop bằng file RDP của nhà cung cấp.\n" +
+                "2. Bạn đăng nhập, mở PowerShell bằng Run as administrator, nhấp chuột phải để dán rồi nhấn Enter.\n" +
+                $"3. Lệnh bật OpenSSH Server (chỉ nghe nội bộ) và chạy một bộ chia cổng để cổng {rdpPort} vừa phục vụ RDP vừa phục vụ SSH. " +
+                "Remote Desktop được dời sang cổng nội bộ khác và ngắt vài giây.\n" +
+                "4. Lệnh tự kiểm tra cả hai đường và tự hoàn lại cổng RDP cũ nếu có lỗi.\n" +
+                "5. QT Studio tự phát hiện SSH rồi làm tiếp.\n\n" +
+                "Lưu ý: từ lúc đó tài khoản quản trị cũng đăng nhập được bằng SSH qua cổng này, và nhật ký RDP sẽ thấy địa chỉ 127.0.0.1.",
+                "Máy Windows chỉ có cổng RDP", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
         { StatusText.Text = "Đã hủy. Chưa có SSH nên chưa cài được."; return false; }
 
-        try { Clipboard.SetDataObject(WindowsRemoteScripts.BuildOpenSshBootstrapCommand(sshPort), true); }
+        try { Clipboard.SetDataObject(WindowsPortMux.BuildBootstrapCommand(), true); }
         catch (System.Runtime.InteropServices.ExternalException)
         { StatusText.Text = "Không sao chép được vào clipboard. Đóng ứng dụng đang giữ clipboard rồi thử lại."; return false; }
         LaunchRemoteDesktop(ssh.Host, rdpPort);
 
-        DateTime deadline = DateTime.UtcNow.AddMinutes(10);
+        DateTime deadline = DateTime.UtcNow.AddMinutes(15);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
             TimeSpan left = deadline - DateTime.UtcNow;
-            StatusText.Text = $"Đã sao chép lệnh. Hãy dán vào PowerShell (Run as administrator) trên máy thuê… đang chờ SSH cổng {sshPort} " +
-                $"(còn {left.Minutes}:{left.Seconds:00}) · có thể hủy";
-            RemoteHostProbeResult check = await _probe.ProbeAsync(ssh.Host, sshPort, cancellationToken);
+            StatusText.Text = "Đã sao chép lệnh. Hãy dán vào PowerShell (Run as administrator) trên máy thuê… " +
+                $"đang chờ SSH ở cổng {rdpPort} (còn {left.Minutes}:{left.Seconds:00}) · có thể hủy";
+            RemoteHostProbeResult check = await _probe.ProbeAsync(ssh.Host, rdpPort, cancellationToken);
             if (check.Kind == RemoteEndpointKind.Ssh) { StatusText.Text = "Đã thấy SSH trên máy thuê."; return true; }
             await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
         }
-        StatusText.Text = $"Chưa thấy SSH ở cổng {sshPort} sau 10 phút. Nếu lệnh đã chạy xong, nhà cung cấp có thể chưa mở cổng này ra Internet.";
+        StatusText.Text = $"Chưa thấy SSH ở cổng {rdpPort} sau 15 phút. Xem C:\\ProgramData\\QTStudio\\logs\\mux-switch.log trên máy thuê.";
         return false;
     }
 

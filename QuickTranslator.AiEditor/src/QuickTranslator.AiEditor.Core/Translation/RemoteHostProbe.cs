@@ -19,6 +19,8 @@ public sealed class RemoteHostProbe
     private static readonly byte[] RdpConnectionRequest =
         [0x03, 0x00, 0x00, 0x13, 0x0E, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00];
 
+    private static readonly byte[] SshClientHello = Encoding.ASCII.GetBytes("SSH-2.0-QTStudioProbe\r\n");
+
     private readonly TimeSpan _connectTimeout;
     private readonly TimeSpan _readTimeout;
 
@@ -45,6 +47,13 @@ public sealed class RemoteHostProbe
             return new(RemoteEndpointKind.Ssh, text, windows, [],
                 windows ? "Cổng này là SSH của Windows (OpenSSH). Có thể cài tự động." : "Cổng này là SSH.");
         }
+
+        // A port splitter (SSH and RDP on one port) waits for the client to speak first, so greet it like an SSH client.
+        (_, byte[] hello) = await ExchangeAsync(host, port, SshClientHello, cancellationToken).ConfigureAwait(false);
+        string helloReply = Printable(hello).Trim();
+        if (helloReply.StartsWith("SSH-", StringComparison.Ordinal))
+            return new(RemoteEndpointKind.Ssh, helloReply, helloReply.Contains("Windows", StringComparison.OrdinalIgnoreCase), [],
+                "Cổng này nhận SSH (có thể dùng chung với Remote Desktop).");
 
         (_, byte[] rdp) = await ExchangeAsync(host, port, RdpConnectionRequest, cancellationToken).ConfigureAwait(false);
         if (rdp.Length >= 2 && rdp[0] == 0x03 && rdp[1] == 0x00)

@@ -131,7 +131,7 @@ public sealed class GpuManagerUiTests
                 "full address:s:203.0.113.7:33890\nusername:s:WIN-GPU\\Administrator"), @"C:\gpu.rdp");
 
             Assert.Equal("203.0.113.7", ((TextBox)window.FindName("HostInput")).Text);
-            Assert.Equal("22", ((TextBox)window.FindName("PortInput")).Text);
+            Assert.Equal("33890", ((TextBox)window.FindName("PortInput")).Text);
             Assert.Equal("Administrator", ((TextBox)window.FindName("UsernameInput")).Text);
             Assert.Equal("", ((TextBox)window.FindName("FingerprintInput")).Text);
             Assert.True(((Expander)window.FindName("AdvancedConnectionExpander")).IsExpanded);

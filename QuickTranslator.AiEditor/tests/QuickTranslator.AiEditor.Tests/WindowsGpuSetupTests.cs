@@ -47,12 +47,9 @@ public sealed class WindowsGpuSetupTests
     [Fact]
     public void Every_windows_script_is_valid_powershell()
     {
-        string bootstrap = Encoding.Unicode.GetString(Convert.FromBase64String(
-            WindowsRemoteScripts.BuildOpenSshBootstrapCommand(2222).Split(' ')[^1]));
-        Assert.Contains("2222", bootstrap);
         var scripts = new Dictionary<string, string>
         {
-            ["provision"] = WindowsRemoteScripts.ProvisionScript, ["bootstrap"] = bootstrap,
+            ["provision"] = WindowsRemoteScripts.ProvisionScript, ["bootstrap"] = WindowsPortMux.BootstrapScript,
             ["info"] = WindowsRemoteScripts.ReadInfo, ["gpu"] = WindowsRemoteScripts.ReadGpu,
             ["disk"] = WindowsRemoteScripts.ReadFreeDisk, ["find"] = WindowsRemoteScripts.FindOllama,
             ["service"] = WindowsRemoteScripts.ReadOllamaService, ["models"] = WindowsRemoteScripts.ListModels,
@@ -86,11 +83,34 @@ public sealed class WindowsGpuSetupTests
     }
 
     [Fact]
-    public void Bootstrap_command_rejects_invalid_ports()
+    public void Bootstrap_command_round_trips_the_script_and_fits_a_console_command_line()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => WindowsRemoteScripts.BuildOpenSshBootstrapCommand(0));
-        Assert.Throws<ArgumentOutOfRangeException>(() => WindowsRemoteScripts.BuildOpenSshBootstrapCommand(70000));
-        Assert.True(WindowsRemoteScripts.BuildOpenSshBootstrapCommand().Length < 8000);
+        string command = WindowsPortMux.BuildBootstrapCommand();
+        Assert.StartsWith("powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ", command);
+        Assert.True(command.Length < 30_000, $"{command.Length} characters; CreateProcess stops at 32767.");
+
+        string loader = Encoding.Unicode.GetString(Convert.FromBase64String(command.Split(' ')[^1]));
+        const string marker = "FromBase64String('";
+        int start = loader.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        byte[] packed = Convert.FromBase64String(loader[start..loader.IndexOf('\'', start)]);
+        using var gzip = new System.IO.Compression.GZipStream(new MemoryStream(packed), System.IO.Compression.CompressionMode.Decompress);
+        using var reader = new StreamReader(gzip, Encoding.UTF8);
+        Assert.Equal(WindowsPortMux.BootstrapScript, reader.ReadToEnd());
+    }
+
+    [Fact]
+    public void Bootstrap_script_keeps_every_safety_step_that_prevents_a_lockout()
+    {
+        string script = WindowsPortMux.BootstrapScript;
+        // Both routes are proven on a test port before any setting changes, sshd stays on loopback, the RDP port
+        // is only moved by a detached SYSTEM task that verifies the public port and rolls back on failure.
+        Assert.Contains("ListenAddress 127.0.0.1", script);
+        Assert.True(script.IndexOf("33998", StringComparison.Ordinal) < script.IndexOf("Set-ItemProperty -Path $key -Name PortNumber -Value $Rdp", StringComparison.Ordinal));
+        Assert.Contains("rolling back", script);
+        Assert.Contains("Set-ItemProperty -Path $key -Name PortNumber -Value $Public", script);
+        Assert.Contains("IsInRole", script);
+        Assert.Contains("RestartCount 99", script);
+        Assert.Contains("-LocalPort $public", script);
     }
 
     [Fact]
