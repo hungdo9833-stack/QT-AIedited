@@ -19,6 +19,8 @@ public interface ILocalLlamaProcess : IDisposable
     bool HasExited { get; }
     int ExitCode { get; }
     void Kill();
+    /// <summary>After exit: wait until the redirected output was fully read, so the log tail holds the last lines.</summary>
+    void WaitForOutput() { }
 }
 
 public interface ILocalLlamaProcessLauncher
@@ -142,6 +144,7 @@ public sealed class LocalLlamaServerHost : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (_process?.HasExited != false)
             {
+                _process?.WaitForOutput();
                 string tail = ReadTail(logPath, 30);
                 throw new InvalidOperationException($"llama-server đã thoát (mã {_process?.ExitCode})." +
                     (tail.Length == 0 ? "" : Environment.NewLine + "Nhật ký cuối:" + Environment.NewLine + tail));
@@ -243,16 +246,24 @@ internal sealed class WindowsProcess(Process process) : ILocalLlamaProcess
     public bool HasExited => Process.HasExited;
     public int ExitCode => Process.ExitCode;
     public void Kill() { Process.Kill(entireProcessTree: true); Process.WaitForExit(5000); }
+    // Only the parameterless WaitForExit waits for the async output handlers; call it once the process is gone.
+    public void WaitForOutput() { if (Process.WaitForExit(5000)) Process.WaitForExit(); }
     public void Dispose() => Process.Dispose();
     public void CopyOutputTo(string path)
     {
         // A fresh log per start: download progress and the error tail must never come from an earlier run.
         TextWriter writer = TextWriter.Synchronized(new StreamWriter(new FileStream(path, FileMode.Create,
             FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true });
-        Process.OutputDataReceived += (_, e) => { if (e.Data is not null) writer.WriteLine(e.Data); };
-        Process.ErrorDataReceived += (_, e) => { if (e.Data is not null) writer.WriteLine(e.Data); };
-        Process.Exited += (_, _) => writer.Dispose();
-        Process.EnableRaisingEvents = true;
+        // Close the log only when both streams reached their end (Data == null). Exited can fire before the last lines
+        // are read, and those last lines are the error that explains the exit.
+        int open = 2;
+        void Write(DataReceivedEventArgs e)
+        {
+            if (e.Data is not null) writer.WriteLine(e.Data);
+            else if (Interlocked.Decrement(ref open) == 0) writer.Dispose();
+        }
+        Process.OutputDataReceived += (_, e) => Write(e);
+        Process.ErrorDataReceived += (_, e) => Write(e);
         Process.BeginOutputReadLine();
         Process.BeginErrorReadLine();
     }

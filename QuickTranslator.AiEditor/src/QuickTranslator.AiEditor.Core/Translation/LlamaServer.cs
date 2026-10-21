@@ -69,7 +69,9 @@ public sealed record LlamaServerLaunch(GgufModelReference Model, int Port, int S
         return [.. Model.ServerArguments(), "--alias", Model.DisplayName,
             "--host", "127.0.0.1", "--port", Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "-ngl", "99", "-c", (ContextPerSlot * Slots).ToString(System.Globalization.CultureInfo.InvariantCulture),
-            "-np", Slots.ToString(System.Globalization.CultureInfo.InvariantCulture), "--jinja"];
+            "-np", Slots.ToString(System.Globalization.CultureInfo.InvariantCulture), "--jinja",
+            // Text translation only: skip the vision projector some GGUF repos ship (its download and its VRAM).
+            "--no-mmproj"];
     }
 }
 
