@@ -6,14 +6,16 @@ namespace QuickTranslator.AiEditor.Core.Translation;
 
 public static class ResegmentationPlanner
 {
+    /// <param name="releaseAiTranslations">Retranslating from scratch: segments that only hold AI attempts may be split anew;
+    /// user drafts, approvals and edits still pin their boundaries.</param>
     public static ResegmentationPreview Preview(ChapterDocument chapter, SegmenterOptions options,
-        bool allowRecoverableCheckpoint = false)
+        bool allowRecoverableCheckpoint = false, bool releaseAiTranslations = false)
     {
         ArgumentNullException.ThrowIfNull(chapter);
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
         EnsureQueueIdle(chapter, allowRecoverableCheckpoint);
-        Build(chapter, options, out List<TranslationSegment> proposed, out int retained,
+        Build(chapter, options, releaseAiTranslations, out List<TranslationSegment> proposed, out int retained,
             out int protectedCount, out int regions, out List<string> warnings);
         bool changed = !chapter.Segments.Select(segment => segment.Id).SequenceEqual(proposed.Select(segment => segment.Id));
         return new(chapter.Segments.Select(segment => segment.Id).ToArray(), options with { }, chapter.Segments.Count, proposed.Count,
@@ -21,7 +23,7 @@ public static class ResegmentationPlanner
     }
 
     public static ChapterDocument Apply(ChapterDocument chapter, ResegmentationPreview preview,
-        bool confirmed, DateTimeOffset changedAt, bool allowRecoverableCheckpoint = false)
+        bool confirmed, DateTimeOffset changedAt, bool allowRecoverableCheckpoint = false, bool releaseAiTranslations = false)
     {
         ArgumentNullException.ThrowIfNull(chapter);
         ArgumentNullException.ThrowIfNull(preview);
@@ -30,7 +32,7 @@ public static class ResegmentationPlanner
             throw new InvalidOperationException("Chương đã thay đổi sau khi tạo preview chia lại đoạn. Hãy xem trước lại.");
         if (preview.ProtectedSegmentCount > 0 && !confirmed)
             throw new SegmentationConfirmationRequiredException();
-        Build(chapter, preview.Options, out List<TranslationSegment> proposed, out _, out _, out _, out _);
+        Build(chapter, preview.Options, releaseAiTranslations, out List<TranslationSegment> proposed, out _, out _, out _, out _);
         ChapterDocument candidate = DocumentJson.Clone(chapter);
         if (preview.BoundariesChanged)
         {
@@ -53,7 +55,7 @@ public static class ResegmentationPlanner
         return candidate;
     }
 
-    private static void Build(ChapterDocument chapter, SegmenterOptions options,
+    private static void Build(ChapterDocument chapter, SegmenterOptions options, bool releaseAi,
         out List<TranslationSegment> proposed, out int retained, out int protectedCount,
         out int regionCount, out List<string> warnings)
     {
@@ -65,7 +67,7 @@ public static class ResegmentationPlanner
         for (int index = 0; index < chapter.Segments.Count;)
         {
             TranslationSegment current = chapter.Segments[index];
-            if (HasProtectedData(current))
+            if (Pins(current, releaseAi))
             {
                 TranslationSegment anchor = DocumentJson.CloneSegment(current);
                 proposed.Add(anchor);
@@ -79,7 +81,7 @@ public static class ResegmentationPlanner
             }
 
             int startIndex = index;
-            while (index < chapter.Segments.Count && !HasProtectedData(chapter.Segments[index])) index++;
+            while (index < chapter.Segments.Count && !Pins(chapter.Segments[index], releaseAi)) index++;
             TranslationSegment[] oldRegion = chapter.Segments.Skip(startIndex).Take(index - startIndex).ToArray();
             string source = string.Concat(oldRegion.Select(segment => segment.SourceText));
             int baseOffset = oldRegion[0].StartUtf16;
@@ -108,6 +110,11 @@ public static class ResegmentationPlanner
                 StringComparison.Ordinal))
             throw new InvalidDataException("Kế hoạch chia lại đoạn không tái tạo chính xác nguyên văn.");
     }
+
+    private static bool Pins(TranslationSegment segment, bool releaseAi) => releaseAi ? HasUserData(segment) : HasProtectedData(segment);
+
+    private static bool HasUserData(TranslationSegment segment) => segment.UserDraft is not null || segment.Approvals.Count > 0 ||
+        segment.DraftHistory.Count > 0 || segment.PreservedText is not null || segment.ProtectedByPreviousEdit || segment.NormalizationHistory.Count > 0;
 
     internal static bool HasProtectedData(TranslationSegment segment) => segment.Attempts.Count > 0 ||
         segment.UserDraft is not null || segment.Approvals.Count > 0 || segment.DraftHistory.Count > 0 ||

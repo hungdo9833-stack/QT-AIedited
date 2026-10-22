@@ -150,6 +150,7 @@ public sealed class ProjectTranslationCoordinator
             CompletedHanCharacters = CompletedHanCharacters(chapter),
             RetranslateAll = retranslate
         };
+        if (retranslate) item.CompletedSegments = CompletedSegmentsFor(chapter, item);
         item.RecordEligibilityDiagnostic(TranslationEligibilityDiagnostics.Analyze(chapter,
             retranslate ? QueueMode.AllSegments : QueueMode.MissingSegments, TranslationEligibilityDiagnosticStage.Plan));
         return item;
@@ -192,6 +193,8 @@ public sealed class ProjectTranslationCoordinator
                     item.Error = null; item.FinishedAt = null; item.ChapterQueueRunId = null; item.AssignedWorkerId = null;
                     PrepareItemMetricsForRetry(item);
                     item.RetranslateAll = true;
+                    // Count progress from the new run; preflight recounts kept user segments once the chapter starts.
+                    item.StartedAt = null; item.CompletedSegments = 0;
                     reopened++;
                 }
                 else if (item.ChapterQueueRunId is null) item.RetranslateAll = true; // Not started yet: retranslate when it starts.
@@ -930,7 +933,7 @@ public sealed class ProjectTranslationCoordinator
                     target.Disposition = ProjectTranslationItemDisposition.MissingEligibility;
                     target.Error = EligibilityFailureMessage(eligibility);
                 }
-                target.CompletedSegments = CompletedSegments(chapter);
+                target.CompletedSegments = CompletedSegmentsFor(chapter, target);
                 target.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
                 target.FinishedAt = DateTimeOffset.UtcNow;
             }, CancellationToken.None).ConfigureAwait(false);
@@ -1091,7 +1094,7 @@ public sealed class ProjectTranslationCoordinator
                 ProjectTranslationItem target = job.Items.Single(value => value.ChapterId == chapter.Id);
                 target.ProtectedFingerprint = protectedFingerprint;
                 target.TotalSegments = chapter.Segments.Count;
-                target.CompletedSegments = CompletedSegments(chapter);
+                target.CompletedSegments = CompletedSegmentsFor(chapter, target);
                 target.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
                 target.Error = null;
             }, cancellationToken).ConfigureAwait(false);
@@ -1322,7 +1325,7 @@ public sealed class ProjectTranslationCoordinator
             if (!hasWorker && current is not null)
             {
                 current.TotalSegments = chapter.Segments.Count;
-                current.CompletedSegments = CompletedSegments(chapter);
+                current.CompletedSegments = CompletedSegmentsFor(chapter, current);
                 current.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
                 current.CompletedHanCharacters = CompletedHanCharacters(chapter);
             }
@@ -1337,7 +1340,7 @@ public sealed class ProjectTranslationCoordinator
             ProjectTranslationItem? item = job.Items.SingleOrDefault(value => value.ChapterId == chapterId);
             if (item is null) return;
             item.TotalSegments = chapter.Segments.Count;
-            item.CompletedSegments = CompletedSegments(chapter);
+            item.CompletedSegments = CompletedSegmentsFor(chapter, item);
             item.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
             item.CompletedHanCharacters = CompletedHanCharacters(chapter);
             if (item.AssignedWorkerId is not Guid workerId) return;
@@ -1454,7 +1457,7 @@ public sealed class ProjectTranslationCoordinator
         ProjectTranslationItem item = job.Items.Single(value => value.ChapterId == chapterId);
         item.Status = status;
         item.TotalSegments = chapter.Segments.Count;
-        item.CompletedSegments = CompletedSegments(chapter);
+        item.CompletedSegments = CompletedSegmentsFor(chapter, item);
         item.ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
         item.CompletedHanCharacters = CompletedHanCharacters(chapter);
         item.SourceFingerprint = ProjectTranslationFingerprints.Source(chapter);
@@ -1569,6 +1572,16 @@ public sealed class ProjectTranslationCoordinator
 
     private static int CompletedSegments(ChapterDocument chapter) => chapter.Segments.Count(segment =>
         segment.Status == SegmentStatus.Approved || segment.HasCompletedTranslation);
+
+    /// <summary>
+    /// Progress of one queue item. A retranslated chapter counts only segments translated since the item started, plus
+    /// the ones the user wrote or approved (those are kept, not sent again); older AI translations do not count.
+    /// </summary>
+    internal static int CompletedSegmentsFor(ChapterDocument chapter, ProjectTranslationItem item) => !item.RetranslateAll
+        ? CompletedSegments(chapter)
+        : chapter.Segments.Count(segment => segment.Status == SegmentStatus.Approved || segment.UserDraft is not null ||
+            item.StartedAt is DateTimeOffset started && segment.HasCompletedTranslation && segment.Attempts.Any(attempt =>
+                attempt.Outcome == AttemptOutcome.Completed && attempt.StartedAt >= started));
 
     private static int CompletedHanCharacters(ChapterDocument chapter) => chapter.Segments
         .Where(segment => segment.Status == SegmentStatus.Approved || segment.HasCompletedTranslation)

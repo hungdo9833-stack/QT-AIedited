@@ -89,6 +89,43 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
     }
 
     [Fact]
+    public async Task Retranslating_a_translated_chapter_resplits_it_with_the_worker_segment_size_and_counts_the_new_run()
+    {
+        (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =
+            await CreateProjectAsync(1);
+        var small = new ProjectTranslationWorkerDefinition(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault("local-model"),
+            new CapturingClient(), Model("local-model", 4096, 1024, 0.1, 300), Segmentation(80, 120, 160));
+        var first = new ProjectTranslationCoordinator(session, _repository, [small], load);
+        await first.StartAsync(await first.PlanAsync(ids));
+        ChapterDocument translated = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        Assert.All(translated.Segments, segment => Assert.True(segment.HasCompletedTranslation));
+        TranslationSegment edited = translated.Segments[^1];
+        edited.UserDraft = "Câu người dùng sửa";
+        edited.DraftRevision = 1;
+        await _repository.UpdateChapterAsync(session, translated);
+
+        var client = new CapturingClient();
+        SegmenterOptions large = Segmentation(300, 400, 500);
+        var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault("local-model"),
+            client, Model("local-model", 4096, 1024, 0.1, 300), large);
+        var coordinator = new ProjectTranslationCoordinator(session, _repository, [worker], load);
+        ProjectTranslationJob plan = await coordinator.PlanAsync(ids, retranslateAll: new HashSet<Guid>(ids));
+        Assert.Equal(1, plan.Items[0].CompletedSegments); // Only the user's segment; old AI translations do not count.
+        await coordinator.StartAsync(plan);
+
+        ChapterDocument after = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        Assert.True(after.Segments.Count < translated.Segments.Count);
+        Assert.Equal(large, after.SegmentationOptions);
+        Assert.Equal("Câu người dùng sửa", after.Segments.Single(segment => segment.Id == edited.Id).UserDraft);
+        Assert.NotEmpty(after.SegmentationHistory);
+        ProjectTranslationItem item = coordinator.CurrentJob!.Items[0];
+        Assert.Equal(ProjectTranslationItemStatus.Completed, item.Status);
+        Assert.Equal(after.Segments.Count, item.TotalSegments);
+        Assert.Equal(after.Segments.Count, item.CompletedSegments);
+        Assert.Equal(after.Segments.Count - 1, client.Options.Count);
+    }
+
+    [Fact]
     public async Task Failure_after_preflight_checkpoint_reports_interrupted_without_calling_provider()
     {
         (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =

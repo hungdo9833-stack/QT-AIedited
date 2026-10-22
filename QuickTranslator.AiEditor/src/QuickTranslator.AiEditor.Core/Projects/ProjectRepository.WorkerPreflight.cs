@@ -34,18 +34,20 @@ public sealed partial class ProjectRepository
                 ProjectTranslationFingerprints.Protected(current) != expectedItem.ProtectedFingerprint)
                 throw new InvalidOperationException("Chapter đã đổi ngoài Queue trước worker preflight; không tự chia lại.");
 
+            // Retranslating from scratch: earlier AI translations do not pin the old boundaries, so the chapter takes this
+            // worker's segment size. Only what the user wrote or approved keeps its boundaries. Old segments stay in history.
+            bool releaseAi = expectedItem.RetranslateAll;
             ResegmentationPreview preview = ResegmentationPlanner.Preview(current, segmentation,
-                allowRecoverableCheckpoint: true);
+                allowRecoverableCheckpoint: true, releaseAiTranslations: releaseAi);
             ChapterDocument candidate = ResegmentationPlanner.Apply(current, preview,
                 confirmed: preview.ProtectedSegmentCount > 0, DateTimeOffset.UtcNow,
-                allowRecoverableCheckpoint: true);
+                allowRecoverableCheckpoint: true, releaseAiTranslations: releaseAi);
             ProjectTranslationJob proposed = ProjectTranslationJobStore.Clone(expectedJob);
             ProjectTranslationItem item = proposed.Items.Single(value => value.ChapterId == chapterId);
             item.SourceFingerprint = ProjectTranslationFingerprints.Source(candidate);
             item.ProtectedFingerprint = ProjectTranslationFingerprints.Protected(candidate);
             item.TotalSegments = candidate.Segments.Count;
-            item.CompletedSegments = candidate.Segments.Count(segment => segment.HasCompletedTranslation ||
-                segment.Status == SegmentStatus.Approved);
+            item.CompletedSegments = ProjectTranslationCoordinator.CompletedSegmentsFor(candidate, item);
             item.ErrorSegments = candidate.Segments.Count(segment => segment.Status == SegmentStatus.Error);
             item.SourceHanCharacters = candidate.Segments.Sum(segment => TextSegmenter.CountHanCharacters(segment.SourceText));
             item.AppliedSegmentationOptions = segmentation with { };
