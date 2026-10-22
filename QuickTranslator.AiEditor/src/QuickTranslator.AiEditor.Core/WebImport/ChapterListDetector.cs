@@ -7,7 +7,7 @@ internal static class ChapterListDetector
     internal static IReadOnlyList<WebChapterLink> Detect(WebPage page)
     {
         var links = page.Document.QuerySelectorAll("a[href]")
-            .Select(a => new { Title = a.TextContent.Trim(), Url = WebPage.Resolve(page.Url, a.GetAttribute("href")) })
+            .Select(a => new { Title = LinkTitle(a), Url = WebPage.Resolve(page.Url, a.GetAttribute("href")) })
             .Where(a => a.Url is not null && WebPage.SameHost(page.Url, a.Url) && a.Title.Length > 0)
             .Select(a => new WebChapterLink(0, a.Title, a.Url!))
             // A "开始阅读" button and the real "第1回 …" entry share one URL: keep the first position but the title that
@@ -98,6 +98,23 @@ internal static class ChapterListDetector
     {
         var match = Regex.Match(title, @"(\d+)\s*[-－~～—至]\s*\d+");
         return match.Success && long.TryParse(match.Groups[1].Value, out var n) ? n : null;
+    }
+
+    // A table-of-contents row often packs several cells into one link (seen live: "第 2 章" + "第2回 标题" + "10-03" posting
+    // date). Join the cells with spaces, drop a trailing date and a leading counter that only repeats the chapter's own 第N.
+    internal static string LinkTitle(AngleSharp.Dom.IElement anchor)
+    {
+        var cells = new List<string>();
+        void Collect(AngleSharp.Dom.INode node)
+        {
+            if (node is AngleSharp.Dom.IText text) { if (text.Data.Trim() is { Length: > 0 } cell) cells.Add(cell); return; }
+            foreach (var child in node.ChildNodes) Collect(child);
+        }
+        Collect(anchor);
+        string title = Regex.Replace(string.Join(" ", cells), @"\s+", " ").Trim();
+        title = Regex.Replace(title, @"\s*(?:\d{4}[-/.])?\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$", "").Trim();
+        var counter = Regex.Match(title, @"^第\s*\d+\s*[章回节節]\s*(?=第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節])");
+        return counter.Success ? title[counter.Length..].Trim() : title;
     }
 
     internal static bool HasChapterNumber(string title) =>

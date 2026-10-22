@@ -112,6 +112,20 @@ public sealed class WebNovelImporterTests
     }
 
     [Fact]
+    public async Task Toc_row_cells_become_a_clean_title_without_counter_or_posting_date()
+    {
+        // Seen live: each row links "<span>第 N 章</span><span>第N回 标题</span><span>10-03</span>".
+        string rows = string.Concat(Enumerable.Range(1, 5).Select(i =>
+            $"<a href='/novel/test/chapter/{i}'><span>第 {i} 章</span><span>第{i}回 占位标题</span><span>10-0{i}</span></a>"));
+        rows += "<a href='/novel/test/chapter/6'><span>第 6 章</span><span>楔子</span><span>2026-10-06 12:30</span></a>";
+        using var handler = new FakeHandler(_ => Html("<h1>测试书名</h1>" + rows));
+        using var importer = new WebNovelImporter(Options, handler);
+        var analysis = await importer.AnalyzeAsync(Url("novel/test"));
+        Assert.Equal(Enumerable.Range(1, 5).Select(i => $"第{i}回 占位标题").Append("第 6 章 楔子"),
+            analysis.Chapters.Select(chapter => chapter.Title));
+    }
+
+    [Fact]
     public async Task Directory_with_out_of_order_title_numbers_is_ordered_by_its_urls()
     {
         // Seen live on a dir.html: one title carries an unrelated number, which used to reject the whole list.
