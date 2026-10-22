@@ -13,6 +13,37 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 
 public sealed class ProjectTranslationQueueUiTests
 {
+    [Fact]
+    public Task Queueing_a_chapter_while_the_queue_is_paused_appends_it() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        var first = await fixture.AddChapterAsync("Một", 1);
+        var second = await fixture.AddChapterAsync("Hai", 2);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<LlmCompletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Client.Respond = (call, _) =>
+        {
+            if (call == 1) { started.TrySetResult(); return release.Task; }
+            return Task.FromResult(FakeClient.Completion("Bản dịch tiếp theo."));
+        };
+        await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { first.Id });
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
+        Task pause = coordinator.PauseAsync();
+        release.TrySetResult(FakeClient.Completion("Checkpoint."));
+        await pause;
+        Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob?.Status);
+
+        await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { second.Id });
+
+        coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator"); // Rebuilt for the saved job.
+        ProjectTranslationItem appended = Assert.Single(coordinator.CurrentJob!.Items, item => item.ChapterId == second.Id);
+        Assert.Equal(2, appended.Order);
+        Assert.Equal(ProjectTranslationItemStatus.Pending, appended.Status);
+        Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob.Status); // Waits for Tiếp tục.
+    });
+
     [Theory]
     [InlineData(MessageBoxResult.Yes, 2)]
     [InlineData(MessageBoxResult.No, 1)]

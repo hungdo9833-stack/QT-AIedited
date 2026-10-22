@@ -273,6 +273,51 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task Paused_job_takes_new_chapters_at_its_end_and_reopens_finished_ones_for_retranslation()
+    {
+        await WithProjectAsync(3, async context =>
+        {
+            var first = new ProjectQueueFakeClient();
+            var initial = context.Coordinator(first);
+            await initial.StartAsync(await initial.PlanAsync([context.ChapterIds[0]]));
+            var store = new ProjectTranslationJobStore(context.Session);
+            ProjectTranslationJob saved = await store.SaveNewAsync(await context.Coordinator(first).PlanAsync(context.ChapterIds.Take(2)));
+            ProjectTranslationItem done = saved.Items.Single(item => item.ChapterId == context.ChapterIds[0]);
+            done.Status = ProjectTranslationItemStatus.Completed;
+            done.Disposition = ProjectTranslationItemDisposition.AlreadyTranslated;
+            done.FinishedAt = DateTimeOffset.UtcNow;
+            saved.Status = ProjectTranslationJobStatus.Paused;
+            await store.SaveAsync(saved);
+
+            var client = new ProjectQueueFakeClient();
+            var coordinator = context.Coordinator(client);
+            await coordinator.LoadAsync();
+            ProjectTranslationAppendResult result = await coordinator.AppendAsync(
+                [context.ChapterIds[0], context.ChapterIds[2]], new HashSet<Guid> { context.ChapterIds[0] });
+
+            Assert.Equal(1, result.Added);
+            Assert.Equal(1, result.Reopened);
+            Assert.Equal(3, coordinator.CurrentJob!.Items.Single(item => item.ChapterId == context.ChapterIds[2]).Order);
+            await coordinator.ResumeAsync();
+            Assert.Equal(3, client.Calls); // Chapter 1 again (retranslation), chapter 2, then the appended chapter 3.
+            Assert.All(coordinator.CurrentJob!.Items, item => Assert.Equal(ProjectTranslationItemStatus.Completed, item.Status));
+            ChapterDocument again = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[0])).Chapter;
+            Assert.Equal(2, again.Segments[0].Attempts.Count(attempt => attempt.Outcome == AttemptOutcome.Completed));
+        });
+    }
+
+    [Fact]
+    public async Task Append_is_refused_while_the_job_runs_or_after_it_completed()
+    {
+        await WithProjectAsync(2, async context =>
+        {
+            var coordinator = context.Coordinator(new ProjectQueueFakeClient());
+            await coordinator.StartAsync(await coordinator.PlanAsync([context.ChapterIds[0]]));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.AppendAsync([context.ChapterIds[1]]));
+        });
+    }
+
+    [Fact]
     public async Task Approved_and_user_drafts_are_skipped_and_preserved()
     {
         await WithProjectAsync(3, async context =>

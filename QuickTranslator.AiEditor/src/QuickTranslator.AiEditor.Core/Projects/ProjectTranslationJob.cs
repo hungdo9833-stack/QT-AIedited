@@ -244,6 +244,9 @@ public sealed record ProjectTranslationWorkerProgress(Guid WorkerId, string Name
     public int Slots { get; init; } = 1;
 }
 
+/// <summary>Chapters appended at the end of the job, and chapters already in it reopened for retranslation.</summary>
+public sealed record ProjectTranslationAppendResult(int Added, int Reopened);
+
 public sealed record ProjectTranslationAggregateMetrics(double HanCharactersPerMinute,
     TimeSpan? EstimatedRemaining, decimal EstimatedCost, double TotalTokensPerSecond = 0,
     double PerSlotTokensPerSecond = 0, int Slots = 0);

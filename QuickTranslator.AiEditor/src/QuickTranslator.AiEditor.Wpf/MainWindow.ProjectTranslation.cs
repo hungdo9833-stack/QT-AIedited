@@ -93,10 +93,16 @@ public partial class MainWindow
                 ? await RebuildParallelCoordinatorAsync(resumable, loadExisting: resumable is not null)
                 : await EnsureProjectTranslationCoordinatorAsync();
             ProjectTranslationJob? existing = coordinator.CurrentJob;
-            if (coordinator.IsRunning || existing?.Status is ProjectTranslationJobStatus.Paused or
-                ProjectTranslationJobStatus.Interrupted or ProjectTranslationJobStatus.Ready)
+            if (coordinator.IsRunning)
             {
                 HostProjectTranslationView(coordinator, null);
+                SetStatus("Hàng đợi đang dịch; hãy Tạm dừng rồi thêm chương.");
+                return;
+            }
+            if (existing?.Status is ProjectTranslationJobStatus.Paused or
+                ProjectTranslationJobStatus.Interrupted or ProjectTranslationJobStatus.Ready)
+            {
+                await AppendToProjectTranslationQueueAsync(coordinator, existing, chapterIds);
                 return;
             }
             if (AskRetranslation(chapterIds) is not { } retranslate) return;
@@ -111,6 +117,32 @@ public partial class MainWindow
             HostProjectTranslationView(coordinator, plan);
         }
         finally { EndUiOperation(); }
+    }
+
+    /// <summary>
+    /// A paused, interrupted or ready job gets the chosen chapters at its end (asking about retranslation first) instead
+    /// of ignoring them. Chapters still waiting in the job are left as they are; Tiếp tục then translates the rest.
+    /// </summary>
+    private async Task AppendToProjectTranslationQueueAsync(ProjectTranslationCoordinator coordinator,
+        ProjectTranslationJob existing, IReadOnlyList<Guid> chapterIds)
+    {
+        Guid[] candidates = chapterIds.Where(id => existing.Items.FirstOrDefault(item => item.ChapterId == id) is not { } item ||
+            item.Status is ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Skipped or
+                ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview or ProjectTranslationItemStatus.Cancelled)
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            HostProjectTranslationView(coordinator, null);
+            SetStatus("Các chương đã chọn đều đang chờ trong hàng đợi. Bấm Tiếp tục để dịch.");
+            return;
+        }
+        if (AskRetranslation(candidates) is not { } retranslate) return;
+        ProjectTranslationAppendResult result = await coordinator.AppendAsync(candidates, retranslate);
+        HostProjectTranslationView(coordinator, null);
+        SetStatus(result.Added == 0 && result.Reopened == 0
+            ? "Không có chương mới để thêm: các chương đã chọn đã được dịch trong hàng đợi này."
+            : $"Đã thêm {result.Added} chương vào cuối hàng đợi" +
+              (result.Reopened > 0 ? $", mở lại {result.Reopened} chương để dịch lại" : "") + ". Bấm Tiếp tục để dịch.");
     }
 
     /// <summary>

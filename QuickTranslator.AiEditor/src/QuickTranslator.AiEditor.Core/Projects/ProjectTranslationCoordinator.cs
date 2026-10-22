@@ -100,29 +100,8 @@ public sealed class ProjectTranslationCoordinator
             .OrderBy(entry => entry.Number).ToArray();
         var items = new List<ProjectTranslationItem>(entries.Length);
         for (int index = 0; index < entries.Length; index++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            ChapterDocument chapter = (await _repository.LoadChapterAsync(_session, entries[index].ChapterId, cancellationToken)
-                .ConfigureAwait(false)).Chapter;
-            var item = new ProjectTranslationItem
-            {
-                ChapterId = chapter.Id,
-                Number = entries[index].Number,
-                Order = index + 1,
-                Title = entries[index].VietnameseTitle,
-                SourceFingerprint = ProjectTranslationFingerprints.Source(chapter),
-                ProtectedFingerprint = ProjectTranslationFingerprints.Protected(chapter),
-                TotalSegments = chapter.Segments.Count,
-                CompletedSegments = CompletedSegments(chapter),
-                ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error),
-                SourceHanCharacters = chapter.Segments.Sum(segment => CountHan(segment.SourceText)),
-                CompletedHanCharacters = CompletedHanCharacters(chapter),
-                RetranslateAll = retranslateAll?.Contains(chapter.Id) == true
-            };
-            item.RecordEligibilityDiagnostic(TranslationEligibilityDiagnostics.Analyze(chapter,
-                item.RetranslateAll ? QueueMode.AllSegments : QueueMode.MissingSegments, TranslationEligibilityDiagnosticStage.Plan));
-            items.Add(item);
-        }
+            items.Add(await CreateItemAsync(entries[index], index + 1, retranslateAll?.Contains(entries[index].ChapterId) == true,
+                cancellationToken).ConfigureAwait(false));
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var job = new ProjectTranslationJob
         {
@@ -148,6 +127,78 @@ public sealed class ProjectTranslationCoordinator
         };
         job.Validate();
         return job;
+    }
+
+    private async Task<ProjectTranslationItem> CreateItemAsync(ProjectChapterEntry entry, int order, bool retranslate,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ChapterDocument chapter = (await _repository.LoadChapterAsync(_session, entry.ChapterId, cancellationToken)
+            .ConfigureAwait(false)).Chapter;
+        var item = new ProjectTranslationItem
+        {
+            ChapterId = chapter.Id,
+            Number = entry.Number,
+            Order = order,
+            Title = entry.VietnameseTitle,
+            SourceFingerprint = ProjectTranslationFingerprints.Source(chapter),
+            ProtectedFingerprint = ProjectTranslationFingerprints.Protected(chapter),
+            TotalSegments = chapter.Segments.Count,
+            CompletedSegments = CompletedSegments(chapter),
+            ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error),
+            SourceHanCharacters = chapter.Segments.Sum(segment => CountHan(segment.SourceText)),
+            CompletedHanCharacters = CompletedHanCharacters(chapter),
+            RetranslateAll = retranslate
+        };
+        item.RecordEligibilityDiagnostic(TranslationEligibilityDiagnostics.Analyze(chapter,
+            retranslate ? QueueMode.AllSegments : QueueMode.MissingSegments, TranslationEligibilityDiagnosticStage.Plan));
+        return item;
+    }
+
+    /// <summary>
+    /// Adds chapters to the end of a job that is paused, interrupted or ready (never while it runs). A chapter already
+    /// in the job keeps its place: if it finished or was skipped and is chosen for retranslation it goes back to
+    /// Pending; if it has not started yet it only takes the retranslation choice. Resume then continues as usual.
+    /// </summary>
+    public async Task<ProjectTranslationAppendResult> AppendAsync(IEnumerable<Guid> chapterIds,
+        IReadOnlySet<Guid>? retranslateAll = null, CancellationToken cancellationToken = default)
+    {
+        if (IsRunning) throw new InvalidOperationException("Hãy tạm dừng hàng đợi trước khi thêm chương.");
+        ProjectTranslationJob current = CurrentJob ?? await LoadAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Project chưa có hàng đợi để thêm chương.");
+        if (current.Status is not (ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted or
+            ProjectTranslationJobStatus.Ready))
+            throw new InvalidOperationException("Chỉ thêm chương vào hàng đợi đang tạm dừng, bị gián đoạn hoặc sẵn sàng.");
+        HashSet<Guid> selected = chapterIds.ToHashSet();
+        HashSet<Guid> inJob = current.Items.Select(item => item.ChapterId).ToHashSet();
+        ProjectChapterEntry[] entries = _session.Manifest.Chapters
+            .Where(entry => entry.DeletedAt is null && selected.Contains(entry.ChapterId) && !inJob.Contains(entry.ChapterId))
+            .OrderBy(entry => entry.Number).ToArray();
+        int order = current.Items.Count == 0 ? 0 : current.Items.Max(item => item.Order);
+        var added = new List<ProjectTranslationItem>(entries.Length);
+        foreach (ProjectChapterEntry entry in entries)
+            added.Add(await CreateItemAsync(entry, ++order, retranslateAll?.Contains(entry.ChapterId) == true,
+                cancellationToken).ConfigureAwait(false));
+        int reopened = 0;
+        await PersistAsync(job =>
+        {
+            foreach (ProjectTranslationItem item in job.Items.Where(item => retranslateAll?.Contains(item.ChapterId) == true))
+            {
+                if (item.Status is ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Skipped or
+                    ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview or ProjectTranslationItemStatus.Cancelled)
+                {
+                    item.Status = ProjectTranslationItemStatus.Pending;
+                    item.Disposition = ProjectTranslationItemDisposition.None;
+                    item.Error = null; item.FinishedAt = null; item.ChapterQueueRunId = null; item.AssignedWorkerId = null;
+                    PrepareItemMetricsForRetry(item);
+                    item.RetranslateAll = true;
+                    reopened++;
+                }
+                else if (item.ChapterQueueRunId is null) item.RetranslateAll = true; // Not started yet: retranslate when it starts.
+            }
+            job.Items.AddRange(added);
+        }, cancellationToken).ConfigureAwait(false);
+        return new(added.Count, reopened);
     }
 
     public Task StartAsync(ProjectTranslationJob plan, CancellationToken cancellationToken = default)
