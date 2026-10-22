@@ -533,7 +533,9 @@ public partial class GpuManagerWindow : Window
 
     private void OnChoosePrivateKey(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog { Filter = "SSH private key|id_*;*.pem;*.key|Tất cả tệp|*.*" };
+        // Keys made with ssh-keygen -f are often named <name>_ed25519 / _rsa (no id_ prefix); start in ~/.ssh.
+        var dialog = new OpenFileDialog { Filter = "SSH private key|id_*;*_ed25519;*_rsa;*_ecdsa;*.pem;*.key|Tất cả tệp|*.*",
+            InitialDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh") };
         if (dialog.ShowDialog(this) != true) return;
         _loadedPrivateKey = File.ReadAllText(dialog.FileName);
         PrivateKeyInput.Password = "••••••••";
