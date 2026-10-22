@@ -353,6 +353,22 @@ public sealed class ProjectTranslationCoordinator
         await running.ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Empties the queue: the saved job is deleted so the next selection starts a new one. Segments already translated
+    /// stay in their chapters. Only allowed while the queue is not running.
+    /// </summary>
+    public async Task ClearAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (_runTask is { IsCompleted: false })
+                throw new InvalidOperationException("Hàng đợi đang dịch; hãy Tạm dừng trước khi xóa hàng đợi.");
+        }
+        await _store.DeleteAsync(cancellationToken).ConfigureAwait(false);
+        lock (_sync) _job = null;
+        Notify();
+    }
+
     public async Task CancelPendingAsync()
     {
         Task? running;

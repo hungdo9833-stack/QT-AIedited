@@ -318,6 +318,34 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task Clearing_a_paused_job_deletes_it_keeps_translations_and_allows_a_new_plan()
+    {
+        await WithProjectAsync(3, async context =>
+        {
+            var client = new ProjectQueueFakeClient();
+            var initial = context.Coordinator(client);
+            await initial.StartAsync(await initial.PlanAsync([context.ChapterIds[0]]));
+            var store = new ProjectTranslationJobStore(context.Session);
+            ProjectTranslationJob saved = await store.SaveNewAsync(await context.Coordinator(client).PlanAsync(context.ChapterIds.Take(2)));
+            saved.Status = ProjectTranslationJobStatus.Paused;
+            await store.SaveAsync(saved);
+
+            var coordinator = context.Coordinator(client);
+            await coordinator.LoadAsync();
+            await coordinator.ClearAsync();
+
+            Assert.Null(coordinator.CurrentJob);
+            Assert.False(File.Exists(store.PathName));
+            Assert.Null(await context.Coordinator(client).LoadAsync());
+            ChapterDocument translated = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[0])).Chapter;
+            Assert.Contains(translated.Segments[0].Attempts, attempt => attempt.Outcome == AttemptOutcome.Completed);
+            ProjectTranslationJob plan = await coordinator.PlanAsync([context.ChapterIds[2]]);
+            await coordinator.StartAsync(plan);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+        });
+    }
+
+    [Fact]
     public async Task Approved_and_user_drafts_are_skipped_and_preserved()
     {
         await WithProjectAsync(3, async context =>

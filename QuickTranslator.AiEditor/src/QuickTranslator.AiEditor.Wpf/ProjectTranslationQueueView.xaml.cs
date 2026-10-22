@@ -128,8 +128,9 @@ public partial class ProjectTranslationQueueView : UserControl
         {
             _rows.Clear();
             _rowsByChapter.Clear();
-            StatusText.Text = "Project chưa có translation job.";
+            StatusText.Text = "Hàng đợi trống. Chọn chương trong Quản lý chương rồi bấm Dịch các chương đã chọn.";
             StartButton.Visibility = Visibility.Collapsed;
+            ClearQueueButton.Visibility = Visibility.Collapsed;
             ResumeButton.Visibility = Visibility.Collapsed;
             PauseButton.Visibility = Visibility.Collapsed;
             OverflowButton.Visibility = Visibility.Collapsed;
@@ -220,6 +221,8 @@ public partial class ProjectTranslationQueueView : UserControl
             _commandBusy ? busy : "Hàng đợi không ở trạng thái tạm dừng hoặc gián đoạn.", "Tiếp tục hàng đợi.");
         SetButtonState(CancelButton, !_commandBusy && runningQueue,
             _commandBusy ? busy : "Hàng đợi chưa chạy.", "Dừng request hiện tại; các đoạn đã lưu được giữ lại.");
+        SetButtonState(ClearQueueButton, !_commandBusy && !runningQueue,
+            _commandBusy ? busy : "Hãy Tạm dừng hàng đợi trước khi xóa.", "Xóa toàn bộ hàng đợi; bản dịch đã lưu trong chương được giữ nguyên.");
         OverflowButton.IsEnabled = CancelButton.IsEnabled;
         ToolTipService.SetShowOnDisabled(OverflowButton, true);
         OverflowButton.ToolTip = OverflowButton.IsEnabled ? "Tác vụ khác" : (_commandBusy ? busy : "Hàng đợi chưa chạy.");
@@ -247,6 +250,24 @@ public partial class ProjectTranslationQueueView : UserControl
             (status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted)
             ? Visibility.Visible : Visibility.Collapsed;
         OverflowButton.Visibility = runningQueue ? Visibility.Visible : Visibility.Collapsed;
+        ClearQueueButton.Visibility = runningQueue ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void OnClearQueue(object sender, RoutedEventArgs e)
+    {
+        if (_coordinator.IsRunning || _commandBusy) return;
+        ProjectTranslationJob? job = _coordinator.CurrentJob ?? _plan;
+        int count = job?.Items.Count ?? 0;
+        if (ThemedDialog.Show(Window.GetWindow(this),
+                $"Xóa toàn bộ hàng đợi ({count:N0} chương)?\n\n" +
+                "Các đoạn đã dịch vẫn được giữ trong từng chương. Chương chưa dịch xong sẽ không được dịch tiếp; " +
+                "muốn dịch lại thì chọn chương trong Quản lý chương và bấm Dịch các chương đã chọn.",
+                "Xóa hàng đợi", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        await RunControlAsync(async () =>
+        {
+            _plan = null;
+            await _coordinator.ClearAsync();
+        }, "Đã xóa hàng đợi.");
     }
 
     private static void SetButtonState(Button button, bool enabled, string disabledToolTip, string enabledToolTip)

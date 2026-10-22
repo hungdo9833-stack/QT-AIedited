@@ -89,6 +89,14 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
         return await WriteAsync(saved, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Removes the saved job. Translations already written to chapters are not touched.</summary>
+    public async Task DeleteAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { if (File.Exists(PathName)) File.Delete(PathName); }
+        finally { _gate.Release(); }
+    }
+
     private async Task<ProjectTranslationJob?> ReadCurrentAsync(CancellationToken cancellationToken)
     {
         return await SimpleFileStorage.ReadOptionalAsync(PathName, Decode,

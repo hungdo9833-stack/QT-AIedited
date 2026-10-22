@@ -13,6 +13,7 @@
       <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
         <Button x:Name="StartButton" Content="Dịch" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE768;" Margin="4,0,0,0" Click="OnStart" ToolTip="Bắt đầu dịch hàng đợi" ToolTipService.ShowOnDisabled="True"/>
         <Button x:Name="ResumeButton" Content="Tiếp tục" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE768;" Margin="4,0,0,0" Click="OnResume" ToolTip="Tiếp tục hàng đợi đã tạm dừng hoặc bị gián đoạn" ToolTipService.ShowOnDisabled="True"/>
+        <Button x:Name="ClearQueueButton" Content="Xóa hàng đợi" Style="{StaticResource DangerButton}" ui:ButtonIcon.Glyph="&#xE74D;" Margin="4,0,0,0" Click="OnClearQueue" Visibility="Collapsed" ToolTip="Xóa toàn bộ hàng đợi; bản dịch đã lưu trong chương được giữ nguyên" ToolTipService.ShowOnDisabled="True"/>
         <Button x:Name="PauseButton" Content="Tạm dừng" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE769;" Margin="4,0,0,0" Click="OnPause" ToolTip="Tạm dừng sau khi AI xử lý xong đoạn hiện tại" ToolTipService.ShowOnDisabled="True"/>
         <ToggleButton x:Name="OverflowButton" Margin="4,0,0,0" MinWidth="36" ToolTip="Tác vụ khác" ToolTipService.ShowOnDisabled="True"
                       AutomationProperties.Name="Tác vụ khác" Click="OnToggleOverflow">
