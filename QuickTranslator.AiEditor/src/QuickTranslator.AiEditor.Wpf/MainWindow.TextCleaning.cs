@@ -263,8 +263,12 @@ public partial class MainWindow
                 var rules = BuildRules(loadedChapters);
                 var preview = await Task.Run(() => _batchReplacementEngine.Preview(loadedChapters, rules,
                     selectedScope, _selectedId));
-                previewRows.Clear();
-                foreach (var item in preview) previewRows.Add(new(item, allowProtected.IsChecked == true));
+                // One new collection instead of thousands of Adds: each Add made the filtered view and the grid
+                // react again, which took far longer than the search itself on a whole book.
+                bool includeProtected = allowProtected.IsChecked == true;
+                previewRows = new ObservableCollection<BatchPreviewRow>(preview.Select(item => new BatchPreviewRow(item, includeProtected)));
+                previewGrid.ItemsSource = previewRows;
+                previewView = CollectionViewSource.GetDefaultView(previewRows);
                 status.Text = $"Tìm thấy {preview.Count} vị trí trong {loadedChapters.Count} chương. " +
                     $"Đã chọn sẵn {previewRows.Count(x => x.IsSelected)} ánh xạ xác nhận, không xung đột" +
                     (allowProtected.IsChecked == true ? ", bao gồm nội dung được bảo vệ." : " và không được bảo vệ.");
@@ -639,11 +643,18 @@ public partial class MainWindow
         catch (Exception ex) { ShowError(ex); }
     }
 
+
     private void ShowProjectReport(BatchProjectApplyReport report, string title)
     {
-        string details = string.Join(Environment.NewLine, report.Chapters.Select(x =>
-            $"{(x.Applied ? "ĐÃ GHI" : "CHƯA GHI")} · {x.ChapterTitle} · {x.OccurrencesChanged} vị trí" +
-            (x.Error is null ? "" : " · " + x.Error)));
+        // A summary, then only the chapters that were not written: listing every written chapter made a report
+        // taller than the screen with its OK button out of reach.
+        const int listedFailures = 30;
+        var failed = report.Chapters.Where(x => !x.Applied).ToArray();
+        string details = $"Đã ghi {report.AppliedChapters:N0} chương · {report.Chapters.Where(x => x.Applied).Sum(x => x.OccurrencesChanged):N0} vị trí." +
+            (failed.Length == 0 ? "\nKhông có chương nào lỗi." :
+                $"\nChưa ghi {failed.Length:N0} chương:\n" + string.Join(Environment.NewLine, failed.Take(listedFailures).Select(x =>
+                    $"• {x.ChapterTitle}" + (x.Error is null ? "" : " · " + x.Error))) +
+                (failed.Length > listedFailures ? $"\n… và {failed.Length - listedFailures:N0} chương khác." : ""));
         ThemedDialog.Show(this, details, title,
             MessageBoxButton.OK, report.FailedChapters == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }

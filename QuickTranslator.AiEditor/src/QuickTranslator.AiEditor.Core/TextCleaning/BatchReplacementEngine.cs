@@ -23,12 +23,14 @@ public sealed class BatchReplacementEngine
             .Select(group => new RuleGroup(group.Key, group.ToArray(),
                 group.Select(x => x.Replacement).Distinct(StringComparer.Ordinal).Count() > 1))
             .OrderByDescending(x => x.Find.Length).ThenBy(x => x.Find, StringComparer.Ordinal).ToArray();
+        // Index by first character (longest first): each text position only tries the rules that can start there.
+        var byFirstCharacter = normalized.GroupBy(x => x.Find[0]).ToDictionary(group => group.Key, group => group.ToArray());
         var output = new List<BatchReplacementPreviewItem>();
         foreach (var chapter in chapterList)
         foreach (var segment in chapter.Segments.OrderBy(x => x.Order))
         {
             if (scope == BatchReplacementScope.SelectedSegment && segment.Id != selectedSegmentId) continue;
-            FindMatches(chapter, segment, normalized, output);
+            FindMatches(chapter, segment, byFirstCharacter, output);
         }
         return output;
     }
@@ -192,18 +194,20 @@ public sealed class BatchReplacementEngine
         return (Apply(text, preview), preview.Select(ToChange).ToArray());
     }
 
-    private static void FindMatches(ChapterDocument chapter, TranslationSegment segment, RuleGroup[] rules,
-        List<BatchReplacementPreviewItem> output)
+    private static void FindMatches(ChapterDocument chapter, TranslationSegment segment,
+        Dictionary<char, RuleGroup[]> rulesByFirstCharacter, List<BatchReplacementPreviewItem> output)
     {
         string text = segment.EditableText;
         int offset = 0;
         while (offset < text.Length)
         {
-            var matching = rules.Where(x => offset + x.Find.Length <= text.Length &&
-                text.AsSpan(offset, x.Find.Length).SequenceEqual(x.Find)).ToArray();
-            if (matching.Length == 0) { offset++; continue; }
-            int longest = matching.Max(x => x.Find.Length);
-            var selected = matching.Where(x => x.Find.Length == longest).First();
+            // Candidates are ordered longest first and their Find texts are distinct, so the first match is the longest.
+            RuleGroup? selected = null;
+            if (rulesByFirstCharacter.TryGetValue(text[offset], out RuleGroup[]? candidates))
+                foreach (RuleGroup candidate in candidates)
+                    if (offset + candidate.Find.Length <= text.Length &&
+                        text.AsSpan(offset, candidate.Find.Length).SequenceEqual(candidate.Find)) { selected = candidate; break; }
+            if (selected is null) { offset++; continue; }
             var preferred = selected.Rules.OrderByDescending(x => x.Confirmed)
                 .ThenBy(x => x.Source == ReplacementRuleSource.CharacterProfile ? 0 : 1).First();
             string? replacement = selected.Conflict ? null : preferred.Replacement;

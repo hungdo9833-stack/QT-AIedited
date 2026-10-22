@@ -72,9 +72,16 @@ internal sealed class ThemedDialog : Window
         Buttons = created;
 
         var text = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxWidth = 470, LineHeight = 20, VerticalAlignment = VerticalAlignment.Center };
+        // A long message scrolls inside the dialog: the window never grows past the screen and hides its buttons.
+        var scroller = new ScrollViewer
+        {
+            Content = text, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Focusable = false,
+            MaxHeight = Math.Max(200, SystemParameters.WorkArea.Height * 0.6)
+        };
         var body = new DockPanel { Margin = new Thickness(24, 22, 24, 20) };
         if (ImageGlyph(image) is { } icon) { DockPanel.SetDock(icon, Dock.Left); body.Children.Add(icon); }
-        body.Children.Add(text);
+        body.Children.Add(scroller);
 
         var footerBar = new Border { Padding = new Thickness(24, 12, 24, 12), BorderThickness = new Thickness(0, 1, 0, 0), Child = footer };
         footerBar.SetResourceReference(Border.BackgroundProperty, "PanelAltBrush");

@@ -33,6 +33,17 @@ public sealed class ThemedDialogTests
     });
 
     [Fact]
+    public Task Very_long_message_scrolls_inside_the_dialog_so_its_buttons_stay_on_screen() => StaHost.Run(() =>
+    {
+        string message = string.Join("\n", Enumerable.Range(1, 500).Select(i => $"ĐÃ GHI · Chương {i} · 1 vị trí"));
+        var dialog = Capture(() => ThemedDialog.Show(null, message, "Thay thế nhiều chương"), MessageBoxResult.OK, out _);
+        dialog.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Assert.True(dialog.DesiredSize.Height < SystemParameters.WorkArea.Height,
+            $"Dialog wants {dialog.DesiredSize.Height:N0}px of a {SystemParameters.WorkArea.Height:N0}px work area.");
+        return Task.CompletedTask;
+    });
+
+    [Fact]
     public Task Question_uses_the_primary_style_and_honours_the_default_result() => StaHost.Run(() =>
     {
         var dialog = Capture(() => ThemedDialog.Show(null, "Tiếp tục?", "Hàng đợi", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No),
