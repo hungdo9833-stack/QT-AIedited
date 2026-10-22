@@ -89,8 +89,13 @@ public partial class MainWindow
             await EnsureGpuBackendReadyAsync();
             await SaveCurrentAsync();
             await SaveProjectAssetsAsync();
+            // Adding chapters needs no GPU connection. When the user picked a GPU mode, or a saved worker's profile is
+            // gone, build the workers from the current setup; Tiếp tục then moves the job onto them (asking if needed).
+            bool currentWorkers = _gpuPreferences.ModeExplicitlySelected ||
+                resumable is not null && MissingWorkerProfiles(resumable).Count > 0;
             ProjectTranslationCoordinator coordinator = resumable?.Workers.Count > 0 || resumable is null
-                ? await RebuildParallelCoordinatorAsync(resumable, loadExisting: resumable is not null)
+                ? await RebuildParallelCoordinatorAsync(resumable, loadExisting: resumable is not null,
+                    useCurrentWorkers: currentWorkers)
                 : await EnsureProjectTranslationCoordinatorAsync();
             ProjectTranslationJob? existing = coordinator.CurrentJob;
             if (coordinator.IsRunning)
@@ -177,7 +182,8 @@ public partial class MainWindow
     private async Task ApplyTranslationModeAsync(ProjectTranslationJob? recovered)
     {
         Guid profileId;
-        if (recovered?.Workers.Count > 0 && !_gpuPreferences.ModeExplicitlySelected)
+        if (recovered?.Workers.Count > 0 && !_gpuPreferences.ModeExplicitlySelected &&
+            MissingWorkerProfiles(recovered).Count == 0)
         {
             profileId = recovered.Workers.FirstOrDefault(worker => worker.Backend.Kind == GpuBackendKind.Remote)?.ProfileId
                 ?? GpuBackendProfile.DefaultLocalId;
@@ -190,7 +196,7 @@ public partial class MainWindow
         else
         {
             if (recovered?.Workers.FirstOrDefault(worker => worker.Backend.Kind == GpuBackendKind.Remote) is { } remote &&
-                _gpuPreferences.RemoteProfileId is null)
+                _gpuPreferences.RemoteProfileId is null && GpuProfileExists(remote.ProfileId))
                 _gpuPreferences.RemoteProfileId = remote.ProfileId;
             profileId = _gpuPreferences.Mode == GpuTranslationMode.LocalOnly
             ? GpuBackendProfile.DefaultLocalId
@@ -208,7 +214,7 @@ public partial class MainWindow
     {
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
         if (_translationClient is GpuBackendManager &&
-            (recovered?.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Local) == true ||
+            (!useCurrentWorkers && recovered?.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Local) == true ||
              _gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote))
         {
             GpuBackendProfile localProfile = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
