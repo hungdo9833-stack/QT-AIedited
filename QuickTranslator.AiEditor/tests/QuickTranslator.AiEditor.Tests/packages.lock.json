@@ -29,6 +29,11 @@
         "resolved": "3.1.1",
         "contentHash": "gNu2zhnuwjq5vQlU4S7yK/lfaKZDLmtcu+vTjnhfTlMAUYn+Hmgu8IIX0UCwWepYkk+Szx03DHx1bDnc9Fd+9w=="
       },
+      "AngleSharp": {
+        "type": "Transitive",
+        "resolved": "1.1.2",
+        "contentHash": "aRFpAqixbuj1Vmqy2hsWPF0PJygo1SfjvmpBvVWZv6i+/u+C/L4wDdwFIzyCGUbjqr61NsZdPNPqDE8wlmG2qA=="
+      },
       "BouncyCastle.Cryptography": {
         "type": "Transitive",
         "resolved": "2.7.0",
@@ -123,13 +128,8 @@
       "quicktranslator.aieditor.core": {
         "type": "Project",
         "dependencies": {
+          "AngleSharp": "[1.1.2, )",
           "SSH.NET": "[2026.0.0, )"
-        }
-      },
-      "quicktranslator.aieditor.geminischema.probe": {
-        "type": "Project",
-        "dependencies": {
-          "QuickTranslator.AiEditor.Core": "[1.0.0, )"
         }
       }
     }

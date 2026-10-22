@@ -2,6 +2,11 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows7.0": {
+      "AngleSharp": {
+        "type": "Transitive",
+        "resolved": "1.1.2",
+        "contentHash": "aRFpAqixbuj1Vmqy2hsWPF0PJygo1SfjvmpBvVWZv6i+/u+C/L4wDdwFIzyCGUbjqr61NsZdPNPqDE8wlmG2qA=="
+      },
       "BouncyCastle.Cryptography": {
         "type": "Transitive",
         "resolved": "2.7.0",
@@ -56,6 +61,7 @@
       "quicktranslator.aieditor.core": {
         "type": "Project",
         "dependencies": {
+          "AngleSharp": "[1.1.2, )",
           "SSH.NET": "[2026.0.0, )"
         }
       }
