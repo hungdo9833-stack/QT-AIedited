@@ -8,6 +8,42 @@ namespace QuickTranslator.AiEditor.Tests;
 public sealed partial class ProjectPublicationTests
 {
     [Fact]
+    public async Task Chinese_epub_uses_zh_metadata_original_text_and_chinese_navigation_without_draft_permission()
+    {
+        var session = await _repository.CreateAsync(Path.Combine(_root, "ChineseEpub"), "Tên tiếng Việt");
+        session.Manifest.ChineseTitle = "中文小说";
+        await _repository.SaveManifestAsync(session);
+        await AddChineseChapterAsync(session, 2, "第二章 相逢", "第二章原文。");
+        await AddChineseChapterAsync(session, 1, "第一章 开始", "第一章原文。");
+        var service = new ProjectPublicationService(_repository, new ProjectCatalog(_repository));
+        var inspection = await service.InspectAsync(session); // Chinese export also accepts a Vietnamese inspection.
+        string path = Path.Combine(_root, "book-zh.epub");
+
+        var report = await service.ExportEpubAsync(session, inspection, path, new(Language: PublicationLanguage.Chinese));
+
+        Assert.Equal(2, report.ExportedChapterCount);
+        Assert.Equal(0, report.IncompleteChapterCount);
+        Assert.Equal(0, report.InspectionChapterCount);
+        using var zip = ZipFile.OpenRead(path);
+        XNamespace dc = "http://purl.org/dc/elements/1.1/", html = "http://www.w3.org/1999/xhtml";
+        var package = LoadEpubXml(zip, "EPUB/package.opf");
+        Assert.Equal("zh", Assert.Single(package.Descendants(dc + "language")).Value);
+        Assert.Equal("中文小说", Assert.Single(package.Descendants(dc + "title")).Value);
+        Assert.Equal(new[] { "第一章 开始", "第二章 相逢" },
+            LoadEpubXml(zip, "EPUB/nav.xhtml").Descendants(html + "a").Select(element => element.Value));
+        Assert.Equal("第一章原文。", LoadEpubXml(zip, "EPUB/chapter-000001.xhtml").Descendants(html + "p").First().Value);
+        Assert.Equal("第二章 相逢", Assert.Single(LoadEpubXml(zip, "EPUB/chapter-000002.xhtml").Descendants(html + "h1")).Value);
+        foreach (var entry in zip.Entries.Where(entry => entry.FullName.EndsWith(".xhtml")))
+        {
+            var page = LoadEpubXml(zip, entry.FullName);
+            Assert.Equal("zh", (string?)page.Root!.Attribute("lang"));
+            Assert.Equal("zh", (string?)page.Root.Attribute(XNamespace.Xml + "lang"));
+            Assert.DoesNotContain("tiếng Việt", page.Root.Value);
+            Assert.DoesNotContain("Mục lục", page.Root.Value);
+        }
+    }
+
+    [Fact]
     public async Task Epub_has_valid_package_clickable_navigation_unicode_and_no_project_changes()
     {
         var session = await _repository.CreateAsync(Path.Combine(_root, "Epub"), "Truyện <Việt> & bạn");

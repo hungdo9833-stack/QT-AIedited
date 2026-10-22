@@ -9,9 +9,10 @@
    <StackPanel Grid.Column="1"><TextBlock Text="CHƯƠNG SẼ XUẤT" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ChapterCountText" Text="Đang kiểm tra…" FontSize="17" FontWeight="SemiBold"/></StackPanel>
    <StackPanel Grid.Column="2"><TextBlock Text="TRẠNG THÁI" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="InspectionText" Text="Đang đọc metadata và bản dịch…" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/></StackPanel>
   </Grid></Border>
-  <Border Grid.Row="2" Style="{StaticResource Card}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="300"/><ColumnDefinition/></Grid.ColumnDefinitions>
+  <Border Grid.Row="2" Style="{StaticResource Card}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="300"/><ColumnDefinition/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
    <StackPanel><TextBlock Text="Định dạng" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="FormatInput" SelectionChanged="OnFormatChanged" AutomationProperties.Name="Định dạng xuất bản"><ComboBoxItem Tag="Txt" IsSelected="True">TXT · UTF-8</ComboBoxItem><ComboBoxItem Tag="Pdf">PDF · A4</ComboBoxItem><ComboBoxItem Tag="Epub">EPUB · Sách điện tử</ComboBoxItem></ComboBox></StackPanel>
-   <StackPanel Grid.Column="1" Margin="14,0,0,0">
+   <StackPanel Grid.Column="1" Margin="14,0,0,0"><TextBlock Text="Ngôn ngữ" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="LanguageInput" SelectionChanged="OnLanguageChanged" AutomationProperties.Name="Ngôn ngữ xuất bản"><ComboBoxItem Tag="Vietnamese" IsSelected="True">Bản dịch tiếng Việt</ComboBoxItem><ComboBoxItem Tag="Chinese">Bản gốc tiếng Trung</ComboBoxItem></ComboBox></StackPanel>
+   <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,14,0,0">
     <TextBlock Text="Phạm vi" Style="{StaticResource FieldLabel}"/>
     <ComboBox x:Name="RangeModeInput" SelectionChanged="OnRangeChanged" AutomationProperties.Name="Phạm vi xuất">
      <ComboBoxItem Tag="All" IsSelected="True">Toàn bộ truyện</ComboBoxItem>
@@ -26,7 +27,7 @@
     </StackPanel>
     <TextBlock x:Name="RangeHintText" Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Visibility="Collapsed"/>
    </StackPanel>
-   <StackPanel Grid.Column="2" Margin="14,0,0,0"><TextBlock Text="Nội dung" Style="{StaticResource FieldLabel}"/><CheckBox x:Name="IncludeProjectTitleInput" Content="Gồm tên Project" IsChecked="True"/><CheckBox x:Name="IncludeChapterTitlesInput" Content="Gồm tiêu đề từng chương" IsChecked="True"/><CheckBox x:Name="AllowIncompleteInput" Content="Cho phép xuất bản nháp/chương cần kiểm tra" Visibility="Collapsed" Checked="OnAllowIncompleteChanged" Unchecked="OnAllowIncompleteChanged" Foreground="{DynamicResource WarningBrush}"/></StackPanel>
+   <StackPanel Grid.Column="2" Grid.RowSpan="2" Margin="14,0,0,0"><TextBlock Text="Nội dung" Style="{StaticResource FieldLabel}"/><CheckBox x:Name="IncludeProjectTitleInput" Content="Gồm tên Project" IsChecked="True"/><CheckBox x:Name="IncludeChapterTitlesInput" Content="Gồm tiêu đề từng chương" IsChecked="True"/><CheckBox x:Name="AllowIncompleteInput" Content="Cho phép xuất bản nháp/chương cần kiểm tra" Visibility="Collapsed" Checked="OnAllowIncompleteChanged" Unchecked="OnAllowIncompleteChanged" Foreground="{DynamicResource WarningBrush}"/></StackPanel>
   </Grid></Border>
   <Border Grid.Row="3" Style="{StaticResource Card}">
    <DockPanel>

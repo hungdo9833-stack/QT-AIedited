@@ -32,11 +32,14 @@ public sealed partial class ProjectPublicationService
         ArgumentNullException.ThrowIfNull(inspection);
         ArgumentNullException.ThrowIfNull(options);
         EnsureAllowed(inspection, options);
-        PublicationSnapshot snapshot = Capture(session, inspection.ProjectRevision, inspection.FromNumber, inspection.ToNumber);
+        PublicationSnapshot snapshot = Capture(session, inspection.ProjectRevision, inspection.FromNumber, inspection.ToNumber,
+            options.Language);
         string outputPath = ValidateOutputPath(session, path);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         string temporaryPath = outputPath + ".publication-" + Guid.NewGuid().ToString("N") + ".tmp";
         string title = string.IsNullOrWhiteSpace(snapshot.ProjectTitle) ? "Truyện" : snapshot.ProjectTitle;
+        string language = options.Language == PublicationLanguage.Chinese ? "zh" : "vi";
+        string contentsTitle = options.Language == PublicationLanguage.Chinese ? "目录" : "Mục lục";
         string identifier = "urn:uuid:" + Guid.NewGuid();
         var entries = new List<(string Id, string Href, string Title)>();
         try
@@ -56,7 +59,7 @@ public sealed partial class ProjectPublicationService
                     await WriteEpubEntryAsync(zip, "EPUB/book.css", ReadingCss, cancellationToken);
                     if (options.IncludeProjectTitle)
                         await WriteEpubXmlAsync(zip, "EPUB/title.xhtml", EpubPage(title,
-                            new XElement(Html + "h1", title)), cancellationToken);
+                            new XElement(Html + "h1", title), language), cancellationToken);
 
                     await foreach (ProjectPublicationChapter chapter in ReadSnapshotAsync(session, snapshot, progress,
                                        cancellationToken).ConfigureAwait(false))
@@ -73,15 +76,15 @@ public sealed partial class ProjectPublicationService
                             if (!string.IsNullOrWhiteSpace(line)) main.Add(new XElement(Html + "p", line));
                         }
                         main.Add(new XElement(Html + "p", new XAttribute("class", "toc-link"),
-                            new XElement(Html + "a", new XAttribute("href", "nav.xhtml#toc"), "Mục lục")));
-                        await WriteEpubXmlAsync(zip, "EPUB/" + id + ".xhtml", EpubPage(chapterTitle, main), cancellationToken);
+                            new XElement(Html + "a", new XAttribute("href", "nav.xhtml#toc"), contentsTitle)));
+                        await WriteEpubXmlAsync(zip, "EPUB/" + id + ".xhtml", EpubPage(chapterTitle, main, language), cancellationToken);
                         entries.Add((id, id + ".xhtml", chapterTitle));
                     }
 
                     var nav = new XElement(Html + "nav", new XAttribute(Epub + "type", "toc"), new XAttribute("id", "toc"),
-                        new XElement(Html + "h1", "Mục lục"), new XElement(Html + "ol", entries.Select(entry =>
+                        new XElement(Html + "h1", contentsTitle), new XElement(Html + "ol", entries.Select(entry =>
                             new XElement(Html + "li", new XElement(Html + "a", new XAttribute("href", entry.Href), entry.Title)))));
-                    await WriteEpubXmlAsync(zip, "EPUB/nav.xhtml", EpubPage("Mục lục", nav), cancellationToken);
+                    await WriteEpubXmlAsync(zip, "EPUB/nav.xhtml", EpubPage(contentsTitle, nav, language), cancellationToken);
 
                     // NCX also makes the chapter list available to older EPUB readers.
                     await WriteEpubXmlAsync(zip, "EPUB/toc.ncx", new XElement(Ncx + "ncx", new XAttribute("version", "2005-1"),
@@ -111,7 +114,7 @@ public sealed partial class ProjectPublicationService
                         new XAttribute("version", "3.0"), new XAttribute("unique-identifier", "book-id"),
                         new XElement(Opf + "metadata", new XAttribute(XNamespace.Xmlns + "dc", Dc),
                             new XElement(Dc + "identifier", new XAttribute("id", "book-id"), identifier),
-                            new XElement(Dc + "title", title), new XElement(Dc + "language", "vi"),
+                            new XElement(Dc + "title", title), new XElement(Dc + "language", language),
                             new XElement(Opf + "meta", new XAttribute("property", "dcterms:modified"),
                                 DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture)),
                             new XElement(Opf + "meta", new XAttribute("property", "rendition:layout"), "reflowable")),
@@ -123,7 +126,9 @@ public sealed partial class ProjectPublicationService
             cancellationToken.ThrowIfCancellationRequested();
             EnsureRevision(session, snapshot.Revision);
             CommitTemporaryFile(temporaryPath, outputPath);
-            return new(outputPath, entries.Count, inspection.IncompleteChapterCount, inspection.InspectionChapterCount);
+            return new(outputPath, entries.Count,
+                options.Language == PublicationLanguage.Chinese ? 0 : inspection.IncompleteChapterCount,
+                options.Language == PublicationLanguage.Chinese ? 0 : inspection.InspectionChapterCount);
         }
         finally
         {
@@ -133,8 +138,8 @@ public sealed partial class ProjectPublicationService
         }
     }
 
-    private static XElement EpubPage(string title, XElement content) => new(Html + "html",
-        new XAttribute(XNamespace.Xmlns + "epub", Epub), new XAttribute("lang", "vi"), new XAttribute(XNamespace.Xml + "lang", "vi"),
+    private static XElement EpubPage(string title, XElement content, string language) => new(Html + "html",
+        new XAttribute(XNamespace.Xmlns + "epub", Epub), new XAttribute("lang", language), new XAttribute(XNamespace.Xml + "lang", language),
         new XElement(Html + "head", new XElement(Html + "title", title),
             new XElement(Html + "link", new XAttribute("rel", "stylesheet"), new XAttribute("type", "text/css"), new XAttribute("href", "book.css"))),
         new XElement(Html + "body", content));

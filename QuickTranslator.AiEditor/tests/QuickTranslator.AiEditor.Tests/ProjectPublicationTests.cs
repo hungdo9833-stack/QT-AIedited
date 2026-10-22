@@ -34,6 +34,88 @@ public sealed partial class ProjectPublicationTests : IDisposable
     }
 
     [Fact]
+    public async Task Chinese_txt_exports_original_titles_and_text_in_reading_order_without_draft_permission()
+    {
+        ProjectSession session = await _repository.CreateAsync(Path.Combine(_root, "Chinese"), "Tên tiếng Việt");
+        session.Manifest.ChineseTitle = "中文小说";
+        await _repository.SaveManifestAsync(session);
+        ChapterDocument second = await AddChineseChapterAsync(session, 2, "第二章 相逢", "第二章原文。\r\n保留换行。");
+        second.Segments[0].UserDraft = "Bản dịch không được xuất.";
+        second.Segments[0].Status = SegmentStatus.InspectionRequired;
+        second.Segments[0].RequiresRetranslation = true;
+        await _repository.UpdateChapterAsync(session, second);
+        await AddChineseChapterAsync(session, 1, "第一章 开始", "第一章原文。");
+        ChapterDocument deleted = await AddChineseChapterAsync(session, 3, "删除章", "不应出现。");
+        await _repository.SoftDeleteChapterAsync(session, deleted.Id);
+        var before = HashProjectFiles(session.RootDirectory);
+        var service = new ProjectPublicationService(_repository, new ProjectCatalog(_repository));
+        ProjectPublicationInspection inspection = await service.InspectAsync(session, language: PublicationLanguage.Chinese);
+
+        Assert.Equal("中文小说", inspection.ProjectTitle);
+        Assert.Equal(0, inspection.IncompleteChapterCount);
+        Assert.Equal(0, inspection.InspectionChapterCount);
+        Assert.Empty(inspection.IssueChapters!);
+        Assert.False(inspection.RequiresConfirmation);
+        Assert.False(inspection.WithRange(2, 2).RequiresConfirmation);
+        string path = Path.Combine(_root, "book-zh.txt");
+        var options = new ProjectPublicationOptions(Language: PublicationLanguage.Chinese);
+        ProjectPublicationReport report = await service.ExportTextAsync(session, path, options);
+
+        Assert.Equal(2, report.ExportedChapterCount);
+        Assert.Equal(0, report.IncompleteChapterCount);
+        Assert.Equal(0, report.InspectionChapterCount);
+        string expected = "中文小说\n\n\n第一章 开始\n\n第一章原文。\n\n\n第二章 相逢\n\n第二章原文。\r\n保留换行。";
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes(expected), await File.ReadAllBytesAsync(path));
+        Assert.Equal(before, HashProjectFiles(session.RootDirectory));
+
+        ProjectPublicationInspection vietnamese = await service.InspectAsync(session);
+        Assert.True(vietnamese.RequiresConfirmation);
+        report = await service.ExportTextAsync(session, vietnamese.WithRange(2, 2), path, options);
+        Assert.Equal(0, report.IncompleteChapterCount);
+        Assert.Equal(0, report.InspectionChapterCount);
+        Assert.Equal("中文小说\n\n\n第二章 相逢\n\n第二章原文。\r\n保留换行。", await File.ReadAllTextAsync(path));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExportTextAsync(session, inspection, path, new()));
+    }
+
+    [Theory]
+    [InlineData("目录标题", "章节标题", "目录标题")]
+    [InlineData("", "章节标题", "章节标题")]
+    [InlineData("", "", "第7章")]
+    public async Task Chinese_txt_uses_catalog_then_chapter_then_number_title_and_falls_back_to_vietnamese_project_title(
+        string catalogTitle, string chapterTitle, string expectedTitle)
+    {
+        ProjectSession session = await _repository.CreateAsync(Path.Combine(_root, "Fallback"), "Tên dự phòng");
+        await AddChineseChapterAsync(session, 7, chapterTitle, "章节原文。");
+        session.Manifest.Chapters.Single().ChineseTitle = catalogTitle;
+        await _repository.SaveManifestAsync(session);
+        var service = new ProjectPublicationService(_repository, new ProjectCatalog(_repository));
+        string path = Path.Combine(_root, "fallback.txt");
+
+        await service.ExportTextAsync(session, path, new(Language: PublicationLanguage.Chinese));
+
+        Assert.Equal($"Tên dự phòng\n\n\n{expectedTitle}\n\n章节原文。", await File.ReadAllTextAsync(path));
+    }
+
+    [Theory]
+    [InlineData("", "第一段。\n\n第二段。")]
+    [InlineData("原文。\r\n保留换行。", "原文。\r\n保留换行。")]
+    public void Chinese_body_uses_original_text_or_falls_back_to_source_segments_in_order(string original, string expected)
+    {
+        // Persisted chapters currently require OriginalText; exercise the legacy fallback before persistence validation.
+        var chapter = new ChapterDocument
+        {
+            OriginalText = original,
+            Segments =
+            [
+                new() { Order = 2, SourceText = "第二段。", UserDraft = "Bản dịch hai." },
+                new() { Order = 1, SourceText = "第一段。", UserDraft = "Bản dịch một." }
+            ]
+        };
+
+        Assert.Equal(expected, ProjectPublicationService.ComposeOriginalText(chapter));
+    }
+
+    [Fact]
     public async Task Inspection_reports_incomplete_and_review_chapters_without_writing_project()
     {
         ProjectSession session = await _repository.CreateAsync(Path.Combine(_root, "Inspect"), "Truyện kiểm tra");
@@ -167,6 +249,14 @@ public sealed partial class ProjectPublicationTests : IDisposable
 
         Assert.Contains("bên ngoài", error.Message);
         Assert.Equal(original, await File.ReadAllTextAsync(managedPath));
+    }
+
+    private async Task<ChapterDocument> AddChineseChapterAsync(ProjectSession session, int number, string title, string text)
+    {
+        ChapterDocument chapter = TranslationService.CreateChapter($"Tên tiếng Việt {number}", text);
+        chapter.ChineseTitle = title;
+        await _repository.AddChapterAsync(session, chapter, number);
+        return chapter;
     }
 
     private async Task<ChapterDocument> AddChapterAsync(ProjectSession session, int number, string title, string text)

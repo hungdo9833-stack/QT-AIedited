@@ -106,7 +106,8 @@ public partial class ProjectPublicationView : UserControl
         try
         {
             var progress = new Progress<ProjectPublicationProgress>(UpdateProgress);
-            _wholeInspection = await _service.InspectAsync(_session, progress, _operationCancellation.Token);
+            _wholeInspection = await _service.InspectAsync(_session, progress, _operationCancellation.Token, SelectedLanguage());
+            ProjectTitleText.Text = _wholeInspection.ProjectTitle;
             _inspectionLoaded = true;
             ApplyRange();
             ProgressText.Text = _wholeInspection.TotalChapterCount == 0
@@ -161,6 +162,7 @@ public partial class ProjectPublicationView : UserControl
         bool needsConfirmation = _inspection?.RequiresConfirmation == true;
         InspectionText.Text = _inspection is null ? _rangeError
             : needsConfirmation ? $"{_inspection.IncompleteChapterCount} chưa hoàn tất · {_inspection.InspectionChapterCount} cần kiểm tra"
+            : SelectedLanguage() == PublicationLanguage.Chinese ? "Sẵn sàng · xuất bản gốc tiếng Trung"
             : _inspection.IsRange ? "Sẵn sàng · mọi chương trong phạm vi đều có bản dịch hợp lệ"
             : "Sẵn sàng · mọi chương đều có bản dịch hợp lệ";
         InspectionText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,
@@ -199,26 +201,39 @@ public partial class ProjectPublicationView : UserControl
             },
             DefaultExt = extension,
             AddExtension = true,
-            FileName = SanitizeFileName(_session.Manifest.VietnameseTitle + RangeFileSuffix(_inspection)) + extension
+            FileName = SuggestedFileName(extension)
         };
         if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
 
+        await ExportToPathAsync(dialog.FileName);
+    }
+
+    internal string SuggestedFileName(string extension) =>
+        SanitizeFileName((_inspection?.ProjectTitle ?? _session.Manifest.VietnameseTitle) +
+            (_inspection is null ? "" : RangeFileSuffix(_inspection)) +
+            (SelectedLanguage() == PublicationLanguage.Chinese ? "-zh" : "")) + extension;
+
+    internal async Task ExportToPathAsync(string path)
+    {
+        if (_inspection is null || _busy) return;
+        PublicationFormat format = SelectedFormat();
         var options = new ProjectPublicationOptions(
             IncludeProjectTitleInput.IsChecked == true,
             IncludeChapterTitlesInput.IsChecked == true,
-            AllowIncomplete: AllowIncompleteInput.IsChecked == true);
+            AllowIncomplete: AllowIncompleteInput.IsChecked == true,
+            Language: SelectedLanguage());
         SetBusy(true, "Đang xuất bản…");
         _operationCancellation = new();
         try
         {
             var progress = new Progress<ProjectPublicationProgress>(UpdateProgress);
             ProjectPublicationReport report = format == PublicationFormat.Pdf
-                ? await ProjectPdfExporter.ExportAsync(_service, _session, _inspection, dialog.FileName, options,
+                ? await ProjectPdfExporter.ExportAsync(_service, _session, _inspection, path, options,
                     progress, _operationCancellation.Token)
                 : format == PublicationFormat.Epub
-                    ? await _service.ExportEpubAsync(_session, _inspection, dialog.FileName, options, progress,
+                    ? await _service.ExportEpubAsync(_session, _inspection, path, options, progress,
                         _operationCancellation.Token)
-                : await _service.ExportTextAsync(_session, _inspection, dialog.FileName, options, progress,
+                : await _service.ExportTextAsync(_session, _inspection, path, options, progress,
                     _operationCancellation.Token);
             LastExportPath = report.OutputPath;
             OutputPathText.Text = "Đã xuất " + report.ExportedChapterCount.ToString("N0") + " chương:\n" + report.OutputPath;
@@ -258,10 +273,11 @@ public partial class ProjectPublicationView : UserControl
     {
         _busy = busy;
         FormatInput.IsEnabled = !busy;
+        LanguageInput.IsEnabled = !busy;
         IncludeProjectTitleInput.IsEnabled = !busy;
         IncludeChapterTitlesInput.IsEnabled = !busy;
         RangeModeInput.IsEnabled = RangeFromInput.IsEnabled = RangeToInput.IsEnabled = !busy;
-        AllowIncompleteInput.IsEnabled = !busy;
+        AllowIncompleteInput.IsEnabled = !busy && SelectedLanguage() == PublicationLanguage.Vietnamese;
         CloseButton.IsEnabled = !busy;
         CancelTaskButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         if (message is not null) ProgressText.Text = message;
@@ -291,10 +307,30 @@ public partial class ProjectPublicationView : UserControl
         if (FormatDescriptionText is not null) UpdateFormatDescription();
     }
 
+    private async void OnLanguageChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (FormatDescriptionText is null) return; // Raised while the XAML is still loading.
+        _wholeInspection = _inspection = null;
+        AllowIncompleteInput.IsChecked = false;
+        AllowIncompleteInput.Visibility = IssueChaptersPanel.Visibility = Visibility.Collapsed;
+        IssueChaptersList.ItemsSource = null;
+        ChapterCountText.Text = "Đang kiểm tra…";
+        InspectionText.Text = "Đang kiểm tra ngôn ngữ đã chọn…";
+        UpdateFormatDescription();
+        await RefreshAsync();
+    }
+
+    private PublicationLanguage SelectedLanguage() =>
+        (LanguageInput.SelectedItem as ComboBoxItem)?.Tag as string == "Chinese"
+            ? PublicationLanguage.Chinese : PublicationLanguage.Vietnamese;
+
     private void UpdateFormatDescription() => FormatDescriptionText.Text = SelectedFormat() switch
     {
+        PublicationFormat.Pdf when SelectedLanguage() == PublicationLanguage.Chinese =>
+            "PDF khổ A4, mỗi chương bắt đầu ở trang mới; giữ nguyên bản gốc tiếng Trung và dùng phông chữ hỗ trợ tiếng Trung.",
         PublicationFormat.Pdf => "PDF khổ A4, mỗi chương bắt đầu ở trang mới; nội dung tiếng Việt dùng cùng bộ ghép văn bản với Reader/TXT.",
         PublicationFormat.Epub => "EPUB có mục lục nhấn để mở từng chương và liên kết quay lại mục lục. Bố cục tự co giãn, giãn dòng 1,6; đổi cỡ chữ, phông chữ và chế độ tối trong ứng dụng đọc. Mục lục luôn giữ tên chương dù bỏ chọn tiêu đề trong nội dung.",
+        _ when SelectedLanguage() == PublicationLanguage.Chinese => "TXT UTF-8 giữ nguyên tiêu đề và nội dung bản gốc tiếng Trung.",
         _ => "TXT UTF-8 giữ nguyên nội dung tiếng Việt do Reader và trình xuất chương đang sử dụng."
     };
 

@@ -1,14 +1,18 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Core.Projects;
+
+public enum PublicationLanguage { Vietnamese, Chinese }
 
 public sealed record ProjectPublicationOptions(
     bool IncludeProjectTitle = true,
     bool IncludeChapterTitles = true,
     bool UseUtf8Bom = false,
-    bool AllowIncomplete = false);
+    bool AllowIncomplete = false,
+    PublicationLanguage Language = PublicationLanguage.Vietnamese);
 
 public sealed record ProjectPublicationIssueChapter(
     Guid ChapterId,
@@ -30,7 +34,8 @@ public sealed record ProjectPublicationInspection(
     IReadOnlyList<ProjectPublicationIssueChapter>? IssueChapters = null,
     IReadOnlyList<int>? ChapterNumbers = null,
     int? FromNumber = null,
-    int? ToNumber = null)
+    int? ToNumber = null,
+    PublicationLanguage Language = PublicationLanguage.Vietnamese)
 {
     public bool RequiresConfirmation => IncompleteChapterCount > 0 || InspectionChapterCount > 0;
     public bool IsRange => FromNumber is not null || ToNumber is not null;
@@ -77,7 +82,8 @@ public sealed record ProjectPublicationReport(
 
 /// <summary>
 /// Builds a read-only publication view from the manifest-backed catalog. Chapter bodies are loaded one at a time,
-/// and translated text always comes from ChapterTranslationComposer, shared with Reader and chapter TXT export.
+/// and Vietnamese text comes from ChapterTranslationComposer, shared with Reader and chapter TXT export.
+/// Chinese publications use the original chapter text without translation completeness checks.
 /// </summary>
 public sealed partial class ProjectPublicationService
 {
@@ -92,10 +98,11 @@ public sealed partial class ProjectPublicationService
     }
 
     public async Task<ProjectPublicationInspection> InspectAsync(ProjectSession session,
-        IProgress<ProjectPublicationProgress>? progress = null, CancellationToken cancellationToken = default)
+        IProgress<ProjectPublicationProgress>? progress = null, CancellationToken cancellationToken = default,
+        PublicationLanguage language = PublicationLanguage.Vietnamese)
     {
         ArgumentNullException.ThrowIfNull(session);
-        PublicationSnapshot snapshot = Capture(session);
+        PublicationSnapshot snapshot = Capture(session, language: language);
         int incomplete = 0, inspection = 0, completed = 0;
         var issueChapters = new List<ProjectPublicationIssueChapter>();
         var numbers = new List<int>(snapshot.Chapters.Count);
@@ -109,7 +116,8 @@ public sealed partial class ProjectPublicationService
             numbers.Add(chapter.Number);
             completed++;
         }
-        return new(snapshot.ProjectTitle, snapshot.Revision, completed, incomplete, inspection, issueChapters, numbers);
+        return new(snapshot.ProjectTitle, snapshot.Revision, completed, incomplete, inspection, issueChapters, numbers,
+            Language: language);
     }
 
     public async Task<ProjectPublicationReport> ExportTextAsync(ProjectSession session, string path,
@@ -118,7 +126,8 @@ public sealed partial class ProjectPublicationService
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
-        ProjectPublicationInspection inspection = await InspectAsync(session, cancellationToken: cancellationToken)
+        ProjectPublicationInspection inspection = await InspectAsync(session, cancellationToken: cancellationToken,
+                language: options.Language)
             .ConfigureAwait(false);
         return await ExportTextAsync(session, inspection, path, options, progress, cancellationToken).ConfigureAwait(false);
     }
@@ -132,7 +141,8 @@ public sealed partial class ProjectPublicationService
         ArgumentNullException.ThrowIfNull(options);
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Đường dẫn xuất bản không được để trống.", nameof(path));
         EnsureAllowed(inspection, options);
-        PublicationSnapshot snapshot = Capture(session, inspection.ProjectRevision, inspection.FromNumber, inspection.ToNumber);
+        PublicationSnapshot snapshot = Capture(session, inspection.ProjectRevision, inspection.FromNumber, inspection.ToNumber,
+            options.Language);
         string outputPath = ValidateOutputPath(session, path);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         string temporaryPath = outputPath + ".publication-" + Guid.NewGuid().ToString("N") + ".tmp";
@@ -170,7 +180,9 @@ public sealed partial class ProjectPublicationService
 
             EnsureRevision(session, snapshot.Revision);
             CommitTemporaryFile(temporaryPath, outputPath);
-            return new(outputPath, exported, inspection.IncompleteChapterCount, inspection.InspectionChapterCount);
+            return new(outputPath, exported,
+                options.Language == PublicationLanguage.Chinese ? 0 : inspection.IncompleteChapterCount,
+                options.Language == PublicationLanguage.Chinese ? 0 : inspection.InspectionChapterCount);
         }
         finally
         {
@@ -182,11 +194,12 @@ public sealed partial class ProjectPublicationService
 
     public async IAsyncEnumerable<ProjectPublicationChapter> ReadChaptersAsync(ProjectSession session,
         string expectedRevision, IProgress<ProjectPublicationProgress>? progress = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default, int? fromNumber = null, int? toNumber = null)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default, int? fromNumber = null, int? toNumber = null,
+        PublicationLanguage language = PublicationLanguage.Vietnamese)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (string.IsNullOrWhiteSpace(expectedRevision)) throw new ArgumentException("Thiếu revision Project.", nameof(expectedRevision));
-        PublicationSnapshot snapshot = Capture(session, expectedRevision, fromNumber, toNumber);
+        PublicationSnapshot snapshot = Capture(session, expectedRevision, fromNumber, toNumber, language);
         await foreach (ProjectPublicationChapter chapter in ReadSnapshotAsync(session, snapshot, progress, cancellationToken)
                            .ConfigureAwait(false))
             yield return chapter;
@@ -221,6 +234,16 @@ public sealed partial class ProjectPublicationService
             EnsureRevision(session, snapshot.Revision);
             PublicationEntry entry = snapshot.Chapters[index];
             var loaded = await _repository.LoadChapterAsync(session, entry.ChapterId, cancellationToken).ConfigureAwait(false);
+            if (snapshot.Language == PublicationLanguage.Chinese)
+            {
+                string chineseTitle = string.IsNullOrWhiteSpace(entry.Title)
+                    ? string.IsNullOrWhiteSpace(loaded.Chapter.ChineseTitle) ? $"第{entry.Number}章" : loaded.Chapter.ChineseTitle.Trim()
+                    : entry.Title.Trim();
+                string original = ComposeOriginalText(loaded.Chapter);
+                progress?.Report(new(index + 1, snapshot.Chapters.Count, chineseTitle));
+                yield return new(entry.ChapterId, entry.Number, chineseTitle, original, true, false);
+                continue;
+            }
             ComposedChapter composed = ChapterTranslationComposer.Compose(loaded.Chapter);
             string title = string.IsNullOrWhiteSpace(entry.Title)
                 ? string.IsNullOrWhiteSpace(loaded.Chapter.Title) ? $"Chương {entry.Number}" : loaded.Chapter.Title.Trim()
@@ -232,8 +255,12 @@ public sealed partial class ProjectPublicationService
         EnsureRevision(session, snapshot.Revision);
     }
 
+    internal static string ComposeOriginalText(ChapterDocument chapter) => string.IsNullOrEmpty(chapter.OriginalText)
+        ? ChapterTranslationComposer.Join(chapter.Segments.OrderBy(segment => segment.Order).Select(segment => segment.SourceText))
+        : chapter.OriginalText;
+
     private PublicationSnapshot Capture(ProjectSession session, string? expectedRevision = null,
-        int? fromNumber = null, int? toNumber = null)
+        int? fromNumber = null, int? toNumber = null, PublicationLanguage language = PublicationLanguage.Vietnamese)
     {
         ProjectCatalogSnapshot catalog = _catalog.GetSnapshot(session);
         if (expectedRevision is not null && !string.Equals(catalog.Revision, expectedRevision, StringComparison.Ordinal))
@@ -241,9 +268,12 @@ public sealed partial class ProjectPublicationService
         List<PublicationEntry> chapters = catalog.Chapters.Where(chapter => !chapter.IsDeleted &&
                 chapter.Number >= (fromNumber ?? int.MinValue) && chapter.Number <= (toNumber ?? int.MaxValue))
             .OrderBy(chapter => chapter.DisplayOrder)
-            .Select(chapter => new PublicationEntry(chapter.ChapterId, chapter.Number, chapter.VietnameseTitle))
+            .Select(chapter => new PublicationEntry(chapter.ChapterId, chapter.Number,
+                language == PublicationLanguage.Chinese ? chapter.ChineseTitle : chapter.VietnameseTitle))
             .ToList();
-        return new(session.Manifest.VietnameseTitle.Trim(), catalog.Revision, chapters);
+        string title = language == PublicationLanguage.Chinese && !string.IsNullOrWhiteSpace(session.Manifest.ChineseTitle)
+            ? session.Manifest.ChineseTitle.Trim() : session.Manifest.VietnameseTitle.Trim();
+        return new(title, catalog.Revision, chapters, language);
     }
 
     private static void EnsureAllowed(ProjectPublicationInspection inspection, ProjectPublicationOptions options)
@@ -251,7 +281,9 @@ public sealed partial class ProjectPublicationService
         if (inspection.TotalChapterCount == 0)
             throw new InvalidOperationException(inspection.IsRange ? "Không có chương nào trong phạm vi đã chọn."
                 : "Project chưa có chương để xuất bản.");
-        if (inspection.RequiresConfirmation && !options.AllowIncomplete)
+        if (options.Language == PublicationLanguage.Vietnamese && inspection.Language != options.Language)
+            throw new InvalidOperationException("Hãy kiểm tra lại theo ngôn ngữ xuất bản đã chọn.");
+        if (options.Language == PublicationLanguage.Vietnamese && inspection.RequiresConfirmation && !options.AllowIncomplete)
             throw new InvalidOperationException((inspection.IsRange ? "Phạm vi đã chọn" : "Project") +
                 " còn chương chưa hoàn tất hoặc cần kiểm tra. Hãy xác nhận xuất bản nháp trước khi tiếp tục.");
     }
@@ -265,5 +297,6 @@ public sealed partial class ProjectPublicationService
     }
 
     private sealed record PublicationEntry(Guid ChapterId, int Number, string Title);
-    private sealed record PublicationSnapshot(string ProjectTitle, string Revision, IReadOnlyList<PublicationEntry> Chapters);
+    private sealed record PublicationSnapshot(string ProjectTitle, string Revision, IReadOnlyList<PublicationEntry> Chapters,
+        PublicationLanguage Language);
 }
