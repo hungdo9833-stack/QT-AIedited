@@ -138,7 +138,7 @@ public partial class MainWindow
         ProjectSwitcher.Width = _compactShell ? 190 : 300;
         TitleInput.Width = _compactShell ? 250 : 360;
         ShellChapterText.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
-        ChapterModeHint.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
+        UpdateChapterModeHint();
         ChapterSummary.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         ReaderBookmarkButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
         FocusModeButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
@@ -153,12 +153,24 @@ public partial class MainWindow
         ApplyPanelPolicy();
     }
 
+    // The one-line mode hint only helps the reader; in the editor it took a row above the grid.
+    private void UpdateChapterModeHint()
+    {
+        if (ChapterModeHint is null || ReaderView is null) return;
+        ChapterModeHint.Visibility = !_compactShell && ReaderView.Visibility == Visibility.Visible
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     // BL-14: In Two-Pane mode, show Aligned Bilingual Segment Grid when a chapter is segmented and not in _sourceEditMode;
     // show monolithic ChapterInput when _service is null or _sourceEditMode == true.
     internal void ApplyTwoPaneEditorModeLayout()
     {
         if (ChapterTwoPaneLeftColumn is null || ChapterTwoPaneSplitter is null) return;
         bool showRawSourceBox = _service is null || _sourceEditMode;
+        // The title / paste / import / split strip only serves a chapter that is not segmented yet; an open chapter
+        // gives its height to the bilingual grid (its tools sit under "Thêm" in the grid header).
+        ChapterInitStrip.Visibility = showRawSourceBox ? Visibility.Visible : Visibility.Collapsed;
+        UpdateChapterModeHint();
         if (FindName("ChapterSourcePaneBorder") is Border sourceBorder)
             sourceBorder.Visibility = showRawSourceBox ? Visibility.Visible : Visibility.Collapsed;
         ChapterTwoPaneSplitter.Visibility = showRawSourceBox ? Visibility.Visible : Visibility.Collapsed;

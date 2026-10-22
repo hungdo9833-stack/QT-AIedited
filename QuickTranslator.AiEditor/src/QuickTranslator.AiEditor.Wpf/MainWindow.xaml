@@ -433,24 +433,9 @@
                             </DockPanel>
                         </Grid>
                         <DockPanel x:Name="EditorView" Grid.Row="1">
-                            <Border DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="7" Margin="0,0,0,7">
+                            <!-- Shown only while there is no segmented chapter (new chapter / source edit): title, paste, import, split. -->
+                            <Border x:Name="ChapterInitStrip" DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="7" Padding="7" Margin="0,0,0,7">
                                 <StackPanel>
-                                    <!-- State-driven command bar: run controls show only while usable; rarely used tools live under "Thêm". No horizontal scrolling. -->
-                                    <DockPanel>
-                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                            <ToggleButton x:Name="CommandOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm lệnh: quét, lịch sử, xuất, thay thế" AutomationProperties.Name="Thêm lệnh" AutomationProperties.HelpText="Thêm lệnh: quét, lịch sử, xuất, thay thế" IsTabStop="True"/>
-                                            <Popup IsOpen="{Binding IsChecked, ElementName=CommandOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=CommandOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
-                                                <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
-                                                    <StackPanel ButtonBase.Click="OnCommandOverflowClick">
-                                                        <Button x:Name="ReviewChecksNavigationButton" Content="Kiểm tra &amp; Duyệt…" ui:ButtonIcon.Glyph="&#xE721;" Click="OnOpenReviewChecks" Style="{StaticResource MenuButton}"/>
-                                                        <Button x:Name="BatchReplaceButton" Content="Thay thế hàng loạt" ui:ButtonIcon.Glyph="&#xE8AC;" Click="OnOpenBatchReplace" Style="{StaticResource MenuButton}" ToolTip="Tìm &amp; thay thế hàng loạt / Quét chữ Hán (Ctrl+H)"/>
-                                                        <Button Content="Lịch sử đoạn" ui:ButtonIcon.Glyph="&#xE81C;" Click="OnShowCurrentHistory" Style="{StaticResource MenuButton}"/>
-                                                        <Button x:Name="ExportButton" Content="Xuất chương TXT" ui:ButtonIcon.Glyph="&#xEDE1;" Click="OnExportChapter" Style="{StaticResource MenuButton}"/>
-                                                    </StackPanel>
-                                                </Border>
-                                            </Popup>
-                                        </StackPanel>
-                                    </DockPanel>
                                     <DockPanel x:Name="StandaloneChapterInitBar">
                                         <TextBlock Text="CHAPTER" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center"/>
                                         <TextBox x:Name="TitleInput" Width="360" Text="Chương mới"/>
@@ -482,7 +467,21 @@
                                 <Border Grid.Column="2" Style="{StaticResource Card}" Margin="3,0,0,0">
                                     <DockPanel>
                                         <DockPanel DockPanel.Dock="Top" LastChildFill="False">
-                                            <TextBlock DockPanel.Dock="Right" Text="Tự lưu · Ctrl+Enter duyệt &amp; sang đoạn kế" FontSize="12" Foreground="{DynamicResource SuccessBrush}"/>
+                                            <!-- Rarely used tools (review, batch replace, history, export) live under "Thêm". -->
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+                                            <ToggleButton x:Name="CommandOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm lệnh: quét, lịch sử, xuất, thay thế" AutomationProperties.Name="Thêm lệnh" AutomationProperties.HelpText="Thêm lệnh: quét, lịch sử, xuất, thay thế" IsTabStop="True"/>
+                                            <Popup IsOpen="{Binding IsChecked, ElementName=CommandOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=CommandOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                                                <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
+                                                    <StackPanel ButtonBase.Click="OnCommandOverflowClick">
+                                                        <Button x:Name="ReviewChecksNavigationButton" Content="Kiểm tra &amp; Duyệt…" ui:ButtonIcon.Glyph="&#xE721;" Click="OnOpenReviewChecks" Style="{StaticResource MenuButton}"/>
+                                                        <Button x:Name="BatchReplaceButton" Content="Thay thế hàng loạt" ui:ButtonIcon.Glyph="&#xE8AC;" Click="OnOpenBatchReplace" Style="{StaticResource MenuButton}" ToolTip="Tìm &amp; thay thế hàng loạt / Quét chữ Hán (Ctrl+H)"/>
+                                                        <Button Content="Lịch sử đoạn" ui:ButtonIcon.Glyph="&#xE81C;" Click="OnShowCurrentHistory" Style="{StaticResource MenuButton}"/>
+                                                        <Button x:Name="ExportButton" Content="Xuất chương TXT" ui:ButtonIcon.Glyph="&#xEDE1;" Click="OnExportChapter" Style="{StaticResource MenuButton}"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </Popup>
+                                            </StackPanel>
+                                            <TextBlock DockPanel.Dock="Right" Text="Tự lưu · Ctrl+Enter duyệt &amp; sang đoạn kế" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource SuccessBrush}"/>
                                             <ComboBox x:Name="BilingualSourceViewInput" DockPanel.Dock="Left" Width="150" Margin="0,0,10,0" FontSize="12" Padding="6,2"
                                                       SelectionChanged="OnBilingualSourceViewChanged" ToolTip="Ô 1 hiển thị: chữ Hán, Hán Việt hoặc VP đơn ý"
                                                       AutomationProperties.Name="Nội dung ô 1">

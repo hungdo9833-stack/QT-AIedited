@@ -98,6 +98,8 @@ public sealed class EditorUxPhase1Tests
         fixture.Call("Refresh");
         var blockItems = (ItemsControl)fixture.Window.FindName("ChapterBlocksItems");
         Assert.Equal(ScrollUnit.Pixel, VirtualizingPanel.GetScrollUnit(blockItems));
+        Assert.Equal(Visibility.Collapsed, ((FrameworkElement)fixture.Window.FindName("ChapterInitStrip")).Visibility);
+        Assert.Equal(Visibility.Visible, ((FrameworkElement)fixture.Window.FindName("CommandOverflowToggle")).Visibility);
         var blocks = fixture.Get<System.Collections.ObjectModel.ObservableCollection<MainWindow.ChapterBlock>>("_chapterBlocks");
         Assert.All(blocks, block => Assert.Equal(block.SourceText, block.DisplaySource));
 

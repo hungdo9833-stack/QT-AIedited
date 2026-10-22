@@ -139,6 +139,7 @@ public partial class MainWindow
         bool reader = ReaderModeButton.IsChecked == true;
         ReaderView.Visibility = reader ? Visibility.Visible : Visibility.Collapsed;
         EditorView.Visibility = reader ? Visibility.Collapsed : Visibility.Visible;
+        UpdateChapterModeHint();
         TwoPaneModeButton.Visibility = FourPaneModeButton.Visibility = reader
             ? Visibility.Collapsed : Visibility.Visible;
         ApplyProjectSidebarVisibility();
