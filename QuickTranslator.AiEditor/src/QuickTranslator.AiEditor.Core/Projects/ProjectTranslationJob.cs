@@ -94,6 +94,8 @@ public sealed class ProjectTranslationItem
     public DateTimeOffset? FinishedAt { get; set; }
     public string? Error { get; set; }
     public bool WorkerMetricsRecorded { get; set; }
+    /// <summary>The user chose to translate this chapter again from scratch (segments they edited or approved stay).</summary>
+    public bool RetranslateAll { get; set; }
     public DateTimeOffset? WorkerMetricsStartedAt { get; set; }
     public List<Guid>? RecordedWorkerAttemptIds { get; set; }
     public List<Guid>? RecordedWorkerSegmentIds { get; set; }

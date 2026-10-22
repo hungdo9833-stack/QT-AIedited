@@ -1,3 +1,4 @@
+using System.Windows;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
@@ -98,7 +99,8 @@ public partial class MainWindow
                 HostProjectTranslationView(coordinator, null);
                 return;
             }
-            ProjectTranslationJob plan = await coordinator.PlanAsync(chapterIds);
+            if (AskRetranslation(chapterIds) is not { } retranslate) return;
+            ProjectTranslationJob plan = await coordinator.PlanAsync(chapterIds, retranslateAll: retranslate);
             // Only detach the open chapter if it is part of the planned queue items.
             if (_service?.GetSnapshot().Id is Guid openId && chapterIds.Contains(openId))
             {
@@ -109,6 +111,35 @@ public partial class MainWindow
             HostProjectTranslationView(coordinator, plan);
         }
         finally { EndUiOperation(); }
+    }
+
+    /// <summary>
+    /// Chapters that already have translated segments would only be skipped ("Đã có bản dịch"). Ask once whether to
+    /// translate them again from scratch. Returns the chapters to retranslate (empty: only missing segments), or null
+    /// when the user cancels and no queue should be created.
+    /// </summary>
+    private IReadOnlySet<Guid>? AskRetranslation(IReadOnlyList<Guid> chapterIds)
+    {
+        ProjectChapterEntry[] translated = _projectSession!.Manifest.Chapters
+            .Where(entry => entry.DeletedAt is null && entry.CompletedSegmentCount > 0 && chapterIds.Contains(entry.ChapterId))
+            .OrderBy(entry => entry.Number).ToArray();
+        if (translated.Length == 0) return new HashSet<Guid>();
+        int complete = translated.Count(entry => entry.CompletedSegmentCount >= entry.SegmentCount);
+        string names = translated.Length == 1 ? $"Chương {translated[0].Number}: {translated[0].VietnameseTitle}"
+            : $"{translated.Length} chương ({complete} chương đã dịch xong toàn bộ), ví dụ chương " +
+              string.Join(", ", translated.Take(5).Select(entry => entry.Number)) + (translated.Length > 5 ? "…" : "");
+        MessageBoxResult answer = ThemedDialog.Show(this,
+            $"{names} đã có bản dịch.\n\nDịch lại toàn bộ?\n\n" +
+            "• Có: dịch lại mọi đoạn bằng AI. Đoạn bạn đã sửa tay hoặc đã duyệt vẫn được giữ nguyên; bản dịch AI cũ còn trong lịch sử.\n" +
+            "• Không: chỉ dịch các đoạn còn thiếu; chương đã dịch đủ sẽ được bỏ qua.\n" +
+            "• Hủy: không tạo hàng đợi.",
+            "Chương đã có bản dịch", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        return answer switch
+        {
+            MessageBoxResult.Yes => translated.Select(entry => entry.ChapterId).ToHashSet(),
+            MessageBoxResult.No => new HashSet<Guid>(),
+            _ => null
+        };
     }
 
     private async Task ApplyTranslationModeAsync(ProjectTranslationJob? recovered)

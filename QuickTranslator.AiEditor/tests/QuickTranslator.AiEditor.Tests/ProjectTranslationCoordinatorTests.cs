@@ -244,6 +244,35 @@ public sealed class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task Retranslate_all_translates_finished_chapters_again_but_keeps_user_edits()
+    {
+        await WithProjectAsync(3, async context =>
+        {
+            var first = new ProjectQueueFakeClient();
+            var initial = context.Coordinator(first);
+            await initial.StartAsync(await initial.PlanAsync(context.ChapterIds));
+            Assert.Equal(3, first.Calls);
+            await EditAsync(context, 2, service => service.UpdateDraft(service.GetSnapshot().Segments[0].Id, "Nháp người dùng."));
+
+            var client = new ProjectQueueFakeClient();
+            var coordinator = context.Coordinator(client);
+            ProjectTranslationJob plan = await coordinator.PlanAsync(context.ChapterIds,
+                retranslateAll: new HashSet<Guid> { context.ChapterIds[0], context.ChapterIds[2] });
+            await coordinator.StartAsync(plan);
+
+            Assert.Equal(1, client.Calls); // Chapter 1 again; chapter 2 was not chosen; chapter 3's only segment is a user draft.
+            ProjectTranslationItem Item(int index) => coordinator.CurrentJob!.Items.Single(item => item.ChapterId == context.ChapterIds[index]);
+            Assert.Equal(ProjectTranslationItemDisposition.TranslatedThisJob, Item(0).Disposition);
+            Assert.Equal(ProjectTranslationItemDisposition.AlreadyTranslated, Item(1).Disposition);
+            Assert.Equal(ProjectTranslationItemDisposition.ProtectedContent, Item(2).Disposition);
+            ChapterDocument again = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[0])).Chapter;
+            Assert.Equal(2, again.Segments[0].Attempts.Count(attempt => attempt.Outcome == AttemptOutcome.Completed));
+            ChapterDocument edited = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[2])).Chapter;
+            Assert.Equal("Nháp người dùng.", edited.Segments[0].UserDraft);
+        });
+    }
+
+    [Fact]
     public async Task Approved_and_user_drafts_are_skipped_and_preserved()
     {
         await WithProjectAsync(3, async context =>

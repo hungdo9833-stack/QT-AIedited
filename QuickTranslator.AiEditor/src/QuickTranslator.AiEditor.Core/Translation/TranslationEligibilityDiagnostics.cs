@@ -18,6 +18,7 @@ public enum QueueEligibilityReason
     EligibleCancelledAttempt,
     EligibleInterruptedAttempt,
     EligibleFailedRetry,
+    EligibleRetranslateAll,
     ProtectedUserDraft,
     ProtectedApproval,
     ProtectedPreviousEdit,
@@ -115,6 +116,7 @@ public static class TranslationEligibilityDiagnostics
         if (segment.Approvals.Count > 0 || segment.Status == SegmentStatus.Approved)
             return QueueEligibilityReason.ProtectedApproval;
         if (segment.ProtectedByPreviousEdit) return QueueEligibilityReason.ProtectedPreviousEdit;
+        if (mode == QueueMode.AllSegments) return QueueEligibilityReason.EligibleRetranslateAll;
         if (mode == QueueMode.FailedSegments)
             return segment.Status == SegmentStatus.Error
                 ? QueueEligibilityReason.EligibleFailedRetry

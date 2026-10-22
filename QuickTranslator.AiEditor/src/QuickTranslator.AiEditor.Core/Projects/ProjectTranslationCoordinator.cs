@@ -86,8 +86,10 @@ public sealed class ProjectTranslationCoordinator
         return loaded is null ? null : ProjectTranslationJobStore.Clone(loaded);
     }
 
+    /// <param name="retranslateAll">Chapters to translate again from scratch (QueueMode.AllSegments); segments the user
+    /// edited or approved stay protected. Other chapters only get their missing segments.</param>
     public async Task<ProjectTranslationJob> PlanAsync(IEnumerable<Guid> chapterIds,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IReadOnlySet<Guid>? retranslateAll = null)
     {
         Guid[] selected = chapterIds.Distinct().ToArray();
         if (selected.Length == 0) throw new ArgumentException("Hãy chọn ít nhất một chapter.", nameof(chapterIds));
@@ -114,10 +116,11 @@ public sealed class ProjectTranslationCoordinator
                 CompletedSegments = CompletedSegments(chapter),
                 ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error),
                 SourceHanCharacters = chapter.Segments.Sum(segment => CountHan(segment.SourceText)),
-                CompletedHanCharacters = CompletedHanCharacters(chapter)
+                CompletedHanCharacters = CompletedHanCharacters(chapter),
+                RetranslateAll = retranslateAll?.Contains(chapter.Id) == true
             };
             item.RecordEligibilityDiagnostic(TranslationEligibilityDiagnostics.Analyze(chapter,
-                QueueMode.MissingSegments, TranslationEligibilityDiagnosticStage.Plan));
+                item.RetranslateAll ? QueueMode.AllSegments : QueueMode.MissingSegments, TranslationEligibilityDiagnosticStage.Plan));
             items.Add(item);
         }
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -209,7 +212,10 @@ public sealed class ProjectTranslationCoordinator
             throw new InvalidOperationException("Không còn chapter chưa hoàn tất để tạo lại hàng đợi.");
 
         // Build the replacement first. If current settings or chapter files cannot be read, the old job remains intact.
-        ProjectTranslationJob replacement = await PlanAsync(unfinished, cancellationToken).ConfigureAwait(false);
+        // A chapter chosen for a full retranslation keeps that choice until its retranslation queue has started.
+        HashSet<Guid> retranslate = current.Items.Where(item => item.RetranslateAll && item.ChapterQueueRunId is null)
+            .Select(item => item.ChapterId).ToHashSet();
+        ProjectTranslationJob replacement = await PlanAsync(unfinished, cancellationToken, retranslate).ConfigureAwait(false);
         CarryHistoricalWorkerMetrics(current, replacement);
         if (current.Status is not (ProjectTranslationJobStatus.Completed or
             ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled))
@@ -796,7 +802,10 @@ public sealed class ProjectTranslationCoordinator
         await RefreshBoundaryConfigurationAsync(environment, workerDefinition, cancellationToken).ConfigureAwait(false);
         item = CurrentJob!.Items.Single(value => value.ChapterId == chapterId);
 
-        QueueMode mode = retryFailed && item.StartedAt is not null ? QueueMode.FailedSegments : QueueMode.MissingSegments;
+        // A full retranslation runs once, as the chapter's first queue run in this job; a later run (retry, or a new run
+        // after an interruption that left no resumable checkpoint) only fills what is missing.
+        QueueMode mode = retryFailed && item.StartedAt is not null ? QueueMode.FailedSegments :
+            item.RetranslateAll && item.ChapterQueueRunId is null ? QueueMode.AllSegments : QueueMode.MissingSegments;
         bool canResumeChapter = item.ChapterQueueRunId is Guid runId && chapter.Queue.RunId == runId &&
             chapter.Queue.Status is QueueStatus.Paused or QueueStatus.Interrupted or QueueStatus.Cancelled or QueueStatus.Faulted;
         if (workerDefinition is not null && !canResumeChapter)
@@ -835,7 +844,8 @@ public sealed class ProjectTranslationCoordinator
                     target.Disposition = ProjectTranslationItemDisposition.TranslatedThisJob;
                     target.Error = null;
                 }
-                else if (alreadyTranslated)
+                // A chapter chosen for retranslation that has nothing left to send is fully protected, not "already translated".
+                else if (alreadyTranslated && mode != QueueMode.AllSegments)
                 {
                     target.Status = ProjectTranslationItemStatus.Completed;
                     target.Disposition = ProjectTranslationItemDisposition.AlreadyTranslated;

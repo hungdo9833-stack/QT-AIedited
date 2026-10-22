@@ -10,6 +10,7 @@ public sealed partial class TranslationService
     {
         if (segment.IsProtectedFromAutomaticTranslation || segment.Status == SegmentStatus.Approved) return false;
         if (mode == QueueMode.FailedSegments) return segment.Status == SegmentStatus.Error;
+        if (mode == QueueMode.AllSegments) return true;
         if (segment.HasCompletedTranslation) return false;
         return segment.RequiresRetranslation || segment.Attempts.Count == 0 ||
             segment.Attempts.Last().Outcome is AttemptOutcome.Cancelled or AttemptOutcome.Interrupted;

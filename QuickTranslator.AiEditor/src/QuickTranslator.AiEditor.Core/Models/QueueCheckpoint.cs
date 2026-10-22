@@ -1,7 +1,8 @@
 namespace QuickTranslator.AiEditor.Core.Models;
 
 public enum QueueStatus { Idle, Running, PauseRequested, Paused, Cancelling, Cancelled, Interrupted, Completed, CompletedWithWarnings, CompletedWithErrors, Faulted }
-public enum QueueMode { MissingSegments, FailedSegments }
+/// <summary>AllSegments: translate again every segment that is not protected (user draft, approval, previous edit).</summary>
+public enum QueueMode { MissingSegments, FailedSegments, AllSegments }
 
 public sealed class QueueCheckpoint
 {

@@ -13,6 +13,38 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 
 public sealed class ProjectTranslationQueueUiTests
 {
+    [Theory]
+    [InlineData(MessageBoxResult.Yes, 2)]
+    [InlineData(MessageBoxResult.No, 1)]
+    [InlineData(MessageBoxResult.Cancel, 1)]
+    public Task Queueing_a_translated_chapter_asks_whether_to_retranslate_it(MessageBoxResult answer, int expectedCalls) => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        var chapter = await fixture.AddChapterAsync("Một", 1);
+        var questions = new List<string>();
+        ThemedDialog.Responder = dialog => { questions.Add(dialog.Message); return answer; };
+        try
+        {
+            async Task RunQueueAsync()
+            {
+                await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { chapter.Id });
+                ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
+                for (int count = 0; count < 200 && coordinator.IsRunning; count++) await Task.Delay(20);
+            }
+
+            await RunQueueAsync();
+            Assert.Empty(questions); // Nothing translated yet: no question.
+            Assert.Equal(1, fixture.Client.Calls);
+
+            await RunQueueAsync();
+
+            Assert.Contains("đã có bản dịch", Assert.Single(questions), StringComparison.Ordinal);
+            Assert.Equal(expectedCalls, fixture.Client.Calls); // Yes translates the chapter again; No skips it; Cancel queues nothing.
+        }
+        finally { ThemedDialog.Responder = null; }
+    });
+
 
     [Theory]
     [InlineData(300)]
