@@ -25,6 +25,7 @@
                 <MenuItem Header="Đóng dự á_n" Click="OnCloseProject"/>
             </MenuItem>
             <MenuItem Header="_Dự án">
+                <MenuItem x:Name="ProjectImportWebMenuItem" Header="Nhập truyện từ web…" Click="OnImportWeb" IsEnabled="False"/>
                 <MenuItem Header="_Thư viện dự án…" Click="OnShowProjectLibrary"/>
                 <MenuItem Header="Th_uộc tính…" Click="OnEditProjectProperties"/>
                 <MenuItem Header="_Mở thư mục" Click="OnOpenProjectFolder"/>
@@ -151,6 +152,7 @@
                     </ComboBox>
                     <WrapPanel>
                         <Button x:Name="ProjectImportTextButton" Content="Nhập TXT" ui:ButtonIcon.Glyph="&#xE710;" Click="OnAddChapterFromText" ToolTip="Thêm chương từ tệp TXT"/>
+                        <Button x:Name="ProjectImportWebButton" Content="Nhập web" Click="OnImportWeb" IsEnabled="False" ToolTip="Nhập truyện từ URL web"/>
                         <Button x:Name="ProjectNewChapterButton" Content="Chương mới" Click="OnNewProjectChapter" ToolTip="Tạo bản nháp chương trống ở cuối dự án"/>
                         <Button Content="Quản lý chương" Click="OnOpenChapterManager"/>
                         <Button x:Name="ProjectRenameChapterButton" Content="Đổi tên" Click="OnRenameProjectChapter"/>
