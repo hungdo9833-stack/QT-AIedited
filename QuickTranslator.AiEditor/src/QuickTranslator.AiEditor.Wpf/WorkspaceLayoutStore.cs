@@ -7,8 +7,12 @@ namespace QuickTranslator.AiEditor.Wpf;
 // System follows the Windows app theme (Settings › Personalization › Colors). New values go last: the layout file stores the number.
 internal enum ShellTheme { Dark, Light, System }
 
+// What the left cell of the two-pane bilingual grid shows. New values go last: the layout file stores the number.
+internal enum BilingualSourceView { Chinese, HanViet, VietPhrase }
+
 internal sealed class WorkspaceLayoutPreferences
 {
+    public BilingualSourceView BilingualSourceView { get; set; } = BilingualSourceView.Chinese;
     public int SchemaVersion { get; set; } = 1;
     public ShellTheme Theme { get; set; } = ShellTheme.Dark;
     public bool InspectorVisible { get; set; } = true;
@@ -24,6 +28,7 @@ internal sealed class WorkspaceLayoutPreferences
 
     public void Validate()
     {
+        if (!Enum.IsDefined(BilingualSourceView)) BilingualSourceView = BilingualSourceView.Chinese;
         if (SchemaVersion != 1 || !Enum.IsDefined(Theme) || InspectorWidth is < 240 or > 600 ||
             ProjectSidebarWidth is < 220 or > 520 || TwoPaneSourceStar is < 0.25 or > 4 ||
             SegmentNavigatorWidth is < 180 or > 520 || FourPaneLeftStar is < 0.25 or > 4 ||

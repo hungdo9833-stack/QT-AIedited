@@ -123,6 +123,7 @@ public partial class MainWindow
             if (savePreferences) await SaveTraditionalPreferencesAsync();
             var selected = _service?.GetSnapshot().Segments.SingleOrDefault(segment => segment.Id == _selectedId);
             RefreshTraditionalSegment(selected);
+            RefreshBilingualSourceDisplay();
             SetStatus("Đã nạp Data QuickTranslator. Hán Việt và VP chạy offline bằng CPU.");
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -155,6 +156,7 @@ public partial class MainWindow
             {
                 var selected = _service?.GetSnapshot().Segments.SingleOrDefault(segment => segment.Id == _selectedId);
                 RefreshTraditionalSegment(selected);
+                RefreshBilingualSourceDisplay();
             }
         }
         catch (Exception ex) { SetStatus("Chưa lưu được thiết lập dịch truyền thống: " + ex.Message); }

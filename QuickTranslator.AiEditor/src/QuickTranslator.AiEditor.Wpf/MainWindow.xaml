@@ -483,12 +483,20 @@
                                     <DockPanel>
                                         <DockPanel DockPanel.Dock="Top" LastChildFill="False">
                                             <TextBlock DockPanel.Dock="Right" Text="Tự lưu · Ctrl+Enter duyệt &amp; sang đoạn kế" FontSize="12" Foreground="{DynamicResource SuccessBrush}"/>
-                                            <TextBlock x:Name="BilingualGridHeaderText" DockPanel.Dock="Left" Text="LƯỚI SONG NGỮ ĐỒNG BỘ TỪNG ĐOẠN (TRUNG ↔ VIỆT)" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
+                                            <ComboBox x:Name="BilingualSourceViewInput" DockPanel.Dock="Left" Width="150" Margin="0,0,10,0" FontSize="12" Padding="6,2"
+                                                      SelectionChanged="OnBilingualSourceViewChanged" ToolTip="Ô 1 hiển thị: chữ Hán, Hán Việt hoặc VP đơn ý"
+                                                      AutomationProperties.Name="Nội dung ô 1">
+                                                <ComboBoxItem Tag="Chinese" IsSelected="True">Ô 1: Chữ Hán</ComboBoxItem>
+                                                <ComboBoxItem Tag="HanViet">Ô 1: Hán Việt</ComboBoxItem>
+                                                <ComboBoxItem Tag="VietPhrase">Ô 1: VP đơn ý</ComboBoxItem>
+                                            </ComboBox>
+                                            <TextBlock x:Name="BilingualGridHeaderText" DockPanel.Dock="Left" VerticalAlignment="Center" Text="LƯỚI SONG NGỮ ĐỒNG BỘ TỪNG ĐOẠN (TRUNG ↔ VIỆT)" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
                                         </DockPanel>
-                                        <ItemsControl x:Name="ChapterBlocksItems" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True">
+                                        <!-- ScrollUnit=Pixel: the wheel moves a few lines, not a whole (often screen-high) segment. -->
+                                        <ItemsControl x:Name="ChapterBlocksItems" VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel" ScrollViewer.CanContentScroll="True">
                                             <ItemsControl.ItemsPanel>
                                                 <ItemsPanelTemplate>
-                                                    <VirtualizingStackPanel IsVirtualizing="True" VirtualizationMode="Recycling"/>
+                                                    <VirtualizingStackPanel IsVirtualizing="True" VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel"/>
                                                 </ItemsPanelTemplate>
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.Template>
@@ -509,7 +517,7 @@
                                                             </Grid.ColumnDefinitions>
                                                             <StackPanel Grid.Column="0" Margin="0,0,4,0">
                                                                 <TextBlock Text="{Binding SourceHeader}" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="4,0,4,2"/>
-                                                                <TextBox Text="{Binding SourceText, Mode=OneWay}" Tag="{Binding Id}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontSize="16" BorderThickness="0" Background="Transparent" Loaded="OnBilingualSourceLoaded" GotKeyboardFocus="OnBilingualSourceFocused" SelectionChanged="OnBilingualSourceSelectionChanged"/>
+                                                                <TextBox Text="{Binding DisplaySource, Mode=OneWay}" Tag="{Binding Id}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontSize="16" BorderThickness="0" Background="Transparent" Loaded="OnBilingualSourceLoaded" GotKeyboardFocus="OnBilingualSourceFocused" SelectionChanged="OnBilingualSourceSelectionChanged"/>
                                                             </StackPanel>
                                                             <Border Grid.Column="1" Width="4" CornerRadius="2" Background="{Binding StatusBrush}" Margin="2,4"/>
                                                             <StackPanel Grid.Column="2" Margin="4,0,0,0">

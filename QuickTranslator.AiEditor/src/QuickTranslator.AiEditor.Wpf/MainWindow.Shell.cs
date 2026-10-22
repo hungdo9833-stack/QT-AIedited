@@ -57,6 +57,8 @@ public partial class MainWindow
         ApplyTwoPaneEditorModeLayout();
         TwoPaneModeButton.IsChecked = !_workspaceLayout.FourPaneMode;
         FourPaneModeButton.IsChecked = _workspaceLayout.FourPaneMode;
+        ApplyBilingualSourceViewSelection();
+        RefreshBilingualSourceDisplay();
     }
 
     private async Task SaveWorkspaceLayoutAsync()

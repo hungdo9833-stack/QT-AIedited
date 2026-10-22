@@ -201,6 +201,7 @@ public partial class MainWindow
             else if (_chapterBlocks.IndexOf(block) != i) _chapterBlocks.Move(_chapterBlocks.IndexOf(block), i);
             block.UpdateFromSegment(segment, segment.Id == _selectedId);
         }
+        RefreshBilingualSourceDisplay();
     }
 
     // Adjustment F (BL-14): Update draft in-place without re-binding or resetting IME/Caret/Undo on the active TextBox.
@@ -263,7 +264,7 @@ public partial class MainWindow
             _service.SelectSegment(id);
             foreach (var b in _chapterBlocks) b.IsSelected = b.Id == id;
         }
-        UpdateInspectorLiveSelection(box.SelectedText);
+        if (!ShowsTranslatedSource(box)) UpdateInspectorLiveSelection(box.SelectedText);
     }
 
     private async void OnApproveBlockButtonClicked(object sender, RoutedEventArgs e)
@@ -485,7 +486,7 @@ public partial class MainWindow
     internal sealed class ChapterBlock(Guid id, Action<Guid, string> changed) : INotifyPropertyChanged
     {
         public Guid Id { get; } = id;
-        private string _text = "", _label = "", _sourceText = "", _sourceHeader = "", _statusDot = "○";
+        private string _text = "", _label = "", _sourceText = "", _displaySource = "", _sourceHeader = "", _statusDot = "○";
         private Brush _statusBrush = Brushes.Gray;
         private bool _isSelected;
         private bool _suppressNotification;
@@ -503,6 +504,8 @@ public partial class MainWindow
         }
         public string Label { get => _label; set { if (_label == value) return; _label = value; PropertyChanged?.Invoke(this, new(nameof(Label))); } }
         public string SourceText { get => _sourceText; set { if (_sourceText == value) return; _sourceText = value; PropertyChanged?.Invoke(this, new(nameof(SourceText))); } }
+        /// <summary>What the left cell shows: the Chinese source, or its Hán Việt / VP đơn ý rendering.</summary>
+        public string DisplaySource { get => _displaySource; set { if (_displaySource == value) return; _displaySource = value; PropertyChanged?.Invoke(this, new(nameof(DisplaySource))); } }
         public string SourceHeader { get => _sourceHeader; set { if (_sourceHeader == value) return; _sourceHeader = value; PropertyChanged?.Invoke(this, new(nameof(SourceHeader))); } }
         public string StatusDot { get => _statusDot; set { if (_statusDot == value) return; _statusDot = value; PropertyChanged?.Invoke(this, new(nameof(StatusDot))); } }
         public Brush StatusBrush { get => _statusBrush; set { if (ReferenceEquals(_statusBrush, value)) return; _statusBrush = value; PropertyChanged?.Invoke(this, new(nameof(StatusBrush))); } }

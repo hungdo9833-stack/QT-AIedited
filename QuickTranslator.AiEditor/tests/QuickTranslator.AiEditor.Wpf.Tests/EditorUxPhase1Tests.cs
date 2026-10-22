@@ -88,6 +88,31 @@ public sealed class EditorUxPhase1Tests
     });
 
     [Fact]
+    public Task Two_pane_grid_scrolls_by_pixel_and_left_cell_switches_between_chinese_and_traditional_views() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        fixture.Call("InitializeChapterView");
+        fixture.Window.Show();
+        ChapterDocument chapter = TranslationService.CreateChapter("Ô 1", "你好。世界。");
+        fixture.Attach(chapter);
+        fixture.Call("Refresh");
+        var blockItems = (ItemsControl)fixture.Window.FindName("ChapterBlocksItems");
+        Assert.Equal(ScrollUnit.Pixel, VirtualizingPanel.GetScrollUnit(blockItems));
+        var blocks = fixture.Get<System.Collections.ObjectModel.ObservableCollection<MainWindow.ChapterBlock>>("_chapterBlocks");
+        Assert.All(blocks, block => Assert.Equal(block.SourceText, block.DisplaySource));
+
+        var view = (ComboBox)fixture.Window.FindName("BilingualSourceViewInput");
+        view.SelectedIndex = 1; // Hán Việt; no QuickTranslator data is loaded in tests.
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+        Assert.All(blocks, block => Assert.StartsWith("Chưa nạp Data QuickTranslator", block.DisplaySource));
+        Assert.Equal(BilingualSourceView.HanViet, fixture.Get<WorkspaceLayoutPreferences>("_workspaceLayout").BilingualSourceView);
+
+        view.SelectedIndex = 0; // Chữ Hán
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+        Assert.All(blocks, block => Assert.Equal(block.SourceText, block.DisplaySource));
+    });
+
+    [Fact]
     public Task Quality_route_opens_review_checks() => StaHost.Run(() =>
     {
         using var fixture = new WorkspaceFixture();

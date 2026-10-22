@@ -85,6 +85,8 @@ public partial class MainWindow
     private string GetSourceSelection(TextBox textBox)
     {
         RestoreSourceSelection(textBox);
+        // Hán Việt / VP shown in the bilingual left cell is not Chinese: glossary, character and search actions stay off.
+        if (ShowsTranslatedSource(textBox)) return "";
         if ((ReferenceEquals(textBox, HanVietText) || ReferenceEquals(textBox, VietPhraseText)) &&
             textBox.SelectionLength > 0 && _traditionalResult is not null &&
             _traditionalDisplayedSegmentId == _selectedId &&
