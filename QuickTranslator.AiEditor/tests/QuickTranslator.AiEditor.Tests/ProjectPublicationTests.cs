@@ -5,7 +5,7 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
 
-public sealed class ProjectPublicationTests : IDisposable
+public sealed partial class ProjectPublicationTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "qtaie-publication-" + Guid.NewGuid().ToString("N"));
     private readonly ProjectRepository _repository = new();

@@ -11,6 +11,29 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 public sealed class ProjectPublicationUiTests
 {
     [Fact]
+    public Task Publication_epub_choice_explains_reading_and_clickable_toc() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        await fixture.AddChapterAsync("Một", 1);
+        var service = new ProjectPublicationService(fixture.Repository, fixture.Get<ProjectCatalog>("_projectCatalog"));
+        var window = new ProjectPublicationWindow(fixture.Project, service);
+        try
+        {
+            await window.LoadInspectionAsync();
+            var input = (ComboBox)window.FindName("FormatInput");
+            input.SelectedItem = input.Items.Cast<ComboBoxItem>().Single(item => (string)item.Tag == "Epub");
+            string description = ((TextBlock)window.FindName("FormatDescriptionText")).Text;
+            Assert.Contains("mục lục nhấn", description);
+            Assert.Contains("cỡ chữ", description);
+            Assert.False(((Button)window.FindName("ExportButton")).IsEnabled);
+            ((CheckBox)window.FindName("AllowIncompleteInput")).IsChecked = true;
+            Assert.True(((Button)window.FindName("ExportButton")).IsEnabled);
+        }
+        finally { window.Close(); }
+    });
+
+    [Fact]
     public Task Workspace_sidebar_exposes_the_publication_command() => StaHost.Run(() =>
     {
         using var fixture = new WorkspaceFixture();

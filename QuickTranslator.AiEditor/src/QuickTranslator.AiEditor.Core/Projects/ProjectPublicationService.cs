@@ -79,7 +79,7 @@ public sealed record ProjectPublicationReport(
 /// Builds a read-only publication view from the manifest-backed catalog. Chapter bodies are loaded one at a time,
 /// and translated text always comes from ChapterTranslationComposer, shared with Reader and chapter TXT export.
 /// </summary>
-public sealed class ProjectPublicationService
+public sealed partial class ProjectPublicationService
 {
     private const string ChapterSeparator = "\n\n\n";
     private readonly ProjectRepository _repository;

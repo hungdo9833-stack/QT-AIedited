@@ -188,10 +188,15 @@ public partial class ProjectPublicationView : UserControl
     {
         if (_inspection is null || _busy) return;
         PublicationFormat format = SelectedFormat();
-        string extension = format == PublicationFormat.Pdf ? ".pdf" : ".txt";
+        string extension = format switch { PublicationFormat.Pdf => ".pdf", PublicationFormat.Epub => ".epub", _ => ".txt" };
         var dialog = new SaveFileDialog
         {
-            Filter = format == PublicationFormat.Pdf ? "Tài liệu PDF (*.pdf)|*.pdf" : "Văn bản UTF-8 (*.txt)|*.txt",
+            Filter = format switch
+            {
+                PublicationFormat.Pdf => "Tài liệu PDF (*.pdf)|*.pdf",
+                PublicationFormat.Epub => "Sách điện tử EPUB (*.epub)|*.epub",
+                _ => "Văn bản UTF-8 (*.txt)|*.txt"
+            },
             DefaultExt = extension,
             AddExtension = true,
             FileName = SanitizeFileName(_session.Manifest.VietnameseTitle + RangeFileSuffix(_inspection)) + extension
@@ -210,6 +215,9 @@ public partial class ProjectPublicationView : UserControl
             ProjectPublicationReport report = format == PublicationFormat.Pdf
                 ? await ProjectPdfExporter.ExportAsync(_service, _session, _inspection, dialog.FileName, options,
                     progress, _operationCancellation.Token)
+                : format == PublicationFormat.Epub
+                    ? await _service.ExportEpubAsync(_session, _inspection, dialog.FileName, options, progress,
+                        _operationCancellation.Token)
                 : await _service.ExportTextAsync(_session, _inspection, dialog.FileName, options, progress,
                     _operationCancellation.Token);
             LastExportPath = report.OutputPath;
@@ -283,13 +291,19 @@ public partial class ProjectPublicationView : UserControl
         if (FormatDescriptionText is not null) UpdateFormatDescription();
     }
 
-    private void UpdateFormatDescription() => FormatDescriptionText.Text = SelectedFormat() == PublicationFormat.Pdf
-        ? "PDF khổ A4, mỗi chương bắt đầu ở trang mới; nội dung tiếng Việt dùng cùng bộ ghép văn bản với Reader/TXT."
-        : "TXT UTF-8 giữ nguyên nội dung tiếng Việt do Reader và trình xuất chương đang sử dụng.";
+    private void UpdateFormatDescription() => FormatDescriptionText.Text = SelectedFormat() switch
+    {
+        PublicationFormat.Pdf => "PDF khổ A4, mỗi chương bắt đầu ở trang mới; nội dung tiếng Việt dùng cùng bộ ghép văn bản với Reader/TXT.",
+        PublicationFormat.Epub => "EPUB có mục lục nhấn để mở từng chương và liên kết quay lại mục lục. Bố cục tự co giãn, giãn dòng 1,6; đổi cỡ chữ, phông chữ và chế độ tối trong ứng dụng đọc. Mục lục luôn giữ tên chương dù bỏ chọn tiêu đề trong nội dung.",
+        _ => "TXT UTF-8 giữ nguyên nội dung tiếng Việt do Reader và trình xuất chương đang sử dụng."
+    };
 
-    private PublicationFormat SelectedFormat() =>
-        string.Equals((FormatInput.SelectedItem as ComboBoxItem)?.Tag as string, "Pdf", StringComparison.Ordinal)
-            ? PublicationFormat.Pdf : PublicationFormat.Txt;
+    private PublicationFormat SelectedFormat() => ((FormatInput.SelectedItem as ComboBoxItem)?.Tag as string) switch
+    {
+        "Pdf" => PublicationFormat.Pdf,
+        "Epub" => PublicationFormat.Epub,
+        _ => PublicationFormat.Txt
+    };
 
     private void OnAllowIncompleteChanged(object sender, RoutedEventArgs e) => UpdateExportEnabled();
     private void OnCancelTask(object sender, RoutedEventArgs e) => _operationCancellation?.Cancel();
@@ -315,5 +329,5 @@ public partial class ProjectPublicationView : UserControl
         return string.IsNullOrWhiteSpace(safe) ? "QT-Studio-Export" : safe;
     }
 
-    private enum PublicationFormat { Txt, Pdf }
+    private enum PublicationFormat { Txt, Pdf, Epub }
 }
