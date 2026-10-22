@@ -57,7 +57,6 @@
  <Style x:Key="ThemedMenuItemStyle" TargetType="MenuItem">
   <Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
   <Setter Property="Padding" Value="8,5"/><Setter Property="SnapsToDevicePixels" Value="True"/>
-  <Setter Property="ItemContainerStyle" Value="{DynamicResource ThemedMenuItemStyle}"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
    <Grid SnapsToDevicePixels="True">
     <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="3" Padding="{TemplateBinding Padding}">
@@ -87,10 +86,12 @@
    </ControlTemplate.Triggers>
   </ControlTemplate></Setter.Value></Setter>
  </Style>
+ <!-- Menu items take the theme through this implicit style, not ItemContainerStyle: an ItemContainerStyle for MenuItem is also
+      applied to a Separator in the same menu and WPF throws (it crashed the chapter list's context menu). -->
  <Style TargetType="MenuItem" BasedOn="{StaticResource ThemedMenuItemStyle}"/>
  <Style TargetType="Separator"><Setter Property="Margin" Value="4"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Separator"><Border Height="1" Background="{DynamicResource BorderBrush}" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>
  <Style TargetType="ContextMenu">
-  <Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="4"/><Setter Property="ItemContainerStyle" Value="{StaticResource ThemedMenuItemStyle}"/><Setter Property="SnapsToDevicePixels" Value="True"/>
+  <Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="4"/><Setter Property="SnapsToDevicePixels" Value="True"/>
   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ContextMenu"><Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True"><ScrollViewer CanContentScroll="True"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle"/></ScrollViewer></Border></ControlTemplate></Setter.Value></Setter>
  </Style>
 

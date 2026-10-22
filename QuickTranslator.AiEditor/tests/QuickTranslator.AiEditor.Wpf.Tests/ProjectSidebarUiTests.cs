@@ -21,6 +21,26 @@ public sealed class ProjectSidebarUiTests
     });
 
     [Fact]
+    public Task ContextMenusWithSeparatorsOpenWithoutThrowing() => StaHost.Run(async () =>
+    {
+        // Regression: a themed ItemContainerStyle for MenuItem was applied to Separator and crashed the app on right click.
+        using var fixture = new WorkspaceFixture();
+        fixture.Call("InitializeSourceContextMenus");
+        fixture.Window.ShowInTaskbar = false; fixture.Window.Left = -30000;
+        fixture.Window.Show();
+        var list = (ListBox)fixture.Window.FindName("ProjectChapterList");
+        var source = (TextBox)fixture.Window.FindName("SourceText");
+        foreach (ContextMenu menu in new[] { list.ContextMenu!, source.ContextMenu! })
+        {
+            Assert.Contains(menu.Items.Cast<object>(), item => item is Separator);
+            menu.PlacementTarget = (UIElement)(ReferenceEquals(menu, list.ContextMenu) ? list : source);
+            menu.IsOpen = true; // The crash happened here, while the popup measured its items.
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            menu.IsOpen = false;
+        }
+    });
+
+    [Fact]
     public Task MultipleSelectionEnablesOnlyBulkContextCommands() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
