@@ -13,7 +13,8 @@ public sealed record WebBookAnalysis(
     string? BookTitle,
     IReadOnlyList<WebChapterLink> Chapters,
     string DetectionSummary,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    bool NumberingConflict = false);
 
 /// <summary>Text of one chapter link after joining its sub-pages. A forum post may contain several chapters.</summary>
 public sealed record WebChapterContent(WebChapterLink Link, string Title, string Text, int PageCount);
@@ -40,9 +41,9 @@ public interface IWebNovelImporter
 
     /// <summary>
     /// One UTF-8 text in the format the existing TXT import understands: chapters keep their own 第N章 headings;
-    /// a chapter without one gets its link title as a heading line.
+    /// a chapter without one gets its link title as a heading line. Keep site order renumbers headings by link index.
     /// </summary>
-    string ComposeImportText(IReadOnlyList<WebChapterContent> chapters);
+    string ComposeImportText(IReadOnlyList<WebChapterContent> chapters, bool keepSiteOrder = false);
 }
 
 public enum WebImportBlockReason { RequiresBrowser, RequiresUserConfirmation, BotChallenge, NotFound, NoChapterList }

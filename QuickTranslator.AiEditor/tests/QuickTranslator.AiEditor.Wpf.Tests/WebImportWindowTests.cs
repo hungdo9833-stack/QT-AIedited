@@ -46,6 +46,33 @@ public sealed class WebImportWindowTests
         finally { window.Close(); }
     });
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public Task Keep_site_order_defaults_to_conflict_and_passes_user_choice_to_composition(bool conflict, bool selected) => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        var fake = new FakeImporter { NumberingConflict = conflict };
+        fixture.Window.WebImportPreviewOpener = _ => Task.CompletedTask;
+        var window = Create(fixture, fake);
+        try
+        {
+            var checkbox = (CheckBox)window.FindName("KeepSiteOrderCheckBox");
+            Assert.False(checkbox.IsChecked);
+            await window.AnalyzeAsync();
+            Assert.Equal(conflict, checkbox.IsChecked);
+            Assert.True(checkbox.IsEnabled);
+            checkbox.IsChecked = selected;
+            await window.DownloadAsync();
+            Assert.NotNull(fake.ComposedChapters);
+            Assert.Equal(selected, fake.KeepSiteOrder);
+        }
+        finally { window.Close(); }
+    });
+
     [Fact]
     public Task Preview_fetches_first_range_position_and_shows_only_thirty_lines() => StaHost.Run(async () =>
     {
@@ -151,6 +178,7 @@ public sealed class WebImportWindowTests
             await window.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Background);
             Assert.False(FindButton(window, "AnalyzeButton").IsEnabled);
             Assert.False(FindButton(window, "DownloadButton").IsEnabled);
+            Assert.False(((CheckBox)window.FindName("KeepSiteOrderCheckBox")).IsEnabled);
             Assert.Equal("1/3 · 第10章 Một", Block(window, "StatusText").Text);
             Assert.Equal(1, ((ProgressBar)window.FindName("BusyProgress")).Value);
             FindButton(window, "CancelButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -162,6 +190,7 @@ public sealed class WebImportWindowTests
             Assert.Equal(fake.ComposedText, await File.ReadAllTextAsync(openedPath!));
             Assert.Contains("giữ 1 chương", Block(window, "StatusText").Text);
             Assert.True(FindButton(window, "DownloadButton").IsEnabled);
+            Assert.True(((CheckBox)window.FindName("KeepSiteOrderCheckBox")).IsEnabled);
         }
         finally { window.Close(); }
     });
@@ -280,7 +309,9 @@ public sealed class WebImportWindowTests
             new(20, "第20章 Hai", new Uri("https://example.invalid/20")),
             new(30, "第30章 Ba", new Uri("https://example.invalid/30"))
         ];
-        public WebBookAnalysis Analysis => new(new Uri("https://example.invalid/book"), "Truyện / thử: web?", Links, "Mục lục thử", ["Kiểm tra chương"]);
+        public WebBookAnalysis Analysis => new(new Uri("https://example.invalid/book"), "Truyện / thử: web?", Links, "Mục lục thử", ["Kiểm tra chương"], NumberingConflict);
+        public bool NumberingConflict { get; init; }
+        public bool KeepSiteOrder { get; private set; }
         public Uri? AnalyzedUrl { get; private set; }
         public WebChapterLink? PreviewedLink { get; private set; }
         public IReadOnlyList<WebChapterLink>? DownloadedLinks { get; private set; }
@@ -328,8 +359,9 @@ public sealed class WebImportWindowTests
             catch (OperationCanceledException) when (token.IsCancellationRequested) { CancellationObserved = true; throw; }
         }
 
-        public string ComposeImportText(IReadOnlyList<WebChapterContent> chapters)
+        public string ComposeImportText(IReadOnlyList<WebChapterContent> chapters, bool keepSiteOrder = false)
         {
+            KeepSiteOrder = keepSiteOrder;
             ComposedChapters = chapters.ToArray();
             return ComposedText = EmptyComposition ? " " : string.Join("\n", chapters.Select(chapter => $"{chapter.Title}\n{chapter.Text}\n"));
         }

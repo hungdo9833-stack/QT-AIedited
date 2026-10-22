@@ -54,6 +54,7 @@ public partial class WebImportWindow : Window
         if (analysis.Chapters.Count == 0)
             throw new WebImportBlockedException(url, WebImportBlockReason.NoChapterList, "Không tìm thấy mục lục.");
         _analysis = analysis;
+        KeepSiteOrderCheckBox.IsChecked = analysis.NumberingConflict;
         BookTitleText.Text = analysis.BookTitle ?? "Truyện chưa có tên";
         ChapterCountText.Text = $"{analysis.Chapters.Count:N0} chương";
         DetectionSummaryText.Text = analysis.DetectionSummary;
@@ -118,7 +119,7 @@ public partial class WebImportWindow : Window
             StatusText.Text = "Đã hủy; chưa tải xong chương nào.";
             return;
         }
-        string text = importer.ComposeImportText(chapters);
+        string text = importer.ComposeImportText(chapters, KeepSiteOrderCheckBox.IsChecked == true);
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidDataException("Nội dung nhập trống. Hãy kiểm tra lại bản xem trước.");
 
@@ -205,7 +206,7 @@ public partial class WebImportWindow : Window
 
     private void SetBusy(bool busy)
     {
-        UrlInput.IsEnabled = DelayInput.IsEnabled = AnalyzeButton.IsEnabled = CloseButton.IsEnabled = !busy;
+        UrlInput.IsEnabled = DelayInput.IsEnabled = KeepSiteOrderCheckBox.IsEnabled = AnalyzeButton.IsEnabled = CloseButton.IsEnabled = !busy;
         RangePanel.IsEnabled = PreviewButton.IsEnabled = DownloadButton.IsEnabled = !busy && _analysis is not null;
         CancelButton.IsEnabled = busy;
         BusyProgress.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;

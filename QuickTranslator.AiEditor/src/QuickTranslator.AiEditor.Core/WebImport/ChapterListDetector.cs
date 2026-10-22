@@ -120,6 +120,15 @@ internal static class ChapterListDetector
     internal static bool HasChapterNumber(string title) =>
         Regex.IsMatch(title, @"第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節卷]");
 
+    internal static long? ChapterNumber(string title)
+    {
+        var match = Regex.Match(title, @"第\s*([\d〇零一二三四五六七八九十百千万兩两]+)\s*[章回节節卷]");
+        if (!match.Success) return null;
+        var number = match.Groups[1].Value;
+        if (Regex.IsMatch(number, @"^\d+$")) return long.TryParse(number, out var value) ? value : null;
+        return ChineseNumber(number);
+    }
+
     private static bool LooksLikeChapter(WebChapterLink link) =>
         Regex.IsMatch(link.Title, @"第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節卷]|\d+") ||
         Regex.IsMatch(link.Url.AbsolutePath, @"(?:chapter|read)[/_-]?\d", RegexOptions.IgnoreCase);

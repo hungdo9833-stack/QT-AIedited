@@ -19,6 +19,7 @@
      <TextBox x:Name="DelayInput" Text="1.5" Width="72" AutomationProperties.Name="Thời gian nghỉ giữa các yêu cầu, tối thiểu 0,5 giây"/>
      <TextBlock Text="Tối thiểu 0,5 giây" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="4"/>
     </WrapPanel>
+    <CheckBox x:Name="KeepSiteOrderCheckBox" Content="Giữ đúng thứ tự mục lục (đánh số lại theo trang)" Margin="4,6,4,0"/>
    </StackPanel>
   </Border>
   <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10">

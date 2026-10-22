@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using QuickTranslator.AiEditor.Core.Importing;
 using QuickTranslator.AiEditor.Core.WebImport;
 
 namespace QuickTranslator.AiEditor.Tests.WebImport;
@@ -426,6 +427,83 @@ public sealed class WebNovelImporterTests
         Assert.Equal("第五章 占位\n测试文字\n\n第六章 占位\n测试文字\n占位内容", importer.ComposeImportText([ownHeading, needsHeading]));
         Assert.Equal("", importer.ComposeImportText([]));
         Assert.Empty(handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("第1章 起|第2章 承|第3章 转|第4章 合|第5章 终", false)]
+    [InlineData("第一章 起|第二章 承|第三章 转|第四章 合|第五章 终", false)]
+    [InlineData("第1章 起|第2章 承|第2章 番外|第4章 合|第5章 终", true)]
+    [InlineData("第1章 起|第2章 承|第6章 番外|第3章 合|第4章 终", true)]
+    [InlineData("第一章 起|第二章 承|第2回 番外|第四章 合|第五章 终", true)]
+    [InlineData("番外 100|第1章 起|无编号|第二章 承|第3章 合", false)]
+    public async Task Analyze_detects_duplicate_or_reversed_title_numbers(string titles, bool conflict)
+    {
+        string[] expected = titles.Split('|');
+        string catalog = string.Concat(expected.Select((title, i) => $"<a href='/novel/test/chapter/{i + 1}'>{title}</a>"));
+        using var handler = new FakeHandler(_ => Html("<h1>测试书名</h1>" + catalog));
+        using var importer = new WebNovelImporter(Options, handler);
+        var analysis = await importer.AnalyzeAsync(Url("novel/test"));
+        Assert.Equal(expected, analysis.Chapters.Select(c => c.Title));
+        Assert.Equal(conflict, analysis.NumberingConflict);
+        if (conflict) Assert.Contains(analysis.Warnings, w => w.Contains("Giữ đúng thứ tự mục lục"));
+        else Assert.Empty(analysis.Warnings);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ComposeImportText_can_keep_site_order_without_duplicate_headings(bool keepSiteOrder)
+    {
+        using var handler = new FakeHandler(_ => throw new InvalidOperationException("No HTTP expected"));
+        using var importer = new WebNovelImporter(Options, handler);
+        WebChapterContent[] chapters =
+        [
+            new(new(1, "第29章 正文", Url("chapter/1")), "unused", "第29章 正文\n正文内容。", 1),
+            new(new(2, "第 60 章 番外 X", Url("chapter/2")), "unused", "番外内容。", 1),
+            new(new(3, "楔子", Url("chapter/3")), "unused", "楔子内容。", 1)
+        ];
+        string expected = keepSiteOrder
+            ? "第1章 正文\n正文内容。\n\n第2章 番外 X\n番外内容。\n\n第3章 楔子\n楔子内容。"
+            : "第29章 正文\n正文内容。\n\n第 60 章 番外 X\n番外内容。\n\n第3章 楔子\n楔子内容。";
+        Assert.Equal(expected, importer.ComposeImportText(chapters, keepSiteOrder));
+        if (!keepSiteOrder) Assert.Equal(expected, importer.ComposeImportText(chapters));
+        Assert.Equal("", importer.ComposeImportText([], keepSiteOrder));
+        Assert.Empty(handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("第 64 章 第29回 正文")]
+    [InlineData("第六十四节 第兩十九節 正文")]
+    [InlineData("第64卷 第29章 正文")]
+    public void ComposeImportText_strips_multiple_counters_from_link_or_own_heading(string title)
+    {
+        using var handler = new FakeHandler(_ => throw new InvalidOperationException("No HTTP expected"));
+        using var importer = new WebNovelImporter(Options, handler);
+        var link = new WebChapterLink(64, title, Url("chapter/64"));
+        Assert.Equal("第64章 正文\n内容。", importer.ComposeImportText([new(link, "unused", "内容。", 1)], true));
+        Assert.Equal("第64章 正文\n内容。", importer.ComposeImportText([new(link with { Title = "链接标题" }, "unused", title + "\n内容。", 1)], true));
+        Assert.Equal("第64章 正文", importer.ComposeImportText([new(link, "unused", title, 1)], true));
+    }
+
+    [Fact]
+    public void Keep_site_order_preserves_all_130_chapters_in_txt_preview()
+    {
+        using var handler = new FakeHandler(_ => throw new InvalidOperationException("No HTTP expected"));
+        using var importer = new WebNovelImporter(Options, handler);
+        var chapters = Enumerable.Range(1, 130).Select(i =>
+        {
+            string title = i % 3 == 0 ? $"第 {i} 章 番外 {i}" : $"第{i / 2 + 1}章 正文 {i}";
+            var link = new WebChapterLink(i, title, Url($"chapter/{i}"));
+            return new WebChapterContent(link, title, $"这是第{i}段独立正文。", 1);
+        }).ToArray();
+        string text = importer.ComposeImportText(chapters, true);
+        var preview = ImportPreviewEditor.Create(new ChapterDetector().Detect(text)).Current;
+        var imported = preview.ImportableChapters.ToArray();
+        Assert.Equal(chapters.Length, imported.Length);
+        Assert.Equal(Enumerable.Range(1, 130).Select(i => (int?)i), imported.Select(c => c.Number));
+        Assert.Equal(chapters.Select(c => c.Text), imported.Select(c => preview.Slice(c.ContentSpan).Trim()));
+        Assert.False(preview.WasAutomaticallyReordered);
+        Assert.Equal(0, preview.AutomaticallySkippedDuplicateCount);
     }
 
     private static string Catalog(int count, Func<int, string> path) => string.Concat(Enumerable.Range(1, count)
