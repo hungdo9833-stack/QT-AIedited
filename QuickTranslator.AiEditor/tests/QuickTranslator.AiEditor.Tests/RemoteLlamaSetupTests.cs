@@ -104,15 +104,12 @@ public sealed class RemoteLlamaSetupTests : IDisposable
     }
 
     [Fact]
-    public async Task Probe_rejects_ubuntu_and_keeps_windows_gpu_details()
+    public async Task Probe_keeps_windows_gpu_details()
     {
         var windows = new FakeSession(true);
-        RemoteLlamaInspection result = await new RemoteWindowsGpuProbe().InspectAsync(windows, 11436);
+        RemoteLlamaInspection result = await new RemoteGpuProbe().InspectAsync(windows, 11436);
         Assert.True(result.SupportsAutomaticSetup); Assert.Equal("NVIDIA RTX 4090", result.GpuName);
-        Assert.Equal(24564L * 1024 * 1024, result.VramBytes);
-        var linux = new FakeSession(true) { IsWindows = false };
-        RemoteLlamaInspection rejected = await new RemoteWindowsGpuProbe().InspectAsync(linux, 11436);
-        Assert.False(rejected.SupportsAutomaticSetup); Assert.Contains("Windows", rejected.BlockedReason);
+        Assert.Equal(24564L * 1024 * 1024, result.VramBytes); Assert.Equal(RemoteHostPlatform.Windows, result.Platform);
     }
 
     private FakePackageProvider MakePackage()

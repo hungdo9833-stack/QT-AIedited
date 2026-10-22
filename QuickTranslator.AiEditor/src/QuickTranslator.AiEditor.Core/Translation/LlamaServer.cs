@@ -20,7 +20,8 @@ public sealed partial record GgufModelReference
         string text = value.Trim();
         if (text.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
         {
-            if (!Path.IsPathFullyQualified(text) || text.Any(char.IsControl))
+            // "/models/x.gguf" is a file on a rented Linux GPU; Windows does not count it as fully qualified.
+            if (!(Path.IsPathFullyQualified(text) || text.StartsWith('/')) || text.Any(char.IsControl))
                 throw new ArgumentException("File GGUF phải là đường dẫn tuyệt đối.", nameof(value));
             return new() { FilePath = text };
         }

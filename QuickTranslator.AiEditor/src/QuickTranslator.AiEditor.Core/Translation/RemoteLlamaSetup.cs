@@ -6,8 +6,10 @@ namespace QuickTranslator.AiEditor.Core.Translation;
 
 public enum RemoteLlamaSetupStage { Inspect, PreparePackage, Upload, Extract, Configure, DownloadModel, Verify, Done }
 public sealed record RemoteLlamaSetupProgress(RemoteLlamaSetupStage Stage, string Message, double? Percent = null);
+public enum RemoteHostPlatform { Unsupported, Windows, Linux }
 public sealed record RemoteLlamaInspection(string OperatingSystem, string? GpuName, long? VramBytes, long? FreeDiskBytes,
-    bool LlamaServerRunning, int Port, IReadOnlyList<string> Models, bool SupportsAutomaticSetup, string? BlockedReason = null);
+    bool LlamaServerRunning, int Port, IReadOnlyList<string> Models, bool SupportsAutomaticSetup, string? BlockedReason = null,
+    RemoteHostPlatform Platform = RemoteHostPlatform.Unsupported);
 public sealed record RemoteLlamaSetupResult(bool Success, string Message, RemoteLlamaInspection? Inspection);
 public sealed record LlamaServerHealth(bool Healthy, IReadOnlyList<string> Models);
 
@@ -47,20 +49,23 @@ public sealed class RemoteLlamaHealthClient(Func<HttpClient>? clientFactory = nu
     }
 }
 
-public sealed class RemoteWindowsGpuProbe
+/// <summary>Tells a rented Windows machine from a Linux one over SSH and reads its NVIDIA GPU, VRAM and free disk.</summary>
+public sealed class RemoteGpuProbe
 {
     public async Task<RemoteLlamaInspection> InspectAsync(ISshSession session, int port,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         SshCommandResult unix = await session.ExecuteAsync(SshOperation.ReadOperatingSystem, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (unix.Success && LinuxRelease(unix.Output) is string release)
+            return await InspectLinuxAsync(session, release, port, cancellationToken).ConfigureAwait(false);
         SshCommandResult version = await session.ExecuteAsync(SshOperation.ReadWindowsVersion, cancellationToken: cancellationToken).ConfigureAwait(false);
         string combined = unix.Output + unix.Error + version.Output + version.Error;
         bool windows = !unix.Success && (combined.Contains("Windows", StringComparison.OrdinalIgnoreCase) ||
             combined.Contains("is not recognized as an internal or external command", StringComparison.OrdinalIgnoreCase));
         if (!windows)
             return new("Hệ điều hành không được hỗ trợ", null, null, null, false, port, [], false,
-                "Cài đặt tự động llama-server chỉ hỗ trợ máy thuê Windows.");
+                "Cài đặt tự động llama-server chỉ hỗ trợ máy thuê Windows hoặc Linux (Ubuntu).");
         await session.ExecuteAsync(SshOperation.ConfirmWindowsMux, cancellationToken: cancellationToken).ConfigureAwait(false);
         SshCommandResult info = await session.ExecuteAsync(SshOperation.ReadWindowsInfo, cancellationToken: cancellationToken).ConfigureAwait(false);
         SshCommandResult gpu = await session.ExecuteAsync(SshOperation.ReadNvidiaGpuWindows, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -70,7 +75,44 @@ public sealed class RemoteWindowsGpuProbe
         long? free = long.TryParse(disk.Output.Trim(), out long bytes) ? bytes : null;
         string os = string.IsNullOrWhiteSpace(info.Output) ? "Windows" : info.Output.Trim();
         string? blocked = noNvidia ? "Máy Windows chưa có driver NVIDIA (không tìm thấy nvidia-smi)." : null;
-        return new(os, name, vram, free, false, port, [], blocked is null, blocked);
+        return new(os, name, vram, free, false, port, [], blocked is null, blocked, RemoteHostPlatform.Windows);
+    }
+
+    private static async Task<RemoteLlamaInspection> InspectLinuxAsync(ISshSession session, string release, int port,
+        CancellationToken cancellationToken)
+    {
+        SshCommandResult arch = await session.ExecuteAsync(SshOperation.ReadLinuxArchitecture, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult gpu = await session.ExecuteAsync(SshOperation.ReadNvidiaGpuLinux, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult disk = await session.ExecuteAsync(SshOperation.ReadSystemDiskLinux, cancellationToken: cancellationToken).ConfigureAwait(false);
+        string machine = arch.Output.Trim();
+        string gpuText = gpu.Output.Trim(); bool noNvidia = !gpu.Success || gpuText.Length == 0 || gpuText.StartsWith("NONVIDIA:", StringComparison.Ordinal);
+        (string? name, long? vram) = noNvidia ? (null, null) : ParseGpu(gpuText);
+        long? free = long.TryParse(disk.Output.Trim(), out long bytes) ? bytes : null;
+        string? blocked = !string.Equals(machine, "x86_64", StringComparison.Ordinal)
+            ? $"Cài đặt tự động trên Linux cần máy x86_64 (máy này: {(machine.Length == 0 ? "không rõ" : machine)})."
+            : noNvidia ? "Máy Linux chưa có driver NVIDIA (nvidia-smi không chạy được)." : null;
+        string os = machine.Length == 0 ? release : release + " · " + machine;
+        return new(os, name, vram, free, false, port, [], blocked is null, blocked, RemoteHostPlatform.Linux);
+    }
+
+    /// <summary>PRETTY_NAME (or NAME) from /etc/os-release; null when the text is not an os-release file.</summary>
+    internal static string? LinuxRelease(string osRelease)
+    {
+        string? pretty = null, name = null;
+        foreach (string raw in osRelease.Split('\n'))
+        {
+            string line = raw.Trim(); int equals = line.IndexOf('=');
+            if (equals < 1) continue;
+            string value = line[(equals + 1)..].Trim().Trim('"', '\'');
+            switch (line[..equals])
+            {
+                case "PRETTY_NAME": pretty = value; break;
+                case "NAME": name = value; break;
+                case "ID": name ??= value; break;
+            }
+        }
+        string? result = !string.IsNullOrWhiteSpace(pretty) ? pretty : name;
+        return string.IsNullOrWhiteSpace(result) ? null : result;
     }
 
     private static (string?, long?) ParseGpu(string output)
@@ -87,12 +129,20 @@ public sealed class RemoteLlamaSetup
     public const long MinimumFreeDiskBytes = 12L * 1024 * 1024 * 1024;
     private readonly ILlamaCppPackageProvider _packages;
     private readonly IRemoteLlamaHealthClient _health;
-    private readonly RemoteWindowsGpuProbe _probe;
+    private readonly RemoteGpuProbe _probe;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly TimeSpan _pollInterval, _healthTimeout;
 
+    /// <summary>The commands one setup run uses, per rented operating system.</summary>
+    private sealed record PlatformOperations(SshOperation TestExecutable, SshOperation Configure,
+        SshOperation CacheSize, SshOperation LogTail);
+    private static readonly PlatformOperations WindowsOperations = new(SshOperation.TestLlamaServerExecutable,
+        SshOperation.ConfigureLlamaServerTask, SshOperation.ReadLlamaCacheSize, SshOperation.ReadLlamaServerLogTail);
+    private static readonly PlatformOperations LinuxOperations = new(SshOperation.TestLlamaServerLinux,
+        SshOperation.ConfigureLlamaServerLinux, SshOperation.ReadLlamaCacheSizeLinux, SshOperation.ReadLlamaServerLogTailLinux);
+
     public RemoteLlamaSetup(ILlamaCppPackageProvider packages, IRemoteLlamaHealthClient? health = null,
-        RemoteWindowsGpuProbe? probe = null, Func<TimeSpan, CancellationToken, Task>? delay = null,
+        RemoteGpuProbe? probe = null, Func<TimeSpan, CancellationToken, Task>? delay = null,
         TimeSpan? pollInterval = null, TimeSpan? healthTimeout = null)
     {
         _packages = packages ?? throw new ArgumentNullException(nameof(packages)); _health = health ?? new RemoteLlamaHealthClient();
@@ -115,15 +165,24 @@ public sealed class RemoteLlamaSetup
         CancellationToken cancellationToken = default)
     {
         var launch = new LlamaServerLaunch(GgufModelReference.Parse(model), port, slots, contextPerSlot); launch.Validate();
-        progress?.Report(new(RemoteLlamaSetupStage.Inspect, "Đang nhận diện máy thuê Windows…"));
+        progress?.Report(new(RemoteLlamaSetupStage.Inspect, "Đang nhận diện máy thuê…"));
         RemoteLlamaInspection inspection = await _probe.InspectAsync(session, port, cancellationToken).ConfigureAwait(false);
         if (!inspection.SupportsAutomaticSetup) return new(false, inspection.BlockedReason!, inspection);
         if (inspection.FreeDiskBytes is long free && free < MinimumFreeDiskBytes)
             return new(false, $"Ổ đĩa máy thuê chỉ còn {free / 1024d / 1024 / 1024:0.0} GB, không đủ để tải model.", inspection);
+        bool linux = inspection.Platform == RemoteHostPlatform.Linux;
+        PlatformOperations operations = linux ? LinuxOperations : WindowsOperations;
 
-        SshCommandResult executable = await session.ExecuteAsync(SshOperation.TestLlamaServerExecutable,
+        SshCommandResult executable = await session.ExecuteAsync(operations.TestExecutable,
             cancellationToken: cancellationToken).ConfigureAwait(false);
-        if (!executable.Success)
+        if (!executable.Success && linux)
+        {
+            // The rental downloads the pinned Linux CUDA build from GitHub itself and checks its SHA-256.
+            progress?.Report(new(RemoteLlamaSetupStage.Extract, "Máy thuê đang tải và giải nén llama.cpp CUDA cho Linux (khoảng 770 MB)…"));
+            await RequireAsync(session, SshOperation.InstallLlamaCppLinux, null, cancellationToken).ConfigureAwait(false);
+            await RequireAsync(session, SshOperation.TestLlamaServerLinux, null, cancellationToken).ConfigureAwait(false);
+        }
+        else if (!executable.Success)
         {
             progress?.Report(new(RemoteLlamaSetupStage.PreparePackage, "Đang chuẩn bị llama.cpp trên máy này…"));
             LlamaCppPackage package = await _packages.EnsureAsync(new TextProgress(text =>
@@ -144,9 +203,9 @@ public sealed class RemoteLlamaSetup
             await RequireAsync(session, SshOperation.TestLlamaServerExecutable, null, cancellationToken).ConfigureAwait(false);
         }
 
-        progress?.Report(new(RemoteLlamaSetupStage.Configure, "Đang đăng ký llama-server tự khởi động…"));
+        progress?.Report(new(RemoteLlamaSetupStage.Configure, linux ? "Đang khởi động lại llama-server…" : "Đang đăng ký llama-server tự khởi động…"));
         string specification = JsonSerializer.Serialize(new RemoteLlamaTaskSpecification(model, port, slots, contextPerSlot));
-        await RequireAsync(session, SshOperation.ConfigureLlamaServerTask, specification, cancellationToken).ConfigureAwait(false);
+        await RequireAsync(session, operations.Configure, specification, cancellationToken).ConfigureAwait(false);
         DateTimeOffset deadline = DateTimeOffset.UtcNow + _healthTimeout;
         while (DateTimeOffset.UtcNow <= deadline)
         {
@@ -163,19 +222,20 @@ public sealed class RemoteLlamaSetup
             }
             // A probe timeout (server still starting or downloading) is "not ready yet"; only the caller's token cancels.
             catch (Exception e) when (e is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
-            SshCommandResult size = await session.ExecuteAsync(SshOperation.ReadLlamaCacheSize, cancellationToken: cancellationToken).ConfigureAwait(false);
+            SshCommandResult size = await session.ExecuteAsync(operations.CacheSize, cancellationToken: cancellationToken).ConfigureAwait(false);
             string downloaded = long.TryParse(size.Output.Trim(), out long bytes) ? $" · đã tải {bytes / 1024d / 1024 / 1024:0.0} GB" : "";
             progress?.Report(new(RemoteLlamaSetupStage.DownloadModel, "llama-server đang tải/khởi tạo model" + downloaded + "…"));
             await _delay(_pollInterval, cancellationToken).ConfigureAwait(false);
         }
-        SshCommandResult log = await session.ExecuteAsync(SshOperation.ReadLlamaServerLogTail, cancellationToken: cancellationToken).ConfigureAwait(false);
+        SshCommandResult log = await session.ExecuteAsync(operations.LogTail, cancellationToken: cancellationToken).ConfigureAwait(false);
         string tail = SafeTail(log.Output + (string.IsNullOrWhiteSpace(log.Error) ? "" : "\n" + log.Error));
         return new(false, "llama-server không sẵn sàng trước thời hạn." + (tail.Length == 0 ? "" : "\nLog cuối:\n" + tail), inspection);
     }
 
     private static async Task RequireAsync(ISshSession session, SshOperation operation, string? argument, CancellationToken token)
     { SshCommandResult result = await session.ExecuteAsync(operation, argument, token).ConfigureAwait(false);
-        if (!result.Success) throw new InvalidOperationException("Máy Windows từ chối bước cài đặt: " + SafeTail(result.Error)); }
+        if (!result.Success) throw new InvalidOperationException("Máy thuê từ chối bước cài đặt: " +
+            SafeTail(string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error)); }
     private static string SafeTail(string value) => value.Trim().Length <= 3000 ? value.Trim() : value.Trim()[^3000..];
     private sealed class TextProgress(Action<string> report) : IProgress<string> { public void Report(string value) => report(value); }
     private sealed class ByteProgress(Action<long> report) : IProgress<long> { public void Report(long value) => report(value); }

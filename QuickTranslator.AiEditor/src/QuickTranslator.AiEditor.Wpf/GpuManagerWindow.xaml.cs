@@ -341,7 +341,7 @@ public partial class GpuManagerWindow : Window
             if (readiness == SshReadiness.Failed) return;
             // A machine QT Studio just prepared was confirmed in one dialog already, and its SSH server is our own.
             if (readiness == SshReadiness.AlreadyAvailable && ThemedDialog.Show(this,
-                    $"QT Studio sẽ kết nối SSH tới {profile.Ssh.Host}, nhận diện máy Windows, tải gói llama.cpp từ máy này và khởi động model “{model}”.\n\n" +
+                    $"QT Studio sẽ kết nối SSH tới {profile.Ssh.Host}, nhận diện máy thuê (Windows hoặc Linux), cài llama.cpp CUDA (Windows: tải từ máy này; Linux: máy thuê tự tải từ GitHub) và khởi động model “{model}”.\n\n" +
                     "Không cài hay nâng cấp driver NVIDIA. Nhà cung cấp có thể tính phí mạng và thời gian thuê trong lúc cài. Tiếp tục?",
                     "Xác nhận cài đặt tự động", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
 
