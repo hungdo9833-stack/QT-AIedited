@@ -53,6 +53,56 @@ public sealed partial class ProjectRepository
         finally { session.OperationGate.Release(); }
     }
 
+    public async Task<ProjectChapterEntry> InsertChapterAsync(ProjectSession session, ChapterDocument chapter, int number,
+        string? chineseTitle = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(chapter);
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            int lastNumber = session.Manifest.Chapters.Where(x => x.DeletedAt is null)
+                .Select(x => x.Number).DefaultIfEmpty(0).Max();
+            if (number <= 0 || number > lastNumber + 1) throw new ArgumentOutOfRangeException(nameof(number));
+            if (session.Manifest.Chapters.Any(x => x.ChapterId == chapter.Id))
+                throw new InvalidOperationException("Chương đã có ID trong manifest.");
+            string relative = $"Chapters/{chapter.Id:D}.qtaie.json";
+            await EnsureDestinationEmptyAsync(session.Resolve(relative), cancellationToken).ConfigureAwait(false);
+            ChapterDocument saved = PrepareRegisteredChapter(session, chapter, number, chineseTitle);
+            ProjectManifest after = Clone(session.Manifest);
+            foreach (ProjectChapterEntry entry in after.Chapters.Where(x => x.DeletedAt is null && x.Number >= number))
+                entry.Number++;
+            after.Chapters.Add(ToEntry(saved, number));
+            after.CurrentChapterId = saved.Id;
+            NormalizeManifest(after);
+            string chapterPath = session.ChapterStore.GetPath(saved.Id);
+            await session.ChapterStore.SaveSerializedAsync(saved.Id, ChapterFileStore.SerializeDocument(saved), cancellationToken)
+                .ConfigureAwait(false);
+            try
+            {
+                FaultPoint?.Invoke("AfterChapterWrite");
+                await WriteFastManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                try { File.Delete(chapterPath); }
+                catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException)
+                {
+                    throw new IOException("Không lưu được manifest và không thể dọn file chương chưa đăng ký.", cleanupError);
+                }
+                throw;
+            }
+            session.Manifest = after;
+            PublishManifestCommitted(session, "InsertChapter");
+            return session.Manifest.Chapters.Single(x => x.ChapterId == saved.Id);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            throw new IOException("Không đủ quyền hoặc file bị khóa; thao tác chèn chương chưa hoàn tất.", ex);
+        }
+        finally { session.OperationGate.Release(); }
+    }
+
     public Task SoftDeleteChapterAsync(ProjectSession session, Guid chapterId, CancellationToken cancellationToken = default) =>
         SoftDeleteChaptersAsync(session, [chapterId], cancellationToken);
     public Task RestoreDeletedChapterAsync(ProjectSession session, Guid chapterId, CancellationToken cancellationToken = default) =>

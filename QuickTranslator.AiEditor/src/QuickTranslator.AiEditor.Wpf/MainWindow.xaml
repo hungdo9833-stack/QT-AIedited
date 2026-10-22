@@ -30,8 +30,8 @@
                 <MenuItem Header="_Mở thư mục" Click="OnOpenProjectFolder"/>
             </MenuItem>
         </Menu>
-        <!-- One slim row: brand, Project and the open chapter. Shell tools live in the left rail. -->
-        <Border x:Name="GlobalToolbar" DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,2">
+        <!-- Kept for code-behind compatibility; all commands are available from the menu bar above. -->
+        <Border x:Name="GlobalToolbar" DockPanel.Dock="Top" Visibility="Collapsed" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,2">
             <DockPanel>
                 <StackPanel x:Name="BrandBlock" DockPanel.Dock="Left" Width="194" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="QT STUDIO" FontSize="15" FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}" VerticalAlignment="Center"/>
@@ -151,10 +151,11 @@
                     </ComboBox>
                     <WrapPanel>
                         <Button x:Name="ProjectImportTextButton" Content="Nhập TXT" ui:ButtonIcon.Glyph="&#xE710;" Click="OnAddChapterFromText" ToolTip="Thêm chương từ tệp TXT"/>
+                        <Button x:Name="ProjectNewChapterButton" Content="Chương mới" Click="OnNewProjectChapter" ToolTip="Tạo bản nháp chương trống ở cuối dự án"/>
                         <Button Content="Quản lý chương" Click="OnOpenChapterManager"/>
-                        <Button Content="Đổi tên" Click="OnRenameProjectChapter"/>
-                        <Button Content="Nhân bản" Click="OnDuplicateProjectChapter"/>
-                        <Button Content="Xóa" Click="OnDeleteProjectChapter" Style="{StaticResource DangerButton}"/>
+                        <Button x:Name="ProjectRenameChapterButton" Content="Đổi tên" Click="OnRenameProjectChapter"/>
+                        <Button x:Name="ProjectDuplicateChapterButton" Content="Nhân bản" Click="OnDuplicateProjectChapter"/>
+                        <Button x:Name="ProjectDeleteChapterButton" Content="Xóa" Click="OnDeleteProjectChapter" Style="{StaticResource DangerButton}"/>
                     </WrapPanel>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Bottom">
@@ -164,7 +165,20 @@
                     </WrapPanel>
                     <TextBlock x:Name="ProjectAutosaveStatus" Text="Đã lưu" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="4" TextWrapping="Wrap"/>
                 </StackPanel>
-                <ListBox x:Name="ProjectChapterList" DisplayMemberPath="Label" SelectionChanged="OnProjectChapterSelected" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Danh sách chương"/>
+                <ListBox x:Name="ProjectChapterList" DisplayMemberPath="Label" SelectionMode="Extended" SelectionChanged="OnProjectChapterSelected" PreviewMouseRightButtonDown="OnProjectChapterPreviewRightButtonDown" ContextMenuOpening="OnProjectChapterContextMenuOpening" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Danh sách chương">
+                    <ListBox.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem x:Name="ProjectChapterRenameMenuItem" Header="Đổi tên" Click="OnRenameProjectChapter"/>
+                            <MenuItem x:Name="ProjectChapterDeleteMenuItem" Header="Xóa" Click="OnDeleteProjectChapter"/>
+                            <MenuItem x:Name="ProjectChapterRetranslateMenuItem" Header="Dịch lại" Click="OnRetranslateProjectChapters"/>
+                            <Separator/>
+                            <MenuItem x:Name="ProjectChapterInsertAboveMenuItem" Header="Chèn chương phía trên" Click="OnInsertProjectChapterAbove"/>
+                            <MenuItem x:Name="ProjectChapterInsertBelowMenuItem" Header="Chèn chương phía dưới" Click="OnInsertProjectChapterBelow"/>
+                            <Separator/>
+                            <MenuItem x:Name="ProjectChapterDuplicateMenuItem" Header="Nhân bản" Click="OnDuplicateProjectChapter"/>
+                        </ContextMenu>
+                    </ListBox.ContextMenu>
+                </ListBox>
             </DockPanel>
         </Border>
         </ContentControl>
