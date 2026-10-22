@@ -95,6 +95,43 @@ public sealed class ImportDefaultDecisionTests
     }
 
     [Fact]
+    public void Unnumbered_subtitles_at_the_start_of_numbered_chapters_are_merged_before_inclusion_is_decided()
+    {
+        const string source = "第55章 番外 归来\n他终于回到了故乡。\n第56章 番外 重逢\n番外 久别重逢\n他们在村口再次相见。\n第57章 番外 新程\n\n番外 雨后初晴\n清晨，他们一起踏上了新的旅程。\n";
+        ImportPreviewPlan plan = Preview(source).Current;
+        AssertImportable(source, plan);
+        Assert.Equal([55, 56, 57], plan.ImportableChapters.Select(x => x.Number));
+        ImportPreviewItem chapter56 = Assert.Single(plan.Chapters, x => x.Number == 56);
+        ImportPreviewItem chapter57 = Assert.Single(plan.Chapters, x => x.Number == 57);
+        Assert.True(chapter56.Included);
+        Assert.False(chapter56.ExplicitlyExcluded);
+        Assert.False(chapter57.ExplicitlyExcluded);
+        Assert.Equal("久别重逢", Assert.Single(chapter56.AbsorbedTitles));
+        Assert.Equal("雨后初晴", Assert.Single(chapter57.AbsorbedTitles));
+        Assert.Contains("他们在村口再次相见。", plan.Slice(chapter56.ContentSpan), StringComparison.Ordinal);
+        Assert.Contains("清晨，他们一起踏上了新的旅程。", plan.Slice(chapter57.ContentSpan), StringComparison.Ordinal);
+        Assert.All(new[] { chapter56, chapter57 }, chapter =>
+            Assert.Contains(plan.Issues, x => x.Code == ImportPreviewIssueCode.UncertainBoundary &&
+                x.Severity == DetectionIssueSeverity.Warning && x.ItemIds.Contains(chapter.Id)));
+        Assert.DoesNotContain(plan.Issues, x => x.Code is ImportPreviewIssueCode.NumberJump or
+            ImportPreviewIssueCode.MissingNumber or ImportPreviewIssueCode.ChapterNotImported);
+    }
+
+    [Fact]
+    public void An_empty_numbered_chapter_followed_by_another_numbered_chapter_stays_excluded()
+    {
+        const string source = "第55章 归来\n他终于回到了故乡。\n第56章 重逢\n\n第57章 新程\n清晨，他们一起踏上了新的旅程。\n";
+        ImportPreviewPlan plan = Preview(source).Current;
+        AssertImportable(source, plan);
+        Assert.Equal([55, 57], plan.ImportableChapters.Select(x => x.Number));
+        ImportPreviewItem chapter = Assert.Single(plan.Chapters, x => x.Number == 56);
+        Assert.False(chapter.Included);
+        Assert.True(chapter.ExplicitlyExcluded);
+        Assert.True(string.IsNullOrWhiteSpace(plan.Slice(chapter.ContentSpan)));
+        Assert.Empty(chapter.AbsorbedTitles);
+    }
+
+    [Fact]
     public void A_numbering_gap_is_only_a_warning()
     {
         const string source = "第1313章 甲\n正文。\n第1315章 乙\n正文。\n";

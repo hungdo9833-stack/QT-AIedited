@@ -286,8 +286,8 @@ public sealed class ImportPreviewEditor
 
     /// <summary>
     /// Gives every chapter a decision so the preview can always be imported, keeping all text accounted for:
-    /// a low-confidence numbered heading with text is imported; an unnumbered heading that is not a confirmed special chapter
-    /// is folded into the chapter before it (its text stays imported); an included chapter without text is left out; a missing
+    /// continuations are folded into the chapter before them before inclusion is decided (their text stays imported);
+    /// a low-confidence numbered heading with text is imported; an included chapter without text is left out; a missing
     /// title becomes "Chương N"; anything else not imported is an explicit "kept in the snapshot" decision, listed as a warning.
     /// The user can change each of these in the preview.
     /// </summary>
@@ -298,7 +298,6 @@ public sealed class ImportPreviewEditor
         {
             ImportPreviewItem item = list[index];
             if (!item.IsChapter || item.AutomaticallyExcludedDuplicate) continue;
-            bool hasText = !string.IsNullOrWhiteSpace(source.Text.Substring(item.ContentSpan.StartUtf16, item.ContentSpan.LengthUtf16));
             bool followsChapter = index > 0 && list[index - 1].IsChapter && list[index - 1].Span.EndUtf16 == item.Span.StartUtf16;
             // An unnumbered heading that is not a confirmed special chapter, or the same number again right after itself with no
             // title of its own ("第24章" then "第24章1" / "第24章（下）": one chapter posted in parts), continues the chapter before it.
@@ -321,6 +320,12 @@ public sealed class ImportPreviewEditor
                 list.RemoveAt(index--);
                 continue;
             }
+        }
+        for (int index = 0; index < list.Count; index++)
+        {
+            ImportPreviewItem item = list[index];
+            if (!item.IsChapter || item.AutomaticallyExcludedDuplicate) continue;
+            bool hasText = !string.IsNullOrWhiteSpace(source.Text.Substring(item.ContentSpan.StartUtf16, item.ContentSpan.LengthUtf16));
             if (!item.Included && item.Number is > 0 && hasText && item.Decision == CandidateDecision.NeedsReview)
                 item = item with { Included = true };
             if (item.Included && !hasText) item = item with { Included = false };
