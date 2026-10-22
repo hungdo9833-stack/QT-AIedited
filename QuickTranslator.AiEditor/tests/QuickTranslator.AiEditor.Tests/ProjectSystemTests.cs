@@ -73,6 +73,35 @@ public sealed class ProjectSystemTests : IDisposable
     }
 
     [Fact]
+    public async Task InsertChapter_RenumbersManifestOnceAndLeavesExistingChapterFilesUntouched()
+    {
+        var project = await _repository.CreateAsync(Path.Combine(_root, "Insert"), "Truyện");
+        ChapterDocument first = Chapter("Một");
+        ChapterDocument second = Chapter("Hai");
+        ChapterDocument third = Chapter("Ba");
+        await _repository.AddChapterAsync(project, first, 1);
+        await _repository.AddChapterAsync(project, second, 2);
+        await _repository.AddChapterAsync(project, third, 3);
+        var existingFiles = new[] { first.Id, second.Id, third.Id }
+            .ToDictionary(id => id, id => File.ReadAllBytes(project.ChapterStore.GetPath(id)));
+
+        ChapterDocument inserted = Chapter("Chèn");
+        ProjectChapterEntry entry = await _repository.InsertChapterAsync(project, inserted, 2);
+
+        Assert.Equal(inserted.Id, entry.ChapterId);
+        Assert.Equal(inserted.Id, project.Manifest.CurrentChapterId);
+        Assert.Equal(new[] { first.Id, inserted.Id, second.Id, third.Id }, project.Manifest.Chapters
+            .Where(item => item.DeletedAt is null).OrderBy(item => item.Number).Select(item => item.ChapterId));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, project.Manifest.Chapters
+            .Where(item => item.DeletedAt is null).OrderBy(item => item.Number).Select(item => item.Number));
+        Assert.All(existingFiles, item => Assert.Equal(item.Value, File.ReadAllBytes(project.ChapterStore.GetPath(item.Key))));
+
+        ProjectSession reopened = (await _repository.OpenAsync(project.ManifestPath)).Session;
+        Assert.Equal(new[] { 1, 2, 3, 4 }, reopened.Manifest.Chapters
+            .Where(item => item.DeletedAt is null).OrderBy(item => item.Number).Select(item => item.Number));
+    }
+
+    [Fact]
     public async Task UpdateChapter_PreservesProtectedUserDraft()
     {
         var project = await CreateWithChapterAsync("Draft");

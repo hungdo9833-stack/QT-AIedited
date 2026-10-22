@@ -1,0 +1,75 @@
+using System.Windows;
+using System.Windows.Controls;
+using QuickTranslator.AiEditor.Core.Models;
+using QuickTranslator.AiEditor.Core.Translation;
+using Xunit;
+
+namespace QuickTranslator.AiEditor.Wpf.Tests;
+
+public sealed class ProjectSidebarUiTests
+{
+    [Fact]
+    public Task ShellToolbarIsCollapsedAndChapterListUsesExtendedSelection() => StaHost.Run(() =>
+    {
+        using var fixture = new WorkspaceFixture();
+        Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("GlobalToolbar")).Visibility);
+        var list = (ListBox)fixture.Window.FindName("ProjectChapterList");
+        Assert.Equal(SelectionMode.Extended, list.SelectionMode);
+        Assert.Equal(new[] { "Đổi tên", "Xóa", "Dịch lại", "Chèn chương phía trên", "Chèn chương phía dưới", "Nhân bản" },
+            list.ContextMenu!.Items.OfType<MenuItem>().Select(item => item.Header));
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task MultipleSelectionEnablesOnlyBulkContextCommands() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        fixture.Call("InitializeProjectWorkspace");
+        await fixture.CreateProjectAsync();
+        await fixture.AddChapterAsync("Một", 1);
+        await fixture.AddChapterAsync("Hai", 2);
+        fixture.Call("RefreshProjectChapterList");
+        var list = (ListBox)fixture.Window.FindName("ProjectChapterList");
+        fixture.Set("_suppressProjectChapterOpen", true);
+        try
+        {
+            list.SelectedItems.Clear();
+            list.SelectedItems.Add(list.Items[0]);
+            list.SelectedItems.Add(list.Items[1]);
+        }
+        finally { fixture.Set("_suppressProjectChapterOpen", false); }
+        fixture.Call("UpdateProjectChapterCommands");
+
+        Assert.False(((Button)fixture.Window.FindName("ProjectRenameChapterButton")).IsEnabled);
+        Assert.False(((Button)fixture.Window.FindName("ProjectDuplicateChapterButton")).IsEnabled);
+        Assert.True(((Button)fixture.Window.FindName("ProjectDeleteChapterButton")).IsEnabled);
+        MenuItem[] commands = list.ContextMenu!.Items.OfType<MenuItem>().ToArray();
+        Assert.False(commands.Single(item => Equals(item.Header, "Đổi tên")).IsEnabled);
+        Assert.True(commands.Single(item => Equals(item.Header, "Xóa")).IsEnabled);
+        Assert.True(commands.Single(item => Equals(item.Header, "Dịch lại")).IsEnabled);
+        Assert.False(commands.Single(item => Equals(item.Header, "Chèn chương phía trên")).IsEnabled);
+        Assert.False(commands.Single(item => Equals(item.Header, "Chèn chương phía dưới")).IsEnabled);
+        Assert.False(commands.Single(item => Equals(item.Header, "Nhân bản")).IsEnabled);
+    });
+
+    [Fact]
+    public Task InsertedDraftRegistersAtRememberedReadingPosition() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        fixture.Call("InitializeProjectWorkspace");
+        await fixture.CreateProjectAsync();
+        ChapterDocument first = await fixture.AddChapterAsync("Một", 1);
+        ChapterDocument second = await fixture.AddChapterAsync("Hai", 2);
+
+        await fixture.TaskCall("BeginChapterDraftAsync", 2, "Đang chèn chương.");
+        Assert.Equal(2, fixture.Get<int?>("_pendingProjectChapterNumber"));
+        Assert.Equal("", fixture.Text("ChapterInput").Text);
+        Assert.Equal("Chương 2", fixture.Text("TitleInput").Text);
+
+        ChapterDocument draft = TranslationService.CreateChapter("Chèn", "天地玄黄。");
+        ChapterDocument registered = await fixture.TaskCall<ChapterDocument>("RegisterChapterIfNeededAsync", draft);
+        Assert.Null(fixture.Get<int?>("_pendingProjectChapterNumber"));
+        Assert.Equal(new[] { first.Id, registered.Id, second.Id }, fixture.Project.Manifest.Chapters
+            .Where(item => item.DeletedAt is null).OrderBy(item => item.Number).Select(item => item.ChapterId));
+    });
+}

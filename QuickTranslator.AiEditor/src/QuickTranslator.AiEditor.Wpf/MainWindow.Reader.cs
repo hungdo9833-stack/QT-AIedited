@@ -577,7 +577,8 @@ public partial class MainWindow
     private void OnToggleFocusMode(object sender, RoutedEventArgs e)
     {
         _focusMode = !_focusMode;
-        GlobalToolbar.Visibility = GlobalStatus.Visibility = _focusMode ? Visibility.Collapsed : Visibility.Visible;
+        GlobalToolbar.Visibility = Visibility.Collapsed;
+        GlobalStatus.Visibility = _focusMode ? Visibility.Collapsed : Visibility.Visible;
         ReaderToolbar.Visibility = _focusMode ? Visibility.Collapsed : Visibility.Visible;
         FocusModeButton.Content = _focusMode ? "Thoát tập trung" : "Tập trung";
         ApplyReaderCatalogVisibility();

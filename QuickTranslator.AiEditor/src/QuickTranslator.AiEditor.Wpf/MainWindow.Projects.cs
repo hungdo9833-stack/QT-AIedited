@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Microsoft.Win32;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
@@ -25,7 +26,9 @@ public partial class MainWindow
     private readonly ProjectCatalog _projectCatalog;
     private readonly ObservableCollection<ProjectChapterItem> _projectChapters = [];
     private bool _syncingProjectUi;
+    private bool _suppressProjectChapterOpen;
     private bool _syncingProjectSummary;
+    private int? _pendingProjectChapterNumber;
     private BookIntelligenceState? _bookIntelligenceState;
     private bool _bookKnowledgeContextEnabled;
 
@@ -95,6 +98,7 @@ public partial class MainWindow
         ClearProjectTranslationCoordinator();
         DetachChapter();
         _projectSession = candidate; _projectLibrary = library; _store = candidate.ChapterStore;
+        _pendingProjectChapterNumber = null;
         _standaloneEditorRequested = false;
         StartScreenHost.Visibility = Visibility.Collapsed;
         // Prompt presets belong to the application, not individual Projects.
@@ -221,10 +225,14 @@ public partial class MainWindow
         if (_projectSession is null) return chapter;
         if (_projectSession.Manifest.Chapters.Any(x => x.ChapterId == chapter.Id && x.DeletedAt is null))
             return (await _projectRepository.LoadChapterAsync(_projectSession, chapter.Id)).Chapter;
-        int number = NextChapterNumber();
+        int number = _pendingProjectChapterNumber ?? NextChapterNumber();
         chapter.ProjectId = _projectSession.Manifest.ProjectId; chapter.ChapterNumber = number;
         chapter.CharacterProject.Id = _projectSession.Manifest.ProjectId;
-        await _projectRepository.AddChapterAsync(_projectSession, chapter, number, chapter.ChineseTitle);
+        if (number < NextChapterNumber())
+            await _projectRepository.InsertChapterAsync(_projectSession, chapter, number, chapter.ChineseTitle);
+        else
+            await _projectRepository.AddChapterAsync(_projectSession, chapter, number, chapter.ChineseTitle);
+        _pendingProjectChapterNumber = null;
         RefreshProjectChapterList();
         return (await _projectRepository.LoadChapterAsync(_projectSession, chapter.Id)).Chapter;
     }
@@ -262,6 +270,7 @@ public partial class MainWindow
     private async Task LoadProjectChapterCoreAsync(Guid chapterId)
     {
         if (_projectSession is null) return;
+        _pendingProjectChapterNumber = null;
         var loaded = await _projectRepository.LoadChapterAsync(_projectSession, chapterId);
         var oldCurrent = _projectSession.Manifest.CurrentChapterId;
         _projectSession.Manifest.CurrentChapterId = chapterId;
@@ -340,9 +349,46 @@ public partial class MainWindow
     }
     private async void OnProjectChapterSelected(object sender, SelectionChangedEventArgs e)
     {
-        if (_syncingProjectUi || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
+        UpdateProjectChapterCommands();
+        if (_syncingProjectUi || _suppressProjectChapterOpen || ProjectChapterList.SelectedItems.Count != 1 ||
+            Keyboard.Modifiers is not ModifierKeys.None || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
         try { await LoadProjectChapterAsync(item.Id); } catch (Exception ex) { ShowError(ex); }
         finally { RefreshProjectChapterList(); }
+    }
+
+    private void OnProjectChapterPreviewRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        DependencyObject? source = e.OriginalSource as DependencyObject;
+        ListBoxItem? container = source is null ? null : ItemsControl.ContainerFromElement(ProjectChapterList, source) as ListBoxItem;
+        if (container?.DataContext is not ProjectChapterItem item || container.IsSelected) return;
+        _suppressProjectChapterOpen = true;
+        try
+        {
+            ProjectChapterList.SelectedItems.Clear();
+            ProjectChapterList.SelectedItem = item;
+        }
+        finally { _suppressProjectChapterOpen = false; }
+        UpdateProjectChapterCommands();
+    }
+
+    private void OnProjectChapterContextMenuOpening(object sender, ContextMenuEventArgs e) => UpdateProjectChapterCommands();
+
+    private ProjectChapterItem[] SelectedProjectChapters() =>
+        ProjectChapterList.SelectedItems.Cast<ProjectChapterItem>().ToArray();
+
+    private void UpdateProjectChapterCommands()
+    {
+        if (ProjectChapterList is null) return;
+        int count = ProjectChapterList.SelectedItems.Count;
+        bool available = _projectSession is not null && !_uiOperation && !_closing &&
+            _projectTranslationCoordinator?.IsRunning != true;
+        bool one = available && count == 1;
+        ProjectNewChapterButton.IsEnabled = available;
+        ProjectRenameChapterButton.IsEnabled = ProjectChapterRenameMenuItem.IsEnabled = one;
+        ProjectDuplicateChapterButton.IsEnabled = ProjectChapterDuplicateMenuItem.IsEnabled = one;
+        ProjectDeleteChapterButton.IsEnabled = ProjectChapterDeleteMenuItem.IsEnabled = available && count > 0;
+        ProjectChapterRetranslateMenuItem.IsEnabled = available && count > 0;
+        ProjectChapterInsertAboveMenuItem.IsEnabled = ProjectChapterInsertBelowMenuItem.IsEnabled = one;
     }
     private void OnChapterSearchChanged(object sender, RoutedEventArgs e) { if (_initialized) RefreshProjectChapterList(); }
 
@@ -397,6 +443,7 @@ public partial class MainWindow
                 DropHostedProjectViews();
                 ClearProjectTranslationCoordinator();
                 DetachChapter(); _projectSession = null; _projectResources = null;
+                _pendingProjectChapterNumber = null;
                 _standaloneEditorRequested = false;
                 ApplyPanelPolicy();
                 _store = new(ChapterFileStore.DefaultDirectory);
@@ -583,9 +630,34 @@ public partial class MainWindow
         await OpenDetectedBulkImportAsync();
     }
 
+    private async void OnNewProjectChapter(object sender, RoutedEventArgs e)
+    {
+        if (_projectSession is null || _projectTranslationCoordinator?.IsRunning == true) return;
+        try { await BeginChapterDraftAsync(NextChapterNumber(), "Đang tạo chương mới ở cuối dự án. Hãy dán nguyên văn rồi chia đoạn."); }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async Task BeginChapterDraftAsync(int? number, string status)
+    {
+        await RunWorkspaceTransitionAsync(() =>
+        {
+            DetachChapter();
+            ClearChapterEditor();
+            _pendingProjectChapterNumber = number;
+            if (number is int chapterNumber) TitleInput.Text = $"Chương {chapterNumber}";
+            Refresh();
+            SetStatus(status);
+            ChapterInput.Focus();
+            Keyboard.Focus(ChapterInput);
+            return Task.CompletedTask;
+        });
+    }
+
     private async void OnRenameProjectChapter(object sender, RoutedEventArgs e)
     {
-        if (_projectSession is null || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
+        ProjectChapterItem[] selected = SelectedProjectChapters();
+        if (_projectSession is null || _projectTranslationCoordinator?.IsRunning == true || selected.Length != 1) return;
+        ProjectChapterItem item = selected[0];
         var entry = _projectSession.Manifest.Chapters.Single(x => x.ChapterId == item.Id);
         var (title, chinese) = ShowChapterRenameDialog(entry.VietnameseTitle, entry.ChineseTitle);
         if (title is null || chinese is null) return;
@@ -631,7 +703,9 @@ public partial class MainWindow
 
     private async void OnDuplicateProjectChapter(object sender, RoutedEventArgs e)
     {
-        if (_projectSession is null || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
+        ProjectChapterItem[] selected = SelectedProjectChapters();
+        if (_projectSession is null || _projectTranslationCoordinator?.IsRunning == true || selected.Length != 1) return;
+        ProjectChapterItem item = selected[0];
         try
         {
             await RunWorkspaceTransitionAsync(async () =>
@@ -646,16 +720,46 @@ public partial class MainWindow
 
     private async void OnDeleteProjectChapter(object sender, RoutedEventArgs e)
     {
-        if (_projectSession is null || ProjectChapterList.SelectedItem is not ProjectChapterItem item) return;
-        if (ThemedDialog.Show(this, "Chuyển chương vào History của dự án? Có thể phục hồi bằng dữ liệu manifest; tệp không bị xóa vĩnh viễn.", "Xóa mềm chương", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (_projectSession is null || _projectTranslationCoordinator?.IsRunning == true) return;
+        Guid[] selected = SelectedProjectChapters().Select(x => x.Id).Distinct().ToArray();
+        if (selected.Length == 0) return;
+        string message = selected.Length == 1
+            ? "Chuyển 1 chương vào History của dự án? Có thể phục hồi bằng dữ liệu manifest; tệp không bị xóa vĩnh viễn."
+            : $"Chuyển {selected.Length:N0} chương vào History của dự án? Có thể phục hồi bằng dữ liệu manifest; các tệp không bị xóa vĩnh viễn.";
+        if (ThemedDialog.Show(this, message, "Xóa mềm chương", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         try
         {
-            await RunWorkspaceTransitionAsync(async () =>
-            {
-                await _projectRepository.SoftDeleteChapterAsync(_projectSession, item.Id);
-                if (_projectSession.Manifest.CurrentChapterId is Guid id) await LoadProjectChapterCoreAsync(id);
-                else { DetachChapter(); ClearChapterEditor(); RefreshProjectChapterList(); Refresh(); }
-            });
+            await SoftDeleteFromManagerAsync(selected);
+        }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async void OnRetranslateProjectChapters(object sender, RoutedEventArgs e)
+    {
+        if (_projectSession is null || _projectTranslationCoordinator?.IsRunning == true) return;
+        Guid[] selected = SelectedProjectChapters().Select(x => x.Id).Distinct().ToArray();
+        if (selected.Length == 0) return;
+        try { await OpenProjectTranslationQueueAsync(selected); }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async void OnInsertProjectChapterAbove(object sender, RoutedEventArgs e) =>
+        await BeginInsertedProjectChapterAsync(after: false);
+
+    private async void OnInsertProjectChapterBelow(object sender, RoutedEventArgs e) =>
+        await BeginInsertedProjectChapterAsync(after: true);
+
+    private async Task BeginInsertedProjectChapterAsync(bool after)
+    {
+        ProjectChapterItem[] selected = SelectedProjectChapters();
+        if (_projectSession is null || _projectTranslationCoordinator?.IsRunning == true || selected.Length != 1) return;
+        ProjectChapterEntry anchor = _projectSession.Manifest.Chapters.Single(x => x.ChapterId == selected[0].Id && x.DeletedAt is null);
+        int number = anchor.Number + (after ? 1 : 0);
+        try
+        {
+            await BeginChapterDraftAsync(number, after
+                ? $"Đang chèn chương sau chương {anchor.Number}. Hãy dán nguyên văn rồi chia đoạn."
+                : $"Đang chèn chương trước chương {anchor.Number}. Hãy dán nguyên văn rồi chia đoạn.");
         }
         catch (Exception ex) { ShowError(ex); }
     }

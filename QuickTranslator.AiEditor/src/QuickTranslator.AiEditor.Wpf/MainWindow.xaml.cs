@@ -125,12 +125,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            await RunWorkspaceTransitionAsync(() =>
-            {
-                DetachChapter(); ClearChapterEditor(); Refresh();
-                SetStatus("Nhập chương mới. Chương trước đã được lưu.");
-                return Task.CompletedTask;
-            });
+            await BeginChapterDraftAsync(_projectSession is null ? null : NextChapterNumber(),
+                "Nhập chương mới. Chương trước đã được lưu.");
         }
         catch (Exception ex) { ShowError(ex); }
     }
@@ -625,6 +621,7 @@ public partial class MainWindow : Window
         SplitSegmentButton.IsEnabled = MergeSegmentButton.IsEnabled = MoveBoundaryButton.IsEnabled = selected && !active && available;
         ArchiveButton.IsEnabled = document && available;
         RestoreStructureButton.IsEnabled = document && !active && available && chapter!.SegmentationHistory.Count > 0;
+        UpdateProjectChapterCommands();
         if (selectedSegment is not null)
         {
             TranslateButton.Content = selectedSegment.Attempts.Count == 0
