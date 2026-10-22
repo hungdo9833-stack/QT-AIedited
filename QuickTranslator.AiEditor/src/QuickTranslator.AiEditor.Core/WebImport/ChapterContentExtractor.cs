@@ -22,10 +22,12 @@ internal static class ChapterContentExtractor
         var candidates = root.QuerySelectorAll("article,main,section,div,td,pre,p").Prepend(root);
         var selected = post ?? candidates.OrderByDescending(Score).First();
         var text = Clean(Lines(selected));
-        if (WebPage.CjkCount(text) < 50)
+        var cjk = WebPage.CjkCount(text);
+        if (page.Document.QuerySelectorAll("script").Any(s => s.TextContent.Contains("__next_f", StringComparison.Ordinal)))
         {
             var streamed = NextText(page);
-            if (WebPage.CjkCount(streamed) > WebPage.CjkCount(text)) text = streamed;
+            var streamedCjk = WebPage.CjkCount(streamed);
+            if (streamedCjk > cjk && (cjk < 50 || SentenceEnds(text) < 3 || streamedCjk >= cjk * 2)) text = streamed;
         }
         BlockDetector.CheckBrowser(page, WebPage.CjkCount(text));
         return text;

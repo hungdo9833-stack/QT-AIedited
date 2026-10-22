@@ -89,6 +89,36 @@ public sealed class WebNovelImporterTests
         Assert.Equal(string.Join("\n", Enumerable.Repeat(Placeholder, 4)), text);
     }
 
+    [Theory]
+    [InlineData(0, 4)]
+    [InlineData(3, 8)]
+    public async Task NextFlight_BodyReplacesLongDomHeader(int sentenceEnds, int paragraphs)
+    {
+        string title = string.Concat(Enumerable.Repeat("这是一个很长的章节标题名称", 4)) + new string('！', sentenceEnds);
+        string header = $"<h1>测试书名</h1><div>第 58 章</div><div>更新于七天前</div><h2>{title} - 测试书名 | NovelBox</h2>";
+        Assert.True(WebPage.CjkCount(header) >= 60);
+        string body = string.Concat(Enumerable.Repeat($"<p>{Placeholder}</p>", paragraphs));
+        string payload = $"5:T{Encoding.UTF8.GetByteCount(body):x},{body}";
+        var html = $"<main>{header}</main><script>self.__next_f.push([1,{JsonSerializer.Serialize(payload)}])</script>";
+        using var handler = new FakeHandler(_ => Html(html));
+        using var importer = new WebNovelImporter(Options, handler);
+        Assert.Equal(string.Join("\n", Enumerable.Repeat(Placeholder, paragraphs)), (await importer.FetchChapterAsync(Link())).Text);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(8)]
+    public async Task NextFlight_UnrelatedPayloadKeepsDomBody(int payloadParagraphs)
+    {
+        string body = string.Join("\n", Enumerable.Repeat(Placeholder, 4));
+        string unrelated = string.Join("\n", Enumerable.Repeat("这是无关的页面配置占位文字。", payloadParagraphs));
+        string payload = "1:[\"$\",\"div\",null,{\"children\":" + JsonSerializer.Serialize(unrelated) + "}]\n";
+        var html = $"<article>{body}</article><script>self.__next_f.push([1,{JsonSerializer.Serialize(payload)}])</script>";
+        using var handler = new FakeHandler(_ => Html(html));
+        using var importer = new WebNovelImporter(Options, handler);
+        Assert.Equal(body, (await importer.FetchChapterAsync(Link())).Text);
+    }
+
     [Fact]
     public async Task Start_reading_button_does_not_steal_chapter_one_title_and_every_chapter_gets_a_heading()
     {
