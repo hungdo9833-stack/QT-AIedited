@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
@@ -85,6 +86,29 @@ public sealed class WebNovelImporterTests
         using var importer = new WebNovelImporter(Options, handler);
         string text = (await importer.FetchChapterAsync(Link())).Text;
         Assert.Equal(string.Join("\n", Enumerable.Repeat(Placeholder, 4)), text);
+    }
+
+    [Fact]
+    public async Task Start_reading_button_does_not_steal_chapter_one_title_and_every_chapter_gets_a_heading()
+    {
+        // Seen live: a "开始阅读" button before the list links to chapter 1, so chapter 1 was imported without a heading
+        // and ended up outside every chapter in the TXT import.
+        string book = "<h1>测试书名</h1><a href='/novel/test/chapter/1'>开始阅读</a>" +
+            string.Concat(Enumerable.Range(1, 5).Select(i => $"<a href='/novel/test/chapter/{i}'>第{i}回 占位标题</a>"));
+        using var handler = new FakeHandler(r => Html(r.RequestUri!.AbsolutePath == "/novel/test"
+            ? book : $"<article>{Placeholder}</article>"));
+        using var importer = new WebNovelImporter(Options, handler);
+        var analysis = await importer.AnalyzeAsync(Url("novel/test"));
+        Assert.Equal(5, analysis.Chapters.Count);
+        Assert.Equal("第1回 占位标题", analysis.Chapters[0].Title);
+        var chapters = new List<WebChapterContent>();
+        await foreach (var chapter in importer.FetchChaptersAsync(analysis.Chapters)) chapters.Add(chapter);
+        string text = importer.ComposeImportText(chapters);
+        Assert.StartsWith("第1回 占位标题\n", text);
+        Assert.Equal(5, Regex.Matches(text, @"(?m)^第\d+回 ").Count);
+        // A title without any number still becomes a heading the TXT import can split on.
+        var untitled = chapters[0] with { Link = chapters[0].Link with { Title = "楔子" } };
+        Assert.StartsWith("第1章 楔子\n", importer.ComposeImportText([untitled]));
     }
 
     [Fact]

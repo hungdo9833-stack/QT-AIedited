@@ -9,7 +9,12 @@ internal static class ChapterListDetector
         var links = page.Document.QuerySelectorAll("a[href]")
             .Select(a => new { Title = a.TextContent.Trim(), Url = WebPage.Resolve(page.Url, a.GetAttribute("href")) })
             .Where(a => a.Url is not null && WebPage.SameHost(page.Url, a.Url) && a.Title.Length > 0)
-            .Select(a => new WebChapterLink(0, a.Title, a.Url!)).DistinctBy(a => a.Url).ToList();
+            .Select(a => new WebChapterLink(0, a.Title, a.Url!))
+            // A "开始阅读" button and the real "第1回 …" entry share one URL: keep the first position but the title that
+            // reads like a chapter, or chapter 1 is imported under the button's text and loses its heading.
+            .GroupBy(a => a.Url)
+            .Select(g => g.First() with { Title = g.OrderByDescending(a => HasChapterNumber(a.Title)).First().Title })
+            .ToList();
 
         if (IsThread(page.Url))
         {
@@ -94,6 +99,9 @@ internal static class ChapterListDetector
         var match = Regex.Match(title, @"(\d+)\s*[-－~～—至]\s*\d+");
         return match.Success && long.TryParse(match.Groups[1].Value, out var n) ? n : null;
     }
+
+    internal static bool HasChapterNumber(string title) =>
+        Regex.IsMatch(title, @"第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節卷]");
 
     private static bool LooksLikeChapter(WebChapterLink link) =>
         Regex.IsMatch(link.Title, @"第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節卷]|\d+") ||

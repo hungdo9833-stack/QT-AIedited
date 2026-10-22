@@ -70,7 +70,15 @@ public sealed class WebNovelImporter : IWebNovelImporter, IDisposable
     {
         var texts = ChapterContentExtractor.RemoveRepeatedBoilerplate(chapters.Select(c => WebPage.Normalize(c.Text)).ToArray());
         return string.Join("\n\n", chapters.Select((chapter, i) =>
-            IsHeading(texts[i]) ? texts[i] : WebPage.Normalize(chapter.Link.Title) + (texts[i].Length > 0 ? "\n" + texts[i] : "")));
+            IsHeading(texts[i]) ? texts[i] : Heading(chapter.Link) + (texts[i].Length > 0 ? "\n" + texts[i] : "")));
+    }
+
+    // The TXT import splits on 第N章-style lines; a title without a number (e.g. "楔子", a site button) would leave the
+    // chapter outside every chapter, so it gets its list position as the number.
+    private static string Heading(WebChapterLink link)
+    {
+        string title = WebPage.Normalize(link.Title);
+        return ChapterListDetector.HasChapterNumber(title) ? title : $"第{link.Index}章 {title}".TrimEnd();
     }
 
     private static bool IsHeading(string text) => Regex.IsMatch(text,
