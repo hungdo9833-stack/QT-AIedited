@@ -14,7 +14,9 @@ public partial class ProjectPublicationView : UserControl
     private readonly ProjectSession _session;
     private readonly ProjectPublicationService _service;
     private readonly Func<Guid, Task>? _openChapter;
-    private ProjectPublicationInspection? _inspection;
+    private ProjectPublicationInspection? _wholeInspection;
+    private ProjectPublicationInspection? _inspection; // _wholeInspection limited to the chosen range; null while the range is invalid.
+    private string? _rangeError;
     private CancellationTokenSource? _operationCancellation;
     private Task? _inspectionTask;
     private bool _busy;
@@ -104,20 +106,11 @@ public partial class ProjectPublicationView : UserControl
         try
         {
             var progress = new Progress<ProjectPublicationProgress>(UpdateProgress);
-            _inspection = await _service.InspectAsync(_session, progress, _operationCancellation.Token);
+            _wholeInspection = await _service.InspectAsync(_session, progress, _operationCancellation.Token);
             _inspectionLoaded = true;
-            ChapterCountText.Text = _inspection.TotalChapterCount.ToString("N0");
-            InspectionText.Text = _inspection.RequiresConfirmation
-                ? $"{_inspection.IncompleteChapterCount} chưa hoàn tất · {_inspection.InspectionChapterCount} cần kiểm tra"
-                : "Sẵn sàng · mọi chương đều có bản dịch hợp lệ";
-            InspectionText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,
-                _inspection.RequiresConfirmation ? "WarningBrush" : "SuccessBrush");
-            AllowIncompleteInput.Visibility = _inspection.RequiresConfirmation ? Visibility.Visible : Visibility.Collapsed;
-            IReadOnlyList<ProjectPublicationIssueChapter> issues = _inspection.IssueChapters ?? [];
-            IssueChaptersList.ItemsSource = issues;
-            IssueChaptersPanel.Visibility = issues.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            ProgressText.Text = _inspection.TotalChapterCount == 0
-                ? "Project chưa có chương đang hoạt động." : "Đã kiểm tra xong. Chọn định dạng và nơi lưu.";
+            ApplyRange();
+            ProgressText.Text = _wholeInspection.TotalChapterCount == 0
+                ? "Project chưa có chương đang hoạt động." : "Đã kiểm tra xong. Chọn định dạng, phạm vi và nơi lưu.";
         }
         catch (OperationCanceledException) { ProgressText.Text = "Đã hủy kiểm tra."; }
         catch (Exception ex) { ShowError(ex); }
@@ -128,6 +121,60 @@ public partial class ProjectPublicationView : UserControl
             SetBusy(false);
         }
     }
+
+    private void OnRangeChanged(object sender, RoutedEventArgs e)
+    {
+        if (RangeInputsPanel is null || RangeHintText is null) return; // Raised while the XAML is still loading.
+        ApplyRange();
+    }
+
+    /// <summary>Limits the inspection to the chosen chapters and refreshes counts, warnings and the issue list.</summary>
+    private void ApplyRange()
+    {
+        string mode = (RangeModeInput.SelectedItem as ComboBoxItem)?.Tag as string ?? "All";
+        RangeInputsPanel.Visibility = mode == "All" ? Visibility.Collapsed : Visibility.Visible;
+        RangeToLabel.Visibility = RangeToInput.Visibility = mode == "Range" ? Visibility.Visible : Visibility.Collapsed;
+        RangeFromLabel.Text = mode == "Single" ? "Chương số" : "Từ chương";
+        if (_wholeInspection is null) return;
+        _rangeError = null;
+        ProjectPublicationInspection scoped = _wholeInspection;
+        if (mode != "All")
+        {
+            int? from = ParseChapterNumber(RangeFromInput.Text);
+            int? to = mode == "Single" ? from : ParseChapterNumber(RangeToInput.Text);
+            if (from is null || to is null)
+                _rangeError = mode == "Single" ? "Nhập số chương cần xuất." : "Nhập số chương bắt đầu và kết thúc.";
+            else if (from > to) _rangeError = "Chương bắt đầu phải nhỏ hơn hoặc bằng chương kết thúc.";
+            else
+            {
+                scoped = _wholeInspection.WithRange(from, to);
+                if (scoped.TotalChapterCount == 0) _rangeError = "Không có chương nào trong phạm vi này.";
+            }
+        }
+        _inspection = _rangeError is null ? scoped : null;
+        RangeHintText.Text = _rangeError ?? "Theo số chương ở cột Số trong Quản lý chương.";
+        RangeHintText.Visibility = mode == "All" ? Visibility.Collapsed : Visibility.Visible;
+        RangeHintText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,
+            _rangeError is null ? "MutedBrush" : "WarningBrush");
+
+        ChapterCountText.Text = _inspection is null ? "—" : _inspection.TotalChapterCount.ToString("N0");
+        bool needsConfirmation = _inspection?.RequiresConfirmation == true;
+        InspectionText.Text = _inspection is null ? _rangeError
+            : needsConfirmation ? $"{_inspection.IncompleteChapterCount} chưa hoàn tất · {_inspection.InspectionChapterCount} cần kiểm tra"
+            : _inspection.IsRange ? "Sẵn sàng · mọi chương trong phạm vi đều có bản dịch hợp lệ"
+            : "Sẵn sàng · mọi chương đều có bản dịch hợp lệ";
+        InspectionText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,
+            _inspection is null || needsConfirmation ? "WarningBrush" : "SuccessBrush");
+        AllowIncompleteInput.Visibility = needsConfirmation ? Visibility.Visible : Visibility.Collapsed;
+        IReadOnlyList<ProjectPublicationIssueChapter> issues = _inspection?.IssueChapters ?? [];
+        IssueChaptersList.ItemsSource = issues;
+        IssueChaptersPanel.Visibility = issues.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateExportEnabled();
+    }
+
+    private static int? ParseChapterNumber(string text) =>
+        int.TryParse(text.Trim(), System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out int number) ? number : null;
 
     private async void OnIssueChapterDoubleClick(object sender, MouseButtonEventArgs e)
     {
@@ -147,7 +194,7 @@ public partial class ProjectPublicationView : UserControl
             Filter = format == PublicationFormat.Pdf ? "Tài liệu PDF (*.pdf)|*.pdf" : "Văn bản UTF-8 (*.txt)|*.txt",
             DefaultExt = extension,
             AddExtension = true,
-            FileName = SanitizeFileName(_session.Manifest.VietnameseTitle) + extension
+            FileName = SanitizeFileName(_session.Manifest.VietnameseTitle + RangeFileSuffix(_inspection)) + extension
         };
         if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
 
@@ -205,6 +252,7 @@ public partial class ProjectPublicationView : UserControl
         FormatInput.IsEnabled = !busy;
         IncludeProjectTitleInput.IsEnabled = !busy;
         IncludeChapterTitlesInput.IsEnabled = !busy;
+        RangeModeInput.IsEnabled = RangeFromInput.IsEnabled = RangeToInput.IsEnabled = !busy;
         AllowIncompleteInput.IsEnabled = !busy;
         CloseButton.IsEnabled = !busy;
         CancelTaskButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
@@ -224,6 +272,7 @@ public partial class ProjectPublicationView : UserControl
         ExportButton.IsEnabled = !_busy && _inspection is { TotalChapterCount: > 0 } &&
             (!_inspection.RequiresConfirmation || AllowIncompleteInput.IsChecked == true);
         ExportButton.ToolTip = _busy ? "Đang kiểm tra chương hoặc thực hiện tác vụ."
+            : _rangeError is not null ? _rangeError
             : _inspection is not { TotalChapterCount: > 0 } ? "Không có chương để duyệt để xuất."
             : _inspection.RequiresConfirmation && AllowIncompleteInput.IsChecked != true
                 ? "Xác nhận cho phép xuất bản nháp/chương cần kiểm tra." : "Chọn nơi lưu và xuất bản.";
@@ -252,6 +301,13 @@ public partial class ProjectPublicationView : UserControl
         ProgressText.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
         ThemedDialog.Show(Window.GetWindow(this), ex.Message, "Xuất bản", MessageBoxButton.OK, MessageBoxImage.Error);
     }
+
+    private static string RangeFileSuffix(ProjectPublicationInspection inspection) => inspection switch
+    {
+        { FromNumber: int from, ToNumber: int to } when from == to => $" - Chương {from}",
+        { FromNumber: int from, ToNumber: int to } => $" - Chương {from}-{to}",
+        _ => ""
+    };
 
     private static string SanitizeFileName(string value)
     {

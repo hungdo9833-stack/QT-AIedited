@@ -65,6 +65,45 @@ public sealed class ProjectHostableViewsUiTests
     });
 
     [Fact]
+    public Task Publication_range_limits_the_inspection_and_blocks_export_on_an_invalid_range() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        for (int number = 1; number <= 3; number++) await fixture.AddChapterAsync("Chương " + number, number);
+        var service = new ProjectPublicationService(fixture.Repository, fixture.Get<ProjectCatalog>("_projectCatalog"));
+        var view = new ProjectPublicationView(fixture.Project, service);
+        var host = TestWindow(view);
+        try
+        {
+            host.Show();
+            await view.LoadInspectionAsync();
+            int whole = view.CurrentInspection!.TotalChapterCount;
+            int first = fixture.Project.Manifest.Chapters.Where(chapter => chapter.DeletedAt is null).Min(chapter => chapter.Number);
+            var mode = (ComboBox)view.FindName("RangeModeInput");
+            var from = (TextBox)view.FindName("RangeFromInput");
+            var to = (TextBox)view.FindName("RangeToInput");
+            var export = (Button)view.FindName("ExportButton");
+
+            mode.SelectedIndex = 2; // Một chương
+            from.Text = first.ToString();
+            Assert.Equal(1, view.CurrentInspection!.TotalChapterCount);
+            Assert.Equal(first, view.CurrentInspection.FromNumber);
+            Assert.Equal(Visibility.Collapsed, to.Visibility);
+
+            mode.SelectedIndex = 1; // Dải chương
+            to.Text = (first - 1).ToString();
+            Assert.Null(view.CurrentInspection);
+            Assert.False(export.IsEnabled);
+            Assert.Contains("nhỏ hơn hoặc bằng", export.ToolTip?.ToString());
+
+            mode.SelectedIndex = 0; // Toàn bộ truyện
+            Assert.Equal(whole, view.CurrentInspection!.TotalChapterCount);
+            Assert.False(view.CurrentInspection.IsRange);
+        }
+        finally { host.Close(); }
+    });
+
+    [Fact]
     public Task Library_view_can_be_rehosted_and_each_action_emits_the_expected_request() => StaHost.Run(async () =>
     {
         ProjectLibraryCard card = Card("Một Project");

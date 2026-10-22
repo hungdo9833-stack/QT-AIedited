@@ -16,9 +16,12 @@ internal static class ProjectPdfExporter
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(inspection);
         ArgumentNullException.ThrowIfNull(options);
-        if (inspection.TotalChapterCount == 0) throw new InvalidOperationException("Project chưa có chương để xuất bản.");
+        if (inspection.TotalChapterCount == 0)
+            throw new InvalidOperationException(inspection.IsRange ? "Không có chương nào trong phạm vi đã chọn."
+                : "Project chưa có chương để xuất bản.");
         if (inspection.RequiresConfirmation && !options.AllowIncomplete)
-            throw new InvalidOperationException("Project còn chương chưa hoàn tất hoặc cần kiểm tra. Hãy xác nhận xuất bản nháp trước khi tiếp tục.");
+            throw new InvalidOperationException((inspection.IsRange ? "Phạm vi đã chọn" : "Project") +
+                " còn chương chưa hoàn tất hoặc cần kiểm tra. Hãy xác nhận xuất bản nháp trước khi tiếp tục.");
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Đường dẫn xuất bản không được để trống.", nameof(path));
 
         string outputPath = ProjectPublicationService.ValidateOutputPath(session, path);
@@ -41,7 +44,7 @@ internal static class ProjectPdfExporter
             }
 
             await foreach (ProjectPublicationChapter chapter in service.ReadChaptersAsync(session,
-                               inspection.ProjectRevision, progress, cancellationToken))
+                               inspection.ProjectRevision, progress, cancellationToken, inspection.FromNumber, inspection.ToNumber))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (pageHasContent) section.AddPageBreak();

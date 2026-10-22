@@ -76,6 +76,38 @@ public sealed class ProjectPublicationTests : IDisposable
     }
 
     [Fact]
+    public async Task Range_export_writes_only_chapters_in_the_range_and_scopes_the_draft_check_to_it()
+    {
+        ProjectSession session = await _repository.CreateAsync(Path.Combine(_root, "Range"), "Truyện dải");
+        for (int number = 1; number <= 4; number++) await AddChapterAsync(session, number, $"Chương {number}", $"Nội dung {number}.");
+        ChapterDocument draft = TranslationService.CreateChapter("Chương 5", "第5章 原文。");
+        await _repository.AddChapterAsync(session, draft, 5);
+        var service = new ProjectPublicationService(_repository, new ProjectCatalog(_repository));
+        ProjectPublicationInspection whole = await service.InspectAsync(session);
+        Assert.True(whole.RequiresConfirmation);
+
+        ProjectPublicationInspection range = whole.WithRange(2, 3);
+        Assert.Equal(2, range.TotalChapterCount);
+        Assert.False(range.RequiresConfirmation); // Chapter 5 is a draft but lies outside the range.
+        string path = Path.Combine(_root, "range.txt");
+        ProjectPublicationReport report = await service.ExportTextAsync(session, range, path,
+            new ProjectPublicationOptions(IncludeProjectTitle: false, IncludeChapterTitles: true));
+        Assert.Equal(2, report.ExportedChapterCount);
+        Assert.Equal("Chương 2\n\nNội dung 2.\n\n\nChương 3\n\nNội dung 3.", await File.ReadAllTextAsync(path));
+
+        ProjectPublicationInspection single = whole.WithRange(4, 4);
+        string singlePath = Path.Combine(_root, "single.txt");
+        await service.ExportTextAsync(session, single, singlePath, new ProjectPublicationOptions(IncludeProjectTitle: false));
+        Assert.Equal("Chương 4\n\nNội dung 4.", await File.ReadAllTextAsync(singlePath));
+
+        Assert.True(whole.WithRange(4, null).RequiresConfirmation);
+        Assert.Equal(0, whole.WithRange(9, 12).TotalChapterCount);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExportTextAsync(session, whole.WithRange(9, 12),
+            Path.Combine(_root, "empty.txt"), new ProjectPublicationOptions()));
+        Assert.Throws<ArgumentException>(() => whole.WithRange(3, 2));
+    }
+
+    [Fact]
     public async Task Read_failure_mid_export_never_replaces_existing_file()
     {
         ProjectSession session = await _repository.CreateAsync(Path.Combine(_root, "Fault"), "Truyện lỗi");

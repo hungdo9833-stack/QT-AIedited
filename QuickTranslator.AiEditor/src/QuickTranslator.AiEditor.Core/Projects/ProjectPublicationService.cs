@@ -27,9 +27,36 @@ public sealed record ProjectPublicationInspection(
     int TotalChapterCount,
     int IncompleteChapterCount,
     int InspectionChapterCount,
-    IReadOnlyList<ProjectPublicationIssueChapter>? IssueChapters = null)
+    IReadOnlyList<ProjectPublicationIssueChapter>? IssueChapters = null,
+    IReadOnlyList<int>? ChapterNumbers = null,
+    int? FromNumber = null,
+    int? ToNumber = null)
 {
     public bool RequiresConfirmation => IncompleteChapterCount > 0 || InspectionChapterCount > 0;
+    public bool IsRange => FromNumber is not null || ToNumber is not null;
+
+    /// <summary>
+    /// The same inspection limited to chapter numbers <paramref name="from"/>..<paramref name="to"/> (inclusive; null =
+    /// open end). Counts, issues and the chapters exported all follow the range. Call it on the whole-project inspection.
+    /// </summary>
+    public ProjectPublicationInspection WithRange(int? from, int? to)
+    {
+        if (from is null && to is null) return this;
+        if (from > to) throw new ArgumentException("Chương bắt đầu phải nhỏ hơn hoặc bằng chương kết thúc.");
+        IReadOnlyList<int> numbers = ChapterNumbers
+            ?? throw new InvalidOperationException("Kết quả kiểm tra không có danh sách số chương; hãy kiểm tra lại.");
+        bool Contains(int number) => number >= (from ?? int.MinValue) && number <= (to ?? int.MaxValue);
+        ProjectPublicationIssueChapter[] issues = (IssueChapters ?? []).Where(issue => Contains(issue.Number)).ToArray();
+        return this with
+        {
+            TotalChapterCount = numbers.Count(Contains),
+            IncompleteChapterCount = issues.Count(issue => issue.IsIncomplete),
+            InspectionChapterCount = issues.Count(issue => issue.NeedsInspection),
+            IssueChapters = issues,
+            FromNumber = from,
+            ToNumber = to
+        };
+    }
 }
 
 public sealed record ProjectPublicationChapter(
@@ -71,6 +98,7 @@ public sealed class ProjectPublicationService
         PublicationSnapshot snapshot = Capture(session);
         int incomplete = 0, inspection = 0, completed = 0;
         var issueChapters = new List<ProjectPublicationIssueChapter>();
+        var numbers = new List<int>(snapshot.Chapters.Count);
         await foreach (ProjectPublicationChapter chapter in ReadSnapshotAsync(session, snapshot, progress, cancellationToken)
                            .ConfigureAwait(false))
         {
@@ -78,9 +106,10 @@ public sealed class ProjectPublicationService
             if (chapter.NeedsInspection) inspection++;
             if (!chapter.IsComplete || chapter.NeedsInspection)
                 issueChapters.Add(new(chapter.ChapterId, chapter.Number, chapter.Title, !chapter.IsComplete, chapter.NeedsInspection));
+            numbers.Add(chapter.Number);
             completed++;
         }
-        return new(snapshot.ProjectTitle, snapshot.Revision, completed, incomplete, inspection, issueChapters);
+        return new(snapshot.ProjectTitle, snapshot.Revision, completed, incomplete, inspection, issueChapters, numbers);
     }
 
     public async Task<ProjectPublicationReport> ExportTextAsync(ProjectSession session, string path,
@@ -103,7 +132,7 @@ public sealed class ProjectPublicationService
         ArgumentNullException.ThrowIfNull(options);
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Đường dẫn xuất bản không được để trống.", nameof(path));
         EnsureAllowed(inspection, options);
-        PublicationSnapshot snapshot = Capture(session, inspection.ProjectRevision);
+        PublicationSnapshot snapshot = Capture(session, inspection.ProjectRevision, inspection.FromNumber, inspection.ToNumber);
         string outputPath = ValidateOutputPath(session, path);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         string temporaryPath = outputPath + ".publication-" + Guid.NewGuid().ToString("N") + ".tmp";
@@ -153,11 +182,11 @@ public sealed class ProjectPublicationService
 
     public async IAsyncEnumerable<ProjectPublicationChapter> ReadChaptersAsync(ProjectSession session,
         string expectedRevision, IProgress<ProjectPublicationProgress>? progress = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default, int? fromNumber = null, int? toNumber = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (string.IsNullOrWhiteSpace(expectedRevision)) throw new ArgumentException("Thiếu revision Project.", nameof(expectedRevision));
-        PublicationSnapshot snapshot = Capture(session, expectedRevision);
+        PublicationSnapshot snapshot = Capture(session, expectedRevision, fromNumber, toNumber);
         await foreach (ProjectPublicationChapter chapter in ReadSnapshotAsync(session, snapshot, progress, cancellationToken)
                            .ConfigureAwait(false))
             yield return chapter;
@@ -203,12 +232,14 @@ public sealed class ProjectPublicationService
         EnsureRevision(session, snapshot.Revision);
     }
 
-    private PublicationSnapshot Capture(ProjectSession session, string? expectedRevision = null)
+    private PublicationSnapshot Capture(ProjectSession session, string? expectedRevision = null,
+        int? fromNumber = null, int? toNumber = null)
     {
         ProjectCatalogSnapshot catalog = _catalog.GetSnapshot(session);
         if (expectedRevision is not null && !string.Equals(catalog.Revision, expectedRevision, StringComparison.Ordinal))
             throw new InvalidOperationException("Project đã thay đổi sau khi kiểm tra xuất bản. Hãy kiểm tra lại trước khi xuất.");
-        List<PublicationEntry> chapters = catalog.Chapters.Where(chapter => !chapter.IsDeleted)
+        List<PublicationEntry> chapters = catalog.Chapters.Where(chapter => !chapter.IsDeleted &&
+                chapter.Number >= (fromNumber ?? int.MinValue) && chapter.Number <= (toNumber ?? int.MaxValue))
             .OrderBy(chapter => chapter.DisplayOrder)
             .Select(chapter => new PublicationEntry(chapter.ChapterId, chapter.Number, chapter.VietnameseTitle))
             .ToList();
@@ -218,9 +249,11 @@ public sealed class ProjectPublicationService
     private static void EnsureAllowed(ProjectPublicationInspection inspection, ProjectPublicationOptions options)
     {
         if (inspection.TotalChapterCount == 0)
-            throw new InvalidOperationException("Project chưa có chương để xuất bản.");
+            throw new InvalidOperationException(inspection.IsRange ? "Không có chương nào trong phạm vi đã chọn."
+                : "Project chưa có chương để xuất bản.");
         if (inspection.RequiresConfirmation && !options.AllowIncomplete)
-            throw new InvalidOperationException("Project còn chương chưa hoàn tất hoặc cần kiểm tra. Hãy xác nhận xuất bản nháp trước khi tiếp tục.");
+            throw new InvalidOperationException((inspection.IsRange ? "Phạm vi đã chọn" : "Project") +
+                " còn chương chưa hoàn tất hoặc cần kiểm tra. Hãy xác nhận xuất bản nháp trước khi tiếp tục.");
     }
 
     public static void CommitTemporaryFile(string temporaryPath, string outputPath)
