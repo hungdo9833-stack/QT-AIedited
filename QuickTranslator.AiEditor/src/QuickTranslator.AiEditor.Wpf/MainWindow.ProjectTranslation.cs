@@ -331,6 +331,23 @@ public partial class MainWindow
         // selected yet: preserve the workers saved with the job rather than defaulting
         // to Local-only and silently dropping the Remote worker.
         bool changedMode = _gpuPreferences.ModeExplicitlySelected;
+        if (!changedMode && MissingWorkerProfiles(recovered) is { Count: > 0 } missing)
+        {
+            // The saved worker's profile was deleted (e.g. an old rental box). Its SSH identity cannot be
+            // checked any more, so moving the rest of the job to the current GPU setup needs the user's OK.
+            if (_gpuPreferences.RemoteProfileId is Guid stale && !GpuProfileExists(stale))
+                _gpuPreferences.RemoteProfileId = null;
+            string names = string.Join(", ", missing.Select(worker => $"“{worker.Name}”"));
+            MessageBoxResult answer = ThemedDialog.Show(this,
+                $"Hàng đợi này được tạo với GPU {names}, profile đó không còn trong danh sách (ví dụ máy thuê cũ đã bị xóa).\n\n" +
+                $"Chuyển phần còn lại sang cấu hình GPU hiện tại: {DescribeCurrentGpuSetup()}?\n\n" +
+                "• Có: tiếp tục dịch bằng cấu hình hiện tại; các chương đã dịch được giữ nguyên.\n" +
+                "• Không: giữ hàng đợi đang tạm dừng. Mở GPU để chọn chế độ dịch và card Remote, rồi bấm Tiếp tục.",
+                "GPU của hàng đợi không còn", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (answer != MessageBoxResult.Yes)
+                throw new InvalidOperationException("Hàng đợi vẫn tạm dừng. Chọn chế độ dịch và card Remote trong GPU, rồi bấm Tiếp tục.");
+            changedMode = true;
+        }
         if (!changedMode)
         {
             await ApplyTranslationModeAsync(recovered);
@@ -368,6 +385,23 @@ public partial class MainWindow
         }
         return await RebuildParallelCoordinatorAsync(recovered, closeWindow: false, loadExisting: true,
             useCurrentWorkers: changedMode);
+    }
+
+    private bool GpuProfileExists(Guid profileId) => _gpuBackends.Catalog.Profiles.Any(profile => profile.Id == profileId);
+
+    private List<ProjectTranslationWorkerState> MissingWorkerProfiles(ProjectTranslationJob job) =>
+        job.Workers.Where(worker => !GpuProfileExists(worker.ProfileId)).DistinctBy(worker => worker.ProfileId).ToList();
+
+    private string DescribeCurrentGpuSetup()
+    {
+        string remote = _gpuPreferences.RemoteProfileId is Guid id && GpuProfileExists(id)
+            ? $"Remote “{_gpuBackends.GetProfile(id).Name}”" : "Remote (chưa chọn card)";
+        return _gpuPreferences.Mode switch
+        {
+            GpuTranslationMode.LocalOnly => "chỉ GPU máy này",
+            GpuTranslationMode.RemoteOnly => "chỉ " + remote,
+            _ => "GPU máy này + " + remote
+        };
     }
 
     private async Task PauseProjectTranslationForContextChangeAsync()
