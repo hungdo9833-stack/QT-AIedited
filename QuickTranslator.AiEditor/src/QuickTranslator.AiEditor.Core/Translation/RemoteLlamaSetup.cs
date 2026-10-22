@@ -205,19 +205,21 @@ public static class RemoteLlamaWindowsScripts
         try { spec = JsonSerializer.Deserialize<RemoteLlamaTaskSpecification>(json ?? "") ?? throw new JsonException(); }
         catch (JsonException e) { throw new ArgumentException("Cấu hình llama-server không hợp lệ.", nameof(json), e); }
         var launch = new LlamaServerLaunch(GgufModelReference.Parse(spec.Model), spec.Port, spec.Slots, spec.ContextPerSlot);
-        string arguments = string.Join(" ", launch.Arguments().Select(Quote));
-        string wrapper = "$ErrorActionPreference='Stop'\r\n$env:LLAMA_CACHE=" + Quote(Root + @"\models\llama") +
-            "\r\n& " + Quote(Executable) + " " + arguments + " *>> " + Quote(LogPath) + "\r\nexit $LASTEXITCODE\r\n";
+        // A .cmd wrapper, not PowerShell: Windows PowerShell 5.1 turns each stderr line of a redirected native program
+        // into an error record, so llama-server's first log line ended the script (exit 1, empty log) on a real rental.
+        string arguments = string.Join(" ", launch.Arguments().Select(CmdQuote));
+        string wrapper = "@echo off\r\nchcp 65001 >nul\r\nset \"LLAMA_CACHE=" + Root + "\\models\\llama\"\r\n" +
+            CmdQuote(Executable) + " " + arguments + " >> " + CmdQuote(LogPath) + " 2>&1\r\nexit /b %ERRORLEVEL%\r\n";
         string encodedWrapper = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(wrapper));
         return "$ErrorActionPreference='Stop';$root='" + Root + "';New-Item -ItemType Directory -Force \"$root\\logs\",\"$root\\models\\llama\"|Out-Null;" +
             "$script=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encodedWrapper + "'));" +
-            "[IO.File]::WriteAllText(\"$root\\llama-server.ps1\",$script,(New-Object Text.UTF8Encoding($false)));" +
+            "[IO.File]::WriteAllText(\"$root\\llama-server.cmd\",$script,(New-Object Text.UTF8Encoding($false)));" +
             "Stop-ScheduledTask -TaskName 'QTStudio llama-server' -ErrorAction SilentlyContinue;" +
             // Stopping a task leaves its ollama.exe child running (seen on a real rental), and the task would come back
             // at the next boot: disable it, then end QT Studio's Ollama and any hand-started llama-server on this port.
             "$old=Get-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue;if($old){Stop-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue;Disable-ScheduledTask -TaskName 'QTStudio Ollama' -ErrorAction SilentlyContinue|Out-Null};" +
             "Get-Process ollama*,llama-server -ErrorAction SilentlyContinue|Where-Object{$_.Path -like ($root+'\\*')}|Stop-Process -Force -ErrorAction SilentlyContinue;" +
-            "$a=New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"C:\\ProgramData\\QTStudio\\llama-server.ps1\"';" +
+            "$a=New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/d /c \"C:\\ProgramData\\QTStudio\\llama-server.cmd\"';" +
             "$t=New-ScheduledTaskTrigger -AtStartup;$p=New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest;" +
             "$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 99 -RestartInterval (New-TimeSpan -Minutes 1);" +
             "Register-ScheduledTask -TaskName 'QTStudio llama-server' -Action $a -Trigger $t -Principal $p -Settings $s -Force|Out-Null;" +
@@ -225,4 +227,9 @@ public static class RemoteLlamaWindowsScripts
     }
 
     private static string Quote(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+
+    // Inside double quotes cmd treats & | < > ^ literally; only % still expands. Windows paths cannot contain '"'.
+    internal static string CmdQuote(string value) => value.Contains('"', StringComparison.Ordinal)
+        ? throw new ArgumentException("Tham số llama-server không được chứa dấu nháy kép.", nameof(value))
+        : "\"" + value.Replace("%", "%%", StringComparison.Ordinal) + "\"";
 }

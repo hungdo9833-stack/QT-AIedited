@@ -31,7 +31,9 @@ public sealed class RemoteLlamaSetupTests : IDisposable
         Assert.Contains("QTStudio Ollama", script);
         string wrapper = DecodeWrapper(script);
         foreach (string argument in new LlamaServerLaunch(GgufModelReference.Parse(spec.Model), 11436, 4, 8192).Arguments())
-            Assert.Contains("'" + argument + "'", wrapper);
+            Assert.Contains("\"" + argument + "\"", wrapper);
+        Assert.Contains(" 2>&1", wrapper); Assert.DoesNotContain("ErrorActionPreference", wrapper);
+        Assert.Contains("llama-server.cmd", script);
     }
 
     [Fact]
@@ -93,7 +95,7 @@ public sealed class RemoteLlamaSetupTests : IDisposable
         string json = System.Text.Json.JsonSerializer.Serialize(new RemoteLlamaTaskSpecification(
             @"C:\Models With Space\translate model.gguf", 11436, 3, 4096));
         string script = RemoteLlamaWindowsScripts.ConfigureTask(json);
-        Assert.Contains("'C:\\Models With Space\\translate model.gguf'", DecodeWrapper(script));
+        Assert.Contains("\"C:\\Models With Space\\translate model.gguf\"", DecodeWrapper(script));
         string attack = System.Text.Json.JsonSerializer.Serialize(new RemoteLlamaTaskSpecification(
             "owner/repo:Q4';Start-Process calc", 11436, 1, 4096));
         Assert.Throws<ArgumentException>(() => RemoteLlamaWindowsScripts.ConfigureTask(attack));
