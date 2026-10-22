@@ -72,6 +72,36 @@ public sealed class WebNovelImporterTests
     }
 
     [Fact]
+    public async Task NextFlight_HtmlTextRecordKeepsParagraphsAndBeatsALongerChapterTitleList()
+    {
+        // Seen live: the chapter is an HTML T-record with <p> paragraphs, and a model record listing chapter titles
+        // has slightly more CJK characters but almost no sentence ends.
+        string body = string.Concat(Enumerable.Range(1, 4).Select(_ => $"<p>{Placeholder}</p>"));
+        int bytes = Encoding.UTF8.GetByteCount(body);
+        string titles = string.Concat(Enumerable.Range(1, 40).Select(i => $"第{i}章 占位标题名称 "));
+        string payload = $"2:[\"$\",\"ul\",null,{{\"children\":{JsonSerializer.Serialize(titles)}}}]\n5:T{bytes:x},{body}";
+        var html = "<div id='__next'></div><script>self.__next_f.push([1," + JsonSerializer.Serialize(payload) + "])</script>";
+        using var handler = new FakeHandler(_ => Html(html));
+        using var importer = new WebNovelImporter(Options, handler);
+        string text = (await importer.FetchChapterAsync(Link())).Text;
+        Assert.Equal(string.Join("\n", Enumerable.Repeat(Placeholder, 4)), text);
+    }
+
+    [Fact]
+    public async Task Directory_with_out_of_order_title_numbers_is_ordered_by_its_urls()
+    {
+        // Seen live on a dir.html: one title carries an unrelated number, which used to reject the whole list.
+        string catalog = string.Concat(Enumerable.Range(1, 20).Select(i => i == 7
+            ? $"<a href='/book1/read_{i}.html'>番外 第100章 占位</a>"
+            : $"<a href='/book1/read_{i}.html'>第{i}章 占位</a>"));
+        using var handler = new FakeHandler(_ => Html("<h1>测试书名</h1>" + catalog));
+        using var importer = new WebNovelImporter(Options, handler);
+        var analysis = await importer.AnalyzeAsync(Url("book1/dir.html"));
+        Assert.Equal(Enumerable.Range(1, 20).Select(i => $"/book1/read_{i}.html"),
+            analysis.Chapters.Select(chapter => chapter.Url.AbsolutePath));
+    }
+
+    [Fact]
     public async Task NextFlight_DecodesJsonModelAndSplitStreamWithoutMetadata()
     {
         var text = $"第一章 占位\n{Placeholder}\n{Placeholder}";
@@ -91,7 +121,9 @@ public sealed class WebNovelImporterTests
         {
             "/book1/" => "<h1>测试书名</h1><a href='dir.html'>章节目录</a>",
             "/book1/dir.html" => Catalog(5, i => $"/book1/read_{i}.html") + "<a href='?sort=desc'>倒序</a><a href='other/dir.html'>目录</a>",
-            _ => "<div id='app'><a :href='v.url'>{{ v.url }}</a>{{ chapter.content }}</div><script src='app.js'></script>"
+            // Like the live page: some title / menu text (~70 CJK) around client-side templates.
+            _ => $"<div class='title'>{Placeholder}{Placeholder}{Placeholder}</div>" +
+                 "<div id='app'><a :href='v.url'>{{ v.url }}</a>{{ chapter.content }}</div><script src='app.js'></script>"
         }));
         using var importer = new WebNovelImporter(Options, handler);
         var result = await importer.AnalyzeAsync(Url("book1/"));
@@ -253,7 +285,7 @@ public sealed class WebNovelImporterTests
     }
 
     [Fact]
-    public async Task CacheResumesAcrossImportersWithoutHttpCalls()
+    public async Task CacheResumesChaptersAcrossImportersButReloadsTheBookPage()
     {
         var directory = Path.Combine(Path.GetTempPath(), "qt-web-fixtures-" + Guid.NewGuid().ToString("N"));
         try
@@ -267,11 +299,14 @@ public sealed class WebNovelImporterTests
                 await foreach (var _ in importer.FetchChaptersAsync(analysis.Chapters)) { }
             }
             Assert.Equal(4, firstHandler.Calls.Count);
-            using var secondHandler = new FakeHandler(_ => throw new InvalidOperationException("Cache miss"));
+            // The book page is always fetched again (new chapters appear there); chapter pages come from the cache.
+            using var secondHandler = new FakeHandler(r => r.RequestUri!.AbsolutePath == "/book"
+                ? Html("<h1>测试书名</h1>" + Catalog(3, i => $"/read_{i}.html"))
+                : throw new InvalidOperationException("Cache miss"));
             using var resumed = new WebNovelImporter(options, secondHandler);
             var cached = await resumed.AnalyzeAsync(Url("book"));
             await foreach (var chapter in resumed.FetchChaptersAsync(cached.Chapters)) Assert.Equal(Placeholder, chapter.Text);
-            Assert.Empty(secondHandler.Calls);
+            Assert.Equal(["/book"], secondHandler.Calls.Select(call => call.Url.AbsolutePath));
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
     }

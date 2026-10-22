@@ -32,11 +32,38 @@ internal static class ChapterListDetector
             .OrderByDescending(g => g.Count()).FirstOrDefault();
         if (group is null) return [];
         var ordered = group.ToList();
-        var numbers = ordered.Select(Number).ToArray();
-        var descending = numbers.Zip(numbers.Skip(1)).All(pair => pair.First >= pair.Second);
-        if (descending || Regex.IsMatch(page.Url.Query, @"(?:\?|&)sort=desc(?:&|$)", RegexOptions.IgnoreCase))
-            ordered = ordered.OrderBy(Number).ToList();
+        var key = SequenceKey(ordered);
+        var numbers = ordered.Select(key).ToArray();
+        if (Descending(numbers) || Regex.IsMatch(page.Url.Query, @"(?:\?|&)sort=desc(?:&|$)", RegexOptions.IgnoreCase))
+            ordered = ordered.OrderBy(key).ToList();
         return Index(ordered);
+    }
+
+    // Order by whichever numbering is more consistently sorted: titles usually (第一章…, even behind opaque URL ids), but
+    // URL numbers when a title carries an unrelated number or an extra chapter (番外) out of place. Ties keep the titles.
+    private static Func<WebChapterLink, long> SequenceKey(IReadOnlyCollection<WebChapterLink> links)
+    {
+        if (links.Select(UrlNumber).Distinct().Count() != links.Count) return Number;
+        return Sortedness(links.Select(UrlNumber).ToArray()) > Sortedness(links.Select(Number).ToArray()) ? UrlNumber : Number;
+    }
+
+    private static double Sortedness(long[] numbers)
+    {
+        var pairs = numbers.Zip(numbers.Skip(1)).ToArray();
+        if (pairs.Length == 0) return 1;
+        return Math.Max(pairs.Count(p => p.First < p.Second), pairs.Count(p => p.First > p.Second)) / (double)pairs.Length;
+    }
+
+    private static long UrlNumber(WebChapterLink link)
+    {
+        var numbers = Regex.Matches(link.Url.AbsolutePath + link.Url.Query, @"\d+");
+        return numbers.Count > 0 && long.TryParse(numbers[^1].Value, out var value) ? value : 0;
+    }
+
+    private static bool Descending(long[] numbers)
+    {
+        var pairs = numbers.Zip(numbers.Skip(1)).ToArray();
+        return pairs.Length > 0 && pairs.Count(p => p.First >= p.Second) > pairs.Length / 2;
     }
 
     internal static Uri? DirectoryLink(WebPage page) => page.Document.QuerySelectorAll("a[href]")
@@ -72,12 +99,15 @@ internal static class ChapterListDetector
         Regex.IsMatch(link.Title, @"第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節卷]|\d+") ||
         Regex.IsMatch(link.Url.AbsolutePath, @"(?:chapter|read)[/_-]?\d", RegexOptions.IgnoreCase);
 
-    private static bool PlausibleSequence(IEnumerable<WebChapterLink> links)
+    private static bool PlausibleSequence(IEnumerable<WebChapterLink> group)
     {
-        var numbers = links.Select(Number).ToArray();
-        return numbers.Distinct().Count() >= 3 &&
-            (numbers.Zip(numbers.Skip(1)).All(p => p.First <= p.Second) ||
-             numbers.Zip(numbers.Skip(1)).All(p => p.First >= p.Second));
+        var links = group.ToArray();
+        var numbers = links.Select(SequenceKey(links)).ToArray();
+        if (numbers.Distinct().Count() < 3) return false;
+        // Mostly ordered one way: a few out-of-place entries (extras, re-uploads) must not discard a whole table of contents.
+        var pairs = numbers.Zip(numbers.Skip(1)).ToArray();
+        return pairs.Count(p => p.First <= p.Second) >= pairs.Length * 0.9 ||
+               pairs.Count(p => p.First >= p.Second) >= pairs.Length * 0.9;
     }
 
     private static long Number(WebChapterLink link)

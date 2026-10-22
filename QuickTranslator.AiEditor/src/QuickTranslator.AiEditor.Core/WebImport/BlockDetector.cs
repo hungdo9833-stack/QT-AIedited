@@ -29,6 +29,10 @@ internal static class BlockDetector
 
     internal static void CheckBrowser(WebPage page, int extractedCjk)
     {
+        // Client-side templates with only a title / menu worth of text (seen live: 60–90 CJK) mean the chapter is filled
+        // in by JavaScript; importing that would create nearly empty chapters.
+        if (extractedCjk < 500 && Regex.IsMatch(page.Html, @"\{\{[^}]+\}\}"))
+            throw Block(page.Url, WebImportBlockReason.RequiresBrowser);
         if (extractedCjk >= 30) return;
         if (Regex.IsMatch(page.Html, @"\{\{[^}]+\}\}") ||
             page.Document.QuerySelectorAll("#app,#root,#__next").Any(e => WebPage.CjkCount(e.TextContent) < 10))

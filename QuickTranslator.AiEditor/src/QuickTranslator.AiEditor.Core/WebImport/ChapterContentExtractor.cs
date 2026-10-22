@@ -118,9 +118,21 @@ internal static class ChapterContentExtractor
         if (runs.All(s => WebPage.CjkCount(s) < 10))
             runs.AddRange(Regex.Split(payload, @"\n(?=[0-9a-f]+:)", RegexOptions.IgnoreCase)
                 .Select(s => Regex.Replace(s, @"^[0-9a-f]+:(?:T[0-9a-f]+,)?", "", RegexOptions.IgnoreCase)));
-        return runs.Select(Clean).Where(s => s.Length > 0 && (double)WebPage.CjkCount(s) / s.Length > 0.4)
-            .OrderByDescending(WebPage.CjkCount).FirstOrDefault() ?? "";
+        // Runs may carry the chapter as HTML (<p> paragraphs); read those as HTML so paragraphs stay lines.
+        // Prefer prose: a chapter-title list can hold as many CJK characters as the chapter but almost no sentence ends.
+        return runs.Select(HtmlRunToText).Select(Clean).Where(s => s.Length > 0 && (double)WebPage.CjkCount(s) / s.Length > 0.4)
+            .OrderByDescending(s => SentenceEnds(s) >= 3 ? WebPage.CjkCount(s) : WebPage.CjkCount(s) / 10)
+            .FirstOrDefault() ?? "";
     }
+
+    private static string HtmlRunToText(string run)
+    {
+        if (!Regex.IsMatch(run, @"<(?:p|br|div)\b", RegexOptions.IgnoreCase)) return run;
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument("<body>" + run + "</body>");
+        return Lines(document.Body!);
+    }
+
+    private static int SentenceEnds(string text) => text.Count(c => c is '。' or '！' or '？' or '!' or '?' or '…');
 
     internal static Uri? NextPage(WebPage page, Uri chapterUrl)
     {

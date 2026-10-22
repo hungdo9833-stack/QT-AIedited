@@ -6,7 +6,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 public partial class MainWindow
 {
     internal Func<WebImportOptions, IWebNovelImporter> WebNovelImporterFactory =
-        _ => throw new NotSupportedException("Bộ thu thập web chưa được cài.");
+        options => new WebNovelImporter(options);
 
     internal Func<string, Task>? WebImportPreviewOpener;
 

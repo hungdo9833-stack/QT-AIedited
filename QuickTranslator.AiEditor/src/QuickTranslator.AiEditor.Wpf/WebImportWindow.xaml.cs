@@ -26,6 +26,7 @@ public partial class WebImportWindow : Window
         _openImportPreview = openImportPreview;
         InitializeComponent();
         MainWindow.ClampWindowToWorkArea(this, 1020, 760);
+        Closed += (_, _) => (_importer as IDisposable)?.Dispose();
     }
 
     internal string? ImportPath { get; private set; }
@@ -149,6 +150,7 @@ public partial class WebImportWindow : Window
         if (_importer is null || _options != options)
         {
             Directory.CreateDirectory(options.CacheDirectory);
+            (_importer as IDisposable)?.Dispose(); // Each importer owns an HttpClient.
             _importer = _importerFactory(options);
             _options = options;
         }
