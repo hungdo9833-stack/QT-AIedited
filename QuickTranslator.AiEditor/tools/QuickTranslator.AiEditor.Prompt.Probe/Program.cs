@@ -82,7 +82,6 @@ try
         var sources = loadedChapters.Where(x => !string.IsNullOrEmpty(x.Chapter.OriginalText))
             .Select(x => new QuickTranslator.AiEditor.Core.BookIntelligence.CensusSource(x.Chapter.Id, x.Entry.Number, x.Chapter.OriginalText)).ToArray();
         var scenes = QuickTranslator.AiEditor.Core.Addressing.AddressingDialogueSurvey.Scenes(sources, owners.Keys.ToArray(), int.MaxValue, int.MaxValue);
-        var turns = DialogueTurnInference.Infer(scenes, owners);
         var quotes = scenes.SelectMany(s => s.Quotes).ToArray();
         Console.WriteLine($"names={owners.Count} scenes={scenes.Count} multiQuoteScenes={scenes.Count(s => s.Quotes.Count > 1)} quotes={quotes.Length}");
         Console.WriteLine("evidence: " + string.Join(", ", quotes.GroupBy(q => q.Line.SpeakerEvidence).Select(g => $"{g.Key}={g.Count()}")));
@@ -101,7 +100,6 @@ try
                 if (c.Before.Split('\n').Count(p => !string.IsNullOrWhiteSpace(p)) > 1) beforeMultiPara++;
             }
         Console.WriteLine($"seeds(A,B strong then weak)={seeds} seedBeforeLong={beforeLong} seedBeforeMultiPara={beforeMultiPara}");
-        Console.WriteLine($"inferred={turns.Count(t => t.IsInferred)} attributedTotal={turns.Count(t => t.Speaker is not null)}");
         int[] gaps = quotes.Skip(1).Select(q => q.Before.Trim().Length).OrderBy(x => x).ToArray();
         if (gaps.Length > 0) Console.WriteLine($"gapChars p50={gaps[gaps.Length / 2]} p90={gaps[gaps.Length * 9 / 10]}");
         return 0;

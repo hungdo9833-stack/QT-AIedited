@@ -5,6 +5,14 @@ namespace QuickTranslator.AiEditor.Tests;
 
 public sealed class DialogueMapBuilderTests
 {
+    [Theory]
+    [InlineData("女人", false)]
+    [InlineData("他", false)]
+    [InlineData("男生2", false)]
+    [InlineData("林哲", true)]
+    public void Generic_nouns_pronouns_and_numbered_placeholders_never_name_a_speaker(string name, bool expected) =>
+        Assert.Equal(expected, DialogueMapBuilder.IsCharacterName(name));
+
     [Fact]
     public void Speaker_named_before_the_segment_boundary_attributes_the_first_quote_and_kinship_finds_the_listener()
     {
