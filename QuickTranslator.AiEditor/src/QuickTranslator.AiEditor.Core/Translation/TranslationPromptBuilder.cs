@@ -28,7 +28,9 @@ public sealed class EmptyContextMemory : IContextMemory
 
 public sealed class TranslationPromptBuilder
 {
-    public const string Version = "translategemma-zh-vi-v2-character-consistency";
+    public const string Version = "translategemma-zh-vi-v3-character-notes-in-context";
+    internal const string CharacterNotesHeader =
+        "Character notes (reference only: never translate, repeat or output these notes; use them only to choose names and forms of address):";
 
     public string Build(string sourceText, IReadOnlyList<GlossaryEntry> glossary, string contextNotes)
         => Build(sourceText, glossary, contextNotes, PromptPreset.Default);
@@ -49,15 +51,24 @@ public sealed class TranslationPromptBuilder
         }
         string context = string.IsNullOrWhiteSpace(contextNotes) ? "" :
             "Context notes (reference only, do not translate these notes):\n" + contextNotes;
+        // Character rules and the dialogue map quote Chinese snippets. Placed before the translator instructions without
+        // a label, a translation-tuned model (Index-Translate) translated them as if they were the passage. They now sit
+        // with the other reference blocks, after the instructions and clearly marked as notes that are never output.
+        string characters = string.IsNullOrWhiteSpace(characterConsistency) ? "" :
+            CharacterNotesHeader + "\n" + characterConsistency.TrimEnd();
+        string template = preset.Template.ReplaceLineEndings(Environment.NewLine);
+        bool hasContextSlot = template.Contains("{{context}}", StringComparison.Ordinal);
+        if (characters.Length > 0 && hasContextSlot) context = context.Length == 0 ? characters : characters + "\n" + context;
         // One regex pass: placeholder-like text in source/glossary is never interpreted as template code.
-        string rendered = System.Text.RegularExpressions.Regex.Replace(preset.Template.ReplaceLineEndings(Environment.NewLine), @"\{\{(source_text|glossary|context)\}\}",
+        string rendered = System.Text.RegularExpressions.Regex.Replace(template, @"\{\{(source_text|glossary|context)\}\}",
             match => match.Groups[1].Value switch
             {
                 "source_text" => sourceText, "glossary" => prompt.ToString(), _ => context
             });
-        return string.IsNullOrWhiteSpace(characterConsistency)
+        // A custom preset without {{context}} still gets the notes, labelled, ahead of its own text.
+        return characters.Length == 0 || hasContextSlot
             ? rendered
-            : characterConsistency.TrimEnd() + Environment.NewLine + Environment.NewLine + rendered;
+            : characters + Environment.NewLine + Environment.NewLine + rendered;
     }
 }
 

@@ -127,7 +127,9 @@ public sealed class CharacterConsistencyLockTests
         {
             Name = "Tùy chỉnh", Template = "CUSTOM\n{{context}}\n{{source_text}}\n{{glossary}}"
         }, selected.PromptBlock);
-        Assert.StartsWith("CHARACTER CONSISTENCY", prompt, StringComparison.Ordinal);
+        // The block now fills the preset's {{context}} slot, labelled as notes, instead of preceding the instructions.
+        Assert.StartsWith("CUSTOM", prompt, StringComparison.Ordinal);
+        Assert.True(prompt.IndexOf("CHARACTER CONSISTENCY", StringComparison.Ordinal) > prompt.IndexOf("Character notes", StringComparison.Ordinal));
         Assert.Contains("CUSTOM", prompt);
         Assert.Equal(1, Count(prompt, "林风 = Lâm Phong"));
     }

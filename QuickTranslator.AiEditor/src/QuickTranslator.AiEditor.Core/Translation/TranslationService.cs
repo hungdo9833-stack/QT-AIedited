@@ -339,12 +339,24 @@ public sealed partial class TranslationService
             }
             // An in-flight request may be lost on process termination. Persist only completed outcomes.
             var result = await _client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
+            // Reference notes echoed after the translation are cut; notes mixed into the prose reject the attempt.
+            PromptEchoFilter.Result echo = PromptEchoFilter.Strip(result.Text);
+            var echoIssues = new List<TranslationIssue>();
+            if (echo.RemovedLines > 0)
+            {
+                result = result with { Text = echo.Text };
+                echoIssues.Add(new(IssueCode.EchoedPromptNotes, IssueSeverity.Warning,
+                    $"Model chép {echo.RemovedLines} dòng ghi chú nhân vật/lời thoại vào cuối bản dịch; QT Studio đã tự cắt bỏ."));
+            }
+            if (echo.EchoLinesInsideProse >= 2)
+                echoIssues.Add(new(IssueCode.EchoedPromptNotes, IssueSeverity.Error,
+                    "Bản dịch lẫn ghi chú nhân vật/lời thoại của prompt giữa các câu; không lưu, hãy dịch lại."));
             Guid postProcessBatchId = Guid.NewGuid();
             var chineseAnalysis = AnalyseAutomaticChinese(context, selected, result.Text, postProcessBatchId);
             var pronounAnalysis = AnalyseAutomaticPronouns(context, selected, chineseAnalysis.Text,
                 postProcessBatchId, chineseAnalysis.Run is null ? null : chineseAnalysis.Text);
             var issues = _quality.Check(selected.SourceText, result with { Text = pronounAnalysis.Text }, options)
-                .Concat(chineseAnalysis.Issues).Concat(pronounAnalysis.Issues)
+                .Concat(echoIssues).Concat(chineseAnalysis.Issues).Concat(pronounAnalysis.Issues)
                 .Concat(StorySettingRules.CheckDialogue(context.CharacterProject, pronounAnalysis.Text))
                 .DistinctBy(i => (i.Code, i.Message)).ToList();
             lock (_sync)

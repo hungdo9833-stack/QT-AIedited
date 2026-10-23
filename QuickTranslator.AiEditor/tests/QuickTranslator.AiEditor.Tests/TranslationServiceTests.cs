@@ -4,7 +4,7 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
 
-public sealed class TranslationServiceTests
+public sealed partial class TranslationServiceTests
 {
     [Fact]
     public async Task OneClick_TranslatesOnlyRequestedSegment_AndNeverApprovesOrAdvances()
