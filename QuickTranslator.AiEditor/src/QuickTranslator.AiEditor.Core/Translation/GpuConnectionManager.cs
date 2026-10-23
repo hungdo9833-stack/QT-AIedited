@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 
 namespace QuickTranslator.AiEditor.Core.Translation;
 
@@ -7,7 +6,8 @@ public sealed class GpuConnectionHandle : IAsyncDisposable
 {
     private readonly ISshSession _session;
     private readonly ISshTunnel _tunnel;
-    private bool _disposed;
+    private readonly object _disposeGate = new();
+    private Task? _disposeTask;
     internal GpuConnectionHandle(GpuBackendProfile profile, ISshSession session, ISshTunnel tunnel,
         ILlmBackendClient client)
     { Profile = profile.Clone(); _session = session; _tunnel = tunnel; Client = client; }
@@ -15,14 +15,33 @@ public sealed class GpuConnectionHandle : IAsyncDisposable
     public ILlmBackendClient Client { get; }
     public ISshSession Session => _session;
     public Uri TunnelEndpoint => new($"http://127.0.0.1:{_tunnel.LocalPort}/api/chat");
-    public bool IsConnected => !_disposed && _session.IsConnected && _tunnel.IsStarted;
-    public async ValueTask DisposeAsync()
+    public bool IsConnected => Volatile.Read(ref _disposeTask) is null && _session.IsConnected && _tunnel.IsStarted;
+    public ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
-        Client.Dispose();
-        await _tunnel.DisposeAsync().ConfigureAwait(false);
-        await _session.DisposeAsync().ConfigureAwait(false);
+        TaskCompletionSource completion;
+        lock (_disposeGate)
+        {
+            if (_disposeTask is not null) return new(_disposeTask);
+            completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _disposeTask = completion.Task;
+        }
+        _ = DisposeCoreAsync(completion);
+        return new(completion.Task);
+    }
+
+    private async Task DisposeCoreAsync(TaskCompletionSource completion)
+    {
+        try
+        {
+            try { Client.Dispose(); }
+            finally
+            {
+                try { await _tunnel.DisposeAsync().ConfigureAwait(false); }
+                finally { await _session.DisposeAsync().ConfigureAwait(false); }
+            }
+            completion.SetResult();
+        }
+        catch (Exception error) { completion.SetException(error); }
     }
 }
 
@@ -35,7 +54,13 @@ public sealed class GpuConnectionManager : IAsyncDisposable
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, GpuConnectionHandle> _connections = new();
     private readonly ConcurrentDictionary<Guid, GpuProfileStatus> _statuses = new();
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _monitorCancellations = new();
+    // A lifetime's identity is the generation token. Publication and retirement share this lock.
+    private readonly object _lifetimeGate = new();
+    private readonly Dictionary<Guid, ConnectionLifetime> _lifetimes = new();
+    private readonly Dictionary<Guid, Task> _shutdowns = new();
+    private readonly HashSet<Task> _operations = [];
+    private readonly List<Task> _retirements = [];
+    private Task? _disposeTask;
 
     public GpuConnectionManager(ISshConnectionService? ssh = null,
         Func<GpuBackendProfile, Uri, ILlmBackendClient>? clientFactory = null,
@@ -62,13 +87,15 @@ public sealed class GpuConnectionManager : IAsyncDisposable
     public async Task<GpuConnectionHandle> ConnectAsync(GpuBackendProfile profile,
         CancellationToken cancellationToken = default)
     {
-        GpuConnectionHandle handle = await ConnectCoreAsync(profile, cancellationToken).ConfigureAwait(false);
-        StartMonitor(profile.Clone());
-        return handle;
+        ArgumentNullException.ThrowIfNull(profile);
+        using Operation operation = BeginOperation(profile.Id);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, operation.Lifetime!.Cancellation.Token);
+        return await ConnectCoreAsync(profile, operation.Lifetime, cancellation.Token).ConfigureAwait(false);
     }
 
     private async Task<GpuConnectionHandle> ConnectCoreAsync(GpuBackendProfile profile,
-        CancellationToken cancellationToken)
+        ConnectionLifetime lifetime, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(profile);
         GpuBackendProfile copy = profile.Clone();
@@ -76,61 +103,103 @@ public sealed class GpuConnectionManager : IAsyncDisposable
         if (copy.Kind != GpuBackendKind.Remote || copy.Ssh is null)
             throw new InvalidOperationException("GPU Connection Manager chỉ kết nối profile Remote có cấu hình SSH.");
         await _connectionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        GpuConnectionHandle? pending = null;
         try
         {
-            if (_connections.TryGetValue(copy.Id, out GpuConnectionHandle? existing) && existing.IsConnected) return existing;
-            SetStatus(new(copy.Id, GpuConnectionState.Connecting, "Đang kết nối SSH…"));
-            ISshSession session = await _ssh.ConnectAsync(copy.Ssh, cancellationToken).ConfigureAwait(false);
-            try
+            lock (_lifetimeGate)
             {
-                ISshTunnel tunnel = await session.OpenServerTunnelAsync(copy.Ssh.ServerPort, cancellationToken).ConfigureAwait(false);
-                Uri endpoint = new($"http://127.0.0.1:{tunnel.LocalPort}/api/chat");
-                ILlmBackendClient client = _clientFactory(copy, endpoint);
-                try
+                ThrowIfRetired(copy.Id, lifetime, cancellationToken);
+                if (_connections.TryGetValue(copy.Id, out GpuConnectionHandle? existing) && existing.IsConnected)
                 {
-                    await client.CheckConnectionAsync(copy.Model, TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+                    StartMonitor(copy, lifetime);
+                    return existing;
                 }
-                catch
-                {
-                    client.Dispose();
-                    await tunnel.DisposeAsync().ConfigureAwait(false);
-                    throw;
-                }
-                var handle = new GpuConnectionHandle(copy, session, tunnel, client);
-                if (_connections.TryRemove(copy.Id, out var old)) await old.DisposeAsync().ConfigureAwait(false);
+                SetStatus(new(copy.Id, GpuConnectionState.Connecting, "Đang kết nối SSH…"));
+            }
+            pending = await CreateConnectionAsync(copy, cancellationToken).ConfigureAwait(false);
+            GpuConnectionHandle? old;
+            lock (_lifetimeGate)
+            {
+                ThrowIfRetired(copy.Id, lifetime, cancellationToken);
+                _connections.TryRemove(copy.Id, out old);
+            }
+            if (old is not null) await old.DisposeAsync().ConfigureAwait(false);
+            lock (_lifetimeGate)
+            {
+                // A backend may ignore cancellation, so the generation must also be checked here.
+                ThrowIfRetired(copy.Id, lifetime, cancellationToken);
+                GpuConnectionHandle handle = pending;
                 _connections[copy.Id] = handle;
+                pending = null; // Ownership passes to the manager only at publication.
                 SetStatus(new(copy.Id, GpuConnectionState.Connected, "SSH tunnel đã sẵn sàng.",
-                    TunnelEndpoint: endpoint, CheckedAt: DateTimeOffset.UtcNow));
+                    TunnelEndpoint: handle.TunnelEndpoint, CheckedAt: DateTimeOffset.UtcNow));
+                StartMonitor(copy, lifetime);
                 return handle;
             }
-            catch { await session.DisposeAsync().ConfigureAwait(false); throw; }
         }
         catch (SshHostKeyVerificationException error)
         {
-            SetStatus(new(copy.Id, GpuConnectionState.TrustRequired, error.Message));
+            SetLifetimeStatus(lifetime, new(copy.Id, GpuConnectionState.TrustRequired, error.Message));
             throw;
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            SetStatus(new(copy.Id, GpuConnectionState.Offline, SafeMessage(error)));
+            SetLifetimeStatus(lifetime, new(copy.Id, GpuConnectionState.Offline, SafeMessage(error)));
             throw;
         }
-        finally { _connectionGate.Release(); }
+        finally
+        {
+            try { if (pending is not null) await pending.DisposeAsync().ConfigureAwait(false); }
+            finally { _connectionGate.Release(); }
+        }
+    }
+
+    private async Task<GpuConnectionHandle> CreateConnectionAsync(GpuBackendProfile profile,
+        CancellationToken cancellationToken)
+    {
+        ISshSession session = await _ssh.ConnectAsync(profile.Ssh!, cancellationToken).ConfigureAwait(false);
+        ISshTunnel? tunnel = null;
+        ILlmBackendClient? client = null;
+        bool transferred = false;
+        try
+        {
+            tunnel = await session.OpenServerTunnelAsync(profile.Ssh!.ServerPort, cancellationToken).ConfigureAwait(false);
+            client = _clientFactory(profile, new($"http://127.0.0.1:{tunnel.LocalPort}/api/chat"));
+            await client.CheckConnectionAsync(profile.Model, TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+            var handle = new GpuConnectionHandle(profile, session, tunnel, client);
+            transferred = true;
+            return handle;
+        }
+        finally
+        {
+            if (!transferred)
+            {
+                try { client?.Dispose(); }
+                finally
+                {
+                    try { if (tunnel is not null) await tunnel.DisposeAsync().ConfigureAwait(false); }
+                    finally { await session.DisposeAsync().ConfigureAwait(false); }
+                }
+            }
+        }
     }
 
     public async Task<GpuConnectionHandle> ReconnectAsync(GpuBackendProfile profile, int maximumAttempts = 3,
         CancellationToken cancellationToken = default)
     {
         if (maximumAttempts is < 1 or > 5) throw new ArgumentOutOfRangeException(nameof(maximumAttempts));
-        await DisconnectCoreAsync(profile.Id, cancelMonitor: true).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(profile);
+        using Operation operation = BeginOperation(profile.Id, reconnect: true);
+        ConnectionLifetime lifetime = operation.Lifetime!;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, lifetime.Cancellation.Token);
+        cancellationToken = cancellation.Token;
+        await operation.PreviousShutdown.ConfigureAwait(false);
         Exception? last = null;
         for (int attempt = 1; attempt <= maximumAttempts; attempt++)
         {
             try
             {
-                GpuConnectionHandle handle = await ConnectCoreAsync(profile, cancellationToken).ConfigureAwait(false);
-                StartMonitor(profile.Clone());
-                return handle;
+                return await ConnectCoreAsync(profile, lifetime, cancellationToken).ConfigureAwait(false);
             }
             catch (SshHostKeyVerificationException) { throw; }
             catch (OperationCanceledException) { throw; }
@@ -138,80 +207,222 @@ public sealed class GpuConnectionManager : IAsyncDisposable
             {
                 last = error;
                 if (attempt == maximumAttempts) break;
-                SetStatus(new(profile.Id, GpuConnectionState.Reconnecting,
+                SetLifetimeStatus(lifetime, new(profile.Id, GpuConnectionState.Reconnecting,
                     $"Mất kết nối. Thử lại {attempt}/{maximumAttempts}…"));
                 await _delay(TimeSpan.FromSeconds(Math.Pow(2, attempt - 1)), cancellationToken).ConfigureAwait(false);
             }
         }
-        SetStatus(new(profile.Id, GpuConnectionState.Offline,
+        SetLifetimeStatus(lifetime, new(profile.Id, GpuConnectionState.Offline,
             "Không khôi phục được SSH tunnel sau số lần thử giới hạn."));
         throw new InvalidOperationException("Không khôi phục được SSH tunnel.", last);
     }
 
     public async Task DisconnectAsync(Guid profileId)
     {
-        await DisconnectCoreAsync(profileId, cancelMonitor: true).ConfigureAwait(false);
-        SetStatus(new(profileId, GpuConnectionState.Disconnected, "Đã ngắt SSH tunnel."));
+        using Operation operation = BeginOperation();
+        Task shutdown;
+        lock (_lifetimeGate)
+        {
+            shutdown = StopConnection(profileId);
+        }
+        await shutdown.ConfigureAwait(false);
+        lock (_lifetimeGate)
+        {
+            if (!_lifetimes.ContainsKey(profileId))
+                SetStatus(new(profileId, GpuConnectionState.Disconnected, "Đã ngắt SSH tunnel."));
+        }
     }
 
-    private async Task DisconnectCoreAsync(Guid profileId, bool cancelMonitor)
+    // Called under _lifetimeGate. Retiring the generation prevents both publication and monitor restart.
+    private Task StopConnection(Guid profileId, bool reportDisconnected = false)
     {
-        if (cancelMonitor && _monitorCancellations.TryRemove(profileId, out var monitor))
-        { monitor.Cancel(); monitor.Dispose(); }
-        if (_connections.TryRemove(profileId, out var connection)) await connection.DisposeAsync().ConfigureAwait(false);
+        _lifetimes.Remove(profileId, out var lifetime);
+        if (lifetime is not null)
+        {
+            lifetime.CancellationTask = lifetime.Cancellation.CancelAsync();
+            _retirements.RemoveAll(task => task.IsCompletedSuccessfully);
+            _retirements.Add(RetireAsync(lifetime));
+        }
+        _connections.TryRemove(profileId, out var connection);
+        Task shutdown = FinishDisconnectAsync(lifetime, connection,
+            reportDisconnected && connection is not null ? profileId : null);
+        // Concurrent disconnects also join monitors/cleanup already detached by an earlier caller.
+        if (_shutdowns.TryGetValue(profileId, out var previous) && !previous.IsCompletedSuccessfully)
+            shutdown = Task.WhenAll(previous, shutdown);
+        _shutdowns[profileId] = shutdown;
+        return shutdown;
     }
 
-    private void StartMonitor(GpuBackendProfile profile)
+    private static async Task RetireAsync(ConnectionLifetime lifetime)
     {
-        var cancellation = new CancellationTokenSource();
-        if (_monitorCancellations.TryGetValue(profile.Id, out var old)) { old.Cancel(); old.Dispose(); }
-        _monitorCancellations[profile.Id] = cancellation;
-        _ = MonitorConnectionAsync(profile, cancellation.Token);
+        try
+        {
+            await Task.WhenAll(lifetime.Operations.Append(lifetime.MonitorTask)
+                .Append(lifetime.CancellationTask)).ConfigureAwait(false);
+        }
+        finally { lifetime.Cancellation.Dispose(); }
     }
 
-    private async Task MonitorConnectionAsync(GpuBackendProfile profile, CancellationToken cancellationToken)
+    private async Task FinishDisconnectAsync(ConnectionLifetime? lifetime, GpuConnectionHandle? connection,
+        Guid? disconnectedProfileId = null)
     {
+        // Monitors must stop using a published handle before it is disposed. A pending connect owns
+        // its unpublished resources and cleans them up when it unwinds, even if it ignores cancellation.
+        try
+        {
+            if (lifetime is not null)
+                await Task.WhenAll(lifetime.CancellationTask, lifetime.MonitorTask).ConfigureAwait(false);
+        }
+        finally { if (connection is not null) await connection.DisposeAsync().ConfigureAwait(false); }
+        if (disconnectedProfileId is Guid id)
+        {
+            lock (_lifetimeGate)
+                SetStatus(new(id, GpuConnectionState.Disconnected, "Đã ngắt SSH tunnel."));
+        }
+    }
+
+    private void StartMonitor(GpuBackendProfile profile, ConnectionLifetime lifetime)
+    {
+        // Publication and this registration are atomic with respect to disconnect/dispose.
+        if (!IsCurrent(profile.Id, lifetime) || !lifetime.MonitorTask.IsCompleted) return;
+        lifetime.MonitorTask = Task.Run(() => MonitorConnectionAsync(profile, lifetime));
+    }
+
+    private async Task MonitorConnectionAsync(GpuBackendProfile profile, ConnectionLifetime lifetime)
+    {
+        CancellationToken cancellationToken = lifetime.Cancellation.Token;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
                 await _delay(_healthInterval, cancellationToken).ConfigureAwait(false);
-                if (_connections.TryGetValue(profile.Id, out GpuConnectionHandle? handle) && handle.IsConnected) continue;
-                SetStatus(new(profile.Id, GpuConnectionState.Reconnecting,
-                    "SSH tunnel bị gián đoạn; đang khôi phục có giới hạn."));
-                await DisconnectCoreAsync(profile.Id, cancelMonitor: false).ConfigureAwait(false);
-                Exception? last = null;
+                GpuConnectionHandle? previous;
+                lock (_lifetimeGate)
+                {
+                    ThrowIfRetired(profile.Id, lifetime, cancellationToken);
+                    if (_connections.TryGetValue(profile.Id, out var handle) && handle.IsConnected) continue;
+                    SetStatus(new(profile.Id, GpuConnectionState.Reconnecting,
+                        "SSH tunnel bị gián đoạn; đang khôi phục có giới hạn."));
+                    _connections.TryRemove(profile.Id, out previous);
+                }
+                if (previous is not null) await previous.DisposeAsync().ConfigureAwait(false);
+                bool reconnected = false;
                 for (int attempt = 1; attempt <= 3; attempt++)
                 {
                     try
                     {
-                        await ConnectCoreAsync(profile, cancellationToken).ConfigureAwait(false);
-                        StartMonitor(profile.Clone());
-                        return;
+                        await ConnectCoreAsync(profile, lifetime, cancellationToken).ConfigureAwait(false);
+                        reconnected = true;
+                        break;
                     }
                     catch (SshHostKeyVerificationException) { return; }
                     catch (OperationCanceledException) { throw; }
-                    catch (Exception error)
+                    catch (Exception)
                     {
-                        last = error;
                         if (attempt < 3) await _delay(TimeSpan.FromSeconds(Math.Pow(2, attempt - 1)), cancellationToken).ConfigureAwait(false);
                     }
                 }
-                SetStatus(new(profile.Id, GpuConnectionState.Offline,
+                if (reconnected) continue;
+                SetLifetimeStatus(lifetime, new(profile.Id, GpuConnectionState.Offline,
                     "Không khôi phục được SSH tunnel. Request chưa có checkpoint sẽ không tự gửi lại."));
-                _ = last;
                 return;
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            SetLifetimeStatus(lifetime, new(profile.Id, GpuConnectionState.Offline, SafeMessage(error)));
+        }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        foreach (Guid id in _connections.Keys.ToArray()) await DisconnectAsync(id).ConfigureAwait(false);
-        foreach (var monitor in _monitorCancellations.Values) { monitor.Cancel(); monitor.Dispose(); }
-        _monitorCancellations.Clear();
-        _connectionGate.Dispose();
+        TaskCompletionSource completion;
+        Task[] operations;
+        lock (_lifetimeGate)
+        {
+            if (_disposeTask is not null) return new(_disposeTask);
+            completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            _disposeTask = completion.Task;
+            foreach (Guid id in _lifetimes.Keys.ToArray())
+            {
+                StopConnection(id, reportDisconnected: true);
+            }
+            operations = _operations.Concat(_retirements).Concat(_shutdowns.Values).ToArray();
+        }
+        _ = CompleteDisposeAsync(operations, completion);
+        return new(completion.Task);
+    }
+
+    private async Task CompleteDisposeAsync(Task[] operations, TaskCompletionSource completion)
+    {
+        try
+        {
+            try { await Task.WhenAll(operations).ConfigureAwait(false); }
+            finally { _connectionGate.Dispose(); }
+            completion.SetResult();
+        }
+        catch (Exception error) { completion.SetException(error); }
+    }
+
+    private Operation BeginOperation(Guid? profileId = null, bool reconnect = false)
+    {
+        lock (_lifetimeGate)
+        {
+            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
+            var operation = new Operation(this);
+            if (profileId is Guid id)
+            {
+                if (reconnect)
+                    operation.PreviousShutdown = StopConnection(id);
+                if (!_lifetimes.TryGetValue(id, out var lifetime))
+                    _lifetimes[id] = lifetime = new();
+                operation.Lifetime = lifetime;
+                lifetime.Operations.Add(operation.Completion.Task);
+            }
+            _operations.Add(operation.Completion.Task);
+            return operation;
+        }
+    }
+
+    private bool IsCurrent(Guid profileId, ConnectionLifetime lifetime) =>
+        _disposeTask is null && _lifetimes.TryGetValue(profileId, out var current) && ReferenceEquals(current, lifetime);
+
+    private void ThrowIfRetired(Guid profileId, ConnectionLifetime lifetime, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!IsCurrent(profileId, lifetime)) throw new OperationCanceledException(lifetime.Cancellation.Token);
+    }
+
+    private void SetLifetimeStatus(ConnectionLifetime lifetime, GpuProfileStatus status)
+    {
+        lock (_lifetimeGate)
+            if (IsCurrent(status.ProfileId, lifetime)) SetStatus(status);
+    }
+
+    private sealed class ConnectionLifetime
+    {
+        public CancellationTokenSource Cancellation { get; } = new();
+        public HashSet<Task> Operations { get; } = [];
+        public Task MonitorTask { get; set; } = Task.CompletedTask;
+        public Task CancellationTask { get; set; } = Task.CompletedTask;
+    }
+
+    private sealed class Operation(GpuConnectionManager owner) : IDisposable
+    {
+        public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ConnectionLifetime? Lifetime;
+        public Task PreviousShutdown = Task.CompletedTask;
+
+        public void Dispose()
+        {
+            lock (owner._lifetimeGate)
+            {
+                Lifetime?.Operations.Remove(Completion.Task);
+                owner._operations.Remove(Completion.Task);
+                Completion.SetResult();
+            }
+        }
     }
 
     private void SetStatus(GpuProfileStatus status)
