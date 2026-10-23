@@ -101,7 +101,7 @@ public sealed record AddressingProposal(Guid Id, string RequestId, string TaskId
 /// Addressing Ledger step 2 (docs/ADDRESSING-LEDGER-DESIGN.vi.md): plans per-pair, per-character and per-scene tasks from the
 /// CPU surveys, builds a small Gemini-safe schema, and verifies replies fail-closed against the samples sent.
 /// </summary>
-public static class AddressingAiSurvey
+public static partial class AddressingAiSurvey
 {
     public const string PromptVersion = "addressing-ledger-7";
     private static readonly string[] PairStatus = ["Consistent", "Changes", "Ambiguous", "NotThisPair"];
@@ -178,7 +178,7 @@ public static class AddressingAiSurvey
     internal static bool IsOrganizationOrPlace(string name) =>
         name.Length >= 2 && OrganizationSuffixes.Any(s => name.EndsWith(s, StringComparison.Ordinal) && name.Length > s.Length);
 
-    private sealed record Identities(IReadOnlyList<NameVariantGroup> Variants, string[] AllNames, Dictionary<string, string> Owner)
+    internal sealed record Identities(IReadOnlyList<NameVariantGroup> Variants, string[] AllNames, Dictionary<string, string> Owner)
     {
         public string Canonical(string name) => Owner.GetValueOrDefault(name, name);
     }
@@ -199,12 +199,16 @@ public static class AddressingAiSurvey
     /// <param name="sceneTurns">Verified scene turns (<see cref="AddressingLedgerState.SceneTurns"/>): they attribute quotes the CPU could not.</param>
     public static IReadOnlyList<AddressingTask> PlanTasks(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
         AddressingSettings? settings = null, CancellationToken cancellationToken = default, IReadOnlyCollection<AddressingTurn>? sceneTurns = null)
+        => PlanTasksCore(sources, names, settings, cancellationToken, sceneTurns);
+
+    private static IReadOnlyList<AddressingTask> PlanTasksCore(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
+        AddressingSettings? settings, CancellationToken cancellationToken, IReadOnlyCollection<AddressingTurn>? sceneTurns, CorpusAnalysis? corpus = null)
     {
         settings ??= new(); settings.Validate();
-        var identities = Identify(sources, names);
+        var identities = corpus?._identities ?? Identify(sources, names);
         var (variants, allNames, owner) = (identities.Variants, identities.AllNames, identities.Owner);
         string Canonical(string name) => identities.Canonical(name);
-        var lines = WithSceneTurns(AddressingDialogueSurvey.ExtractAll(sources, allNames, cancellationToken), sceneTurns);
+        var lines = corpus?._projectedLines ?? WithSceneTurns(AddressingDialogueSurvey.ExtractAll(sources, allNames, cancellationToken), sceneTurns);
         var tasks = new List<AddressingTask>();
         // Narration-only guesses are right about half the time on real novels; they need a vocative listener as corroboration.
         var directed = lines.Where(x => x.Speaker is not null && x.Listener is not null &&
@@ -247,7 +251,7 @@ public static class AddressingAiSurvey
         // A title-only person (陆老夫人) who speaks or is spoken to in verified lines is asked about too, so the AI can give the Vietnamese name "Hoàn thành" needs.
         var titlePeople = directed.Keys.SelectMany(k => new[] { k.Speaker, k.Listener }).Where(n => ChineseMentionDiscovery.IsTitleForm(n) && !allNames.Contains(n, StringComparer.Ordinal))
             .Distinct(StringComparer.Ordinal).ToArray();
-        var narration = NarrativeReferenceSurvey.Analyze(sources, [.. allNames, .. titlePeople], int.MaxValue, cancellationToken)
+        var narration = (corpus?.Narration(titlePeople) ?? NarrativeReferenceSurvey.Analyze(sources, [.. allNames, .. titlePeople], int.MaxValue, cancellationToken))
             .GroupBy(x => Canonical(x.Name), StringComparer.Ordinal)
             .Select(g => new NarrativeCharacter(g.Key, g.Sum(x => x.NarrationMentions), g.Sum(x => x.He), g.Sum(x => x.She), g.Sum(x => x.It),
                 g.Min(x => x.FirstChapter), g.Max(x => x.LastChapter), NarrativeReferenceSurvey.Spread(g.SelectMany(x => x.Samples).ToArray(), settings.SamplesPerTask)))
@@ -312,39 +316,19 @@ public static class AddressingAiSurvey
     /// </summary>
     public static IReadOnlyList<AddressingTask> PlanIdentities(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
         AddressingSettings? settings = null, CancellationToken cancellationToken = default, IReadOnlyCollection<AddressingTurn>? sceneTurns = null)
+        => PlanIdentitiesCore(sources, names, settings, cancellationToken, sceneTurns);
+
+    private static IReadOnlyList<AddressingTask> PlanIdentitiesCore(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
+        AddressingSettings? settings, CancellationToken cancellationToken, IReadOnlyCollection<AddressingTurn>? sceneTurns, CorpusAnalysis? corpus = null)
     {
         settings ??= new(); settings.Validate();
-        var identities = Identify(sources, names);
+        var identities = corpus?._identities ?? Identify(sources, names);
         string Canonical(string name) => identities.Canonical(name);
-        var talk = WithSceneTurns(AddressingDialogueSurvey.ExtractAll(sources, identities.AllNames, cancellationToken), sceneTurns)
+        var talk = (corpus?._projectedLines ?? WithSceneTurns(AddressingDialogueSurvey.ExtractAll(sources, identities.AllNames, cancellationToken), sceneTurns))
             .Where(x => x.Speaker is not null && x.Listener is not null).Select(x => Key(Canonical(x.Speaker!), Canonical(x.Listener!))).ToHashSet();
-        var genders = NarrativeReferenceSurvey.Analyze(sources, identities.AllNames, int.MaxValue, cancellationToken).GroupBy(x => Canonical(x.Name), StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => new NarrativeCharacter(g.Key, g.Sum(x => x.NarrationMentions), g.Sum(x => x.He), g.Sum(x => x.She), g.Sum(x => x.It),
-                g.Min(x => x.FirstChapter), g.Max(x => x.LastChapter), []).SourceGender, StringComparer.Ordinal);
-        var matcher = new AddressingDialogueSurvey.NameMatcher(identities.AllNames);
-        var together = new Dictionary<(string, string), List<(int Chapter, int Index, string Text)>>();
-        var listed = new HashSet<(string, string)>();
-        foreach (var source in sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var paragraphs = AddressingDialogueSurvey.NormalizedText.From(source.OriginalText).Value.Split('\n');
-            for (int index = 0; index < paragraphs.Length; index++)
-            {
-                string paragraph = paragraphs[index].Trim();
-                var hits = matcher.Find(paragraph);
-                for (int i = 1; i < hits.Count; i++)
-                    if (paragraph[(hits[i - 1].Start + hits[i - 1].Name.Length)..hits[i].Start] is "和" or "与" or "跟" or "及" or "、" or "同")
-                        listed.Add(Key(Canonical(hits[i - 1].Name), Canonical(hits[i].Name)));
-                var present = hits.Select(h => Canonical(h.Name)).Distinct(StringComparer.Ordinal).ToArray();
-                for (int a = 0; a < present.Length; a++)
-                    for (int b = a + 1; b < present.Length; b++)
-                    {
-                        var key = Key(present[a], present[b]);
-                        if (!together.TryGetValue(key, out var list)) together[key] = list = [];
-                        list.Add((source.ChapterNumber, index, paragraph));
-                    }
-            }
-        }
+        var evidence = corpus?.IdentityEvidence() ?? AnalyzeIdentityEvidence(sources, identities,
+            new AddressingDialogueSurvey.NameMatcher(identities.AllNames), NarrativeReferenceSurvey.Analyze(sources, identities.AllNames, int.MaxValue, cancellationToken), cancellationToken);
+        var (genders, together, listed) = evidence;
         static bool Nickname(string name) => !ChineseSurnames.HasCommonSurname(name);
         bool GenderClash(string a, string b) => genders.GetValueOrDefault(a, "unknown") is var x && genders.GetValueOrDefault(b, "unknown") is var y &&
             x != "unknown" && y != "unknown" && x != y;
@@ -375,6 +359,42 @@ public static class AddressingAiSurvey
         return tasks;
     }
 
+    internal sealed record IdentityCorpusEvidence(Dictionary<string, string> Genders,
+        Dictionary<(string, string), List<(int Chapter, int Index, string Text)>> Together, HashSet<(string, string)> Listed);
+
+    private static IdentityCorpusEvidence AnalyzeIdentityEvidence(IReadOnlyList<CensusSource> sources, Identities identities,
+        AddressingDialogueSurvey.NameMatcher matcher, IReadOnlyList<NarrativeCharacter> narration, CancellationToken cancellationToken)
+    {
+        string Canonical(string name) => identities.Canonical(name);
+        var genders = narration.GroupBy(x => Canonical(x.Name), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => new NarrativeCharacter(g.Key, g.Sum(x => x.NarrationMentions), g.Sum(x => x.He), g.Sum(x => x.She), g.Sum(x => x.It),
+                g.Min(x => x.FirstChapter), g.Max(x => x.LastChapter), []).SourceGender, StringComparer.Ordinal);
+        var together = new Dictionary<(string, string), List<(int Chapter, int Index, string Text)>>();
+        var listed = new HashSet<(string, string)>();
+        foreach (var source in sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var paragraphs = AddressingDialogueSurvey.NormalizedText.From(source.OriginalText).Value.Split('\n');
+            for (int index = 0; index < paragraphs.Length; index++)
+            {
+                string paragraph = paragraphs[index].Trim();
+                var hits = matcher.Find(paragraph);
+                for (int i = 1; i < hits.Count; i++)
+                    if (paragraph[(hits[i - 1].Start + hits[i - 1].Name.Length)..hits[i].Start] is "和" or "与" or "跟" or "及" or "、" or "同")
+                        listed.Add(Key(Canonical(hits[i - 1].Name), Canonical(hits[i].Name)));
+                var present = hits.Select(h => Canonical(h.Name)).Distinct(StringComparer.Ordinal).ToArray();
+                for (int a = 0; a < present.Length; a++)
+                    for (int b = a + 1; b < present.Length; b++)
+                    {
+                        var key = Key(present[a], present[b]);
+                        if (!together.TryGetValue(key, out var list)) together[key] = list = [];
+                        list.Add((source.ChapterNumber, index, paragraph));
+                    }
+            }
+        }
+        return new(genders, together, listed);
+    }
+
     private const int MaximumParticipants = 8;
 
     /// <summary>
@@ -387,10 +407,14 @@ public static class AddressingAiSurvey
     /// </summary>
     public static IReadOnlyList<AddressingTask> PlanScenes(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
         AddressingSettings? settings = null, CancellationToken cancellationToken = default, IReadOnlyCollection<string>? titleForms = null)
+        => PlanScenesCore(sources, names, settings, cancellationToken, titleForms);
+
+    private static IReadOnlyList<AddressingTask> PlanScenesCore(IReadOnlyList<CensusSource> sources, IReadOnlyCollection<string> names,
+        AddressingSettings? settings, CancellationToken cancellationToken, IReadOnlyCollection<string>? titleForms, Identities? identified = null)
     {
         settings ??= new(); settings.Validate();
         if (settings.MaximumScenes == 0) return [];
-        var identities = Identify(sources, names);
+        var identities = identified ?? Identify(sources, names);
         var titles = (titleForms ?? []).Where(t => !identities.AllNames.Contains(t, StringComparer.Ordinal)).Distinct(StringComparer.Ordinal).ToArray();
         var candidates = new List<(DialogueScene Scene, string[] Participants, int Open)>();
         string[] previous = []; int previousChapter = int.MinValue;

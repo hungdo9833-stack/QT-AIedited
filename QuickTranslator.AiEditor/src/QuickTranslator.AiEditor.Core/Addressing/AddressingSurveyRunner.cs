@@ -42,12 +42,7 @@ public sealed class AddressingSurveyRunner(IJsonSchemaLlmClient client)
         AddressingSettings? settings = null, CancellationToken ct = default)
     {
         settings ??= new(); settings.Validate();
-        var (names, titles) = AddressingAiSurvey.SurveyNames(projectId, sources, resources, 3, settings.FilterJunkCandidates, ct);
-        var scenes = AddressingAiSurvey.PlanScenes(sources, names, settings, ct, titles);
-        var turns = state.SceneTurns();
-        // Identity questions go with characters and pairs: they need no scene answer, only the verified turns (who talks to whom).
-        var tasks = AddressingAiSurvey.PlanTasks(sources, names, settings, ct, turns).Concat(AddressingAiSurvey.PlanIdentities(sources, names, settings, ct, turns)).ToArray();
-        return new(scenes, tasks, state, settings);
+        return new AddressingAiSurvey.CorpusAnalysis(projectId, sources, resources, settings, ct).Plan(state);
     }
 
     public async Task<AddressingSurveyResult> RunAsync(ProjectSession session, IReadOnlyList<CensusSource> sources, ProjectResources resources,
@@ -55,6 +50,15 @@ public sealed class AddressingSurveyRunner(IJsonSchemaLlmClient client)
     {
         if (maximumRequests is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(maximumRequests));
         settings ??= new(); settings.Validate(); options.Validate();
+        AddressingAiSurvey.CorpusAnalysis? corpus = null;
+        return await RunPlannedAsync(session, options, maximumRequests, settings,
+            state => (corpus ??= new(session.Manifest.ProjectId, sources, resources, settings, ct)).Plan(state), progress, ct).ConfigureAwait(false);
+    }
+
+    internal async Task<AddressingSurveyResult> RunPlannedAsync(ProjectSession session, ModelOptions options, int maximumRequests,
+        AddressingSettings settings, Func<AddressingLedgerState, AddressingSurveyWork> plan,
+        IProgress<AddressingSurveyProgress>? progress = null, CancellationToken ct = default)
+    {
         var store = new AddressingLedgerStore(session);
         var engine = new AddressingAiEngine(client);
         var state = await store.LoadAsync(ct).ConfigureAwait(false);
@@ -66,7 +70,7 @@ public sealed class AddressingSurveyRunner(IJsonSchemaLlmClient client)
         {
             progress?.Report(new("CPU", sent, maximumRequests, "Đang lập kế hoạch khảo sát (CPU, không gọi AI)…"));
             var current = state;
-            work = await Task.Run(() => Plan(session.Manifest.ProjectId, sources, resources, current, settings, ct), ct).ConfigureAwait(false);
+            work = await Task.Run(() => plan(current), ct).ConfigureAwait(false);
             // Scenes first: their verified turns decide which quotes each pair task gets.
             bool scenes = work.PendingScenes.Any(t => !asked.Contains(t.TaskId));
             var batch = (scenes ? work.PendingScenes : work.PendingTasks).Where(t => asked.Add(t.TaskId)).ToArray();
@@ -80,7 +84,7 @@ public sealed class AddressingSurveyRunner(IJsonSchemaLlmClient client)
             progress?.Report(new(stage, sent, maximumRequests, $"Xong đợt {stage.ToLowerInvariant()}: {run.RequestsSent} request."));
             if (run.StoppedBy is not null) { stoppedBy = run.StoppedBy; break; }
         }
-        var remaining = await Task.Run(() => Plan(session.Manifest.ProjectId, sources, resources, state, settings, ct), ct).ConfigureAwait(false);
+        var remaining = await Task.Run(() => plan(state), ct).ConfigureAwait(false);
         if (stoppedBy is null && !remaining.Complete && remaining.PendingScenes.Concat(remaining.PendingTasks).All(t => asked.Contains(t.TaskId)))
             stoppedBy = "RetryNextRun"; // Only tasks answered invalidly this click are left; the next click asks them once more.
         return new(state, sent, stoppedBy, remaining);
