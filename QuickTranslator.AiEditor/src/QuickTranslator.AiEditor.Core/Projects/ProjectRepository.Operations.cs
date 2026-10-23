@@ -140,19 +140,17 @@ public sealed partial class ProjectRepository
                             string.Join(", ", collisions.Distinct().Order()));
                 }
                 DateTimeOffset movedAt = DateTimeOffset.UtcNow;
+                var moves = new List<(string Source, string Destination)>();
                 foreach (ProjectChapterEntry entry in entries)
                 {
                     token.ThrowIfCancellationRequested();
                     string source = session.Resolve(entry.RelativePath);
-                    ChapterDocument chapter = await ChapterFileStore.ReadVerifiedFileAsync(source, token).ConfigureAwait(false);
-                    if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId)
-                        throw new InvalidDataException("File chương không thuộc liên kết manifest này.");
+                    _ = await ReadRegisteredChapterAsync(session, entry, token).ConfigureAwait(false);
                     string relative = restore ? $"Chapters/{entry.ChapterId:D}.qtaie.json"
                         : $"Deleted/{movedAt:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}-{entry.ChapterId:D}.qtaie.json";
                     string destination = session.Resolve(relative);
                     await EnsureDestinationEmptyAsync(destination, token).ConfigureAwait(false);
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    File.Move(source, destination);
+                    moves.Add((source, destination));
                     entry.RelativePath = relative;
                     entry.DeletedAt = restore ? null : movedAt;
                 }
@@ -160,7 +158,36 @@ public sealed partial class ProjectRepository
                 else if (after.CurrentChapterId is Guid current && ids.Contains(current))
                     after.CurrentChapterId = after.Chapters.FirstOrDefault(x => x.DeletedAt is null)?.ChapterId;
                 NormalizeManifest(after);
-                await WriteFastManifestAsync(session.ManifestPath, after, token).ConfigureAwait(false);
+                var completed = new List<(string Source, string Destination)>();
+                try
+                {
+                    foreach (var move in moves)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        Directory.CreateDirectory(Path.GetDirectoryName(move.Destination)!);
+                        FaultPoint?.Invoke("BeforeChapterMove");
+                        File.Move(move.Source, move.Destination);
+                        completed.Add(move);
+                        FaultPoint?.Invoke("AfterChapterMove");
+                    }
+                    FaultPoint?.Invoke("BeforeMoveManifestWrite");
+                    await WriteFastManifestAsync(session.ManifestPath, after, token).ConfigureAwait(false);
+                }
+                catch (Exception failure)
+                {
+                    // Roll back without the cancelled token, and attempt every move even if one is locked.
+                    var failures = new List<Exception> { failure };
+                    foreach (var move in completed.AsEnumerable().Reverse())
+                    {
+                        try { File.Move(move.Destination, move.Source); }
+                        catch (Exception rollback) when (rollback is IOException or UnauthorizedAccessException)
+                        { failures.Add(rollback); }
+                    }
+                    if (failures.Count > 1)
+                        throw new IOException("Chapter move rollback was incomplete; reopen the project to recover.",
+                            new AggregateException(failures));
+                    throw;
+                }
                 session.Manifest = after;
                 PublishManifestCommitted(session, restore ? "RestoreDeletedChapters" : "SoftDeleteChapters");
             }
@@ -196,23 +223,34 @@ public sealed partial class ProjectRepository
             {
                 token.ThrowIfCancellationRequested();
                 ProjectChapterEntry? replaced = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == source.Id);
+                string? deletedPath = null;
+                byte[]? deletedBytes = null;
                 if (replaced is not null)
                 {
                     if (!replaceSoftDeletedHistory || replaced.DeletedAt is null)
                         throw new InvalidOperationException("ID chương nhập đã có trong Project; bản active không được ghi đè.");
-                    string deletedPath = session.Resolve(replaced.RelativePath);
-                    ChapterDocument deleted = await ChapterFileStore.ReadVerifiedFileAsync(deletedPath, token).ConfigureAwait(false);
+                    deletedPath = session.Resolve(replaced.RelativePath);
+                    deletedBytes = await File.ReadAllBytesAsync(deletedPath, token).ConfigureAwait(false);
+                    ChapterDocument deleted = ChapterFileStore.DeserializeDocument(deletedBytes);
                     if (deleted.Id != replaced.ChapterId || deleted.ProjectId != session.Manifest.ProjectId)
                         throw new InvalidDataException("File History không thuộc ChapterId/Project cần thay thế.");
-                    File.Delete(deletedPath);
                 }
                 if (session.Manifest.Chapters.Any(x => x.ChapterId != source.Id && x.DeletedAt is null && x.Number == number))
                     throw new InvalidOperationException("Số chương nhập đã thuộc một chapter active khác.");
                 string relative = $"Chapters/{source.Id:D}.qtaie.json";
-                await EnsureDestinationEmptyAsync(session.Resolve(relative), token).ConfigureAwait(false);
-                ChapterDocument saved = PrepareRegisteredChapter(session, source, number, source.ChineseTitle);
-                await session.ChapterStore.SaveSerializedAsync(saved.Id, ChapterFileStore.SerializeDocument(saved), token)
-                    .ConfigureAwait(false);
+                string destination = session.Resolve(relative);
+                ChapterDocument? pending = await ReadPendingImportAsync(session, source.Id, token).ConfigureAwait(false);
+                if (pending is not null && (pending.ChapterNumber != number || pending.Title != source.Title ||
+                    pending.ChineseTitle != source.ChineseTitle || pending.OriginalText != source.OriginalText))
+                    throw new IOException("Pending import does not match this import; existing content was preserved.");
+                ChapterDocument saved = pending ?? PrepareRegisteredChapter(session, source, number, source.ChineseTitle);
+                if (pending is null)
+                {
+                    await EnsureDestinationEmptyAsync(destination, token).ConfigureAwait(false);
+                    FaultPoint?.Invoke("BeforeImportChapterWrite");
+                    await WritePendingImportAsync(session, saved, token).ConfigureAwait(false);
+                }
+                FaultPoint?.Invoke("AfterImportChapterWrite");
                 ProjectManifest after = Clone(session.Manifest);
                 if (replaced is not null) after.Chapters.RemoveAll(x => x.ChapterId == replaced.ChapterId);
                 after.Chapters.Add(ToEntry(saved, number));
@@ -220,6 +258,19 @@ public sealed partial class ProjectRepository
                 NormalizeManifest(after);
                 await WriteFastManifestAsync(session.ManifestPath, after, token).ConfigureAwait(false);
                 session.Manifest = after;
+                // Only retire the old History bytes after the new manifest is durable. Cleanup cannot undo a commit.
+                TryDeleteUnreferencedFile(session, ImportReceiptPath(destination));
+                if (deletedPath is not null)
+                {
+                    try
+                    {
+                        if ((await File.ReadAllBytesAsync(deletedPath, CancellationToken.None).ConfigureAwait(false))
+                            .AsSpan().SequenceEqual(deletedBytes))
+                            TryDeleteUnreferencedFile(session, deletedPath);
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    { System.Diagnostics.Trace.TraceWarning($"Could not retire old History file: {error.Message}"); }
+                }
                 published(saved.Id);
                 PublishManifestCommitted(session, operation);
             }

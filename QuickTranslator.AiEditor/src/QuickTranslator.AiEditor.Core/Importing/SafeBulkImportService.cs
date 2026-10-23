@@ -229,7 +229,13 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
                 issues.Add($"Số chương {number} đã thuộc chapter “{collision.VietnameseTitle}”; không ghi đè.");
             string path = session.ChapterStore.GetPath(item.ChapterId);
             if (File.Exists(path) || Directory.Exists(path))
-                issues.Add($"Đích {Path.GetFileName(path)} đã tồn tại ngoài manifest; không tự ghi đè.");
+            {
+                ChapterDocument? pending = await ProjectRepository.ReadPendingImportAsync(session, item.ChapterId, token)
+                    .ConfigureAwait(false);
+                if (pending is null || pending.ChapterNumber != number || pending.Title != expectedTitle ||
+                    pending.ChineseTitle != ChineseTitle(item) || pending.OriginalText != expectedText)
+                    issues.Add($"Đích {Path.GetFileName(path)} đã tồn tại ngoài manifest; không tự ghi đè.");
+            }
         }
         return issues;
     }

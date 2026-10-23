@@ -41,8 +41,7 @@ public sealed partial class ProjectRepository
                 ProjectChapterEntry entry = session.Manifest.Chapters.SingleOrDefault(item =>
                     item.ChapterId == proposal.ChapterId && item.DeletedAt is null)
                     ?? throw new FileNotFoundException($"Không tìm thấy chương hoạt động {proposal.ChapterId:D}.");
-                string path = session.Resolve(entry.RelativePath);
-                ChapterDocument chapter = await ChapterFileStore.ReadVerifiedFileAsync(path, cancellationToken).ConfigureAwait(false);
+                ChapterDocument chapter = await ReadRegisteredChapterAsync(session, entry, cancellationToken).ConfigureAwait(false);
                 if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId ||
                     chapter.Title != entry.VietnameseTitle || chapter.ChineseTitle != entry.ChineseTitle)
                     throw new InvalidDataException("Tiêu đề trong chapter và manifest không đồng bộ; chưa thể cập nhật hàng loạt.");
@@ -71,8 +70,7 @@ public sealed partial class ProjectRepository
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ProjectChapterEntry entry = session.Manifest.Chapters.Single(chapter => chapter.ChapterId == item.ChapterId && chapter.DeletedAt is null);
-                string path = session.Resolve(entry.RelativePath);
-                ChapterDocument current = await ChapterFileStore.ReadVerifiedFileAsync(path, cancellationToken).ConfigureAwait(false);
+                ChapterDocument current = await ReadRegisteredChapterAsync(session, entry, cancellationToken).ConfigureAwait(false);
                 if (current.Title != item.CurrentVietnameseTitle || current.ChineseTitle != item.ChineseTitle)
                     throw new InvalidOperationException($"Tiêu đề chương {entry.Number} đã đổi sau preview.");
                 if (item.ExistingTitleProtected && preview.Policy != ExistingVietnameseTitlePolicy.OverwriteConfirmed)
