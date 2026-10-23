@@ -27,10 +27,11 @@ public sealed class RegisteredChapterStore(ProjectSession session, ProjectReposi
 
     public Task<ChapterLoadResult> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
-        if (!session.Manifest.Chapters.Any(x => x.DeletedAt is null &&
-            string.Equals(session.Resolve(x.RelativePath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)))
+        var entry = session.Manifest.Chapters.SingleOrDefault(x => x.DeletedAt is null &&
+            string.Equals(session.Resolve(x.RelativePath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
             throw new InvalidOperationException("Tệp không thuộc danh sách chương đang hoạt động.");
-        return session.ChapterStore.LoadAsync(path, cancellationToken);
+        return _repository.LoadChapterAsync(session, entry.ChapterId, cancellationToken);
     }
 }
 

@@ -77,6 +77,7 @@ public sealed partial class ProjectRepository
             session.Resolve(entry.RelativePath), cancellationToken).ConfigureAwait(false);
         if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId)
             throw new InvalidDataException("File chương không thuộc liên kết manifest này.");
+        chapter.ChapterNumber = entry.Number;
         return chapter;
     }
 }

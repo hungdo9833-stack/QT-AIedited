@@ -45,6 +45,7 @@ public sealed partial class ProjectRepository
         string root = Path.GetDirectoryName(manifestPath)!;
         CreateLayout(root);
         var session = new ProjectSession(manifestPath, manifest);
+        await RecoverInterruptedChapterMovesAsync(session, cancellationToken).ConfigureAwait(false);
         await SynchronizeNewerChapterSummariesAsync(session, cancellationToken).ConfigureAwait(false);
         return new(session);
     }
@@ -58,9 +59,7 @@ public sealed partial class ProjectRepository
             cancellationToken.ThrowIfCancellationRequested();
             string path = session.Resolve(entry.RelativePath);
             if (!File.Exists(path) || File.GetLastWriteTimeUtc(path) < manifestWriteTime) continue;
-            ChapterDocument chapter = await ChapterFileStore.ReadVerifiedFileAsync(path, cancellationToken).ConfigureAwait(false);
-            if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId)
-                throw new InvalidDataException("Tệp chương không khớp với manifest dự án.");
+            ChapterDocument chapter = await ReadRegisteredChapterAsync(session, entry, cancellationToken).ConfigureAwait(false);
             ProjectChapterEntry current = (synchronized ?? session.Manifest).Chapters.Single(x => x.ChapterId == entry.ChapterId);
             if (SummaryMatches(current, chapter)) continue;
             synchronized ??= Clone(session.Manifest);
@@ -173,6 +172,7 @@ public sealed partial class ProjectRepository
         var result = await session.ChapterStore.LoadAsync(path, cancellationToken).ConfigureAwait(false);
         if (result.Chapter.Id != chapterId || result.Chapter.ProjectId is Guid projectId && projectId != session.Manifest.ProjectId)
             throw new InvalidDataException("Tệp chương không khớp với manifest dự án.");
+        result.Chapter.ChapterNumber = entry.Number;
         return result;
     }
 
