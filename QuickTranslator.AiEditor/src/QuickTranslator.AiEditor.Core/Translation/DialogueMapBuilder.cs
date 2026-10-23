@@ -9,8 +9,8 @@ namespace QuickTranslator.AiEditor.Core.Translation;
 /// <summary>
 /// Per-quote "who speaks to whom" for one segment, from the survey's CPU dialogue extraction run over the whole
 /// chapter: a speaker named just before a segment boundary still attributes the first quote of the next segment.
-/// Only strong evidence is used (speech verb or the narration sentence right before); a pronoun speaker or a listener
-/// guessed from scene presence is left out. A kinship listener (母亲, “妈！”) is resolved through the speaker's own
+/// Strong evidence is preserved; bounded two-party turn and gender inference is marked as tentative. A kinship listener
+/// (母亲, “妈！”) is resolved through the speaker's own
 /// confirmed rules: the one rule whose form of address matches. Performs no I/O and calls no model.
 /// </summary>
 public static class DialogueMapBuilder
@@ -45,24 +45,30 @@ public static class DialogueMapBuilder
         // A surface name belongs to one profile; a name shared by two profiles attributes nothing.
         var owners = project.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases)
                 .Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => (Name: n.Trim(), Profile: p)))
+            .Where(x => DialogueTurnInference.IsCharacterName(x.Name))
             .GroupBy(x => x.Name, StringComparer.Ordinal).Where(g => g.Select(x => x.Profile.Id).Distinct().Count() == 1)
             .ToDictionary(g => g.Key, g => g.First().Profile, StringComparer.Ordinal);
         if (owners.Count == 0) return "";
 
         int start = segment.StartUtf16, end = segment.StartUtf16 + segment.SourceText.Length;
-        var lines = AddressingDialogueSurvey.Extract(new CensusSource(chapter.Id, chapter.ChapterNumber ?? 0, chapter.OriginalText), owners.Keys.ToArray())
+        // Infer before filtering so earlier turns seed a segment opening mid-conversation. Avoid the survey's
+        // task-size scene splits: inference has its own narration and consecutive-guess limits.
+        var scenes = AddressingDialogueSurvey.Scenes([new CensusSource(chapter.Id, chapter.ChapterNumber ?? 0, chapter.OriginalText)],
+            owners.Keys.ToArray(), maximumQuotes: int.MaxValue, maximumCharacters: int.MaxValue);
+        var turns = DialogueTurnInference.Infer(scenes, owners)
             // Offsets are in the original text; the opening words guard against a segment whose start went stale.
-            .Where(l => l.QuoteStartUtf16 >= start && l.QuoteStartUtf16 < end &&
-                segment.SourceText.Contains(l.Quote[..Math.Min(8, l.Quote.Length)], StringComparison.Ordinal));
+            .Where(t => t.Line.QuoteStartUtf16 >= start && t.Line.QuoteStartUtf16 < end &&
+                segment.SourceText.Contains(t.Line.Quote[..Math.Min(8, t.Line.Quote.Length)], StringComparison.Ordinal));
         var builder = new StringBuilder();
         int count = 0;
-        foreach (var line in lines)
+        foreach (var turn in turns)
         {
-            if (line.Speaker is null || line.SpeakerEvidence is not (SpeakerEvidence.Explicit or SpeakerEvidence.PreviousNarration) ||
-                !owners.TryGetValue(line.Speaker, out var speaker)) continue;
+            var line = turn.Line;
+            if (turn.Speaker is not { } speaker) continue;
             CharacterProfile? listener = line.Listener is not null && (line.ListenerEvidence is ListenerEvidence.Vocative or ListenerEvidence.Clause) &&
                 owners.TryGetValue(line.Listener, out var named) && named.Id != speaker.Id ? named : null;
             listener ??= KinListener(project, speaker, line, chapter.ChapterNumber);
+            listener ??= turn.Listener;
             // Weakest: the only other person named in this and the previous paragraph. Marked so the model can overrule it.
             bool likely = false;
             if (listener is null && line.Listener is not null && line.ListenerEvidence == ListenerEvidence.Scene &&
@@ -70,13 +76,14 @@ public static class DialogueMapBuilder
             var rule = listener is null ? null : RuleFor(speaker, listener.Id, chapter.ChapterNumber);
             string who = listener is null ? $"{speaker.VietnameseName} → (listener unclear)"
                 : $"{speaker.VietnameseName} → {listener.VietnameseName}{(likely ? " (likely)" : "")}";
+            if (turn.IsInferred) who += " (inferred)";
             string terms = rule is null ? "" : $" (self={rule.SelfReference.Trim()}; address={rule.AddresseeReference.Trim()})";
             if (count == 0) builder.AppendLine("DIALOGUE MAP (quotes of this passage in order; speaker → listener):");
             builder.AppendLine($"- “{Snippet(line.Quote)}”: {who}{terms}");
             if (++count >= MaximumLines) break;
         }
         if (count == 0) return "";
-        builder.Append("Translate each listed quote with that speaker's self-reference and form of address for that listener. Keep this map out of the translation.");
+        builder.Append("Translate each listed quote with that speaker's self-reference and form of address for that listener. Inferred pairs may be overruled by the text; explicit attribution always wins. Keep this map out of the translation.");
         return builder.ToString();
     }
 
