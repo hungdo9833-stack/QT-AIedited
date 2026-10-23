@@ -185,8 +185,12 @@ public sealed class ProjectTranslationCoordinator
         {
             foreach (ProjectTranslationItem item in job.Items.Where(item => retranslateAll?.Contains(item.ChapterId) == true))
             {
+                // A started chapter that is waiting again (paused, interrupted, or pending after a run) restarts from scratch too:
+                // otherwise its old run resumes with only the missing segments and keeps any failed one.
                 if (item.Status is ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Skipped or
-                    ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview or ProjectTranslationItemStatus.Cancelled)
+                    ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview or ProjectTranslationItemStatus.Cancelled ||
+                    item.ChapterQueueRunId is not null && item.Status is ProjectTranslationItemStatus.Pending or
+                        ProjectTranslationItemStatus.Paused or ProjectTranslationItemStatus.Interrupted)
                 {
                     item.Status = ProjectTranslationItemStatus.Pending;
                     item.Disposition = ProjectTranslationItemDisposition.None;

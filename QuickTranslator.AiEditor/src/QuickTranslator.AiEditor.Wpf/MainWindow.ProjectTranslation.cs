@@ -133,7 +133,9 @@ public partial class MainWindow
     {
         Guid[] candidates = chapterIds.Where(id => existing.Items.FirstOrDefault(item => item.ChapterId == id) is not { } item ||
             item.Status is ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Skipped or
-                ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview or ProjectTranslationItemStatus.Cancelled)
+                ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview or ProjectTranslationItemStatus.Cancelled ||
+            // A waiting chapter that already holds failed segments can only finish if it is retranslated in full.
+            _projectSession!.Manifest.Chapters.Any(entry => entry.ChapterId == id && entry.State == ProjectChapterState.Error))
             .ToArray();
         if (candidates.Length == 0)
         {
@@ -158,7 +160,9 @@ public partial class MainWindow
     private IReadOnlySet<Guid>? AskRetranslation(IReadOnlyList<Guid> chapterIds)
     {
         ProjectChapterEntry[] translated = _projectSession!.Manifest.Chapters
-            .Where(entry => entry.DeletedAt is null && entry.CompletedSegmentCount > 0 && chapterIds.Contains(entry.ChapterId))
+            // A chapter with failed segments is offered too: the queue never retries a failed attempt on its own.
+            .Where(entry => entry.DeletedAt is null && (entry.CompletedSegmentCount > 0 || entry.State == ProjectChapterState.Error) &&
+                chapterIds.Contains(entry.ChapterId))
             .OrderBy(entry => entry.Number).ToArray();
         if (translated.Length == 0) return new HashSet<Guid>();
         int complete = translated.Count(entry => entry.CompletedSegmentCount >= entry.SegmentCount);
