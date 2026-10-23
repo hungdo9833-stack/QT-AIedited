@@ -37,10 +37,22 @@ public sealed class NarrativePronounTracker
         if (originalText.Length == 0 || project.Profiles.Count == 0) return [];
 
         NameMention[] mentions = FindMentions(originalText, project);
-        IReadOnlyList<TextSpan> quotes = QuoteRanges(originalText);
+        var insideQuote = new bool[originalText.Length];
+        foreach (TextSpan range in QuoteRanges(originalText))
+            Array.Fill(insideQuote, true, range.Start, range.End - range.Start);
+        // The latest different owner is enough to detect competition in any suffix ending at the current position.
+        NameMention? male = null, female = null, otherMale = null, otherFemale = null;
+        int mentionIndex = 0;
         var references = new List<NarrativePronounReference>();
         for (int position = 0; position < originalText.Length; position++)
         {
+            while (mentionIndex < mentions.Length && mentions[mentionIndex].Start < position)
+            {
+                NameMention mention = mentions[mentionIndex++];
+                if (insideQuote[mention.Start]) continue;
+                if (mention.Profile.Gender == CharacterGender.Male) Advance(mention, ref male, ref otherMale);
+                else if (mention.Profile.Gender == CharacterGender.Female) Advance(mention, ref female, ref otherFemale);
+            }
             char pronoun = originalText[position];
             CharacterGender gender = pronoun switch
             {
@@ -49,26 +61,30 @@ public sealed class NarrativePronounTracker
                 _ => CharacterGender.Unknown
             };
             if (gender == CharacterGender.Unknown || IsPlural(originalText, position) ||
-                quotes.Any(range => position >= range.Start && position < range.End)) continue;
+                insideQuote[position]) continue;
 
             int windowStart = WindowStart(originalText, position);
-            NameMention? antecedent = mentions.LastOrDefault(mention => mention.Start < position && mention.Start >= windowStart &&
-                mention.Profile.Gender == gender && !quotes.Any(range => mention.Start >= range.Start && mention.Start < range.End));
-            if (antecedent is null)
+            NameMention? antecedent = gender == CharacterGender.Male ? male : female;
+            if (antecedent is null || antecedent.Start < windowStart)
             {
                 references.Add(new(position, pronoun, gender, null, NarrativePronounConfidence.Ambiguous));
                 continue;
             }
 
             int sentenceStart = SentenceStart(originalText, antecedent.Start, windowStart);
-            bool competing = mentions.Any(mention => mention.Profile.Gender == gender && mention.Profile.Id != antecedent.Profile.Id &&
-                mention.Start >= sentenceStart && mention.Start < position &&
-                !quotes.Any(range => mention.Start >= range.Start && mention.Start < range.End));
+            NameMention? other = gender == CharacterGender.Male ? otherMale : otherFemale;
+            bool competing = other is not null && other.Start >= sentenceStart;
             references.Add(competing
                 ? new(position, pronoun, gender, null, NarrativePronounConfidence.Ambiguous)
                 : new(position, pronoun, gender, antecedent.Profile.Id, NarrativePronounConfidence.High));
         }
         return references;
+    }
+
+    private static void Advance(NameMention mention, ref NameMention? latest, ref NameMention? different)
+    {
+        if (latest is not null && latest.Profile.Id != mention.Profile.Id) different = latest;
+        latest = mention;
     }
 
     public IReadOnlyList<NarrativePronounReference> ForSegment(string chapterText, TranslationSegment segment,
@@ -112,27 +128,40 @@ public sealed class NarrativePronounTracker
             .Where(group => group.Select(owner => owner.Profile.Id).Distinct().Count() == 1)
             .Select(group => group.First()).OrderByDescending(owner => owner.Name.Length).ToArray();
         var accepted = new List<NameMention>();
+        // Fenwick occupancy index: overlap queries are logarithmic, independent of the number of accepted mentions.
+        // Accepted intervals are disjoint, so at most text.Length characters are marked over the entire scan.
+        var occupied = new int[text.Length + 1];
         foreach (NameOwner owner in owners)
         {
             for (int start = text.IndexOf(owner.Name, StringComparison.Ordinal); start >= 0;
                  start = text.IndexOf(owner.Name, start + owner.Name.Length, StringComparison.Ordinal))
             {
-                if (accepted.Any(item => Overlaps(start, owner.Name.Length, item.Start, item.Length))) continue;
+                if (OccupiedBefore(occupied, start + owner.Name.Length) != OccupiedBefore(occupied, start)) continue;
                 accepted.Add(new(start, owner.Name.Length, owner.Profile));
+                for (int position = start; position < start + owner.Name.Length; position++)
+                    for (int index = position + 1; index < occupied.Length; index += index & -index) occupied[index]++;
             }
         }
         return accepted.OrderBy(item => item.Start).ToArray();
     }
 
+    private static int OccupiedBefore(int[] occupied, int end)
+    {
+        int count = 0;
+        for (int index = end; index > 0; index -= index & -index) count += occupied[index];
+        return count;
+    }
+
     private static int WindowStart(string text, int position)
     {
         int paragraphStart = position;
+        int floor = Math.Max(0, position - MaximumWindowCharacters);
         int breaks = 0;
-        while (paragraphStart > 0 && breaks < 3)
+        while (paragraphStart > floor && breaks < 3)
             if (text[--paragraphStart] == '\n') breaks++;
         if (breaks == 3) paragraphStart++;
-        else paragraphStart = 0;
-        return Math.Max(paragraphStart, Math.Max(0, position - MaximumWindowCharacters));
+        else paragraphStart = floor;
+        return paragraphStart;
     }
 
     private static int SentenceStart(string text, int position, int floor)
@@ -168,9 +197,6 @@ public sealed class NarrativePronounTracker
     }
 
     private static bool IsHan(char value) => value is >= '\u3400' and <= '\u9fff' or >= '\uf900' and <= '\ufaff';
-    private static bool Overlaps(int firstStart, int firstLength, int secondStart, int secondLength) =>
-        firstStart < secondStart + secondLength && secondStart < firstStart + firstLength;
-
     private sealed record NameOwner(string Name, CharacterProfile Profile);
     private sealed record NameMention(int Start, int Length, CharacterProfile Profile);
     private readonly record struct TextSpan(int Start, int End);

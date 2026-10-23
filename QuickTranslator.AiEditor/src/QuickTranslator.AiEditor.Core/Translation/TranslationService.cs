@@ -19,6 +19,7 @@ public sealed partial class TranslationService
     private readonly TranslationPromptBuilder _prompts = new();
     private readonly CharacterConsistencyRuleSelector _characterConsistency = new();
     private readonly TranslationQualityChecker _quality = new();
+    internal ChapterAnalysisCache ChapterAnalyses { get; init; } = new();
     private long _revision;
     private long _savedRevision = -1;
     private Projects.ProjectResources? _projectResources;

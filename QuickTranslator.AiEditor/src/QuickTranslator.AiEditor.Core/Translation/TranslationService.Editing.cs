@@ -71,7 +71,8 @@ public sealed partial class TranslationService
         string memory, PromptPreset preset, ModelOptions options, BookKnowledgeContextSnapshot? knowledge = null)
     {
         var narrativeTracker = new NarrativePronounTracker();
-        IReadOnlyList<NarrativePronounReference> chapterReferences = narrativeTracker.Scan(chapter.OriginalText, chapter.CharacterProject);
+        var analysis = ChapterAnalyses.Get(chapter);
+        IReadOnlyList<NarrativePronounReference> chapterReferences = analysis.NarrativeReferences;
         Guid[] pronounReferencedIds = narrativeTracker.ForSegment(chapter.OriginalText, segment, chapterReferences)
             .Where(reference => reference.Confidence == NarrativePronounConfidence.High && reference.CharacterId is not null)
             .Select(reference => reference.CharacterId!.Value).Distinct().ToArray();
@@ -105,7 +106,7 @@ public sealed partial class TranslationService
         if (!string.IsNullOrWhiteSpace(memory)) contextBlocks.Add(memory);
         if (!string.IsNullOrWhiteSpace(knowledge?.PromptBlock)) contextBlocks.Add(knowledge.PromptBlock);
         // The dialogue map rides with the character rules it refers to: both sit above the preset, fitted first.
-        string dialogueMap = DialogueMapBuilder.Build(chapter, segment);
+        string dialogueMap = DialogueMapBuilder.Build(chapter, segment, analysis.Dialogue);
         string characters = string.Join(Environment.NewLine + Environment.NewLine,
             new[] { consistency.PromptBlock, dialogueMap }.Where(x => !string.IsNullOrWhiteSpace(x)));
         return BuildWithinTokenBudget(segment.SourceText, glossary, contextBlocks, preset, characters, options);
