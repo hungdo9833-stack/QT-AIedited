@@ -9,6 +9,9 @@ internal sealed record WebPage(Uri Url, string Html, IDocument Document)
 {
     static WebPage() => Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
+    /// <summary>Upper bound for any regex run over untrusted page HTML or script payloads.</summary>
+    internal static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
+
     internal static WebPage Parse(Uri url, byte[] bytes, string? charset)
     {
         Encoding? encoding = null;

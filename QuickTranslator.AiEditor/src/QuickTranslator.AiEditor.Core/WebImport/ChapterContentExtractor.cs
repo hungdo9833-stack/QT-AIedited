@@ -13,7 +13,8 @@ internal static class ChapterContentExtractor
 
     internal static string Extract(WebPage page) => ExtractWithSignature(page).Text;
 
-    internal static Extraction ExtractWithSignature(WebPage page, string? expectedSignature = null)
+    internal static Extraction ExtractWithSignature(WebPage page, string? expectedSignature = null,
+        CancellationToken cancellationToken = default)
     {
         // Work on a clone: pagination and challenge detection still need the original document.
         var root = (IElement)(page.Document.Body ?? page.Document.DocumentElement).Clone(true);
@@ -30,7 +31,7 @@ internal static class ChapterContentExtractor
         var cjk = WebPage.CjkCount(text);
         if (page.Document.QuerySelectorAll("script").Any(s => s.TextContent.Contains("__next_f", StringComparison.Ordinal)))
         {
-            var streamed = NextText(page);
+            var streamed = NextText(page, cancellationToken);
             var streamedCjk = WebPage.CjkCount(streamed);
             if (streamedCjk > cjk && (cjk < 50 || SentenceEnds(text) < 3 || streamedCjk >= cjk * 2))
             {
@@ -120,13 +121,23 @@ internal static class ChapterContentExtractor
             .Where(line => !repeated.Contains(line) || !candidates[i].Contains(line))))).ToArray();
     }
 
-    private static string NextText(WebPage page)
+    // Script payloads are untrusted and can be megabytes: every regex has a timeout and the loops honour cancellation.
+    // A payload that cannot be read in time yields no streamed text, so the DOM text is used instead.
+    private static string NextText(WebPage page, CancellationToken cancellationToken)
+    {
+        try { return NextTextCore(page, cancellationToken); }
+        catch (RegexMatchTimeoutException) { return ""; }
+    }
+
+    private static string NextTextCore(WebPage page, CancellationToken cancellationToken)
     {
         var chunks = new List<string>();
         foreach (var script in page.Document.QuerySelectorAll("script"))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             foreach (Match match in Regex.Matches(script.TextContent,
-                         "self\\.__next_f\\.push\\(\\s*\\[\\s*1\\s*,\\s*(\"(?:\\\\.|[^\"\\\\])*\")\\s*\\]\\s*\\)", RegexOptions.Singleline))
+                         "self\\.__next_f\\.push\\(\\s*\\[\\s*1\\s*,\\s*(\"(?:\\\\.|[^\"\\\\])*\")\\s*\\]\\s*\\)", RegexOptions.Singleline,
+                         WebPage.RegexTimeout))
             {
                 try { chunks.Add(JsonSerializer.Deserialize<string>(match.Groups[1].Value) ?? ""); }
                 catch (JsonException) { }
@@ -135,8 +146,9 @@ internal static class ChapterContentExtractor
         // Flight text records use a UTF-8 byte length, so commas/newlines inside a chapter are safe.
         var payload = string.Concat(chunks);
         var runs = new List<string>();
-        foreach (Match record in Regex.Matches(payload, @"(?:^|\n)[0-9a-f]+:T([0-9a-f]+),", RegexOptions.IgnoreCase))
+        foreach (Match record in Regex.Matches(payload, @"(?:^|\n)[0-9a-f]+:T([0-9a-f]+),", RegexOptions.IgnoreCase, WebPage.RegexTimeout))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!int.TryParse(record.Groups[1].Value, System.Globalization.NumberStyles.HexNumber, null, out var byteLength)) continue;
             var rest = payload.AsSpan(record.Index + record.Length);
             var length = 0;
@@ -150,14 +162,15 @@ internal static class ChapterContentExtractor
             }
         }
         // Some streams carry JSON strings in model records rather than Flight text records.
-        foreach (Match quoted in Regex.Matches(payload, "\"(?:\\\\.|[^\"\\\\])*\"", RegexOptions.Singleline))
+        foreach (Match quoted in Regex.Matches(payload, "\"(?:\\\\.|[^\"\\\\])*\"", RegexOptions.Singleline, WebPage.RegexTimeout))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try { runs.Add(JsonSerializer.Deserialize<string>(quoted.Value) ?? ""); }
             catch (JsonException) { }
         }
         if (runs.All(s => WebPage.CjkCount(s) < 10))
-            runs.AddRange(Regex.Split(payload, @"\n(?=[0-9a-f]+:)", RegexOptions.IgnoreCase)
-                .Select(s => Regex.Replace(s, @"^[0-9a-f]+:(?:T[0-9a-f]+,)?", "", RegexOptions.IgnoreCase)));
+            runs.AddRange(Regex.Split(payload, @"\n(?=[0-9a-f]+:)", RegexOptions.IgnoreCase, WebPage.RegexTimeout)
+                .Select(s => Regex.Replace(s, @"^[0-9a-f]+:(?:T[0-9a-f]+,)?", "", RegexOptions.IgnoreCase, WebPage.RegexTimeout)));
         // Runs may carry the chapter as HTML (<p> paragraphs); read those as HTML so paragraphs stay lines.
         // Prefer prose: a chapter-title list can hold as many CJK characters as the chapter but almost no sentence ends.
         return runs.Select(HtmlRunToText).Select(Clean).Where(s => s.Length > 0 && (double)WebPage.CjkCount(s) / s.Length > 0.4)

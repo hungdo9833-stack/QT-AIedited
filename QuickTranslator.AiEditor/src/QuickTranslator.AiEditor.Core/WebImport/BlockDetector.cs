@@ -6,7 +6,7 @@ internal static class BlockDetector
 {
     internal static void Check(WebPage page)
     {
-        if (Regex.IsMatch(page.Html, @"cf-chl|challenge-platform|\bjust a moment\b|g-recaptcha|h-captcha|cf-turnstile|captcha-(?:container|widget)", RegexOptions.IgnoreCase))
+        if (HtmlMatches(page, @"cf-chl|challenge-platform|\bjust a moment\b|g-recaptcha|h-captcha|cf-turnstile|captcha-(?:container|widget)", RegexOptions.IgnoreCase))
             throw Block(page.Url, WebImportBlockReason.BotChallenge);
 
         var body = (AngleSharp.Dom.IElement?)page.Document.Body?.Clone(true);
@@ -31,12 +31,20 @@ internal static class BlockDetector
     {
         // Client-side templates with only a title / menu worth of text (seen live: 60–90 CJK) mean the chapter is filled
         // in by JavaScript; importing that would create nearly empty chapters.
-        if (extractedCjk < 500 && Regex.IsMatch(page.Html, @"\{\{[^}]+\}\}"))
+        if (extractedCjk < 500 && HtmlMatches(page, @"\{\{[^}]+\}\}"))
             throw Block(page.Url, WebImportBlockReason.RequiresBrowser);
         if (extractedCjk >= 30) return;
-        if (Regex.IsMatch(page.Html, @"\{\{[^}]+\}\}") ||
+        if (HtmlMatches(page, @"\{\{[^}]+\}\}") ||
             page.Document.QuerySelectorAll("#app,#root,#__next").Any(e => WebPage.CjkCount(e.TextContent) < 10))
             throw Block(page.Url, WebImportBlockReason.RequiresBrowser);
+    }
+
+    // These patterns are linear; the timeout only bounds a pathological page. A page that cannot be scanned in time
+    // counts as "not detected", and the CJK checks on the extracted text still apply.
+    private static bool HtmlMatches(WebPage page, string pattern, RegexOptions options = RegexOptions.None)
+    {
+        try { return Regex.IsMatch(page.Html, pattern, options, WebPage.RegexTimeout); }
+        catch (RegexMatchTimeoutException) { return false; }
     }
 
     internal static WebImportBlockedException Block(Uri url, WebImportBlockReason reason) => new(url, reason, reason switch

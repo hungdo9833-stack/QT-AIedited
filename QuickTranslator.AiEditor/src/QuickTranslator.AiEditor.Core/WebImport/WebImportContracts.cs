@@ -58,6 +58,8 @@ public sealed record WebImportOptions
     public int MaxRetries { get; init; } = 3;
     /// <summary>Raw pages are kept here (e.g. the project's Cache folder) so an interrupted import resumes without re-downloading.</summary>
     public string? CacheDirectory { get; init; }
+    /// <summary>A chapter page larger than this is not read into memory (a novel page is a few hundred KB).</summary>
+    public long MaxPageBytes { get; init; } = 32L * 1024 * 1024;
 }
 
 public interface IWebNovelImporter

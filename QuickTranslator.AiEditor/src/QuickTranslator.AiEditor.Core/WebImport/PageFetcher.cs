@@ -18,8 +18,10 @@ internal sealed class PageFetcher : IDisposable
     {
         if (options.DelayBetweenRequests < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(options));
         if (options.MaxRetries < 0) throw new ArgumentOutOfRangeException(nameof(options));
+        if (options.MaxPageBytes <= 0) throw new ArgumentOutOfRangeException(nameof(options));
         _options = options;
         _client = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+        _client.MaxResponseContentBufferSize = options.MaxPageBytes;
         _client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36");
         _client.DefaultRequestHeaders.AcceptLanguage.ParseAdd("zh-CN,zh-TW;q=0.9,en;q=0.5");
     }

@@ -106,7 +106,8 @@ public sealed class WebNovelImporter : IWebNovelImporter, IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             var page = await _fetcher.FetchAsync(url, cancellationToken).ConfigureAwait(false);
-            var extraction = ChapterContentExtractor.ExtractWithSignature(page, link.ExpectedBlockSignature);            if (parts.Count == 0)
+            var extraction = ChapterContentExtractor.ExtractWithSignature(page, link.ExpectedBlockSignature, cancellationToken);
+            if (parts.Count == 0)
             {
                 signature = extraction.Signature;
                 pageTitle = page.Document.QuerySelectorAll("h1,h2,h3").FirstOrDefault(e => ChapterListDetector.HasChapterNumber(e.TextContent))?.TextContent.Trim()
