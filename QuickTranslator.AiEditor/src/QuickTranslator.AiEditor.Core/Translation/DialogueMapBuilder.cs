@@ -45,18 +45,35 @@ public static class DialogueMapBuilder
     {
         ArgumentNullException.ThrowIfNull(chapter);
         ArgumentNullException.ThrowIfNull(segment);
+        if (segment.SourceText.Length == 0) return "";
+        return Build(chapter, segment, AnalyzeChapter(chapter));
+    }
+
+    internal sealed record ChapterAnalysis(IReadOnlyDictionary<string, CharacterProfile> Owners, IReadOnlyList<DialogueLine> Lines);
+
+    internal static ChapterAnalysis AnalyzeChapter(ChapterDocument chapter)
+    {
         var project = chapter.CharacterProject;
-        if (project.Profiles.Count == 0 || string.IsNullOrEmpty(chapter.OriginalText) || segment.SourceText.Length == 0) return "";
+        if (project.Profiles.Count == 0 || string.IsNullOrEmpty(chapter.OriginalText))
+            return new(new Dictionary<string, CharacterProfile>(StringComparer.Ordinal), []);
         // A surface name belongs to one profile; a name shared by two profiles attributes nothing.
         var owners = project.Profiles.SelectMany(p => new[] { p.ChineseName }.Concat(p.Aliases)
                 .Where(n => !string.IsNullOrWhiteSpace(n)).Select(n => (Name: n.Trim(), Profile: p)))
             .Where(x => IsCharacterName(x.Name))
             .GroupBy(x => x.Name, StringComparer.Ordinal).Where(g => g.Select(x => x.Profile.Id).Distinct().Count() == 1)
             .ToDictionary(g => g.Key, g => g.First().Profile, StringComparer.Ordinal);
-        if (owners.Count == 0) return "";
+        if (owners.Count == 0) return new(owners, []);
+        return new(owners, AddressingDialogueSurvey.Extract(
+            new CensusSource(chapter.Id, chapter.ChapterNumber ?? 0, chapter.OriginalText), owners.Keys.ToArray()));
+    }
 
+    internal static string Build(ChapterDocument chapter, TranslationSegment segment, ChapterAnalysis analysis)
+    {
+        var project = chapter.CharacterProject;
+        var owners = analysis.Owners;
+        if (owners.Count == 0 || segment.SourceText.Length == 0) return "";
         int start = segment.StartUtf16, end = segment.StartUtf16 + segment.SourceText.Length;
-        var lines = AddressingDialogueSurvey.Extract(new CensusSource(chapter.Id, chapter.ChapterNumber ?? 0, chapter.OriginalText), owners.Keys.ToArray())
+        var lines = analysis.Lines
             // Offsets are in the original text; the opening words guard against a segment whose start went stale.
             .Where(l => l.QuoteStartUtf16 >= start && l.QuoteStartUtf16 < end &&
                 segment.SourceText.Contains(l.Quote[..Math.Min(8, l.Quote.Length)], StringComparison.Ordinal));

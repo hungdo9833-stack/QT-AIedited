@@ -38,7 +38,7 @@ public sealed partial class TranslationService
         var chapter = GetOperationSnapshot();
         var items = new List<PronounSuggestion>();
         var tracker = new NarrativePronounTracker();
-        IReadOnlyList<NarrativePronounReference> sourceReferences = tracker.Scan(chapter.OriginalText, chapter.CharacterProject);
+        IReadOnlyList<NarrativePronounReference> sourceReferences = ChapterAnalyses.Get(chapter).NarrativeReferences;
         string previous = "";
         foreach (var segment in chapter.Segments.OrderBy(s => s.Order))
         {
@@ -124,7 +124,7 @@ public sealed partial class TranslationService
             return new(translatedText, null, []);
         string previous = chapter.Segments.LastOrDefault(s => s.Order < selected.Order)?.EditableText ?? "";
         var tracker = new NarrativePronounTracker();
-        IReadOnlyList<NarrativePronounReference> sourceReferences = tracker.Scan(chapter.OriginalText, chapter.CharacterProject);
+        IReadOnlyList<NarrativePronounReference> sourceReferences = ChapterAnalyses.Get(chapter).NarrativeReferences;
         NarrativePronounHint? sourceHint = tracker.HintForSegment(chapter.OriginalText, selected, sourceReferences);
         var items = _pronouns.ScanSegment(selected.Id, selected.Order, selected.SourceText, translatedText, previous,
             chapter.CharacterProject, false, chapter.ConfirmedTerms, sourceHint);
