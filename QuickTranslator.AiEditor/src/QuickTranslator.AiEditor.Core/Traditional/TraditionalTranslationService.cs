@@ -53,20 +53,30 @@ public sealed class TraditionalTranslationService
                 return Task.FromResult(node.Value.Value);
             }
         }
-        return Task.Run(() =>
+        return Task.Run(() => Store(key, snapshot, _translator.Translate(source, snapshot, options, cancellationToken)), cancellationToken);
+    }
+
+    internal int CachedNodeCount { get { lock (_gate) return _lru.Count; } }
+
+    // Two concurrent misses for one key both reach here: the second reuses the first node instead of adding a
+    // duplicate whose eviction would later drop the live dictionary entry.
+    internal TraditionalTranslationResult Store(string key, TraditionalDictionarySnapshot? snapshot, TraditionalTranslationResult result)
+    {
+        lock (_gate)
         {
-            var result = _translator.Translate(source, snapshot, options, cancellationToken);
-            lock (_gate)
+            if (!ReferenceEquals(snapshot, _snapshot)) return result;
+            if (_cache.TryGetValue(key, out var existing))
             {
-                if (!ReferenceEquals(snapshot, _snapshot)) return result;
-                var node = new LinkedListNode<(string, TraditionalTranslationResult)>((key, result));
-                _lru.AddFirst(node); _cache[key] = node;
-                while (_cache.Count > CacheCapacity)
-                {
-                    var last = _lru.Last!; _lru.RemoveLast(); _cache.Remove(last.Value.Key);
-                }
+                _lru.Remove(existing); _lru.AddFirst(existing);
+                return existing.Value.Value;
             }
-            return result;
-        }, cancellationToken);
+            var node = new LinkedListNode<(string, TraditionalTranslationResult)>((key, result));
+            _lru.AddFirst(node); _cache[key] = node;
+            while (_cache.Count > CacheCapacity)
+            {
+                var last = _lru.Last!; _lru.RemoveLast(); _cache.Remove(last.Value.Key);
+            }
+        }
+        return result;
     }
 }
