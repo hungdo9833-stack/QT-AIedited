@@ -34,8 +34,10 @@ public static class PromptEchoFilter
             if (!IsEchoLine(line)) break;
             end--; removed++;
         }
-        // A lone arrow line at the end could be prose ("A → B" in a story is rare but possible); require two.
-        if (removed < 2) { end = lines.Length; removed = 0; }
+        // A lone arrow line after real prose could be prose ("A → B" in a story is rare but possible), so a tail needs two
+        // lines; output made only of note lines is never a translation, whatever its length.
+        bool onlyNotes = lines.Take(end).All(l => l.Trim().Length == 0);
+        if (removed < 2 && !onlyNotes) { end = lines.Length; removed = 0; }
         int inside = lines.Take(end).Count(IsEchoLine);
         if (removed == 0) return new(text, 0, inside);
         string kept = string.Join("\n", lines.Take(end)).TrimEnd();

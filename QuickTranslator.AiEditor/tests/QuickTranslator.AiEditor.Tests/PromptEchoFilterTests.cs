@@ -27,6 +27,19 @@ public sealed partial class TranslationServiceTests
     }
 
     [Fact]
+    public async Task Output_that_is_only_the_echoed_map_is_rejected_not_saved()
+    {
+        // Seen live: a 1,198-character segment came back as two map lines and nothing else.
+        var (service, client, _, chapter) = Create();
+        string onlyMap = "“Mẹ, con đói rồi, đút cho con ăn đi.”: Lâm Thu Dao → Tô Bạch (có khả năng) (tự xưng: con; xưng hô: mẹ)\n" +
+            "“Ừm....”: Tô Bạch → Thu Ngọc (có khả năng) (tự xưng: ta; xưng hô: Thu Ngọc)";
+        client.Respond = (_, _) => Task.FromResult(FakeClient.Completion(onlyMap));
+        var attempt = await service.TranslateAsync(chapter.Segments[0].Id);
+        Assert.Equal(AttemptOutcome.InvalidOutput, attempt.Outcome);
+        Assert.Contains(attempt.Issues, i => i.Code == IssueCode.EmptyOutput);
+    }
+
+    [Fact]
     public async Task Notes_mixed_into_the_prose_reject_the_attempt()
     {
         var (service, client, _, chapter) = Create();
@@ -39,6 +52,14 @@ public sealed partial class TranslationServiceTests
 
 public sealed class PromptEchoFilterTests
 {
+    [Fact]
+    public void A_single_note_line_with_no_translation_is_removed()
+    {
+        PromptEchoFilter.Result result = PromptEchoFilter.Strip("“Ừm....”: Tô Bạch → Thu Ngọc (có khả năng) (tự xưng: ta; xưng hô: Thu Ngọc)");
+        Assert.Equal("", result.Text);
+        Assert.Equal(1, result.RemovedLines);
+    }
+
     [Fact]
     public void Ordinary_prose_with_quotes_colons_and_one_arrow_is_left_untouched()
     {
