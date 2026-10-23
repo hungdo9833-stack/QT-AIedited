@@ -13,7 +13,7 @@ namespace QuickTranslator.AiEditor.Tests;
 /// Addressing Ledger step 2b with a mock provider only: CPU scene building, scene prompt, per-turn verification and
 /// verified turns feeding pair planning. Romance (quotes without speech verbs) and hard-wrapped xianxia styles.
 /// </summary>
-public sealed class AddressingSceneTests : IDisposable
+public sealed partial class AddressingSceneTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "qtaie-addressing-scene-" + Guid.NewGuid().ToString("N"));
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }

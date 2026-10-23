@@ -105,6 +105,9 @@ public static class AddressingDialogueSurvey
         return sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId).SelectMany(x => Extract(x, matcher, cancellationToken)).ToArray();
     }
 
+    internal static IReadOnlyList<DialogueLine> ExtractAll(IReadOnlyList<CensusSource> sources, NameMatcher matcher, CancellationToken cancellationToken) =>
+        sources.OrderBy(x => x.ChapterNumber).ThenBy(x => x.ChapterId).SelectMany(x => Extract(x, matcher, cancellationToken)).ToArray();
+
     private const int SceneGapCharacters = 160, SceneContextCharacters = 240, SceneTrailerCharacters = 80, SceneNearbyCharacters = 800;
     private static readonly Regex RepeatedBreaks = Rule(@"\n{2,}");
 
