@@ -216,14 +216,12 @@ public sealed class WebImportWindowTests
         finally { window.Close(); }
     });
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public Task Empty_chapter_or_composed_text_never_opens_import(bool emptyChapter) => StaHost.Run(async () =>
+    [Fact]
+    public Task Empty_composed_text_never_opens_import() => StaHost.Run(async () =>
     {
         using var fixture = new WorkspaceFixture();
         await fixture.CreateProjectAsync();
-        var fake = new FakeImporter { ChapterText = emptyChapter ? " \r\n" : "正文。", EmptyComposition = !emptyChapter };
+        var fake = new FakeImporter { EmptyComposition = true };
         bool opened = false;
         fixture.Window.WebImportPreviewOpener = _ => { opened = true; return Task.CompletedTask; };
         var window = Create(fixture, fake);
@@ -239,6 +237,40 @@ public sealed class WebImportWindowTests
             Assert.Empty(Directory.GetFiles(fixture.Project.Resolve("Cache/web-import"), "*.txt"));
         }
         finally { ThemedDialog.Responder = null; window.Close(); }
+    });
+
+    [Theory]
+    [InlineData(" \r\n", "nội dung trống")]
+    [InlineData("正文。", "nội dung trùng nhau")]
+    public Task Quality_issues_are_shown_and_import_remains_enabled(string chapterText, string warning) => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        var fake = new FakeImporter { ChapterText = chapterText };
+        var window = Create(fixture, fake);
+        bool opened = false;
+        fixture.Window.WebImportPreviewOpener = _ =>
+        {
+            Assert.Contains("Kiểm tra chương", Block(window, "WarningsText").Text);
+            Assert.Contains(warning, Block(window, "WarningsText").Text);
+            opened = true;
+            return Task.CompletedTask;
+        };
+        try
+        {
+            await window.AnalyzeAsync();
+            await window.PreviewAsync();
+            await window.DownloadAsync();
+            Assert.True(opened);
+            Assert.NotNull(window.ImportPath);
+            Assert.Equal(3, fake.ComposedChapters!.Count);
+            Assert.True(FindButton(window, "DownloadButton").IsEnabled);
+            Assert.Contains(warning, Block(window, "WarningsText").Text);
+            // A fresh analysis clears the previous quality report.
+            await window.AnalyzeAsync();
+            Assert.Equal("Kiểm tra chương", Block(window, "WarningsText").Text);
+        }
+        finally { window.Close(); }
     });
 
     [Fact]

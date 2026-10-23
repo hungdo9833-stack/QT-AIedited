@@ -34,10 +34,64 @@ public sealed class WebNovelImporter : IWebNovelImporter, IDisposable
         }
         var numbers = chapters.Select(c => ChapterListDetector.ChapterNumber(c.Title)).OfType<long>().ToArray();
         bool numberingConflict = numbers.Distinct().Count() != numbers.Length || numbers.Zip(numbers.Skip(1)).Any(p => p.First > p.Second);
+        var warnings = new List<string>();
+        if (numberingConflict)
+            warnings.Add("Mục lục có chương ngoại truyện/số chương trùng hoặc lệch thứ tự; nên bật “Giữ đúng thứ tự mục lục”.");
+        var sampleCheck = await CheckSamplesAsync(chapters, warnings, cancellationToken).ConfigureAwait(false);
+        if (sampleCheck.Signature is string signature)
+            chapters = chapters.Select(c => c with { ExpectedBlockSignature = signature }).ToArray();
         return new(url, title ?? ChapterListDetector.Title(page), chapters,
             $"Tìm thấy {chapters.Count} chương theo cấu trúc liên kết" + (followed ? " trong trang mục lục." : "."),
-            numberingConflict ? ["Mục lục có chương ngoại truyện/số chương trùng hoặc lệch thứ tự; nên bật “Giữ đúng thứ tự mục lục”."] : [],
-            numberingConflict);
+            warnings, numberingConflict, sampleCheck);
+    }
+
+    private async Task<WebSampleCheck> CheckSamplesAsync(IReadOnlyList<WebChapterLink> chapters,
+        List<string> warnings, CancellationToken token)
+    {
+        var links = chapters.Count < 4 ? chapters.Take(2).ToArray() : new[] { chapters[0], chapters[chapters.Count / 2] };
+        var samples = new List<WebChapterContent>();
+        var reasons = new List<WebSampleCheckReason>();
+        var indexes = links.Select(c => c.Index).ToArray();
+        string label = string.Join(", ", indexes);
+        void Warn(WebSampleCheckReason reason, string message)
+        {
+            reasons.Add(reason);
+            warnings.Add($"Chương {label}: {message}");
+        }
+        foreach (var link in links)
+        {
+            try { samples.Add(await FetchChapterAsync(link, token).ConfigureAwait(false)); }
+            catch (WebImportBlockedException) { throw; }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or TimeoutException ||
+                                       ex is OperationCanceledException && !token.IsCancellationRequested)
+            {
+                // A failed probe is advisory. Do not put server messages, page text or URLs in warnings.
+                Warn(WebSampleCheckReason.FetchFailed, $"không kiểm tra được mẫu chương {link.Index}.");
+            }
+        }
+        token.ThrowIfCancellationRequested();
+        string? agreedSignature = null;
+        if (samples.Any(c => WebPage.CjkCount(c.Text) < 80))
+            Warn(WebSampleCheckReason.InsufficientCjk, "mẫu có quá ít chữ Hán (dưới 80).");
+        if (samples.Count == 2)
+        {
+            var first = samples[0];
+            var second = samples[1];
+            if (first.BlockSignature == second.BlockSignature) agreedSignature = first.BlockSignature;
+            else Warn(WebSampleCheckReason.SignatureMismatch, "hai mẫu chọn khối nội dung khác nhau.");
+            int smaller = Math.Min(first.Text.Length, second.Text.Length);
+            int larger = Math.Max(first.Text.Length, second.Text.Length);
+            if (larger > smaller * 8L)
+                Warn(WebSampleCheckReason.LengthRatio, "độ dài hai mẫu chênh lệch hơn 8 lần.");
+            if (WebImportQualityReport.NormalizeForComparison(first.PageTitle ?? first.Title) ==
+                WebImportQualityReport.NormalizeForComparison(second.PageTitle ?? second.Title))
+                Warn(WebSampleCheckReason.DuplicateTitles, "hai mẫu có tiêu đề trùng nhau.");
+            if (WebImportQualityReport.ContentHash(first.Text) == WebImportQualityReport.ContentHash(second.Text))
+                Warn(WebSampleCheckReason.DuplicateContent, "hai mẫu có nội dung trùng nhau.");
+        }
+        else if (links.Length < 2)
+            Warn(WebSampleCheckReason.NotEnoughSamples, "chưa đủ hai chương để đối chiếu mẫu.");
+        return new(reasons.Count == 0, agreedSignature, reasons, indexes);
     }
 
     public async Task<WebChapterContent> FetchChapterAsync(WebChapterLink link, CancellationToken cancellationToken = default)
@@ -45,19 +99,35 @@ public sealed class WebNovelImporter : IWebNovelImporter, IDisposable
         var url = link.Url;
         var visited = new HashSet<Uri>();
         var parts = new List<string>();
+        string? signature = null;
+        string? pageTitle = null;
+        int differingPages = 0, correctedPages = 0;
         while (visited.Add(url))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var page = await _fetcher.FetchAsync(url, cancellationToken).ConfigureAwait(false);
-            var text = ChapterContentExtractor.Extract(page);
-            if (string.IsNullOrWhiteSpace(text)) throw BlockDetector.Block(page.Url, WebImportBlockReason.RequiresBrowser);
-            parts.Add(text);
+            var extraction = ChapterContentExtractor.ExtractWithSignature(page, link.ExpectedBlockSignature);            if (parts.Count == 0)
+            {
+                signature = extraction.Signature;
+                pageTitle = page.Document.QuerySelectorAll("h1,h2,h3").FirstOrDefault(e => ChapterListDetector.HasChapterNumber(e.TextContent))?.TextContent.Trim()
+                    ?? page.Document.QuerySelector("meta[property='og:title']")?.GetAttribute("content")?.Trim()
+                    ?? (string.IsNullOrWhiteSpace(page.Document.Title) ? null : page.Document.Title.Trim())
+                    ?? page.Document.QuerySelector("h1")?.TextContent.Trim();
+            }
+            if (extraction.SignatureDiffered) differingPages++;
+            if (extraction.SignatureCorrected) correctedPages++;
+            parts.Add(extraction.Text);
             var next = ChapterContentExtractor.NextPage(page, link.Url);
             if (next is null || visited.Contains(next)) break;
             url = next;
         }
         var joined = WebPage.Normalize(string.Join("\n\n", ChapterContentExtractor.RemoveRepeatedBoilerplate(parts)));
-        return new(link, link.Title, joined, parts.Count);
+        return new(link, link.Title, joined, parts.Count)
+        {
+            BlockSignature = signature, PageTitle = pageTitle,
+            BlockSignatureDiffered = differingPages > 0,
+            BlockSignatureCorrected = differingPages > 0 && correctedPages == differingPages
+        };
     }
 
     public async IAsyncEnumerable<WebChapterContent> FetchChaptersAsync(IReadOnlyList<WebChapterLink> links,

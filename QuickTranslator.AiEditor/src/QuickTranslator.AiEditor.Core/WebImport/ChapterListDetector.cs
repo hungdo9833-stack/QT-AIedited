@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using QuickTranslator.AiEditor.Core.Importing;
 
 namespace QuickTranslator.AiEditor.Core.WebImport;
 
@@ -118,15 +119,12 @@ internal static class ChapterListDetector
     }
 
     internal static bool HasChapterNumber(string title) =>
-        Regex.IsMatch(title, @"第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節卷]");
+        ChapterNumber(title) is not null;
 
     internal static long? ChapterNumber(string title)
     {
-        var match = Regex.Match(title, @"第\s*([\d〇零一二三四五六七八九十百千万兩两]+)\s*[章回节節卷]");
-        if (!match.Success) return null;
-        var number = match.Groups[1].Value;
-        if (Regex.IsMatch(number, @"^\d+$")) return long.TryParse(number, out var value) ? value : null;
-        return ChineseNumber(number);
+        var match = Regex.Match(title, @"第\s*([0-9０-９〇○零一二三四五六七八九十百千万萬亿億廿卅兩两\s]+?)\s*[章回节節卷]");
+        return match.Success && ChineseNumberParser.TryParse(match.Groups[1].Value, out int number) ? number : null;
     }
 
     private static bool LooksLikeChapter(WebChapterLink link) =>
@@ -146,25 +144,11 @@ internal static class ChapterListDetector
 
     private static long Number(WebChapterLink link)
     {
-        var chinese = Regex.Match(link.Title, @"第\s*([〇零一二三四五六七八九十百千万兩两]+)\s*[章回节節卷]");
-        if (chinese.Success) return ChineseNumber(chinese.Groups[1].Value);
+        if (ChapterNumber(link.Title) is long number) return number;
         var titleNumber = Regex.Match(link.Title, @"\d+");
         if (titleNumber.Success && long.TryParse(titleNumber.Value, out var value)) return value;
         var urlNumbers = Regex.Matches(link.Url.AbsolutePath + link.Url.Query, @"\d+");
         return urlNumbers.Count > 0 && long.TryParse(urlNumbers[^1].Value, out value) ? value : 0;
-    }
-
-    private static long ChineseNumber(string text)
-    {
-        long total = 0, section = 0, digit = 0;
-        foreach (var c in text)
-        {
-            var value = c switch { '一' => 1, '二' or '两' or '兩' => 2, '三' => 3, '四' => 4, '五' => 5, '六' => 6, '七' => 7, '八' => 8, '九' => 9, '十' => 10, '百' => 100, '千' => 1000, '万' => 10000, _ => 0 };
-            if (value < 10) digit = digit * 10 + value;
-            else if (value == 10000) { total += (section + digit) * value; section = digit = 0; }
-            else { section += (digit == 0 ? 1 : digit) * value; digit = 0; }
-        }
-        return total + section + digit;
     }
 
     private static WebChapterLink[] Index(IEnumerable<WebChapterLink> links) => links.Select((a, i) => a with { Index = i + 1 }).ToArray();

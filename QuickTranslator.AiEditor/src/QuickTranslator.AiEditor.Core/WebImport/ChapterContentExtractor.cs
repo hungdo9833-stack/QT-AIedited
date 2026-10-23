@@ -9,7 +9,11 @@ internal static class ChapterContentExtractor
 {
     private const string Ignored = "script,style,noscript,nav,header,footer,aside,form,button,iframe,[hidden],[aria-hidden=true],.comments,.comment-list,#comments,.replies,.reply-list,.thread-list,.ad,.ads,.advertisement,.ad-container,.ad-banner";
 
-    internal static string Extract(WebPage page)
+    internal sealed record Extraction(string Text, string Signature, bool SignatureDiffered, bool SignatureCorrected);
+
+    internal static string Extract(WebPage page) => ExtractWithSignature(page).Text;
+
+    internal static Extraction ExtractWithSignature(WebPage page, string? expectedSignature = null)
     {
         // Work on a clone: pagination and challenge detection still need the original document.
         var root = (IElement)(page.Document.Body ?? page.Document.DocumentElement).Clone(true);
@@ -21,16 +25,50 @@ internal static class ChapterContentExtractor
         var post = root.QuerySelector("div.content-section,.t_f,.post-body,.post-content");
         var candidates = root.QuerySelectorAll("article,main,section,div,td,pre,p").Prepend(root);
         var selected = post ?? candidates.OrderByDescending(Score).First();
+        var signature = Signature(selected);
         var text = Clean(Lines(selected));
         var cjk = WebPage.CjkCount(text);
         if (page.Document.QuerySelectorAll("script").Any(s => s.TextContent.Contains("__next_f", StringComparison.Ordinal)))
         {
             var streamed = NextText(page);
             var streamedCjk = WebPage.CjkCount(streamed);
-            if (streamedCjk > cjk && (cjk < 50 || SentenceEnds(text) < 3 || streamedCjk >= cjk * 2)) text = streamed;
+            if (streamedCjk > cjk && (cjk < 50 || SentenceEnds(text) < 3 || streamedCjk >= cjk * 2))
+            {
+                text = streamed;
+                signature = "next-flight:text";
+            }
+        }
+        var differed = expectedSignature is not null && signature != expectedSignature;
+        var corrected = false;
+        if (differed)
+        {
+            // Compare signatures directly: identifiers are data, never interpolated into CSS selectors.
+            var preferred = root.QuerySelectorAll("*").Prepend(root).Where(e => Signature(e) == expectedSignature)
+                .Select(e => Clean(Lines(e))).Where(t => WebPage.CjkCount(t) >= 80)
+                .OrderByDescending(WebPage.CjkCount).FirstOrDefault();
+            if (preferred is not null)
+            {
+                text = preferred;
+                signature = expectedSignature!;
+                corrected = true;
+            }
         }
         BlockDetector.CheckBrowser(page, WebPage.CjkCount(text));
-        return text;
+        return new(text, signature, differed, corrected);
+    }
+
+    // Serialize tag, stable id and sorted class tokens for both the block and its immediate parent.
+    // Discard digit-bearing, UUID/hash-like and long opaque ids rather than learning per-page selectors.
+    private static string Signature(IElement element)
+    {
+        static bool Stable(string token) => token.Length <= 64 && !token.Any(char.IsDigit) &&
+            !Regex.IsMatch(token, @"(?:^|[-_])[a-fA-F0-9]{8,}(?:$|[-_])|[a-zA-Z]{24,}");
+        static string Part(IElement e) => JsonSerializer.Serialize(new[]
+        {
+            e.LocalName, e.Id is string id && Stable(id) ? id : "",
+            string.Join(" ", e.ClassList.Order(StringComparer.Ordinal))
+        });
+        return (element.ParentElement is IElement parent ? Part(parent) : "[]") + ">" + Part(element);
     }
 
     private static double Score(IElement element)

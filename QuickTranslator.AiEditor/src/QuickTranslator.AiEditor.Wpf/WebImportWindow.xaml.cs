@@ -72,14 +72,15 @@ public partial class WebImportWindow : Window
         StatusText.Text = $"Đang xem trước · {first.Title}";
         WebChapterContent chapter = await GetImporter().FetchChapterAsync(first, token);
         token.ThrowIfCancellationRequested();
-        EnsureChapterHasText(chapter);
         PreviewTitleText.Text = chapter.Title;
         PreviewPageCountText.Text = $"{chapter.PageCount:N0} trang · 30 dòng đầu";
         using var reader = new StringReader(chapter.Text);
         var lines = new List<string>();
         while (lines.Count < 30 && reader.ReadLine() is string line) lines.Add(line);
         PreviewText.Text = string.Join(Environment.NewLine, lines);
-        StatusText.Text = "Hãy kiểm tra nội dung xem trước trước khi tải và nhập.";
+        StatusText.Text = string.IsNullOrWhiteSpace(chapter.Text)
+            ? $"Chương {chapter.Link.Index}: nội dung trống. Bạn vẫn có thể tải và nhập."
+            : "Hãy kiểm tra nội dung xem trước trước khi tải và nhập.";
     });
 
     internal Task DownloadAsync() => RunAsync(async token =>
@@ -88,6 +89,7 @@ public partial class WebImportWindow : Window
         IWebNovelImporter importer = GetImporter();
         var chapters = new List<WebChapterContent>();
         ImportPath = null;
+        WarningsText.Text = string.Join(Environment.NewLine, _analysis?.Warnings ?? []);
         StatusText.Text = $"0/{links.Count} · Đang tải chương…";
         BusyProgress.IsIndeterminate = false;
         BusyProgress.Maximum = links.Count;
@@ -105,7 +107,6 @@ public partial class WebImportWindow : Window
         {
             await foreach (WebChapterContent chapter in importer.FetchChaptersAsync(links, progress, token).WithCancellation(token))
             {
-                EnsureChapterHasText(chapter);
                 chapters.Add(chapter);
                 token.ThrowIfCancellationRequested();
             }
@@ -119,6 +120,8 @@ public partial class WebImportWindow : Window
             StatusText.Text = "Đã hủy; chưa tải xong chương nào.";
             return;
         }
+        var issues = WebImportQualityReport.Analyze(chapters);
+        WarningsText.Text = string.Join(Environment.NewLine, (_analysis?.Warnings ?? []).Concat(issues.Select(issue => issue.Message)));
         string text = importer.ComposeImportText(chapters, KeepSiteOrderCheckBox.IsChecked == true);
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidDataException("Nội dung nhập trống. Hãy kiểm tra lại bản xem trước.");
@@ -165,12 +168,6 @@ public partial class WebImportWindow : Window
             from < 1 || to < from || to > _analysis.Chapters.Count)
             throw new InvalidOperationException($"Phạm vi phải nằm từ 1 đến {_analysis.Chapters.Count}, với vị trí đầu không lớn hơn vị trí cuối.");
         return _analysis.Chapters.Skip(from - 1).Take(to - from + 1).ToArray();
-    }
-
-    private static void EnsureChapterHasText(WebChapterContent chapter)
-    {
-        if (string.IsNullOrWhiteSpace(chapter.Text))
-            throw new InvalidDataException($"Chương “{chapter.Title}” không có nội dung. Hãy kiểm tra trang nguồn trước khi nhập.");
     }
 
     private static string SafeFileName(string title)

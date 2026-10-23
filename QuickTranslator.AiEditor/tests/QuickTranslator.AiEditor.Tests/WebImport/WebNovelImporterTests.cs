@@ -195,11 +195,9 @@ public sealed class WebNovelImporterTests
                  "<div id='app'><a :href='v.url'>{{ v.url }}</a>{{ chapter.content }}</div><script src='app.js'></script>"
         }));
         using var importer = new WebNovelImporter(Options, handler);
-        var result = await importer.AnalyzeAsync(Url("book1/"));
-        Assert.Equal(5, result.Chapters.Count);
-        Assert.Equal("测试书名", result.BookTitle);
-        Assert.Equal(2, handler.Calls.Count);
-        var error = await Assert.ThrowsAsync<WebImportBlockedException>(() => importer.FetchChapterAsync(result.Chapters[0]));
+        // Analysis now probes chapter 1, so the existing browser block is reported before the full download.
+        var error = await Assert.ThrowsAsync<WebImportBlockedException>(() => importer.AnalyzeAsync(Url("book1/")));
+        Assert.Equal(3, handler.Calls.Count);
         Assert.Equal(WebImportBlockReason.RequiresBrowser, error.Reason);
         Assert.Contains("JavaScript", error.Message);
     }
@@ -470,7 +468,9 @@ public sealed class WebNovelImporterTests
     {
         string[] expected = titles.Split('|');
         string catalog = string.Concat(expected.Select((title, i) => $"<a href='/novel/test/chapter/{i + 1}'>{title}</a>"));
-        using var handler = new FakeHandler(_ => Html("<h1>测试书名</h1>" + catalog));
+        using var handler = new FakeHandler(r => Html(r.RequestUri!.AbsolutePath == "/novel/test"
+            ? "<h1>测试书名</h1>" + catalog
+            : $"<article>{r.RequestUri.AbsolutePath}{string.Concat(Enumerable.Repeat(Placeholder, 5))}</article>"));
         using var importer = new WebNovelImporter(Options, handler);
         var analysis = await importer.AnalyzeAsync(Url("novel/test"));
         Assert.Equal(expected, analysis.Chapters.Select(c => c.Title));

@@ -5,19 +5,49 @@ namespace QuickTranslator.AiEditor.Core.WebImport;
 // WebImportBlockedException so the UI can explain it instead of importing an empty chapter.
 
 /// <summary>One chapter (or forum post holding one or more chapters) found on the book page, in reading order.</summary>
-public sealed record WebChapterLink(int Index, string Title, Uri Url);
+public sealed record WebChapterLink(int Index, string Title, Uri Url)
+{
+    /// <summary>Sample agreement scoped to this analysis; survives recreating the importer with a different delay.</summary>
+    public string? ExpectedBlockSignature { get; init; }
+}
 
-/// <summary>Result of analysing a book / thread URL before anything is downloaded.</summary>
+/// <summary>Result of analysing a book / thread URL, including two cached sample chapters.</summary>
 public sealed record WebBookAnalysis(
     Uri SourceUrl,
     string? BookTitle,
     IReadOnlyList<WebChapterLink> Chapters,
     string DetectionSummary,
     IReadOnlyList<string> Warnings,
-    bool NumberingConflict = false);
+    bool NumberingConflict = false,
+    WebSampleCheck? SampleCheck = null);
+
+public enum WebSampleCheckReason
+{
+    SignatureMismatch, LengthRatio, DuplicateTitles, DuplicateContent, InsufficientCjk, FetchFailed, NotEnoughSamples
+}
+
+public sealed record WebSampleCheck(bool Passed, string? Signature,
+    IReadOnlyList<WebSampleCheckReason> Reasons, IReadOnlyList<int> ChapterIndexes);
 
 /// <summary>Text of one chapter link after joining its sub-pages. A forum post may contain several chapters.</summary>
-public sealed record WebChapterContent(WebChapterLink Link, string Title, string Text, int PageCount);
+public sealed record WebChapterContent(WebChapterLink Link, string Title, string Text, int PageCount)
+{
+    /// <summary>Signature of the first page's selected content source (DOM block or streamed text).</summary>
+    public string? BlockSignature { get; init; }
+    public string? PageTitle { get; init; }
+    /// <summary>At least one page's best block differed from the sample agreement.</summary>
+    public bool BlockSignatureDiffered { get; init; }
+    /// <summary>Every differing page was corrected using the agreed block.</summary>
+    public bool BlockSignatureCorrected { get; init; }
+}
+
+public enum WebImportQualityIssueKind
+{
+    EmptyChapter, ShortChapter, DuplicateContent, DuplicateTitle, NumberingGap, NumberingRepeat, BlockSignatureMismatch
+}
+
+public sealed record WebImportQualityIssue(WebImportQualityIssueKind Kind,
+    IReadOnlyList<int> ChapterIndexes, string Message, int CorrectedChapterCount = 0);
 
 public sealed record WebImportProgress(int Completed, int Total, string? CurrentTitle);
 
