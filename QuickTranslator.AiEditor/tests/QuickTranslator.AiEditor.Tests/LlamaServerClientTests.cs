@@ -153,6 +153,31 @@ public sealed class LlamaServerClientTests
         Assert.Equal(3, calls);
     }
 
+    [Fact]
+    public async Task Dispose_during_in_flight_request_allows_gate_release_and_completion()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var http = new HttpClient(new FakeHandler(async (_, cancellationToken) =>
+        {
+            started.TrySetResult();
+            await release.Task.WaitAsync(cancellationToken);
+            return JsonResponse("""{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}""");
+        }));
+        using var client = new LlamaServerClient(http, new("https://gpu.example.com"), 1);
+        Task<LlmCompletion> pending = client.TranslateAsync("prompt", new());
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            client.Dispose();
+        }
+        finally { release.TrySetResult(); }
+
+        LlmCompletion completion = await pending.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal("ok", completion.Text);
+    }
+
     private static void UpdateMaximum(ref int maximum, int candidate)
     {
         int current;

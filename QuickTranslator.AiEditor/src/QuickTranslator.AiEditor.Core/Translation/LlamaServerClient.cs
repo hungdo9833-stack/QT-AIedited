@@ -284,7 +284,7 @@ public sealed class LlamaServerClient : ILlmBackendClient, IJsonSchemaLlmClient
     public void Dispose()
     {
         if (_ownsHttpClient) _httpClient.Dispose();
-        _requestGate.Dispose();
+        // In-flight requests still release the gate. No wait handle is allocated for async waits.
     }
 
     private sealed class ChatResponse

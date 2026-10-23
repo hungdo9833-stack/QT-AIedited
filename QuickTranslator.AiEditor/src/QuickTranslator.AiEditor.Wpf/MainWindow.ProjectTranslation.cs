@@ -82,6 +82,12 @@ public partial class MainWindow
         try
         {
             ProjectTranslationCoordinator initial = await EnsureProjectTranslationCoordinatorAsync();
+            if (initial.IsRunning)
+            {
+                HostProjectTranslationView(initial, null);
+                SetStatus("Hàng đợi đang dịch; hãy Tạm dừng rồi thêm chương.");
+                return;
+            }
             ProjectTranslationJob? recovered = initial.CurrentJob;
             ProjectTranslationJob? resumable = recovered?.Status is ProjectTranslationJobStatus.Completed or
                 ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled ? null : recovered;
@@ -98,12 +104,6 @@ public partial class MainWindow
                     useCurrentWorkers: currentWorkers)
                 : await EnsureProjectTranslationCoordinatorAsync();
             ProjectTranslationJob? existing = coordinator.CurrentJob;
-            if (coordinator.IsRunning)
-            {
-                HostProjectTranslationView(coordinator, null);
-                SetStatus("Hàng đợi đang dịch; hãy Tạm dừng rồi thêm chương.");
-                return;
-            }
             if (existing?.Status is ProjectTranslationJobStatus.Paused or
                 ProjectTranslationJobStatus.Interrupted or ProjectTranslationJobStatus.Ready)
             {
@@ -217,6 +217,8 @@ public partial class MainWindow
         bool closeWindow = true, bool loadExisting = true, bool useCurrentWorkers = false)
     {
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_projectTranslationCoordinator?.IsRunning == true)
+            throw new InvalidOperationException("Hàng đợi đang dịch; hãy Tạm dừng rồi thêm chương.");
         if (_translationClient is GpuBackendManager &&
             (!useCurrentWorkers && recovered?.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Local) == true ||
              _gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote))
@@ -224,6 +226,8 @@ public partial class MainWindow
             GpuBackendProfile localProfile = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
             await _localLlama.StartAsync(localProfile);
         }
+        if (_projectTranslationCoordinator?.IsRunning == true)
+            throw new InvalidOperationException("Hàng đợi đang dịch; hãy Tạm dừng rồi thêm chương.");
         if (closeWindow) DropHostedQueueView();
         if (_projectTranslationCoordinator is not null)
             _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
@@ -424,12 +428,14 @@ public partial class MainWindow
 
     private void ClearProjectTranslationCoordinator()
     {
+        // Also called while the window closes: never throw here, but leave a still-running queue's clients to it.
+        bool running = _projectTranslationCoordinator?.IsRunning == true;
         DropHostedQueueView();
         if (_projectTranslationCoordinator is not null)
             _projectTranslationCoordinator.ProgressChanged -= OnProjectTranslationProgressChanged;
         _projectTranslationCoordinator = null;
         _projectTranslationLoadTask = null;
-        foreach (IDisposable client in _projectTranslationOwnedClients) client.Dispose();
+        if (!running) foreach (IDisposable client in _projectTranslationOwnedClients) client.Dispose();
         _projectTranslationOwnedClients.Clear();
         RefreshShellQueueStatus();
     }

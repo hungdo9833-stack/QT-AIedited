@@ -77,6 +77,161 @@ public sealed class ProjectTranslationQueueUiTests
     });
 
 
+    [Fact]
+    public Task Queueing_an_error_chapter_without_completed_segments_offers_full_retranslation() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        ChapterDocument chapter = await AddFailedChapterAsync(fixture);
+        ProjectChapterEntry entry = Assert.Single(fixture.Project.Manifest.Chapters);
+        Assert.Equal(ProjectChapterState.Error, entry.State);
+        Assert.Equal(0, entry.CompletedSegmentCount);
+        var questions = new List<string>();
+        ThemedDialog.Responder = dialog => { questions.Add(dialog.Message); return MessageBoxResult.Cancel; };
+        try
+        {
+            await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { chapter.Id });
+
+            Assert.Contains("Dịch lại toàn bộ?", Assert.Single(questions), StringComparison.Ordinal);
+            Assert.Equal(0, fixture.Client.Calls);
+            Assert.Null(fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator").CurrentJob);
+        }
+        finally { ThemedDialog.Responder = null; }
+    });
+
+    [Theory]
+    [InlineData(ProjectTranslationItemStatus.Pending, MessageBoxResult.Yes)]
+    [InlineData(ProjectTranslationItemStatus.Pending, MessageBoxResult.No)]
+    [InlineData(ProjectTranslationItemStatus.Pending, MessageBoxResult.Cancel)]
+    [InlineData(ProjectTranslationItemStatus.Interrupted, MessageBoxResult.Yes)]
+    public Task Queueing_a_waiting_error_chapter_offers_full_retranslation(
+        ProjectTranslationItemStatus itemStatus, MessageBoxResult answer) => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        ChapterDocument chapter = await AddFailedChapterAsync(fixture);
+        ProjectTranslationCoordinator initial = await fixture.TaskCall<ProjectTranslationCoordinator>(
+            "EnsureProjectTranslationCoordinatorAsync");
+        var store = new ProjectTranslationJobStore(fixture.Project);
+        ProjectTranslationJob saved = await store.SaveNewAsync(await initial.PlanAsync([chapter.Id]));
+        saved.Status = ProjectTranslationJobStatus.Paused;
+        saved.Items[0].Status = itemStatus;
+        saved.Items[0].ChapterQueueRunId = chapter.Queue.RunId;
+        await store.SaveAsync(saved);
+        await initial.LoadAsync();
+        var questions = new List<string>();
+        ThemedDialog.Responder = dialog => { questions.Add(dialog.Message); return answer; };
+        try
+        {
+            await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { chapter.Id });
+
+            Assert.Contains("Dịch lại toàn bộ?", Assert.Single(questions), StringComparison.Ordinal);
+            ProjectTranslationCoordinator coordinator = fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator");
+            ProjectTranslationItem item = Assert.Single(coordinator.CurrentJob!.Items);
+            Assert.Equal(0, fixture.Client.Calls);
+            Assert.Equal(ProjectTranslationJobStatus.Paused, coordinator.CurrentJob.Status);
+            Assert.Equal(answer == MessageBoxResult.Yes, item.RetranslateAll);
+            if (answer == MessageBoxResult.Yes)
+            {
+                Assert.Null(item.ChapterQueueRunId);
+                Assert.Equal(ProjectTranslationItemStatus.Pending, item.Status);
+                await coordinator.ResumeAsync();
+                Assert.Equal(1, fixture.Client.Calls);
+                Assert.Equal(ProjectTranslationItemStatus.Completed, Assert.Single(coordinator.CurrentJob!.Items).Status);
+            }
+            else
+            {
+                Assert.Equal(chapter.Queue.RunId, item.ChapterQueueRunId);
+                Assert.Equal(itemStatus, item.Status);
+            }
+        }
+        finally { ThemedDialog.Responder = null; }
+    });
+
+    [Fact]
+    public Task Adding_chapters_while_running_keeps_coordinator_and_owned_worker_client() => StaHost.Run(async () =>
+    {
+        using var fixture = new WorkspaceFixture();
+        await fixture.CreateProjectAsync();
+        ChapterDocument first = await fixture.AddChapterAsync("Một", 1);
+        ChapterDocument second = await fixture.AddChapterAsync("Hai", 2);
+        ProjectTranslationEnvironment environment = await fixture.TaskCall<ProjectTranslationEnvironment>(
+            "LoadProjectTranslationEnvironmentAsync", fixture.Project, CancellationToken.None);
+        var client = new BlockingDisposableClient();
+        var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(), environment.Backend!, client, environment.ModelOptions);
+        var coordinator = new ProjectTranslationCoordinator(fixture.Project, fixture.Repository, [worker],
+            _ => Task.FromResult(environment));
+        fixture.Set("_projectTranslationCoordinator", coordinator);
+        List<IDisposable> owned = fixture.Get<List<IDisposable>>("_projectTranslationOwnedClients");
+        owned.Add(client);
+        Task run = coordinator.StartAsync(await coordinator.PlanAsync([first.Id]));
+        try
+        {
+            await client.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            await fixture.TaskCall("OpenProjectTranslationQueueAsync", new[] { second.Id });
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.TaskCall<ProjectTranslationCoordinator>(
+                "RebuildParallelCoordinatorAsync", coordinator.CurrentJob, true, true, false));
+            Assert.Same(coordinator, fixture.Get<ProjectTranslationCoordinator>("_projectTranslationCoordinator"));
+            Assert.True(coordinator.IsRunning);
+            Assert.False(client.Disposed);
+            Assert.Same(client, Assert.Single(owned));
+            Assert.Equal(first.Id, Assert.Single(coordinator.CurrentJob!.Items).ChapterId);
+            Assert.Equal("Hàng đợi đang dịch; hãy Tạm dừng rồi thêm chương.",
+                ((TextBlock)fixture.Window.FindName("StatusText")).Text);
+
+            // Clearing (e.g. while the window closes) must not throw nor dispose the running worker's client.
+            fixture.Call("ClearProjectTranslationCoordinator");
+            Assert.True(coordinator.IsRunning);
+            Assert.False(client.Disposed);
+        }
+        finally
+        {
+            client.Release.TrySetResult();
+            await run.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+    });
+
+    private static async Task<ChapterDocument> AddFailedChapterAsync(WorkspaceFixture fixture)
+    {
+        ChapterDocument chapter = await fixture.AddChapterAsync("Lỗi", 1);
+        TranslationSegment segment = Assert.Single(chapter.Segments);
+        segment.Status = SegmentStatus.Error;
+        segment.Attempts.Add(new TranslationAttempt
+        {
+            StartedAt = DateTimeOffset.UtcNow.AddSeconds(-1), FinishedAt = DateTimeOffset.UtcNow,
+            Outcome = AttemptOutcome.Failed, ModelOptions = new(), PromptVersion = "p0-synthetic",
+            Prompt = "synthetic", Error = "synthetic failure"
+        });
+        chapter.Queue = new QueueCheckpoint
+        {
+            RunId = Guid.NewGuid(), Status = QueueStatus.Interrupted, Mode = QueueMode.MissingSegments,
+            CandidateIds = [segment.Id], NextIndex = 1
+        };
+        await fixture.Repository.UpdateChapterAsync(fixture.Project, chapter);
+        return chapter;
+    }
+
+    private sealed class BlockingDisposableClient : ILlmClient, IDisposable
+    {
+        public bool Disposed { get; private set; }
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            ObjectDisposedException.ThrowIf(Disposed, this);
+            return FakeClient.Completion("Bản dịch.");
+        }
+
+        public void Dispose() => Disposed = true;
+    }
+
     [Theory]
     [InlineData(300)]
     [InlineData(1000)]

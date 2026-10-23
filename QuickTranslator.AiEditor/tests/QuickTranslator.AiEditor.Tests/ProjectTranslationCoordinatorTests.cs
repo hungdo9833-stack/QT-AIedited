@@ -317,6 +317,92 @@ public sealed class ProjectTranslationCoordinatorTests
         });
     }
 
+    [Theory]
+    [InlineData(ProjectTranslationJobStatus.Paused, ProjectTranslationItemStatus.Pending)]
+    [InlineData(ProjectTranslationJobStatus.Interrupted, ProjectTranslationItemStatus.Pending)]
+    [InlineData(ProjectTranslationJobStatus.Paused, ProjectTranslationItemStatus.Paused)]
+    [InlineData(ProjectTranslationJobStatus.Interrupted, ProjectTranslationItemStatus.Interrupted)]
+    public async Task Append_retranslation_reopens_started_waiting_item_and_translates_failed_segment(
+        ProjectTranslationJobStatus jobStatus, ProjectTranslationItemStatus itemStatus)
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            ProjectTranslationJob saved = await SaveWaitingJobWithFailedSegmentAsync(context, jobStatus, itemStatus);
+            var client = new ProjectQueueFakeClient();
+            var coordinator = context.Coordinator(client);
+            await coordinator.LoadAsync();
+            Guid id = context.ChapterIds[0];
+
+            ProjectTranslationAppendResult result = await coordinator.AppendAsync([id], new HashSet<Guid> { id });
+
+            Assert.Equal(0, result.Added);
+            Assert.Equal(1, result.Reopened);
+            ProjectTranslationItem reopened = Assert.Single(coordinator.CurrentJob!.Items);
+            Assert.Equal(ProjectTranslationItemStatus.Pending, reopened.Status);
+            Assert.True(reopened.RetranslateAll);
+            Assert.Null(reopened.ChapterQueueRunId);
+            Assert.Equal(ProjectTranslationItemDisposition.None, reopened.Disposition);
+            Assert.Null(reopened.Error);
+            Assert.Null(reopened.StartedAt);
+            Assert.Null(reopened.FinishedAt);
+            Assert.Equal(0, reopened.CompletedSegments);
+            Assert.False(reopened.WorkerMetricsRecorded);
+            Assert.True(reopened.WorkerMetricsStartedAt > saved.Items[0].WorkerMetricsStartedAt);
+            Assert.Empty(reopened.RecordedWorkerAttemptIds!);
+            Assert.Empty(reopened.RecordedWorkerSegmentIds!);
+            Assert.Equal(0, client.Calls);
+
+            await coordinator.ResumeAsync();
+
+            Assert.Equal(1, client.Calls);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(ProjectTranslationItemStatus.Completed, Assert.Single(coordinator.CurrentJob.Items).Status);
+            ChapterDocument chapter = (await context.Repository.LoadChapterAsync(context.Session, id)).Chapter;
+            Assert.Equal(QueueMode.AllSegments, chapter.Queue.Mode);
+            Assert.NotEqual(saved.Items[0].ChapterQueueRunId, chapter.Queue.RunId);
+            TranslationSegment segment = Assert.Single(chapter.Segments);
+            Assert.Collection(segment.Attempts,
+                attempt => Assert.Equal(AttemptOutcome.Failed, attempt.Outcome),
+                attempt => Assert.Equal(AttemptOutcome.Completed, attempt.Outcome));
+        });
+    }
+
+    [Theory]
+    [InlineData(ProjectTranslationJobStatus.Paused, ProjectTranslationItemStatus.Pending)]
+    [InlineData(ProjectTranslationJobStatus.Interrupted, ProjectTranslationItemStatus.Pending)]
+    [InlineData(ProjectTranslationJobStatus.Paused, ProjectTranslationItemStatus.Paused)]
+    [InlineData(ProjectTranslationJobStatus.Interrupted, ProjectTranslationItemStatus.Interrupted)]
+    public async Task Append_without_retranslation_preserves_started_waiting_item(
+        ProjectTranslationJobStatus jobStatus, ProjectTranslationItemStatus itemStatus)
+    {
+        await WithProjectAsync(1, async context =>
+        {
+            ProjectTranslationJob saved = await SaveWaitingJobWithFailedSegmentAsync(context, jobStatus, itemStatus);
+            var client = new ProjectQueueFakeClient();
+            var coordinator = context.Coordinator(client);
+            await coordinator.LoadAsync();
+
+            ProjectTranslationAppendResult result = await coordinator.AppendAsync(context.ChapterIds);
+
+            Assert.Equal(0, result.Added);
+            Assert.Equal(0, result.Reopened);
+            ProjectTranslationItem item = Assert.Single(coordinator.CurrentJob!.Items);
+            ProjectTranslationItem before = Assert.Single(saved.Items);
+            Assert.Equal(itemStatus, item.Status);
+            Assert.Equal(before.ChapterQueueRunId, item.ChapterQueueRunId);
+            Assert.False(item.RetranslateAll);
+            Assert.Equal(before.Error, item.Error);
+            Assert.Equal(before.Disposition, item.Disposition);
+            Assert.Equal(before.StartedAt, item.StartedAt);
+            Assert.Equal(before.FinishedAt, item.FinishedAt);
+            Assert.Equal(before.WorkerMetricsRecorded, item.WorkerMetricsRecorded);
+            Assert.Equal(before.WorkerMetricsStartedAt, item.WorkerMetricsStartedAt);
+            Assert.Equal(before.RecordedWorkerAttemptIds, item.RecordedWorkerAttemptIds);
+            Assert.Equal(before.RecordedWorkerSegmentIds, item.RecordedWorkerSegmentIds);
+            Assert.Equal(0, client.Calls);
+        });
+    }
+
     [Fact]
     public async Task Clearing_a_paused_job_deletes_it_keeps_translations_and_allows_a_new_plan()
     {
@@ -1357,6 +1443,43 @@ public sealed class ProjectTranslationCoordinatorTests
                 "EZYCloudX RTX 3090 Ti", "http://127.0.0.1:43117/api/chat", options.Model), remote,
                 options with { }, 0.45m)
         ];
+    }
+
+    private static async Task<ProjectTranslationJob> SaveWaitingJobWithFailedSegmentAsync(TestProject context,
+        ProjectTranslationJobStatus jobStatus, ProjectTranslationItemStatus itemStatus)
+    {
+        ChapterDocument chapter = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[0])).Chapter;
+        TranslationSegment segment = Assert.Single(chapter.Segments);
+        segment.Status = SegmentStatus.Error;
+        segment.Attempts.Add(new TranslationAttempt
+        {
+            StartedAt = DateTimeOffset.UtcNow.AddSeconds(-2), FinishedAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+            Outcome = AttemptOutcome.Failed, ModelOptions = context.Environment.ModelOptions with { },
+            PromptVersion = "p0-synthetic", Prompt = "synthetic", Error = "synthetic failure"
+        });
+        chapter.Queue = new QueueCheckpoint
+        {
+            RunId = Guid.NewGuid(), Status = QueueStatus.Interrupted, Mode = QueueMode.MissingSegments,
+            CandidateIds = [segment.Id], NextIndex = 1, ModelOptions = context.Environment.ModelOptions with { },
+            Preset = context.Environment.PromptPreset with { }
+        };
+        await context.Repository.UpdateChapterAsync(context.Session, chapter);
+        var store = new ProjectTranslationJobStore(context.Session);
+        ProjectTranslationJob saved = await store.SaveNewAsync(
+            await context.Coordinator(new ProjectQueueFakeClient()).PlanAsync(context.ChapterIds));
+        saved.Status = jobStatus;
+        ProjectTranslationItem item = Assert.Single(saved.Items);
+        item.Status = itemStatus;
+        item.ChapterQueueRunId = chapter.Queue.RunId;
+        item.Error = "synthetic failure";
+        item.Disposition = ProjectTranslationItemDisposition.MissingEligibility;
+        item.StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        item.FinishedAt = DateTimeOffset.UtcNow.AddSeconds(-1);
+        item.WorkerMetricsRecorded = true;
+        item.WorkerMetricsStartedAt = item.StartedAt;
+        item.RecordedWorkerAttemptIds = [segment.Attempts[0].Id];
+        item.RecordedWorkerSegmentIds = [segment.Id];
+        return await store.SaveAsync(saved);
     }
 
     private static async Task EditAsync(TestProject context, int index, Action<TranslationService> edit)
