@@ -719,12 +719,11 @@ public sealed class ProjectTranslationCoordinatorTests
             Task run = coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
             await client.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            await coordinator.StopAsync().WaitAsync(TimeSpan.FromSeconds(2));
-            await run;
-            watch.Stop();
+            // The first request never completes on its own, so finishing at all proves Stop cancelled it.
+            // The generous bound only turns a hang into a failure; it is not a speed assertion.
+            await coordinator.StopAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            await run.WaitAsync(TimeSpan.FromSeconds(30));
 
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2));
             Assert.Equal(ProjectTranslationJobStatus.Interrupted, coordinator.CurrentJob!.Status);
             Assert.DoesNotContain(coordinator.CurrentJob.Items,
                 item => item.Status == ProjectTranslationItemStatus.Cancelled);

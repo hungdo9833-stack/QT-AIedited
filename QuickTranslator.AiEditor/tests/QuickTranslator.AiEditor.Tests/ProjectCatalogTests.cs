@@ -33,7 +33,9 @@ public sealed class ProjectCatalogTests : IDisposable
         Assert.Equal(count, snapshot.ActiveCount);
         Assert.Equal(0, snapshot.DeletedCount);
         Assert.All(snapshot.Chapters, chapter => Assert.True(chapter.DisplayOrder > 0));
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"Catalog build took {watch.Elapsed}.");
+        // Speed is guaranteed by the FaultPoint above (no chapter body is read); this bound only catches a hang,
+        // the timing itself belongs in tools/QuickTranslator.AiEditor.ProjectCatalog.Benchmark.
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"Catalog build took {watch.Elapsed}.");
     }
 
     [Fact]

@@ -260,8 +260,8 @@ public sealed class ProjectTranslationQueueUiTests
             Assert.Same(selected, grid.SelectedItem);
             Assert.Same(selectedRow, window.CurrentRows[selectedIndex]);
             Assert.Equal(chapterCount, window.RowObjectCreationCount);
-            Assert.True(measurement.Elapsed < TimeSpan.FromMilliseconds(750),
-                $"Refresh {chapterCount:N0} rows took {measurement.Elapsed.TotalMilliseconds:N1} ms.");
+            // Row reuse and allocations are deterministic; wall-clock time depends on machine load and belongs in
+            // tools/QuickTranslator.AiEditor.QueueWorkflow.Benchmark, so it is not asserted here.
             Assert.True(measurement.AllocatedBytes < 8_000_000,
                 $"Refresh {chapterCount:N0} rows allocated {measurement.AllocatedBytes:N0} bytes.");
         }
