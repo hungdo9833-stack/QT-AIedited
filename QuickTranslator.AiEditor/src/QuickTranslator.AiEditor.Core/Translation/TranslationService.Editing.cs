@@ -79,17 +79,22 @@ public sealed partial class TranslationService
         var glossary = confirmed.Concat(external).DistinctBy(t => t.Chinese).Take(Math.Max(64, confirmed.Length)).ToArray();
         // The story setting comes first: it is one short line and the register every other block assumes.
         var contextBlocks = new List<string> { StorySettingRules.PromptBlock(chapter.CharacterProject) };
-        var previous =chapter.Segments.LastOrDefault(s => s.Order < segment.Order &&
+        var previous = chapter.Segments.LastOrDefault(s => s.Order < segment.Order &&
             !string.IsNullOrWhiteSpace(s.EditableText));
         if (previous is not null && !string.IsNullOrWhiteSpace(previous.EditableText))
         {
             string previousText = previous.Status == SegmentStatus.Approved && previous.Approvals.Count > 0
                 ? previous.Approvals[^1].Text : previous.EditableText;
-            previousText = TakeTextElements(previousText, 200);
+            previousText = SegmentBoundaryContext.TranslatedTail(previousText);
             string source = previous.Status == SegmentStatus.Approved ? "human-approved" :
                 previous.UserDraft is not null ? "user draft, not approved" : "AI draft, not approved";
             contextBlocks.Add($"Previous {source} excerpt (reference only; never overwrite user text): {previousText}");
         }
+        string precedingSource = SegmentBoundaryContext.PrecedingSource(chapter, segment);
+        if (precedingSource.Length > 0)
+            contextBlocks.Add($"Preceding source (reference only, do not translate): {precedingSource}");
+        if (SegmentBoundaryContext.OpensWithQuote(segment.SourceText))
+            contextBlocks.Add("The passage opens mid-conversation; the first quote continues the exchange shown in the preceding context. Keep the same speaker/listener pronouns and forms of address as established there.");
         if (!string.IsNullOrWhiteSpace(chapter.ConfirmedContextNotes))
             contextBlocks.Add(chapter.ConfirmedContextNotes);
         if (!string.IsNullOrWhiteSpace(memory)) contextBlocks.Add(memory);
@@ -154,12 +159,6 @@ public sealed partial class TranslationService
         }
         if (low > 0 && low < value.Length && char.IsHighSurrogate(value[low - 1]) && char.IsLowSurrogate(value[low])) low--;
         return value[..low].TrimEnd();
-    }
-
-    private static string TakeTextElements(string value, int count)
-    {
-        int[] positions = System.Globalization.StringInfo.ParseCombiningCharacters(value);
-        return positions.Length <= count ? value : value[..positions[count]];
     }
 
     public async Task RestoreDraftAsync(Guid segmentId, Guid versionId, bool approval,

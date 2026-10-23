@@ -16,7 +16,8 @@ public sealed class TranslationServiceTests
         var snapshot = service.GetSnapshot();
         Assert.Equal(1, client.Calls);
         Assert.Contains(selected.SourceText, client.Prompts[0]);
-        Assert.DoesNotContain(chapter.Segments[0].SourceText, client.Prompts[0]);
+        Assert.Contains("Preceding source (reference only, do not translate)", client.Prompts[0]);
+        Assert.DoesNotContain(chapter.Segments[2].SourceText, client.Prompts[0]);
         Assert.Equal(selected.Id, snapshot.SelectedSegmentId);
         Assert.Equal(SegmentStatus.AwaitingReview, snapshot.Segments[1].Status);
         Assert.Empty(snapshot.Segments[1].Approvals);
