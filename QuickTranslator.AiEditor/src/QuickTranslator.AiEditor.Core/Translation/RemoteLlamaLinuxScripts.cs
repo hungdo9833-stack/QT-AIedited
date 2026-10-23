@@ -28,6 +28,18 @@ public static class RemoteLlamaLinuxScripts
     public const string ReadGpu =
         "if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits; " +
         "else echo 'NONVIDIA:'; fi";
+    /// <summary>
+    /// Read-only facts for when nvidia-smi fails: running kernel, NVIDIA PCI devices (sysfs vendor 0x10de, no lspci
+    /// needed), device node, loaded driver, a module for this kernel, and the installed driver/module packages.
+    /// </summary>
+    public const string DiagnoseDriver =
+        "echo \"kernel=$(uname -r)\";" +
+        "n=0;for v in /sys/bus/pci/devices/*/vendor;do [ \"$(cat \"$v\" 2>/dev/null)\" = 0x10de ] && n=$((n+1));done;echo \"pci=$n\";" +
+        "if [ -e /dev/nvidia0 ];then echo dev=1;else echo dev=0;fi;" +
+        "if [ -r /proc/driver/nvidia/version ];then echo loaded=1;else echo loaded=0;fi;" +
+        "echo \"module=$(modinfo -F version nvidia 2>/dev/null | head -n 1)\";" +
+        "dpkg-query -W -f='${db:Status-Abbrev} ${Package}\\n' 'nvidia-driver-*' 'linux-modules-nvidia-*' 'nvidia-dkms-*' 2>/dev/null" +
+        " | awk '$1==\"ii\"{print \"package=\"$2}'";
     public const string ReadFreeDisk = "df -P -B1 \"$HOME\" | awk 'NR==2{print $4}'";
     public const string TestExecutable = Vars +
         "if [ -x \"$D/llama-server\" ] && LD_LIBRARY_PATH=\"$D\" \"$D/llama-server\" --version >/dev/null; then echo installed; else exit 1; fi";

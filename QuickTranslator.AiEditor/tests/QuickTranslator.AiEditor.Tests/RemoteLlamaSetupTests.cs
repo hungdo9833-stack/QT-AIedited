@@ -290,6 +290,7 @@ public sealed class RemoteLlamaSetupTests : IDisposable
     [InlineData(SshOperation.ConfigureLlamaServerLinux)]
     [InlineData(SshOperation.ReadLlamaServerLogTailLinux)]
     [InlineData(SshOperation.ReadLlamaCacheSizeLinux)]
+    [InlineData(SshOperation.DiagnoseNvidiaDriverLinux)]
     public void Linux_ssh_operations_resolve_to_plain_or_base64_shell_commands(SshOperation operation)
     {
         string json = JsonSerializer.Serialize(new RemoteLlamaTaskSpecification("owner/repo:Q4", 11434, 4, 8192));
@@ -308,6 +309,7 @@ public sealed class RemoteLlamaSetupTests : IDisposable
                 SshOperation.ConfigureLlamaServerLinux => RemoteLlamaLinuxScripts.ConfigureServer(json),
                 SshOperation.ReadLlamaServerLogTailLinux => RemoteLlamaLinuxScripts.ReadLogTail,
                 SshOperation.ReadLlamaCacheSizeLinux => RemoteLlamaLinuxScripts.ReadCacheSize,
+                SshOperation.DiagnoseNvidiaDriverLinux => RemoteLlamaLinuxScripts.DiagnoseDriver,
                 _ => throw new ArgumentOutOfRangeException(nameof(operation))
             };
             Assert.Equal(expected, DecodeLinuxWrapper(command));
@@ -352,7 +354,7 @@ public sealed class RemoteLlamaSetupTests : IDisposable
             Task.FromResult(_values.Count == 0 ? new LlamaServerHealth(false, []) : _values.Dequeue());
     }
 
-    private sealed class FakeSession(bool executableExists) : ISshSession
+    internal sealed class FakeSession(bool executableExists) : ISshSession
     {
         private bool _installed = executableExists;
         public bool IsWindows { get; set; } = true;
@@ -361,6 +363,7 @@ public sealed class RemoteLlamaSetupTests : IDisposable
         public string LinuxArchitecture { get; set; } = "x86_64";
         public string LinuxGpuOutput { get; set; } = "NVIDIA GeForce RTX 3090, 24576";
         public int LinuxGpuExitCode { get; set; }
+        public string LinuxDriverDiagnosis { get; set; } = "";
         public bool LinuxInstallFails { get; set; }
         public string LinuxInstallError { get; set; } = "SHA256_MISMATCH synthetic-linux-archive.tar.gz";
         public string LogTail { get; set; } = "";
@@ -384,6 +387,7 @@ public sealed class RemoteLlamaSetupTests : IDisposable
                 SshOperation.ReadLlamaServerLogTail => new(0, LogTail, ""),
                 SshOperation.ReadLinuxArchitecture => new(0, LinuxArchitecture, ""),
                 SshOperation.ReadNvidiaGpuLinux => new(LinuxGpuExitCode, LinuxGpuOutput, ""),
+                SshOperation.DiagnoseNvidiaDriverLinux => new(0, LinuxDriverDiagnosis, ""),
                 SshOperation.ReadSystemDiskLinux => new(0, "300000000000", ""),
                 SshOperation.TestLlamaServerLinux => _installed ? new(0, "installed", "") : new(1, "", "missing"),
                 SshOperation.InstallLlamaCppLinux => LinuxInstallFails ? new(4, "", LinuxInstallError) : Install(),

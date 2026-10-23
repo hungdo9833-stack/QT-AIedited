@@ -11,7 +11,7 @@ public enum SshOperation
     TestLlamaServerExecutable, ExtractLlamaCpp, ConfigureLlamaServerTask, ReadLlamaServerLogTail,
     ReadLlamaCacheSize, ConfirmWindowsMux,
     ReadLinuxArchitecture, ReadNvidiaGpuLinux, ReadSystemDiskLinux, TestLlamaServerLinux, InstallLlamaCppLinux,
-    ConfigureLlamaServerLinux, ReadLlamaServerLogTailLinux, ReadLlamaCacheSizeLinux
+    ConfigureLlamaServerLinux, ReadLlamaServerLogTailLinux, ReadLlamaCacheSizeLinux, DiagnoseNvidiaDriverLinux
 }
 
 public interface ISshTunnel : IAsyncDisposable { int LocalPort { get; } bool IsStarted { get; } }
@@ -203,6 +203,7 @@ internal static class SshCommands
         SshOperation.ConfigureLlamaServerLinux => RemoteLlamaLinuxScripts.Encode(RemoteLlamaLinuxScripts.ConfigureServer(argument)),
         SshOperation.ReadLlamaServerLogTailLinux => RemoteLlamaLinuxScripts.Encode(RemoteLlamaLinuxScripts.ReadLogTail),
         SshOperation.ReadLlamaCacheSizeLinux => RemoteLlamaLinuxScripts.Encode(RemoteLlamaLinuxScripts.ReadCacheSize),
+        SshOperation.DiagnoseNvidiaDriverLinux => RemoteLlamaLinuxScripts.Encode(RemoteLlamaLinuxScripts.DiagnoseDriver),
         _ => throw new ArgumentOutOfRangeException(nameof(operation))
     };
 }

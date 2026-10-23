@@ -90,9 +90,18 @@ public sealed class RemoteGpuProbe
         long? free = long.TryParse(disk.Output.Trim(), out long bytes) ? bytes : null;
         string? blocked = !string.Equals(machine, "x86_64", StringComparison.Ordinal)
             ? $"Cài đặt tự động trên Linux cần máy x86_64 (máy này: {(machine.Length == 0 ? "không rõ" : machine)})."
-            : noNvidia ? "Máy Linux chưa có driver NVIDIA (nvidia-smi không chạy được)." : null;
+            : noNvidia ? await DiagnoseNvidiaAsync(session, cancellationToken).ConfigureAwait(false) : null;
         string os = machine.Length == 0 ? release : release + " · " + machine;
         return new(os, name, vram, free, false, port, [], blocked is null, blocked, RemoteHostPlatform.Linux);
+    }
+
+    // Only runs when nvidia-smi already failed; read-only. A failed diagnosis keeps the generic message.
+    private static async Task<string> DiagnoseNvidiaAsync(ISshSession session, CancellationToken cancellationToken)
+    {
+        SshCommandResult facts = await session.ExecuteAsync(SshOperation.DiagnoseNvidiaDriverLinux, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        NvidiaDriverDiagnosis diagnosis = NvidiaDriverDiagnoser.Diagnose(facts.Output);
+        return diagnosis.FixCommand is null ? diagnosis.Message : diagnosis.Message + Environment.NewLine + diagnosis.FixCommand;
     }
 
     /// <summary>PRETTY_NAME (or NAME) from /etc/os-release; null when the text is not an os-release file.</summary>
