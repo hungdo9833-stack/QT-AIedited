@@ -229,8 +229,40 @@ public sealed class ProjectTranslationCoordinator
             ?? throw new InvalidOperationException("Project chưa có translation job để tiếp tục.");
         if (job.Status is not (ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted))
             throw new InvalidOperationException("Translation job chưa ở trạng thái có thể Resume.");
-        await LaunchAsync(job, isNew: false, retryFailed: false, cancellationToken,
+        await ReopenInterruptedRetranslationsAsync(job, cancellationToken).ConfigureAwait(false);
+        await LaunchAsync(CurrentJob ?? job, isNew: false, retryFailed: false, cancellationToken,
             acceptChangedBackendOrWorkers).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Repairs jobs saved by builds that marked a full retranslation "completed" when it was paused: the item says
+    /// Completed, yet the chapter still holds that item's own AllSegments run, paused or interrupted before its end.
+    /// Such items go back to Paused, so resuming continues the chapter's run instead of skipping to new chapters.
+    /// </summary>
+    private async Task ReopenInterruptedRetranslationsAsync(ProjectTranslationJob job, CancellationToken cancellationToken)
+    {
+        var reopen = new List<Guid>();
+        foreach (ProjectTranslationItem item in job.Items.Where(item => item.RetranslateAll &&
+                     item.Status == ProjectTranslationItemStatus.Completed && item.ChapterQueueRunId is not null))
+        {
+            if (_session.Manifest.Chapters.All(entry => entry.ChapterId != item.ChapterId || entry.DeletedAt is not null)) continue;
+            ChapterDocument chapter = (await _repository.LoadChapterAsync(_session, item.ChapterId, cancellationToken)
+                .ConfigureAwait(false)).Chapter;
+            if (chapter.Queue.RunId == item.ChapterQueueRunId && chapter.Queue.Mode == QueueMode.AllSegments &&
+                chapter.Queue.Status is QueueStatus.Paused or QueueStatus.Interrupted or QueueStatus.Cancelled or QueueStatus.Faulted)
+                reopen.Add(item.ChapterId);
+        }
+        if (reopen.Count == 0) return;
+        await PersistAsync(saved =>
+        {
+            foreach (ProjectTranslationItem item in saved.Items.Where(item => reopen.Contains(item.ChapterId)))
+            {
+                item.Status = ProjectTranslationItemStatus.Paused;
+                item.Disposition = ProjectTranslationItemDisposition.None;
+                item.FinishedAt = null;
+                item.Error = null;
+            }
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task RetryFailedAsync(CancellationToken cancellationToken = default)
@@ -988,8 +1020,12 @@ public sealed class ProjectTranslationCoordinator
             await run.ConfigureAwait(false);
             ChapterDocument after = service.GetSnapshot();
             QueueStatus status = after.Queue.Status;
-            bool chapterCompleted = !after.Segments.Any(segment => TranslationService.IsQueueEligible(segment, QueueMode.MissingSegments)) &&
-                after.Segments.All(segment => segment.Status != SegmentStatus.Error);
+            // A full retranslation leaves every segment with its old translation until it is redone, so "nothing missing"
+            // says nothing about it: a paused or cancelled retranslation is finished only when its own run completed.
+            bool chapterCompleted = after.Queue.Mode == QueueMode.AllSegments
+                ? status is QueueStatus.Completed or QueueStatus.CompletedWithWarnings
+                : !after.Segments.Any(segment => TranslationService.IsQueueEligible(segment, QueueMode.MissingSegments)) &&
+                    after.Segments.All(segment => segment.Status != SegmentStatus.Error);
             if (_pauseRequested || status == QueueStatus.Paused)
             {
                 await PersistAsync(job =>

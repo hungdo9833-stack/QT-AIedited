@@ -4,7 +4,7 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Tests;
 
-public sealed class ProjectTranslationCoordinatorTests
+public sealed partial class ProjectTranslationCoordinatorTests
 {
     [Theory]
     [InlineData(5)]
@@ -1499,7 +1499,7 @@ public sealed class ProjectTranslationCoordinatorTests
         await service.SaveAsync();
     }
 
-    private static async Task WithProjectAsync(int chapterCount, Func<TestProject, Task> test)
+    private static async Task WithProjectAsync(int chapterCount, Func<TestProject, Task> test, string? sourceText = null)
     {
         string root = Path.Combine(Path.GetTempPath(), "QTStudio-M4-Tests", Guid.NewGuid().ToString("N"));
         try
@@ -1509,7 +1509,7 @@ public sealed class ProjectTranslationCoordinatorTests
             var ids = new List<Guid>(chapterCount);
             for (int number = 1; number <= chapterCount; number++)
             {
-                ChapterDocument chapter = TranslationService.CreateChapter($"Chương {number}", $"天地玄黄宇宙洪荒第{number}章。",
+                ChapterDocument chapter = TranslationService.CreateChapter($"Chương {number}", sourceText ?? $"天地玄黄宇宙洪荒第{number}章。",
                     new() { MinimumHanCharacters = 1, TargetHanCharacters = 100, MaximumHanCharacters = 200 });
                 ProjectChapterEntry entry = await repository.AddChapterAsync(session, chapter, number, $"第{number}章");
                 ids.Add(entry.ChapterId);
