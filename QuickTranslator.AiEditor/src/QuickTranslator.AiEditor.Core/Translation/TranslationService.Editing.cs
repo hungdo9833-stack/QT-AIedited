@@ -70,8 +70,13 @@ public sealed partial class TranslationService
     private string BuildPrompt(ChapterDocument chapter, TranslationSegment segment, IReadOnlyList<GlossaryEntry> external,
         string memory, PromptPreset preset, ModelOptions options, BookKnowledgeContextSnapshot? knowledge = null)
     {
+        var narrativeTracker = new NarrativePronounTracker();
+        IReadOnlyList<NarrativePronounReference> chapterReferences = narrativeTracker.Scan(chapter.OriginalText, chapter.CharacterProject);
+        Guid[] pronounReferencedIds = narrativeTracker.ForSegment(chapter.OriginalText, segment, chapterReferences)
+            .Where(reference => reference.Confidence == NarrativePronounConfidence.High && reference.CharacterId is not null)
+            .Select(reference => reference.CharacterId!.Value).Distinct().ToArray();
         CharacterConsistencySelection consistency = _characterConsistency.Select(chapter.CharacterProject, segment.SourceText,
-            chapter.ChapterNumber, SceneText(chapter, segment));
+            chapter.ChapterNumber, SceneText(chapter, segment), pronounReferencedIds);
         var confirmed = chapter.ConfirmedTerms.Where(t => segment.SourceText.Contains(t.Chinese, StringComparison.Ordinal) &&
                 !consistency.CoveredChineseTerms.Contains(t.Chinese))
             .Select(t => new GlossaryEntry(t.Chinese, t.Vietnamese)).ToArray();

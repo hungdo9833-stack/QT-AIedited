@@ -32,7 +32,8 @@ public sealed class CharacterConsistencyRuleSelector(
     /// Source just before the segment (same chapter). Characters named there are scene participants: a dialogue rule
     /// applies when speaker and listener are both in the segment or the scene, and the segment contains dialogue.
     /// </param>
-    public CharacterConsistencySelection Select(CharacterProject project, string sourceText, int? chapterNumber = null, string sceneText = "")
+    public CharacterConsistencySelection Select(CharacterProject project, string sourceText, int? chapterNumber = null, string sceneText = "",
+        IReadOnlyCollection<Guid>? pronounReferencedCharacterIds = null)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(sourceText);
@@ -43,21 +44,32 @@ public sealed class CharacterConsistencyRuleSelector(
 
         var occurrences = FindUnambiguousOccurrences(project, sourceText);
         var inSegment = occurrences.GroupBy(item => item.Profile.Id)
-            .Select(group => new RelevantCharacter(group.First().Profile, group.Min(item => item.Start)))
+            .Select(group => new RelevantCharacter(group.First().Profile, group.Min(item => item.Start), false))
             .OrderBy(item => item.FirstOffset).ThenBy(item => item.Profile.Id).ToArray();
-        // Scene participants rank after every segment character (offset shifted past any segment offset).
+        // Pronoun-referred characters rank after named segment characters but before preceding-scene participants.
         var segmentIds = inSegment.Select(x => x.Profile.Id).ToHashSet();
-        var inScene = sceneText.Length == 0 ? [] : FindUnambiguousOccurrences(project, sceneText)
-            .Where(item => !segmentIds.Contains(item.Profile.Id)).GroupBy(item => item.Profile.Id)
-            .Select(group => new RelevantCharacter(group.First().Profile, int.MaxValue / 2 + group.Min(item => item.Start)))
+        var pronounIds = pronounReferencedCharacterIds?.ToHashSet() ?? [];
+        var byPronoun = project.Profiles.Where(profile => pronounIds.Contains(profile.Id) && !segmentIds.Contains(profile.Id) &&
+                profile.NarrativePronounLocked && !string.IsNullOrWhiteSpace(profile.NarrativePronounFor(chapterNumber)))
+            .OrderBy(profile => profile.Id)
+            .Select((profile, index) => new RelevantCharacter(profile, int.MaxValue / 3 + index, true)).ToArray();
+        var presentIds = segmentIds.Concat(byPronoun.Select(item => item.Profile.Id)).ToHashSet();
+        // Scene participants rank after every segment/pronoun character (offset shifted past any segment offset).
+        var sceneCharacters = sceneText.Length == 0 ? [] : FindUnambiguousOccurrences(project, sceneText)
+            .GroupBy(item => item.Profile.Id)
+            .Select(group => new RelevantCharacter(group.First().Profile, int.MaxValue / 2 + group.Min(item => item.Start), false))
             .OrderBy(item => item.FirstOffset).ToArray();
-        var relevant = inSegment.Concat(inScene).Take(maximumCharacters).ToArray();
+        var inScene = sceneCharacters.Where(item => !presentIds.Contains(item.Profile.Id)).ToArray();
+        var relevant = inSegment.Concat(byPronoun).Concat(inScene).Take(maximumCharacters).ToArray();
         var relevantIds = relevant.Select(item => item.Profile.Id).ToHashSet();
+        var dialogueParticipantIds = inSegment.Concat(sceneCharacters).Select(item => item.Profile.Id).ToHashSet();
 
         bool hasDialogueEvidence = sourceText.IndexOfAny(['“', '”', '「', '」', '『', '』', '"']) >= 0;
         var dialogueRules = hasDialogueEvidence
             ? relevant.SelectMany(owner => owner.Profile.Relationships.Select(relation => new DialogueRule(owner.Profile, relation)))
-                .Where(item => item.Relation.Enabled && relevantIds.Contains(item.Relation.EffectiveListenerCharacterId) &&
+                .Where(item => dialogueParticipantIds.Contains(item.Owner.Id) && item.Relation.Enabled &&
+                    relevantIds.Contains(item.Relation.EffectiveListenerCharacterId) &&
+                    dialogueParticipantIds.Contains(item.Relation.EffectiveListenerCharacterId) &&
                     item.Relation.EffectiveSpeakerCharacterId(item.Owner.Id) == item.Owner.Id &&
                     item.Relation.AppliesTo(chapterNumber) &&
                     !string.IsNullOrWhiteSpace(item.Relation.SelfReference) &&
@@ -78,7 +90,7 @@ public sealed class CharacterConsistencyRuleSelector(
             .Concat(dialogueRules.SelectMany(item => new[] { item.Owner.Id, item.Relation.EffectiveListenerCharacterId }))
             .ToHashSet();
         var builder = new StringBuilder("CHARACTER CONSISTENCY (confirmed project rules):\n");
-        int omitted = Math.Max(0, inSegment.Length + inScene.Length - relevant.Length);
+        int omitted = Math.Max(0, inSegment.Length + byPronoun.Length + inScene.Length - relevant.Length);
         var includedIds = new List<Guid>();
         var covered = new HashSet<string>(StringComparer.Ordinal);
         int narrativeCount = 0;
@@ -89,7 +101,9 @@ public sealed class CharacterConsistencyRuleSelector(
             string identity = $"- CHARACTER {DisplaySourceName(item.Profile)} = {item.Profile.VietnameseName}";
             if (item.Profile.NarrativePronounLocked)
                 identity += $"; narrative pronoun = {item.Profile.NarrativePronounFor(chapterNumber)} (LOCKED)";
-            if (!segmentIds.Contains(item.Profile.Id)) identity += " (in scene, not named in this passage)";
+            if (item.ReferredByPronoun)
+                identity += $" (referred to as {(item.Profile.Gender == CharacterGender.Female ? "她" : "他")} in this passage)";
+            else if (!segmentIds.Contains(item.Profile.Id)) identity += " (in scene, not named in this passage)";
             if (!TryAppendRule(builder, identity)) { omitted++; continue; }
             includedIds.Add(item.Profile.Id);
             if (item.Profile.NarrativePronounLocked) narrativeCount++;
@@ -177,6 +191,6 @@ public sealed class CharacterConsistencyRuleSelector(
 
     private sealed record NameOwner(string Name, CharacterProfile Profile);
     private sealed record NameOccurrence(CharacterProfile Profile, string Name, int Start);
-    private sealed record RelevantCharacter(CharacterProfile Profile, int FirstOffset);
+    private sealed record RelevantCharacter(CharacterProfile Profile, int FirstOffset, bool ReferredByPronoun);
     private sealed record DialogueRule(CharacterProfile Owner, CharacterRelationship Relation);
 }

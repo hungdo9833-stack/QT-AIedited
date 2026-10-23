@@ -37,12 +37,15 @@ public sealed partial class TranslationService
     {
         var chapter = GetOperationSnapshot();
         var items = new List<PronounSuggestion>();
+        var tracker = new NarrativePronounTracker();
+        IReadOnlyList<NarrativePronounReference> sourceReferences = tracker.Scan(chapter.OriginalText, chapter.CharacterProject);
         string previous = "";
         foreach (var segment in chapter.Segments.OrderBy(s => s.Order))
         {
             string text = segment.EditableText;
+            NarrativePronounHint? sourceHint = tracker.HintForSegment(chapter.OriginalText, segment, sourceReferences);
             items.AddRange(_pronouns.ScanSegment(segment.Id, segment.Order, segment.SourceText, text, previous,
-                chapter.CharacterProject, segment.IsProtectedFromAutomaticTranslation, chapter.ConfirmedTerms));
+                chapter.CharacterProject, segment.IsProtectedFromAutomaticTranslation, chapter.ConfirmedTerms, sourceHint));
             previous = text;
         }
         return new(chapter.Id, chapter.CharacterProject.Id, _clock.GetUtcNow(), items);
@@ -120,8 +123,11 @@ public sealed partial class TranslationService
             string.IsNullOrWhiteSpace(translatedText))
             return new(translatedText, null, []);
         string previous = chapter.Segments.LastOrDefault(s => s.Order < selected.Order)?.EditableText ?? "";
+        var tracker = new NarrativePronounTracker();
+        IReadOnlyList<NarrativePronounReference> sourceReferences = tracker.Scan(chapter.OriginalText, chapter.CharacterProject);
+        NarrativePronounHint? sourceHint = tracker.HintForSegment(chapter.OriginalText, selected, sourceReferences);
         var items = _pronouns.ScanSegment(selected.Id, selected.Order, selected.SourceText, translatedText, previous,
-            chapter.CharacterProject, false, chapter.ConfirmedTerms);
+            chapter.CharacterProject, false, chapter.ConfirmedTerms, sourceHint);
         var safe = items.Where(i => i.Kind == PronounSuggestionKind.SafeReplacement).ToArray();
         string normalized = safe.Length == 0 ? translatedText : PronounResolutionEngine.Apply(translatedText, safe);
         var run = safe.Length == 0 ? null : CreateNormalizationRun(batchId, true, previousNormalizedText, translatedText, normalized, safe);

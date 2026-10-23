@@ -12,4 +12,5 @@
   <Project Path="tools/QuickTranslator.AiEditor.Addressing.Probe/QuickTranslator.AiEditor.Addressing.Probe.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.Import.Probe/QuickTranslator.AiEditor.Import.Probe.csproj" />
   <Project Path="tools/QuickTranslator.AiEditor.Prompt.Probe/QuickTranslator.AiEditor.Prompt.Probe.csproj" />
+  <Project Path="tools/QuickTranslator.AiEditor.Pronoun.Probe/QuickTranslator.AiEditor.Pronoun.Probe.csproj" />
 </Solution>

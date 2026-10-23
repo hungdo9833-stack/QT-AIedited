@@ -14,7 +14,7 @@ public sealed class PronounResolutionEngine
 
     public IReadOnlyList<PronounSuggestion> ScanSegment(Guid segmentId, int order, string sourceText,
         string translatedText, string previousContext, CharacterProject project, bool protectedByUser,
-        IReadOnlyList<ConfirmedTerm>? glossary = null)
+        IReadOnlyList<ConfirmedTerm>? glossary = null, NarrativePronounHint? sourceHint = null)
     {
         project.Validate();
         if (string.IsNullOrEmpty(translatedText)) return [];
@@ -84,6 +84,17 @@ public sealed class PronounResolutionEngine
             }
             bool unknownCharacter = resolved is not null && ContainsUnregisteredProperName(antecedentContext, profiles, glossary);
             if (unknownCharacter) resolved = null;
+            bool resolvedBySourceHint = false;
+            if (resolved is null && !multiple && !unknownCharacter && sourceHint is not null)
+            {
+                CharacterProfile[] hinted = matching.Where(profile => sourceHint.For(profile.Gender) == profile.Id &&
+                    IsProfilePronoun(occurrence.Text, profile)).ToArray();
+                if (hinted.Length == 1)
+                {
+                    resolved = hinted[0];
+                    resolvedBySourceHint = true;
+                }
+            }
             if (resolved is null)
             {
                 string reason = unknownCharacter
@@ -110,7 +121,9 @@ public sealed class PronounResolutionEngine
             suggestions.Add(Item(protectedByUser ? PronounSuggestionKind.Protected : PronounSuggestionKind.SafeReplacement,
                 resolved, protectedByUser
                     ? "Đoạn đã được người dùng sửa hoặc duyệt; chỉ cảnh báo, không ghi đè."
-                    : $"Tên {resolved.VietnameseName} là tiền ngữ duy nhất phù hợp trong lời kể." , replacement));
+                    : resolvedBySourceHint
+                        ? "Đại từ kể nguồn có tiền ngữ nhân vật duy nhất với độ tin cậy cao."
+                        : $"Tên {resolved.VietnameseName} là tiền ngữ duy nhất phù hợp trong lời kể." , replacement));
 
             PronounSuggestion Item(PronounSuggestionKind kind, CharacterProfile? character, string reason, string? replacement = null) =>
                 new(Guid.NewGuid(), segmentId, order, occurrence.Start, occurrence.Length, occurrence.Text, replacement,
@@ -140,6 +153,11 @@ public sealed class PronounResolutionEngine
                 .Select(t => t.Vietnamese) ?? [])
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Any(name => ContainsWhole(text, name));
+
+    private static bool IsProfilePronoun(string value, CharacterProfile profile) =>
+        string.Equals(value, profile.PrimaryNarrativePronoun, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value, profile.SecondaryNarrativePronoun, StringComparison.OrdinalIgnoreCase) ||
+        profile.DisallowedNarrativePronouns.Contains(value, StringComparer.OrdinalIgnoreCase);
 
     private static bool ContainsWhole(string text, string value)
     {
