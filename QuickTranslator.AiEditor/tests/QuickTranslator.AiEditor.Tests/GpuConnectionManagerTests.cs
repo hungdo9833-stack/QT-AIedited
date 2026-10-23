@@ -1,6 +1,7 @@
 using System.Text;
 using System.Net;
 using System.Net.Http.Json;
+using System.Threading.Channels;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Translation;
 
@@ -80,18 +81,258 @@ public sealed class GpuConnectionManagerTests : IDisposable
     public async Task Lost_tunnel_reconnects_with_a_new_session_without_resending_any_prompt()
     {
         var ssh = new FakeSshConnectionService();
+        var delay = new ControlledDelay();
         await using var manager = new GpuConnectionManager(ssh, (_, _) => new FakeBackendClient(),
-            healthInterval: TimeSpan.FromMilliseconds(10));
+            delay.WaitAsync);
         GpuBackendProfile profile = RemoteProfile();
         await manager.ConnectAsync(profile);
 
+        DelayCall firstCheck = await delay.NextAsync();
         ssh.Sessions[0].Connected = false;
-        await SpinWaitAsync(() => ssh.Calls >= 2 && manager.GetStatus(profile.Id).State == GpuConnectionState.Connected,
-            TimeSpan.FromSeconds(2));
+        firstCheck.Release.SetResult();
+        await delay.NextAsync(); // The same monitor reaches its next check after reconnecting.
 
+        Assert.Equal(GpuConnectionState.Connected, manager.GetStatus(profile.Id).State);
         Assert.True(ssh.Sessions[0].Disposed);
         Assert.Equal(2, ssh.Calls);
         Assert.True(ssh.Sessions[1].IsConnected);
+    }
+
+    [Fact]
+    public async Task Disconnect_during_health_check_prevents_publication_and_monitor_start()
+    {
+        var entered = Signal();
+        var release = Signal();
+        CancellationToken healthToken = default;
+        var client = new FakeBackendClient
+        {
+            Check = token => { healthToken = token; entered.SetResult(); return release.Task; }
+        };
+        var ssh = new FakeSshConnectionService();
+        var delay = new ControlledDelay();
+        await using var manager = new GpuConnectionManager(ssh, (_, _) => client, delay.WaitAsync);
+        GpuBackendProfile profile = RemoteProfile();
+        var states = new List<GpuConnectionState>();
+        manager.StatusChanged += (_, status) => states.Add(status.State);
+
+        Task<GpuConnectionHandle> connect = manager.ConnectAsync(profile);
+        await entered.Task;
+        await manager.DisconnectAsync(profile.Id);
+        Assert.True(healthToken.IsCancellationRequested);
+        release.SetResult(); // Deliberately ignore cancellation inside the health check.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connect);
+
+        Assert.False(manager.TryGetConnection(profile.Id, out _));
+        Assert.Equal(GpuConnectionState.Disconnected, manager.GetStatus(profile.Id).State);
+        Assert.DoesNotContain(GpuConnectionState.Connected, states);
+        Assert.Equal(0, delay.Calls);
+        AssertDisposedOnce(ssh.Sessions.Single(), client);
+    }
+
+    [Fact]
+    public async Task Dispose_during_connect_drains_active_and_waiting_connects_and_is_idempotent()
+    {
+        var entered = Signal();
+        var release = Signal();
+        var client = new FakeBackendClient { Check = _ => { entered.SetResult(); return release.Task; } };
+        var ssh = new FakeSshConnectionService();
+        var delay = new ControlledDelay();
+        var manager = new GpuConnectionManager(ssh, (_, _) => client, delay.WaitAsync);
+        GpuBackendProfile profile = RemoteProfile();
+        Task<GpuConnectionHandle> active = manager.ConnectAsync(profile);
+        await entered.Task;
+        Task<GpuConnectionHandle> waiting = manager.ConnectAsync(profile);
+
+        Task disposal = manager.DisposeAsync().AsTask();
+        Task secondDisposal = manager.DisposeAsync().AsTask();
+        Assert.Same(disposal, secondDisposal);
+        Assert.False(disposal.IsCompleted);
+        release.SetResult();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => active);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        await Task.WhenAll(disposal, secondDisposal);
+        await manager.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => manager.ConnectAsync(profile));
+        Assert.False(manager.TryGetConnection(profile.Id, out _));
+        Assert.Equal(0, delay.Calls);
+        AssertDisposedOnce(ssh.Sessions.Single(), client);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Shutdown_awaits_monitor_before_disposing_its_connection(bool dispose)
+    {
+        var ssh = new FakeSshConnectionService();
+        var client = new FakeBackendClient();
+        var delay = new ControlledDelay(ignoreCancellation: true);
+        await using var manager = new GpuConnectionManager(ssh, (_, _) => client, delay.WaitAsync);
+        GpuBackendProfile profile = RemoteProfile();
+        await manager.ConnectAsync(profile);
+        DelayCall check = await delay.NextAsync();
+
+        Task shutdown = dispose ? manager.DisposeAsync().AsTask() : manager.DisconnectAsync(profile.Id);
+        Task concurrentShutdown = dispose ? manager.DisposeAsync().AsTask() : manager.DisconnectAsync(profile.Id);
+        Assert.True(check.Token.IsCancellationRequested);
+        Assert.False(shutdown.IsCompleted);
+        Assert.False(concurrentShutdown.IsCompleted);
+        Assert.False(client.Disposed);
+        check.Release.SetResult();
+        await Task.WhenAll(shutdown, concurrentShutdown);
+
+        Assert.Equal(1, delay.Calls);
+        Assert.Equal(1, ssh.Calls);
+        Assert.False(manager.TryGetConnection(profile.Id, out _));
+        AssertDisposedOnce(ssh.Sessions.Single(), client);
+    }
+
+    [Fact]
+    public async Task Reconnect_after_disconnect_uses_a_new_generation_and_monitor()
+    {
+        var ssh = new FakeSshConnectionService();
+        var clients = new List<FakeBackendClient>();
+        var delay = new ControlledDelay();
+        await using var manager = new GpuConnectionManager(ssh, (_, _) =>
+        {
+            var client = new FakeBackendClient();
+            clients.Add(client);
+            return client;
+        }, delay.WaitAsync);
+        GpuBackendProfile profile = RemoteProfile();
+        GpuConnectionHandle first = await manager.ConnectAsync(profile);
+        DelayCall firstMonitor = await delay.NextAsync();
+        await manager.DisconnectAsync(profile.Id);
+
+        GpuConnectionHandle second = await manager.ReconnectAsync(profile);
+        DelayCall secondMonitor = await delay.NextAsync();
+
+        Assert.NotSame(first, second);
+        Assert.True(firstMonitor.Token.IsCancellationRequested);
+        Assert.False(secondMonitor.Token.IsCancellationRequested);
+        Assert.True(manager.TryGetConnection(profile.Id, out var published));
+        Assert.Same(second, published);
+        Assert.Equal(GpuConnectionState.Connected, manager.GetStatus(profile.Id).State);
+        await manager.DisconnectAsync(profile.Id);
+        AssertDisposedOnce(ssh.Sessions[0], clients[0]);
+        AssertDisposedOnce(ssh.Sessions[1], clients[1]);
+    }
+
+    [Fact]
+    public async Task Monitor_failure_is_observed_and_reported_as_offline()
+    {
+        var ssh = new FakeSshConnectionService();
+        var client = new FakeBackendClient();
+        var delay = new ControlledDelay();
+        await using var manager = new GpuConnectionManager(ssh, (_, _) => client, delay.WaitAsync);
+        var offline = Signal();
+        manager.StatusChanged += (_, status) =>
+        {
+            if (status.State == GpuConnectionState.Offline) offline.TrySetResult();
+        };
+        GpuBackendProfile profile = RemoteProfile();
+        await manager.ConnectAsync(profile);
+        DelayCall check = await delay.NextAsync();
+
+        check.Release.SetException(new IOException("synthetic monitor failure"));
+        await offline.Task;
+        await manager.DisconnectAsync(profile.Id); // Joins the monitor after its exception handler.
+
+        Assert.Equal(1, delay.Calls);
+        Assert.Equal(1, ssh.Calls);
+        AssertDisposedOnce(ssh.Sessions.Single(), client);
+    }
+
+    [Fact]
+    public async Task Disconnect_during_monitor_reconnect_awaits_cleanup_without_restarting_monitor()
+    {
+        var entered = Signal();
+        var release = Signal();
+        CancellationToken healthToken = default;
+        var firstClient = new FakeBackendClient();
+        var secondClient = new FakeBackendClient
+        {
+            Check = token => { healthToken = token; entered.SetResult(); return release.Task; }
+        };
+        var ssh = new FakeSshConnectionService();
+        var delay = new ControlledDelay();
+        await using var manager = new GpuConnectionManager(ssh,
+            (_, _) => ssh.Calls == 1 ? firstClient : secondClient, delay.WaitAsync);
+        GpuBackendProfile profile = RemoteProfile();
+        await manager.ConnectAsync(profile);
+        DelayCall check = await delay.NextAsync();
+        ssh.Sessions[0].Connected = false;
+        check.Release.SetResult();
+        await entered.Task;
+
+        Task disconnect = manager.DisconnectAsync(profile.Id);
+        Assert.True(healthToken.IsCancellationRequested);
+        Assert.False(disconnect.IsCompleted);
+        release.SetResult();
+        await disconnect;
+
+        Assert.False(manager.TryGetConnection(profile.Id, out _));
+        Assert.Equal(GpuConnectionState.Disconnected, manager.GetStatus(profile.Id).State);
+        Assert.Equal(1, delay.Calls);
+        Assert.Equal(2, ssh.Calls);
+        AssertDisposedOnce(ssh.Sessions[0], firstClient);
+        AssertDisposedOnce(ssh.Sessions[1], secondClient);
+    }
+
+    [Fact]
+    public async Task Disconnect_cancels_explicit_reconnect_during_backoff()
+    {
+        var ssh = new AlwaysFailSshService();
+        var delay = new ControlledDelay();
+        await using var manager = new GpuConnectionManager(ssh, (_, _) => new FakeBackendClient(), delay.WaitAsync);
+        GpuBackendProfile profile = RemoteProfile();
+        Task<GpuConnectionHandle> reconnect = manager.ReconnectAsync(profile);
+        DelayCall backoff = await delay.NextAsync();
+
+        await manager.DisconnectAsync(profile.Id);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reconnect);
+
+        Assert.True(backoff.Token.IsCancellationRequested);
+        Assert.Equal(1, ssh.Calls);
+        Assert.Equal(GpuConnectionState.Disconnected, manager.GetStatus(profile.Id).State);
+    }
+
+    [Fact]
+    public async Task Client_factory_failure_disposes_tunnel_and_session_once()
+    {
+        var ssh = new FakeSshConnectionService();
+        await using var manager = new GpuConnectionManager(ssh,
+            (_, _) => throw new InvalidOperationException("synthetic factory failure"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => manager.ConnectAsync(RemoteProfile()));
+
+        Assert.Equal(1, ssh.Session!.DisposeCalls);
+        Assert.Equal(1, ssh.Session.Tunnel!.DisposeCalls);
+    }
+
+    [Fact]
+    public async Task Dispose_joins_an_already_disposing_owned_handle()
+    {
+        var release = Signal();
+        var ssh = new FakeSshConnectionService();
+        var client = new FakeBackendClient();
+        var delay = new ControlledDelay();
+        var manager = new GpuConnectionManager(ssh, (_, _) => client, delay.WaitAsync);
+        GpuConnectionHandle handle = await manager.ConnectAsync(RemoteProfile());
+        await delay.NextAsync();
+        ssh.Session!.DisposeCallback = () => release.Task;
+
+        Task handleDisposal = handle.DisposeAsync().AsTask();
+        Task secondHandleDisposal = handle.DisposeAsync().AsTask();
+        Task managerDisposal = manager.DisposeAsync().AsTask();
+        Assert.Same(handleDisposal, secondHandleDisposal);
+        Assert.False(handle.IsConnected);
+        Assert.False(managerDisposal.IsCompleted);
+        release.SetResult();
+        await Task.WhenAll(handleDisposal, secondHandleDisposal, managerDisposal);
+        await manager.DisposeAsync();
+
+        AssertDisposedOnce(ssh.Sessions.Single(), client);
     }
 
     [Fact]
@@ -154,11 +395,30 @@ public sealed class GpuConnectionManagerTests : IDisposable
 
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 
-    private static async Task SpinWaitAsync(Func<bool> condition, TimeSpan timeout)
+    private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private static void AssertDisposedOnce(FakeSshSession session, FakeBackendClient client)
     {
-        DateTimeOffset until = DateTimeOffset.UtcNow + timeout;
-        while (!condition() && DateTimeOffset.UtcNow < until) await Task.Delay(10);
-        Assert.True(condition());
+        Assert.Equal(1, client.DisposeCalls);
+        Assert.Equal(1, session.Tunnel!.DisposeCalls);
+        Assert.Equal(1, session.DisposeCalls);
+    }
+
+    private sealed record DelayCall(CancellationToken Token, TaskCompletionSource Release);
+
+    private sealed class ControlledDelay(bool ignoreCancellation = false)
+    {
+        private readonly Channel<DelayCall> _calls = Channel.CreateUnbounded<DelayCall>();
+        private int _count;
+        public int Calls => Volatile.Read(ref _count);
+        public Task WaitAsync(TimeSpan _, CancellationToken token)
+        {
+            var call = new DelayCall(token, Signal());
+            Interlocked.Increment(ref _count);
+            _calls.Writer.TryWrite(call);
+            return ignoreCancellation ? call.Release.Task : call.Release.Task.WaitAsync(token);
+        }
+        public ValueTask<DelayCall> NextAsync() => _calls.Reader.ReadAsync();
     }
 
     private sealed class Protector : ISecretProtector
@@ -169,14 +429,16 @@ public sealed class GpuConnectionManagerTests : IDisposable
 
     private sealed class FakeBackendClient : ILlmBackendClient
     {
+        public Func<CancellationToken, Task>? Check { get; init; }
+        public int DisposeCalls { get; private set; }
         public bool Disposed { get; private set; }
         public int CheckCalls { get; private set; }
         public Task CheckConnectionAsync(string model, TimeSpan timeout, CancellationToken cancellationToken = default)
-        { CheckCalls++; return Task.CompletedTask; }
+        { CheckCalls++; return Check?.Invoke(cancellationToken) ?? Task.CompletedTask; }
         public Task<IReadOnlyList<string>> ListModelsAsync(TimeSpan timeout, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options, CancellationToken cancellationToken = default) =>
             Task.FromResult(FakeClient.Completion("ok"));
-        public void Dispose() => Disposed = true;
+        public void Dispose() { DisposeCalls++; Disposed = true; }
     }
 
     private sealed class FakeSshConnectionService : ISshConnectionService
@@ -203,6 +465,8 @@ public sealed class GpuConnectionManagerTests : IDisposable
 
     private sealed class FakeSshSession : ISshSession
     {
+        public Func<Task>? DisposeCallback { get; set; }
+        public int DisposeCalls { get; private set; }
         public bool Connected { get; set; } = true;
         public bool IsConnected => Connected && !Disposed;
         public bool Disposed { get; private set; }
@@ -220,15 +484,20 @@ public sealed class GpuConnectionManagerTests : IDisposable
             CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<ISshTunnel> OpenServerTunnelAsync(int remotePort, CancellationToken cancellationToken = default)
         { RemotePort = remotePort; Tunnel = new(); return Task.FromResult<ISshTunnel>(Tunnel); }
-        public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync()
+        {
+            DisposeCalls++; Disposed = true;
+            return new(DisposeCallback?.Invoke() ?? Task.CompletedTask);
+        }
     }
 
     private sealed class FakeTunnel : ISshTunnel
     {
+        public int DisposeCalls { get; private set; }
         public int LocalPort => 43117;
         public bool IsStarted => !Disposed;
         public bool Disposed { get; private set; }
-        public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync() { DisposeCalls++; Disposed = true; return ValueTask.CompletedTask; }
     }
 
     private sealed class StubHttpHandler(
