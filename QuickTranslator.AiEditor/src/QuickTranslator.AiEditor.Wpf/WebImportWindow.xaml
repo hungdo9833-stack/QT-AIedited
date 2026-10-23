@@ -27,7 +27,7 @@
     <TextBlock x:Name="BookTitleText" Text="Chưa phân tích truyện" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap"/>
     <TextBlock x:Name="ChapterCountText" Text="0 chương" Margin="0,4"/>
     <TextBlock x:Name="DetectionSummaryText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-    <ScrollViewer MaxHeight="85" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="WarningsText" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap"/></ScrollViewer>
+    <ScrollViewer MaxHeight="110" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="WarningsText" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" AutomationProperties.Name="Cảnh báo kiểm tra mẫu và chất lượng chương" AutomationProperties.LiveSetting="Polite"/></ScrollViewer>
    </StackPanel>
   </Border>
   <Grid Grid.Row="2">

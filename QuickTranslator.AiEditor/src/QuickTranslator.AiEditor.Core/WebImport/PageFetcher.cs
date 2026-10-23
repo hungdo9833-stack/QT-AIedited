@@ -11,6 +11,7 @@ internal sealed class PageFetcher : IDisposable
     private readonly WebImportOptions _options;
     private readonly HttpClient _client;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Dictionary<Uri, WebPage> _memoryCache = new();
     private long? _lastRequestEnd;
 
     internal PageFetcher(WebImportOptions options, HttpMessageHandler? handler)
@@ -31,6 +32,7 @@ internal sealed class PageFetcher : IDisposable
         await _gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
+            if (useCache && _memoryCache.TryGetValue(url, out var remembered)) return remembered;
             var cachePath = !useCache || _options.CacheDirectory is null ? null : Path.Combine(_options.CacheDirectory,
                 Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url.AbsoluteUri))) + ".json");
             if (cachePath is not null && File.Exists(cachePath))
@@ -79,6 +81,8 @@ internal sealed class PageFetcher : IDisposable
                         var page = WebPage.Parse(finalUrl, bytes, charset);
                         BlockDetector.Check(page);
                         response.EnsureSuccessStatusCode();
+                        // The desktop uses disk caching. Only retain DOMs in memory when no disk cache was requested.
+                        if (useCache && _options.CacheDirectory is null) _memoryCache[url] = page;
                         if (cachePath is not null)
                         {
                             Directory.CreateDirectory(_options.CacheDirectory!);
