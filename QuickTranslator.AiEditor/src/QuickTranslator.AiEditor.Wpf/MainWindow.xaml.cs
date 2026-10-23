@@ -264,8 +264,6 @@ public partial class MainWindow : Window
             if (currentSegment is null || currentSegment.Status == SegmentStatus.Translating ||
                 string.IsNullOrWhiteSpace(currentSegment.EditableText)) return;
             await _service.ApproveAsync(id);
-            if (_projectSession is not null)
-                await _projectRepository.UpdateChapterSummaryAsync(_projectSession, _service.GetSnapshot());
             bool movedNext = false;
             if (advanceToNext)
             {
@@ -370,9 +368,12 @@ public partial class MainWindow : Window
         if (!StatusText.Text.StartsWith("Lỗi:", StringComparison.Ordinal))
             SetStatus("Có thay đổi bản nháp; đang chờ tự lưu. Sửa bản đã duyệt sẽ đưa đoạn về chờ duyệt.");
         UpdateButtons();
+        RefreshQueueProgress();
     }
 
-    private async void OnAutosave(object? sender, EventArgs e)
+    private async void OnAutosave(object? sender, EventArgs e) => await AutosaveAsync();
+
+    private async Task AutosaveAsync()
     {
         _autosave.Stop();
         var service = _service;
@@ -380,8 +381,6 @@ public partial class MainWindow : Window
         try
         {
             await service.SaveAsync();
-            if (_projectSession is not null && ReferenceEquals(service, _service))
-                await _projectRepository.UpdateChapterSummaryAsync(_projectSession, service.GetSnapshot());
             if (service.HasUnsavedChanges && ReferenceEquals(service, _service) && !_closing) _autosave.Start();
             if (ReferenceEquals(service, _service) && !WorkActive && !_uiOperation && !_closing)
             {
@@ -424,12 +423,8 @@ public partial class MainWindow : Window
     {
         _autosave.Stop();
         var service = _service;
-        var session = _projectSession;
-        if (service is not null)
-        {
-            await service.SaveAsync();
-            if (session is not null) await _projectRepository.UpdateChapterSummaryAsync(session, service.GetSnapshot());
-        }
+        // RegisteredChapterStore owns project chapter + summary persistence; standalone uses ChapterFileStore.
+        if (service is not null) await service.SaveAsync();
     }
 
     private void OnSegmentFilterChanged(object sender, SelectionChangedEventArgs e)
@@ -549,19 +544,16 @@ public partial class MainWindow : Window
             UpdateShellChrome(chapter);
         }
         finally { _rendering = false; }
-        UpdateButtons(chapter);
+        UpdateButtons();
     }
 
-    private void UpdateButtons() => UpdateButtons(_service?.GetSnapshot());
-
-    private void UpdateButtons(ChapterDocument? chapter)
+    private void UpdateButtons()
     {
+        var chapter = _service?.GetEditorState(_selectedId);
         bool document = chapter is not null, selected = document && _selectedId is not null;
         bool available = !_uiOperation && !_closing;
         bool active = WorkActive;
-        TranslationSegment? selectedSegment = selected
-            ? chapter!.Segments.SingleOrDefault(s => s.Id == _selectedId)
-            : null;
+        SegmentEditorState? selectedSegment = selected ? chapter!.SelectedSegment : null;
         NewButton.IsEnabled = OpenButton.IsEnabled = !active && available;
         SaveButton.IsEnabled = document && available;
         SplitButton.IsEnabled = !document && !active && available && _presetsReady;
@@ -595,23 +587,23 @@ public partial class MainWindow : Window
         ChapterBlocksItems.IsEnabled = document && available;
         TranslateAllButton.IsEnabled = !active && available && _presetsReady;
         RetryErrorsButton.IsEnabled = document && !active && available && _presetsReady;
-        PauseQueueButton.IsEnabled = _queue?.IsRunning == true && chapter?.Queue.Status == QueueStatus.Running && available;
+        PauseQueueButton.IsEnabled = _queue?.IsRunning == true && chapter?.QueueStatus == QueueStatus.Running && available;
         CancelQueueButton.IsEnabled = _queue?.IsRunning == true && !_closing;
-        QueueStatus? queueStatus = chapter?.Queue.Status;
+        QueueStatus? queueStatus = chapter?.QueueStatus;
         ResumeQueueButton.IsEnabled = document && !active && available && queueStatus is QueueStatus.Paused or QueueStatus.Interrupted or QueueStatus.Cancelled or QueueStatus.Faulted;
         ExportButton.IsEnabled = document && available;
         BatchReplaceButton.IsEnabled = document && !active && available;
         NormalizePronounsButton.IsEnabled = document && !active && available;
         ApplyPronounsButton.IsEnabled = document && !active && available && _pronounReport?.Safe > 0;
         UndoPronounsButton.IsEnabled = document && !active && available &&
-            chapter!.Segments.SelectMany(s => s.NormalizationHistory).Any(r => !r.Reverted);
+            chapter!.CanUndoNormalization;
         if (FindName("InspectorScanPronounsButton") is Button inspScan) inspScan.IsEnabled = NormalizePronounsButton.IsEnabled;
         if (FindName("InspectorApplyPronounsButton") is Button inspApply) inspApply.IsEnabled = ApplyPronounsButton.IsEnabled;
         if (FindName("InspectorUndoPronounsButton") is Button inspUndo) inspUndo.IsEnabled = UndoPronounsButton.IsEnabled;
         if (FindName("InspectorPreviewRulesButton") is Button inspPreview) inspPreview.IsEnabled = document && !active && available;
         ScanChineseButton.IsEnabled = document && !active && available;
         UndoBatchReplaceButton.IsEnabled = document && !active && available &&
-            chapter!.BatchReplacementHistory.Any(r => !r.Reverted && !r.Automatic);
+            chapter!.CanUndoBatchReplacement;
         SettingsPanel.IsEnabled = !active && available;
         PresetPanel.IsEnabled = _presetsReady;
         NewCharacterProjectButton.IsEnabled = AddCharacterButton.IsEnabled = SaveCharactersButton.IsEnabled =
@@ -620,11 +612,11 @@ public partial class MainWindow : Window
         PreviewCharactersButton.IsEnabled = document && !active && available;
         SplitSegmentButton.IsEnabled = MergeSegmentButton.IsEnabled = MoveBoundaryButton.IsEnabled = selected && !active && available;
         ArchiveButton.IsEnabled = document && available;
-        RestoreStructureButton.IsEnabled = document && !active && available && chapter!.SegmentationHistory.Count > 0;
+        RestoreStructureButton.IsEnabled = document && !active && available && chapter!.CanRestoreStructure;
         UpdateProjectChapterCommands();
         if (selectedSegment is not null)
         {
-            TranslateButton.Content = selectedSegment.Attempts.Count == 0
+            TranslateButton.Content = selectedSegment.AttemptCount == 0
                 ? "Dịch đoạn đang chọn" : "Dịch lại đoạn đang chọn";
         }
         ApplyEditorActionPlan(chapter);

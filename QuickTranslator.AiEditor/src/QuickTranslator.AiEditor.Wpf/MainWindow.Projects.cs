@@ -27,7 +27,6 @@ public partial class MainWindow
     private readonly ObservableCollection<ProjectChapterItem> _projectChapters = [];
     private bool _syncingProjectUi;
     private bool _suppressProjectChapterOpen;
-    private bool _syncingProjectSummary;
     private int? _pendingProjectChapterNumber;
     private BookIntelligenceState? _bookIntelligenceState;
     private bool _bookKnowledgeContextEnabled;
@@ -235,19 +234,6 @@ public partial class MainWindow
         _pendingProjectChapterNumber = null;
         RefreshProjectChapterList();
         return (await _projectRepository.LoadChapterAsync(_projectSession, chapter.Id)).Chapter;
-    }
-
-    private async Task SyncProjectSummaryAsync()
-    {
-        if (_syncingProjectSummary || _projectSession is null || _service is null) return;
-        _syncingProjectSummary = true;
-        try
-        {
-            await _projectRepository.UpdateChapterSummaryAsync(_projectSession, _service.GetSnapshot());
-            RefreshProjectChapterList();
-        }
-        catch (Exception ex) { ShowError(ex); }
-        finally { _syncingProjectSummary = false; }
     }
 
     private int NextChapterNumber() => (_projectSession?.Manifest.Chapters.Where(x => x.DeletedAt is null).Select(x => x.Number).DefaultIfEmpty(0).Max() ?? 0) + 1;
@@ -689,7 +675,6 @@ public partial class MainWindow
             if (service?.GetSnapshot().Id == chapterId)
             {
                 await service.RenameAsync(title, chineseTitle);
-                await _projectRepository.UpdateChapterSummaryAsync(session, service.GetSnapshot());
                 if (ReferenceEquals(service, _service)) TitleInput.Text = service.GetSnapshot().Title;
             }
             else

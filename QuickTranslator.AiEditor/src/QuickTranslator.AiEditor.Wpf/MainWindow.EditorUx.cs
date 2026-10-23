@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
@@ -45,11 +46,11 @@ public partial class MainWindow
         }
     }
 
-    private EditorActionContext CreateEditorActionContext(ChapterDocument? chapter)
+    private EditorActionContext CreateEditorActionContext(EditorStateSnapshot? chapter)
     {
-        TranslationSegment? selected = chapter?.Segments.SingleOrDefault(s => s.Id == _selectedId);
+        SegmentEditorState? selected = chapter?.SelectedSegment;
         IReadOnlyDictionary<SegmentStatus, int> counts = Enum.GetValues<SegmentStatus>()
-            .ToDictionary(status => status, status => chapter?.Segments.Count(s => s.Status == status) ?? 0);
+            .ToDictionary(status => status, status => chapter?.Count(status) ?? 0);
         return new()
         {
             ProjectOpen = _projectSession is not null,
@@ -58,15 +59,15 @@ public partial class MainWindow
             RawSourceTextPresent = !string.IsNullOrWhiteSpace(ChapterInput.Text),
             SourceEditMode = _sourceEditMode,
             SingleRequestBusy = _busy,
-            LocalQueueStatus = chapter?.Queue.Status,
-            LocalQueueRunning = _queue?.IsRunning == true && chapter?.Queue.Status == QueueStatus.Running,
+            LocalQueueStatus = chapter?.QueueStatus,
+            LocalQueueRunning = _queue?.IsRunning == true && chapter?.QueueStatus == QueueStatus.Running,
             ProjectQueueRunning = _projectTranslationCoordinator?.IsRunning == true,
             PresetsReady = _presetsReady,
             UiAvailable = !_uiOperation && !_closing,
             SegmentCounts = counts,
-            RequiresRetranslationCount = chapter?.Segments.Count(s => s.RequiresRetranslation) ?? 0,
+            RequiresRetranslationCount = chapter?.RequiresRetranslation ?? 0,
             SelectedSegmentStatus = selected?.Status,
-            SelectedSegmentHasEditableDraft = !string.IsNullOrWhiteSpace(selected?.EditableText),
+            SelectedSegmentHasEditableDraft = selected?.HasEditableText == true,
             NextUnfinishedProjectChapterExists = HasNextUnfinishedProjectChapter()
         };
     }
@@ -88,7 +89,7 @@ public partial class MainWindow
         if (next is not null) await LoadProjectChapterAsync(next.ChapterId);
     }
 
-    private void ApplyEditorActionPlan(ChapterDocument? chapter)
+    private void ApplyEditorActionPlan(EditorStateSnapshot? chapter)
     {
         EditorActionContext context = CreateEditorActionContext(chapter);
         EditorActionPlan plan = EditorActionPolicy.Decide(context);
@@ -153,7 +154,7 @@ public partial class MainWindow
         ApplyReviewActionStates(context, chapter);
     }
 
-    private void UpdateEditorStateLabels(ChapterDocument? chapter)
+    private void UpdateEditorStateLabels(EditorStateSnapshot? chapter)
     {
         if (chapter is null)
         {
@@ -162,17 +163,17 @@ public partial class MainWindow
         }
         else
         {
-            int approved = chapter.Segments.Count(s => s.Status == SegmentStatus.Approved);
-            int review = chapter.Segments.Count(s => s.Status == SegmentStatus.AwaitingReview);
-            int issues = chapter.Segments.Count(s => s.Status == SegmentStatus.InspectionRequired || s.RequiresRetranslation);
-            int errors = chapter.Segments.Count(s => s.Status == SegmentStatus.Error);
-            int untranslated = chapter.Segments.Count(s => s.Status == SegmentStatus.Untranslated);
-            EditorContentStateText.Text = $"{approved}/{chapter.Segments.Count} đã duyệt  ·  {review} chờ duyệt  ·  {issues} cần kiểm tra  ·  {errors} lỗi  ·  {untranslated} chưa dịch";
+            int approved = chapter.Count(SegmentStatus.Approved);
+            int review = chapter.Count(SegmentStatus.AwaitingReview);
+            int issues = chapter.NeedsInspection;
+            int errors = chapter.Count(SegmentStatus.Error);
+            int untranslated = chapter.Count(SegmentStatus.Untranslated);
+            EditorContentStateText.Text = $"{approved}/{chapter.Total} đã duyệt  ·  {review} chờ duyệt  ·  {issues} cần kiểm tra  ·  {errors} lỗi  ·  {untranslated} chưa dịch";
         }
 
         string? processing = _busy ? "Đang dịch đoạn"
             : _projectTranslationCoordinator?.IsRunning == true ? "Queue Project đang chạy"
-            : chapter?.Queue.Status switch
+            : chapter?.QueueStatus switch
             {
                 QueueStatus.Running => "Queue chương đang chạy",
                 QueueStatus.PauseRequested => "Đã yêu cầu tạm dừng",
@@ -185,7 +186,7 @@ public partial class MainWindow
         EditorProcessingStateText.Visibility = processing is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private string? PrimaryBusinessReason(EditorActionKind kind, ChapterDocument? chapter) => kind switch
+    private string? PrimaryBusinessReason(EditorActionKind kind, EditorStateSnapshot? chapter) => kind switch
     {
         EditorActionKind.SaveSourceEdit when !HasPendingSourceEdit => "Nguyên văn chưa có thay đổi để lưu.",
         EditorActionKind.TranslateSegment when _selectedId is null => "Chọn một đoạn trước.",
@@ -212,7 +213,7 @@ public partial class MainWindow
         _ => context.UiAvailable
     };
 
-    private void ApplyReviewActionStates(EditorActionContext context, ChapterDocument? chapter)
+    private void ApplyReviewActionStates(EditorActionContext context, EditorStateSnapshot? chapter)
     {
         ApplyActionState(TranslateButton, TranslateButton.IsEnabled,
             EditorActionPolicy.DisabledReason(EditorActionKind.TranslateSegment, context));
