@@ -88,13 +88,6 @@ public sealed class ProjectTranslationSettings
     public bool BookKnowledgeContextEnabled { get; set; }
 }
 
-public sealed class ProjectExportSettings
-{
-    public string FileNameTemplate { get; set; } = "{number:0000} - {title}.txt";
-    public bool IncludeChapterTitle { get; set; } = true;
-    public bool UseUtf8Bom { get; set; }
-}
-
 public sealed record ProjectOpenResult(ProjectSession Session);
 
 public sealed class ProjectSession

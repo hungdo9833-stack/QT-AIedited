@@ -168,4 +168,3 @@ public sealed class BookIntelligenceState
 }
 
 public sealed record CorpusIndexProgress(int ProcessedChapters, int TotalChapters, int RescannedChapters, int EvidenceCount);
-public sealed record AnalyzerProgress(int ProcessedEvidence, int TotalEvidence, int PendingSuggestions);

@@ -119,12 +119,4 @@ public static class SemanticDependencies
         int marker = provenance.LineageKey.IndexOf(":deps=", StringComparison.Ordinal);
         return marker < 0 ? [] : provenance.LineageKey[(marker + 6)..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => Guid.ParseExact(x, "N")).ToArray();
     }
-    public static bool Current(SemanticBatch batch, MemoryEvidence proof, EntityMemoryState memory, IReadOnlyList<CensusSource> sources, EntityMemoryQuery? query = null)
-    {
-        var source = sources.SingleOrDefault(x => x.ChapterId == proof.ChapterId);
-        if (source is null || source.ChapterNumber != proof.ChapterNumber || CorpusIntegrityAuditor.SourceHash(source.OriginalText) != proof.SourceSha256 ||
-            (long)proof.StartUtf16 + proof.LengthUtf16 > source.OriginalText.Length || batch.ContextFactIds.Any(id => memory.Facts.All(x => x.Id != id)) ||
-            batch.ContextEventIds?.Any(id => memory.Events.All(x => x.Id != id)) == true) return false;
-        return batch.DependencyFingerprint == Fingerprint(query ?? new(memory, sources), batch.ContextFactIds.Concat(batch.ContextEventIds ?? []));
-    }
 }
