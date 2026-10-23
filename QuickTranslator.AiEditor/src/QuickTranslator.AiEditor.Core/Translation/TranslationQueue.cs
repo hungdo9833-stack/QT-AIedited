@@ -145,29 +145,23 @@ public sealed class TranslationQueue(TranslationService service)
         {
             var elapsed = CurrentElapsed();
             _watch = null;
+            _elapsedAtStart = elapsed;
             return elapsed;
         }
     }
 
     private TimeSpan CurrentElapsed()
     {
-        lock (_sync) return _watch is null ? service.GetSnapshot().Queue.Elapsed : _elapsedAtStart + _watch.Elapsed;
+        lock (_sync) return _elapsedAtStart + (_watch?.Elapsed ?? TimeSpan.Zero);
     }
 
     public QueueProgress GetProgress()
     {
-        var chapter = service.GetSnapshot();
-        int translated = chapter.Segments.Count(s => !s.RequiresRetranslation && !string.IsNullOrWhiteSpace(s.EditableText));
-        int errors = chapter.Segments.Count(s => s.Status == SegmentStatus.Error);
-        int inspection = chapter.Segments.Count(s => s.Status == SegmentStatus.InspectionRequired || s.RequiresRetranslation);
-        int remaining = chapter.Segments.Count(s => TranslationService.IsQueueEligible(s, chapter.Queue.Mode));
-        var durations = chapter.Segments.SelectMany(s => s.Attempts).Where(a => a.Outcome == AttemptOutcome.Completed &&
-            a.ModelOptions == chapter.Queue.ModelOptions && a.Metrics?.ClientElapsed.TotalSeconds > 0).Select(a => a.Metrics!.ClientElapsed.TotalSeconds).ToArray();
-        TimeSpan elapsed;
-        elapsed = CurrentElapsed();
-        TimeSpan? estimate = durations.Length >= 2 ? TimeSpan.FromSeconds(durations.Average() * remaining) : null;
-        return new(chapter.Queue.Status, chapter.Segments.Count, translated, errors, inspection, remaining,
-            chapter.Segments.SingleOrDefault(s => s.Id == chapter.Queue.CurrentSegmentId)?.Order, elapsed, estimate, chapter.Queue.LastError);
+        lock (_sync)
+        {
+            var progress = service.GetQueueProgress();
+            return _watch is null ? progress : progress with { Elapsed = _elapsedAtStart + _watch.Elapsed };
+        }
     }
 
     private void Notify() => ProgressChanged?.Invoke(this, EventArgs.Empty);

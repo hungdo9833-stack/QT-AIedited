@@ -24,6 +24,102 @@ public sealed partial class TranslationService
     private long _savedRevision = -1;
     private Projects.ProjectResources? _projectResources;
     private IBookKnowledgeContextProvider? _bookKnowledgeContext;
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<TranslationSegment, AttemptTimingCache> _attemptTimings = new();
+    internal long FullSnapshotCount { get; private set; }
+    internal long AttemptAggregateBuildCount { get; private set; }
+    internal long LightweightSnapshotCount { get; private set; }
+
+    // All callers hold _sync. Kept observable for deterministic clone-budget tests.
+    private ChapterDocument CloneChapter()
+    {
+        FullSnapshotCount++;
+        return DocumentJson.Clone(_chapter);
+    }
+
+    public EditorStateSnapshot GetEditorState(Guid? selectedId)
+    {
+        lock (_sync)
+        {
+            LightweightSnapshotCount++;
+            var segments = _chapter.Segments;
+            var selected = segments.SingleOrDefault(s => s.Id == selectedId);
+            int normalizedChanges = 0;
+            bool canUndoNormalization = false;
+            foreach (var segment in segments)
+                foreach (var run in segment.NormalizationHistory)
+                    if (!run.Reverted)
+                    {
+                        normalizedChanges += run.Changes.Count;
+                        canUndoNormalization = true;
+                    }
+            return new(_chapter.Title, selected is null ? null : new(selected.Id, selected.Status,
+                selected.Attempts.Count, !string.IsNullOrWhiteSpace(selected.EditableText), selected.Order,
+                selected.HanCharacterCount, selected.SourceText, selected.RequiresRetranslation, selected.UserDraft is not null),
+                segments.Count, segments.Count(s => s.Status == SegmentStatus.Untranslated),
+                segments.Count(s => s.Status == SegmentStatus.Translating),
+                segments.Count(s => s.Status == SegmentStatus.AwaitingReview),
+                segments.Count(s => s.Status == SegmentStatus.Approved),
+                segments.Count(s => s.Status == SegmentStatus.Error),
+                segments.Count(s => s.Status == SegmentStatus.InspectionRequired || s.RequiresRetranslation),
+                segments.Count(s => s.Status == SegmentStatus.InspectionRequired),
+                segments.Count(s => s.RequiresRetranslation), normalizedChanges, canUndoNormalization,
+                _chapter.BatchReplacementHistory.Any(r => !r.Reverted && !r.Automatic),
+                _chapter.SegmentationHistory.Count > 0, _chapter.Queue.Status);
+        }
+    }
+
+    public QueueProgress GetQueueProgress()
+    {
+        lock (_sync)
+        {
+            LightweightSnapshotCount++;
+            var queue = _chapter.Queue;
+            int translated = 0, errors = 0, inspection = 0, remaining = 0, durationCount = 0;
+            double durationSeconds = 0;
+            foreach (var segment in _chapter.Segments)
+            {
+                if (!segment.RequiresRetranslation && !string.IsNullOrWhiteSpace(segment.EditableText)) translated++;
+                if (segment.Status == SegmentStatus.Error) errors++;
+                if (segment.Status == SegmentStatus.InspectionRequired || segment.RequiresRetranslation) inspection++;
+                if (IsQueueEligible(segment, queue.Mode)) remaining++;
+                var cache = _attemptTimings.GetOrCreateValue(segment);
+                // Attempts are appended, then the last attempt is finalized under this lock.
+                // Structural edits/restores replace segment instances and therefore get fresh caches.
+                var outcome = segment.Attempts.LastOrDefault()?.Outcome;
+                if (cache.AttemptCount != segment.Attempts.Count || cache.LastOutcome != outcome || cache.Model != queue.ModelOptions)
+                {
+                    cache.AttemptCount = segment.Attempts.Count;
+                    cache.LastOutcome = outcome;
+                    cache.Model = queue.ModelOptions;
+                    cache.Count = 0;
+                    cache.Seconds = 0;
+                    foreach (var attempt in segment.Attempts)
+                        if (attempt.Outcome == AttemptOutcome.Completed && attempt.ModelOptions == queue.ModelOptions &&
+                            attempt.Metrics?.ClientElapsed.TotalSeconds > 0)
+                        {
+                            cache.Count++;
+                            cache.Seconds += attempt.Metrics.ClientElapsed.TotalSeconds;
+                        }
+                    AttemptAggregateBuildCount++;
+                }
+                durationCount += cache.Count;
+                durationSeconds += cache.Seconds;
+            }
+            TimeSpan? estimate = durationCount >= 2 ? TimeSpan.FromSeconds(durationSeconds / durationCount * remaining) : null;
+            return new(queue.Status, _chapter.Segments.Count, translated, errors, inspection, remaining,
+                _chapter.Segments.SingleOrDefault(s => s.Id == queue.CurrentSegmentId)?.Order,
+                queue.Elapsed, estimate, queue.LastError);
+        }
+    }
+
+    private sealed class AttemptTimingCache
+    {
+        public int AttemptCount = -1;
+        public AttemptOutcome? LastOutcome;
+        public ModelOptions? Model;
+        public int Count;
+        public double Seconds;
+    }
 
     public void UseProjectResources(Projects.ProjectResources resources)
     {
@@ -46,7 +142,7 @@ public sealed partial class TranslationService
     {
         lock (_sync)
         {
-            var snapshot = DocumentJson.Clone(_chapter);
+            var snapshot = CloneChapter();
             resourceRevision = _projectResources?.Revision;
             _projectResources?.ApplyTo(snapshot);
             return snapshot;
@@ -89,7 +185,7 @@ public sealed partial class TranslationService
         return chapter;
     }
 
-    public ChapterDocument GetSnapshot() { lock (_sync) return DocumentJson.Clone(_chapter); }
+    public ChapterDocument GetSnapshot() { lock (_sync) return CloneChapter(); }
     public ChapterDocument GetWorkingSnapshot() => GetOperationSnapshot();
     public bool HasUnsavedChanges { get { lock (_sync) return _revision > _savedRevision; } }
     public string SavePath { get { lock (_sync) return _store.GetPath(_chapter.Id); } }
@@ -324,7 +420,7 @@ public sealed partial class TranslationService
         {
             ChapterDocument snapshot;
             long revision;
-            lock (_sync) { snapshot = DocumentJson.Clone(_chapter); revision = _revision; }
+            lock (_sync) { snapshot = CloneChapter(); revision = _revision; }
             // Take the snapshot after acquiring the save gate, so a late save cannot restore old text.
             await _store.SaveAsync(snapshot, cancellationToken).ConfigureAwait(false);
             lock (_sync) _savedRevision = Math.Max(_savedRevision, revision);

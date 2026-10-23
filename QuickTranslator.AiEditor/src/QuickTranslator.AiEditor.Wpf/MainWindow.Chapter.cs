@@ -26,8 +26,14 @@ public partial class MainWindow
     {
         ChapterBlocksItems.ItemsSource = _chapterBlocks;
         Loaded += OnPresetsLoaded;
-        _progressTimer.Tick += (_, _) => RefreshQueueProgress();
+        _progressTimer.Tick += OnProgressTimerTick;
         _progressTimer.Start();
+    }
+
+    private void OnProgressTimerTick(object? sender, EventArgs e)
+    {
+        // Idle edits and state transitions refresh explicitly; only a live queue has a ticking clock.
+        if (_queue?.IsRunning == true) RefreshQueueProgress();
     }
 
     private void AttachChapter(ChapterDocument chapter)
@@ -53,7 +59,8 @@ public partial class MainWindow
         if (FollowQueueCheck.IsChecked == true && !DraftText.IsKeyboardFocusWithin && _service?.GetSnapshot().Queue.CurrentSegmentId is Guid current)
         { _selectedId = current; _shownAttemptId = null; }
         Refresh();
-        _ = SyncProjectSummaryAsync();
+        // RegisteredChapterStore publishes the summary with each durable queue checkpoint.
+        RefreshProjectChapterList();
     });
 
     private SegmenterOptions ReadSegmenterOptions() => new()
@@ -102,8 +109,6 @@ public partial class MainWindow
                 return;
             foreach (var seg in eligible)
                 await _service.ApproveAsync(seg.Id);
-            if (_projectSession is not null)
-                await _projectRepository.UpdateChapterSummaryAsync(_projectSession, _service.GetSnapshot());
             Refresh();
             RefreshProjectChapterList();
             SetAutosaveStatus("✓ Đã duyệt chương", pending: false);
@@ -207,7 +212,7 @@ public partial class MainWindow
     // Adjustment F (BL-14): Update draft in-place without re-binding or resetting IME/Caret/Undo on the active TextBox.
     private void OnChapterDraftChanged(Guid id, string text)
     {
-        if (_rendering || _closing || _service is null || !_service.GetSnapshot().Segments.Any(s => s.Id == id)) return;
+        if (_rendering || _closing || _service is null || _service.GetEditorState(id).SelectedSegment is null) return;
         _service.UpdateDraft(id, text);
         _pronounReport = null;
         _autosave.Start();
@@ -215,8 +220,8 @@ public partial class MainWindow
         if (!StatusText.Text.StartsWith("Lỗi:", StringComparison.Ordinal))
             SetStatus("Đã sửa khối bản dịch chương; thay đổi gắn với đúng đoạn và đang tự lưu.");
 
-        var snapshot = _service.GetSnapshot();
-        var updatedSegment = snapshot.Segments.SingleOrDefault(s => s.Id == id);
+        var snapshot = _service.GetEditorState(id);
+        var updatedSegment = snapshot.SelectedSegment;
         var block = _chapterBlocks.SingleOrDefault(b => b.Id == id);
         if (updatedSegment is not null && block is not null)
         {
@@ -228,9 +233,10 @@ public partial class MainWindow
             try { DraftText.Text = text; }
             finally { _rendering = false; }
         }
-        ChapterSummary.Text = $"{snapshot.Segments.Count} đoạn · đã duyệt {snapshot.Segments.Count(s => s.Status == SegmentStatus.Approved)} · " +
-            $"đã chuẩn hóa {snapshot.Segments.SelectMany(s => s.NormalizationHistory).Where(r => !r.Reverted).Sum(r => r.Changes.Count)} vị trí";
+        ChapterSummary.Text = $"{snapshot.Total} đoạn · đã duyệt {snapshot.Approved} · " +
+            $"đã chuẩn hóa {snapshot.NormalizedChanges} vị trí";
         UpdateButtons();
+        RefreshQueueProgress();
     }
 
     private void OnBilingualSourceLoaded(object sender, RoutedEventArgs e)
@@ -523,6 +529,11 @@ public partial class MainWindow
         }
 
         public void UpdateMetadataOnly(TranslationSegment segment, bool selected)
+            => UpdateMetadataOnly(new SegmentEditorState(segment.Id, segment.Status, segment.Attempts.Count,
+                !string.IsNullOrWhiteSpace(segment.EditableText), segment.Order, segment.HanCharacterCount,
+                segment.SourceText, segment.RequiresRetranslation, segment.UserDraft is not null), selected);
+
+        public void UpdateMetadataOnly(SegmentEditorState segment, bool selected)
         {
             SourceText = segment.SourceText;
             SourceHeader = $"Đoạn {segment.Order} · {segment.HanCharacterCount} chữ Hán";
@@ -530,7 +541,7 @@ public partial class MainWindow
             StatusBrush = SegmentStatusBrush(segment.Status);
             Label = $"{StatusDot} Đoạn {segment.Order} · {StatusLabel(segment.Status)}" +
                     (segment.RequiresRetranslation ? " · ranh giới đã đổi" : "") +
-                    (segment.UserDraft is not null ? " · nháp bảo vệ" : "");
+                    (segment.HasUserDraft ? " · nháp bảo vệ" : "");
             IsSelected = selected;
         }
 
