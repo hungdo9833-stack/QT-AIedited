@@ -57,8 +57,9 @@ public sealed partial class ProjectRepository
         CancellationToken token)
     {
         string path = session.ChapterStore.GetPath(chapterId);
-        if (session.Manifest.Chapters.Any(entry => string.Equals(session.Resolve(entry.RelativePath), path,
-            StringComparison.OrdinalIgnoreCase)) || !File.Exists(path) || !File.Exists(ImportReceiptPath(path)))
+        if (!File.Exists(path) || !File.Exists(ImportReceiptPath(path)) ||
+            session.Manifest.Chapters.Any(entry => string.Equals(session.Resolve(entry.RelativePath), path,
+                StringComparison.OrdinalIgnoreCase)))
             return null;
         byte[] receipt = await File.ReadAllBytesAsync(ImportReceiptPath(path), token).ConfigureAwait(false);
         byte[] bytes = await File.ReadAllBytesAsync(path, token).ConfigureAwait(false);
@@ -84,10 +85,12 @@ public sealed partial class ProjectRepository
         finally { TryDeleteUnreferencedFile(session, stage); }
     }
 
-    private static void TryDeleteUnreferencedFile(ProjectSession session, string path)
+    private static void TryDeleteUnreferencedFile(ProjectSession session, string path,
+        IReadOnlySet<string>? referencedPaths = null)
     {
-        if (session.Manifest.Chapters.Any(entry => string.Equals(session.Resolve(entry.RelativePath), path,
-            StringComparison.OrdinalIgnoreCase))) return;
+        if (!File.Exists(path)) return;
+        if (referencedPaths?.Contains(path) ?? session.Manifest.Chapters.Any(entry =>
+            string.Equals(session.Resolve(entry.RelativePath), path, StringComparison.OrdinalIgnoreCase))) return;
         try { File.Delete(path); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         { System.Diagnostics.Trace.TraceWarning($"Could not clean up committed project file {path}: {error.Message}"); }

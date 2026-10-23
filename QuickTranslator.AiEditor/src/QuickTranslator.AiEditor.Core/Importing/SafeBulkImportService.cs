@@ -131,11 +131,17 @@ public sealed class SafeBulkImportService(ProjectRepository repository)
 
             MutableOutcome[] chunk = chunks[chunkIndex];
             var documents = chunk.Select(x => (CreateChapter(session, plan, x.Item, defaults, resources), x.Item.Number!.Value)).ToArray();
-            var published = new HashSet<Guid>();
+            int stagedChapters = 0;
+            int committedChapters = outcomes.Count(x => x.State is BulkImportChapterState.Imported or BulkImportChapterState.AlreadyImported);
             try
             {
                 await repository.ImportDetectedChapterChunkAsync(session, documents,
-                    $"DetectedBulkImport:{importId:N}:{chunkIndex + 1}/{chunks.Count}", id => published.Add(id),
+                    $"DetectedBulkImport:{importId:N}:{chunkIndex + 1}/{chunks.Count}", _ =>
+                    {
+                        stagedChapters++;
+                        progress?.Report(new(completedChunks, chunks.Count, committedChapters, outcomes.Length,
+                            $"Đã ghi tạm {stagedChapters}/{chunk.Length} chương trong chunk {chunkIndex + 1}/{chunks.Count}."));
+                    },
                     options.ReplaceSoftDeletedHistory, cancellationToken)
                     .ConfigureAwait(false);
                 await VerifyPersistedItemsAsync(session.ManifestPath, plan, chunk.Select(x => x.Item), cancellationToken)

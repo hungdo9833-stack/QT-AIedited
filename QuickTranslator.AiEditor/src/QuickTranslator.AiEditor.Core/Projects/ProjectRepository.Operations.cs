@@ -213,16 +213,20 @@ public sealed partial class ProjectRepository
 
     internal async Task<Guid> ImportDetectedChapterChunkAsync(ProjectSession session,
         IReadOnlyList<(ChapterDocument Source, int Number)> chapters, string operation,
-        Action<Guid> published, bool replaceSoftDeletedHistory, CancellationToken token)
+        Action<Guid> staged, bool replaceSoftDeletedHistory, CancellationToken token)
     {
         Guid operationId = Guid.NewGuid();
         await session.OperationGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
+            if (chapters.Count == 0) return operationId;
+            ProjectManifest after = Clone(session.Manifest);
+            var receipts = new List<string>(chapters.Count);
+            var history = new List<(string Path, byte[] Bytes)>();
             foreach ((ChapterDocument source, int number) in chapters)
             {
                 token.ThrowIfCancellationRequested();
-                ProjectChapterEntry? replaced = session.Manifest.Chapters.SingleOrDefault(x => x.ChapterId == source.Id);
+                ProjectChapterEntry? replaced = after.Chapters.SingleOrDefault(x => x.ChapterId == source.Id);
                 string? deletedPath = null;
                 byte[]? deletedBytes = null;
                 if (replaced is not null)
@@ -235,7 +239,7 @@ public sealed partial class ProjectRepository
                     if (deleted.Id != replaced.ChapterId || deleted.ProjectId != session.Manifest.ProjectId)
                         throw new InvalidDataException("File History không thuộc ChapterId/Project cần thay thế.");
                 }
-                if (session.Manifest.Chapters.Any(x => x.ChapterId != source.Id && x.DeletedAt is null && x.Number == number))
+                if (after.Chapters.Any(x => x.ChapterId != source.Id && x.DeletedAt is null && x.Number == number))
                     throw new InvalidOperationException("Số chương nhập đã thuộc một chapter active khác.");
                 string relative = $"Chapters/{source.Id:D}.qtaie.json";
                 string destination = session.Resolve(relative);
@@ -251,29 +255,37 @@ public sealed partial class ProjectRepository
                     await WritePendingImportAsync(session, saved, token).ConfigureAwait(false);
                 }
                 FaultPoint?.Invoke("AfterImportChapterWrite");
-                ProjectManifest after = Clone(session.Manifest);
                 if (replaced is not null) after.Chapters.RemoveAll(x => x.ChapterId == replaced.ChapterId);
                 after.Chapters.Add(ToEntry(saved, number));
                 after.CurrentChapterId = saved.Id;
-                NormalizeManifest(after);
-                await WriteFastManifestAsync(session.ManifestPath, after, token).ConfigureAwait(false);
-                session.Manifest = after;
-                // Only retire the old History bytes after the new manifest is durable. Cleanup cannot undo a commit.
-                TryDeleteUnreferencedFile(session, ImportReceiptPath(destination));
-                if (deletedPath is not null)
-                {
-                    try
-                    {
-                        if ((await File.ReadAllBytesAsync(deletedPath, CancellationToken.None).ConfigureAwait(false))
-                            .AsSpan().SequenceEqual(deletedBytes))
-                            TryDeleteUnreferencedFile(session, deletedPath);
-                    }
-                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-                    { System.Diagnostics.Trace.TraceWarning($"Could not retire old History file: {error.Message}"); }
-                }
-                published(saved.Id);
-                PublishManifestCommitted(session, operation);
+                receipts.Add(ImportReceiptPath(destination));
+                if (deletedPath is not null) history.Add((deletedPath, deletedBytes!));
+                staged(saved.Id);
             }
+            // Until this single atomic replacement succeeds, the live manifest and all History files
+            // remain untouched. Staged chapters keep their receipts so the entire chunk can resume.
+            token.ThrowIfCancellationRequested();
+            NormalizeManifest(after);
+            FaultPoint?.Invoke("BeforeImportManifestWrite");
+            await WriteFastManifestAsync(session.ManifestPath, after, token).ConfigureAwait(false);
+            session.Manifest = after;
+            FaultPoint?.Invoke("AfterImportManifestWrite");
+            // Cleanup cannot undo a durable commit and must finish even if cancellation arrives now.
+            var referencedPaths = after.Chapters.Select(entry => session.Resolve(entry.RelativePath))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (string receipt in receipts) TryDeleteUnreferencedFile(session, receipt, referencedPaths);
+            foreach (var old in history)
+            {
+                try
+                {
+                    if ((await File.ReadAllBytesAsync(old.Path, CancellationToken.None).ConfigureAwait(false))
+                        .AsSpan().SequenceEqual(old.Bytes))
+                        TryDeleteUnreferencedFile(session, old.Path, referencedPaths);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                { System.Diagnostics.Trace.TraceWarning($"Could not retire old History file: {error.Message}"); }
+            }
+            PublishManifestCommitted(session, operation);
             return operationId;
         }
         finally { session.OperationGate.Release(); }
