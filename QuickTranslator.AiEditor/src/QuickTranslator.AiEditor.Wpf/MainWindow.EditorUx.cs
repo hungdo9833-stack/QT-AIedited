@@ -263,6 +263,30 @@ public partial class MainWindow
         if (_currentEditorActionPlan is { } plan) await DispatchEditorActionAsync(plan.Primary.Kind);
     }
 
+    // MenuItem lives in a Popup; copy the state from the live action-policy buttons
+    // when the menu opens instead of relying solely on cross-Popup ElementName bindings.
+    private void OnEditorActionsOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menu) return;
+        Button[] actions =
+        [
+            TranslateAllButton, PauseQueueButton, ResumeQueueButton, RetryErrorsButton,
+            ApproveCurrentButton, ApproveAllChapterButton, EditSourceButton,
+            SaveSourceEditButton, CancelSourceEditButton, CancelQueueButton,
+            SecondaryActionButton1, SecondaryActionButton2, SecondaryActionButton3
+        ];
+        MenuItem[] commands = menu.Items.OfType<MenuItem>().ToArray();
+        if (commands.Length < actions.Length) return;
+        for (int i = 0; i < actions.Length; i++)
+        {
+            commands[i].Visibility = actions[i].Visibility;
+            commands[i].IsEnabled = actions[i].IsEnabled;
+            if (i < 10) continue;
+            commands[i].Header = actions[i].Content;
+            commands[i].Tag = actions[i].Tag;
+        }
+    }
+
     private async void OnSecondaryAction(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: EditorActionKind kind }) await DispatchEditorActionAsync(kind);

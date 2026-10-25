@@ -106,6 +106,23 @@ public partial class MainWindow
             btn.Content = _navRailCollapsed ? "»" : "«";
     }
 
+    private void OnChapterImportMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menu && menu.Items.Count > 1 && menu.Items[1] is MenuItem webImport)
+            webImport.IsEnabled = ProjectImportWebButton.IsEnabled;
+    }
+
+    private void OnChapterActionsMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menu) return;
+        MenuItem[] entries = menu.Items.OfType<MenuItem>().ToArray();
+        if (entries.Length < 5) return;
+        entries[1].IsEnabled = ProjectNewChapterButton.IsEnabled;
+        entries[2].IsEnabled = ProjectRenameChapterButton.IsEnabled;
+        entries[3].IsEnabled = ProjectDuplicateChapterButton.IsEnabled;
+        entries[4].IsEnabled = ProjectDeleteChapterButton.IsEnabled;
+    }
+
     private void OnSwitchLeftPanelToChapters(object sender, RoutedEventArgs e)
     {
         SetPanelPreference(PanelId.ProjectSidebar, PanelPreference.PinnedShown);
@@ -468,7 +485,7 @@ public partial class MainWindow
         try
         {
             ProjectTranslationCoordinator? coordinator = _projectTranslationCoordinator;
-            if (coordinator?.CurrentJob is null) return;
+            if (coordinator is null || coordinator.CurrentJob is null) return;
             if (coordinator.IsRunning)
             {
                 QueueMiniActionButton.IsEnabled = false;

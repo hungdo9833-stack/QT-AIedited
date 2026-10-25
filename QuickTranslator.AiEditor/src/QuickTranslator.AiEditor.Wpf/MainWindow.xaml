@@ -96,7 +96,7 @@
             </DockPanel>
             </StackPanel>
         </Border>
-        <Border x:Name="ShellNavigation" DockPanel.Dock="Left" Width="204" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="4,10">
+        <Border x:Name="ShellNavigation" DockPanel.Dock="Left" Width="184" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="4,10">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Bottom">
                     <Button x:Name="ShellQueueButton" Content="Hàng đợi · chưa chạy" ui:ButtonIcon.Glyph="&#xE895;" Click="OnOpenQueueStatus" Style="{StaticResource NavigationToolButton}" ToolTip="Mở Hàng đợi; khi hàng đợi đang tạm dừng, bấm để tiếp tục dịch" Visibility="Collapsed"/>
@@ -179,11 +179,11 @@
                     <!-- Quick chapter actions; named legacy buttons stay for enable-state bindings. -->
                         <StackPanel>
                             <Menu Background="Transparent" Padding="0" Margin="0,0,0,4">
-                                <MenuItem Header="Nhập truyện">
+                                <MenuItem Header="Nhập truyện" SubmenuOpened="OnChapterImportMenuOpened">
                                     <MenuItem Header="Từ tệp TXT…" Click="OnAddChapterFromText"/>
                                     <MenuItem Header="Từ website…" Click="OnImportWeb" IsEnabled="{Binding IsEnabled, ElementName=ProjectImportWebButton}"/>
                                 </MenuItem>
-                                <MenuItem Header="Tác vụ chương">
+                                <MenuItem Header="Tác vụ chương" SubmenuOpened="OnChapterActionsMenuOpened">
                                     <MenuItem Header="Quản lý chương…" Click="OnOpenChapterManager"/>
                                     <MenuItem Header="Chương mới" Click="OnNewProjectChapter"/>
                                     <Separator/>
@@ -328,7 +328,7 @@
                         </Popup>
                         </StackPanel>
                         <Menu Background="Transparent" Padding="0">
-                            <MenuItem Header="Thêm ▾">
+                            <MenuItem Header="Thêm ▾" SubmenuOpened="OnEditorActionsOpened">
                                 <MenuItem Header="Dịch chương" Click="OnTranslateAll" Visibility="{Binding Visibility, ElementName=TranslateAllButton}" IsEnabled="{Binding IsEnabled, ElementName=TranslateAllButton}"/>
                                 <MenuItem Header="Tạm dừng" Click="OnPauseQueue" Visibility="{Binding Visibility, ElementName=PauseQueueButton}" IsEnabled="{Binding IsEnabled, ElementName=PauseQueueButton}"/>
                                 <MenuItem Header="Tiếp tục" Click="OnResumeQueue" Visibility="{Binding Visibility, ElementName=ResumeQueueButton}" IsEnabled="{Binding IsEnabled, ElementName=ResumeQueueButton}"/>
