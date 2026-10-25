@@ -456,6 +456,32 @@ public partial class MainWindow
         else await OpenQueueStatusAsync();
     }
 
+    private async void OnShowQueueDetails(object sender, RoutedEventArgs e)
+    {
+        try { await OpenQueueStatusAsync(); }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async void OnQueueMiniToggle(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ProjectTranslationCoordinator? coordinator = _projectTranslationCoordinator;
+            if (coordinator?.CurrentJob is null) return;
+            if (coordinator.IsRunning)
+            {
+                QueueMiniActionButton.IsEnabled = false;
+                await coordinator.PauseAsync();
+                RefreshShellQueueStatus();
+            }
+            else if (coordinator.CurrentJob.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted)
+                OnResumeProjectTranslationFromShell(sender, e);
+            else await OpenQueueStatusAsync();
+        }
+        catch (Exception ex) { ShowError(ex); }
+        finally { QueueMiniActionButton.IsEnabled = true; }
+    }
+
     private async Task OpenQueueStatusAsync()
     {
         if (_projectSession is null) { NavigateTo(WorkspaceId.Queue); return; }
@@ -743,6 +769,38 @@ public partial class MainWindow
             ? null : _projectTranslationCoordinator.GetProgress();
         bool resumable = progress?.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted;
         _shellQueueResumable = resumable;
+        // Compact progress follows the queue across all workspaces, including Reader.
+        bool showQueue = progress is not null && progress.Status is
+            (ProjectTranslationJobStatus.Ready or ProjectTranslationJobStatus.Running or
+             ProjectTranslationJobStatus.PauseRequested or ProjectTranslationJobStatus.Paused or
+             ProjectTranslationJobStatus.Interrupted or ProjectTranslationJobStatus.Cancelling or
+             ProjectTranslationJobStatus.CompletedWithErrors);
+        QueueMiniBar.Visibility = showQueue ? Visibility.Visible : Visibility.Collapsed;
+        if (showQueue && progress is not null)
+        {
+            string state = progress.Status switch
+            {
+                ProjectTranslationJobStatus.Ready => "Sẵn sàng",
+                ProjectTranslationJobStatus.Running => "Đang dịch",
+                ProjectTranslationJobStatus.PauseRequested => "Đang tạm dừng",
+                ProjectTranslationJobStatus.Paused => "Đã tạm dừng",
+                ProjectTranslationJobStatus.Interrupted => "Chờ tiếp tục",
+                ProjectTranslationJobStatus.Cancelling => "Đang dừng",
+                ProjectTranslationJobStatus.CompletedWithErrors => "Hoàn tất có lỗi",
+                _ => "Hàng đợi"
+            };
+            QueueMiniSummary.Text = $"{state} · {progress.CompletedChapters:N0}/{progress.TotalChapters:N0} chương" +
+                (progress.FailedChapters > 0 ? $" · {progress.FailedChapters} lỗi" : "");
+            int finished = progress.CompletedChapters + progress.FailedChapters + progress.SkippedChapters;
+            QueueMiniProgress.Value = progress.TotalChapters == 0 ? 0 :
+                Math.Clamp(100d * finished / progress.TotalChapters, 0, 100);
+            QueueMiniActionButton.Content = resumable ? "Tiếp tục" : "Tạm dừng";
+            QueueMiniActionButton.Visibility = resumable || progress.Status == ProjectTranslationJobStatus.Running
+                ? Visibility.Visible : Visibility.Collapsed;
+            QueueMiniActionButton.IsEnabled = resumable || progress.Status == ProjectTranslationJobStatus.Running;
+            QueueMiniBar.ToolTip = progress.CurrentChapterTitle is null ? null :
+                $"Đang xử lý: {progress.CurrentChapterTitle}";
+        }
         ShellQueueButton.ToolTip = resumable && progress is not null
             ? $"Đã dịch {progress.CompletedChapters:N0}/{progress.TotalChapters:N0} chương. " +
               $"Còn {Math.Max(0, progress.TotalChapters - progress.CompletedChapters - progress.SkippedChapters):N0} chương. Bấm để tiếp tục dịch."

@@ -23,12 +23,22 @@
                 <MenuItem x:Name="RecentProjectsMenu" Header="Dự án _gần đây" SubmenuOpened="OnRecentProjectsOpened"/>
                 <Separator/>
                 <MenuItem Header="Đóng dự á_n" Click="OnCloseProject"/>
+                <Separator/>
+                <MenuItem Header="Lưu thay đổi" Click="OnSaveProgress"/>
             </MenuItem>
             <MenuItem Header="_Dự án">
                 <MenuItem x:Name="ProjectImportWebMenuItem" Header="Nhập truyện từ web…" Click="OnImportWeb" IsEnabled="False"/>
                 <MenuItem Header="_Thư viện dự án…" Click="OnShowProjectLibrary"/>
                 <MenuItem Header="Th_uộc tính…" Click="OnEditProjectProperties"/>
+                <MenuItem Header="Quản lý chương…" Click="OnOpenChapterManager"/>
+                <MenuItem Header="Hàng đợi dịch…" Click="OnShowQueueDetails"/>
                 <MenuItem Header="_Mở thư mục" Click="OnOpenProjectFolder"/>
+            </MenuItem>
+            <MenuItem Header="_Hiển thị">
+                <MenuItem Header="Ẩn / hiện mục lục" Click="OnToggleProjectSidebar"/>
+                <MenuItem Header="Ẩn / hiện Inspector" Click="OnToggleInspector"/>
+                <Separator/>
+                <MenuItem Header="Chuyển sáng / tối" Click="OnToggleShellTheme"/>
             </MenuItem>
         </Menu>
         <!-- Kept for code-behind compatibility; all commands are available from the menu bar above. -->
@@ -63,7 +73,20 @@
             </DockPanel>
         </Border>
         <Border x:Name="GlobalStatus" DockPanel.Dock="Bottom" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="10,5">
-            <DockPanel>
+            <StackPanel>
+                <Grid x:Name="QueueMiniBar" Visibility="Collapsed" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="QueueMiniSummary" Text="Hàng đợi dịch" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" FontSize="12" Margin="0,0,12,0" TextTrimming="CharacterEllipsis" MaxWidth="300"/>
+                    <ProgressBar x:Name="QueueMiniProgress" Grid.Column="1" Height="5" VerticalAlignment="Center" Minimum="0" Maximum="100" Value="0" Background="{DynamicResource EditorSurfaceBrush}" Foreground="{DynamicResource PrimaryBrush}" Margin="0,0,12,0"/>
+                    <Button x:Name="QueueMiniActionButton" Grid.Column="2" Content="Tạm dừng" Click="OnQueueMiniToggle" Margin="0,0,6,0" Padding="8,2" ToolTipService.ShowOnDisabled="True"/>
+                    <Button Grid.Column="3" Content="Chi tiết…" Click="OnShowQueueDetails" Padding="8,2" ToolTip="Mở danh sách và tiến độ từng chương, không tự tiếp tục dịch"/>
+                </Grid>
+                <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0">
                     <TextBlock x:Name="AutosaveStatusText" Text="✓ Đã tự lưu" TextWrapping="NoWrap" Foreground="{DynamicResource SuccessBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,14,0" AutomationProperties.LiveSetting="Polite"/>
                     <Button Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)" AutomationProperties.Name="Backend dịch · mở Quản lý GPU"><TextBlock x:Name="GpuBackendStatus" Text="Local · llama-server Local · Index-Translate-9B-Q4_K_M" TextWrapping="NoWrap" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
@@ -71,29 +94,30 @@
                 </StackPanel>
                 <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." Foreground="{DynamicResource TextBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
             </DockPanel>
+            </StackPanel>
         </Border>
         <Border x:Name="ShellNavigation" DockPanel.Dock="Left" Width="204" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="4,10">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Bottom">
                     <Separator Margin="8"/>
                     <TextBlock Text="CÔNG CỤ" Margin="14,4,8,6" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
-                    <Button x:Name="ShellQueueButton" Content="Hàng đợi · chưa chạy" ui:ButtonIcon.Glyph="&#xE895;" Click="OnOpenQueueStatus" Style="{StaticResource NavigationToolButton}" ToolTip="Mở Hàng đợi; khi hàng đợi đang tạm dừng, bấm để tiếp tục dịch"/>
-                    <Button x:Name="ProjectSidebarToggleButton" Content="Ẩn mục lục" ui:ButtonIcon.Glyph="&#xE8A0;" Click="OnToggleProjectSidebar" Style="{StaticResource NavigationToolButton}" ToolTip="Ẩn/Hiện mục lục chương (Ctrl+B)">
+                    <Button x:Name="ShellQueueButton" Content="Hàng đợi · chưa chạy" ui:ButtonIcon.Glyph="&#xE895;" Click="OnOpenQueueStatus" Style="{StaticResource NavigationToolButton}" ToolTip="Mở Hàng đợi; khi hàng đợi đang tạm dừng, bấm để tiếp tục dịch" Visibility="Collapsed"/>
+                    <Button x:Name="ProjectSidebarToggleButton" Content="Ẩn mục lục" ui:ButtonIcon.Glyph="&#xE8A0;" Click="OnToggleProjectSidebar" Style="{StaticResource NavigationToolButton}" ToolTip="Ẩn/Hiện mục lục chương (Ctrl+B)" Visibility="Collapsed">
                         <Button.ContextMenu><ContextMenu>
                             <MenuItem Header="Tự động" Tag="ProjectSidebar.Auto" Click="OnPanelPreferenceMenuClick"/>
                             <MenuItem Header="Ghim hiện" Tag="ProjectSidebar.PinnedShown" Click="OnPanelPreferenceMenuClick"/>
                             <MenuItem Header="Ghim ẩn" Tag="ProjectSidebar.PinnedHidden" Click="OnPanelPreferenceMenuClick"/>
                         </ContextMenu></Button.ContextMenu>
                     </Button>
-                    <Button x:Name="InspectorToggleButton" Content="Ẩn Inspector" ui:ButtonIcon.Glyph="&#xE946;" Click="OnToggleInspector" Style="{StaticResource NavigationToolButton}" ToolTip="Ẩn/Hiện Inspector (Ctrl+Shift+I)">
+                    <Button x:Name="InspectorToggleButton" Content="Ẩn Inspector" ui:ButtonIcon.Glyph="&#xE946;" Click="OnToggleInspector" Style="{StaticResource NavigationToolButton}" ToolTip="Ẩn/Hiện Inspector (Ctrl+Shift+I)" Visibility="Collapsed">
                         <Button.ContextMenu><ContextMenu>
                             <MenuItem Header="Tự động" Tag="Inspector.Auto" Click="OnPanelPreferenceMenuClick"/>
                             <MenuItem Header="Ghim hiện" Tag="Inspector.PinnedShown" Click="OnPanelPreferenceMenuClick"/>
                             <MenuItem Header="Ghim ẩn" Tag="Inspector.PinnedHidden" Click="OnPanelPreferenceMenuClick"/>
                         </ContextMenu></Button.ContextMenu>
                     </Button>
-                    <Button x:Name="ThemeToggleButton" Content="Light" ui:ButtonIcon.Glyph="&#xE793;" Click="OnToggleShellTheme" Style="{StaticResource NavigationToolButton}" ToolTip="Chuyển sang giao diện này (Dark / Light)"/>
-                    <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" Style="{StaticResource NavigationToolButton}" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)"/>
+                    <Button x:Name="ThemeToggleButton" Content="Light" ui:ButtonIcon.Glyph="&#xE793;" Click="OnToggleShellTheme" Style="{StaticResource NavigationToolButton}" ToolTip="Chuyển sang giao diện này (Dark / Light)" Visibility="Collapsed"/>
+                    <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" Style="{StaticResource NavigationToolButton}" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)" Visibility="Collapsed"/>
                     <Separator Margin="8"/>
                     <TextBlock Text="TÙY CHỌN" Margin="14,4,8,6" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
                     <Button x:Name="SettingsNavButton" Content="Cài đặt" ui:ButtonIcon.Glyph="&#xE713;" Tag="Settings" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
