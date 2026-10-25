@@ -35,7 +35,7 @@ public partial class MainWindow
                 ShowReaderWorkspace();
                 break;
             case WorkspaceId.Resources:
-                ShowResourcesWorkspace("Dictionary");
+                ShowResourcesWorkspace("Characters");
                 break;
             case WorkspaceId.Settings:
                 ShowSettingsWorkspace();

@@ -96,7 +96,7 @@ public partial class MainWindow
         TogglePanelPreference(PanelId.ProjectSidebar);
 
     // The rail also holds the shell tools (queue, panels, theme, save), so it is wide enough for their labels.
-    private double NavRailWidth => _navRailCollapsed ? 56 : (_compactShell ? 172 : 204);
+    private double NavRailWidth => _navRailCollapsed ? 56 : (_compactShell ? 160 : 184);
 
     private void OnToggleNavRail(object sender, RoutedEventArgs e)
     {
@@ -405,9 +405,10 @@ public partial class MainWindow
         CurrentWorkspace = WorkspaceId.Resources;
         ApplyWorkspaceVisibility(CurrentWorkspace);
         MarkActiveNavigation(WorkspaceId.Resources);
-        string target = section ?? "Dictionary";
+        string target = section ?? "Characters";
         ResourcesNavigation.SelectedItem = ResourcesNavigation.Items.OfType<ListBoxItem>()
             .FirstOrDefault(item => string.Equals(item.Tag as string, target, StringComparison.OrdinalIgnoreCase));
+        ApplyResourcesSelection();
     }
 
     internal void ActivateShellSection(string section)

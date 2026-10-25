@@ -19,7 +19,7 @@ internal sealed class WorkspaceLayoutPreferences
     public bool ProjectSidebarVisible { get; set; } = true;
     public bool FourPaneMode { get; set; }
     public double InspectorWidth { get; set; } = 300;
-    public double ProjectSidebarWidth { get; set; } = 290;
+    public double ProjectSidebarWidth { get; set; } = 260;
     public double TwoPaneSourceStar { get; set; } = 1;
     public double SegmentNavigatorWidth { get; set; } = 250;
     public double FourPaneLeftStar { get; set; } = 1;

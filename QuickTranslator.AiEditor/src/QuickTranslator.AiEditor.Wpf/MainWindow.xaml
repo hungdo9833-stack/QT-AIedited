@@ -99,8 +99,6 @@
         <Border x:Name="ShellNavigation" DockPanel.Dock="Left" Width="204" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="4,10">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Bottom">
-                    <Separator Margin="8"/>
-                    <TextBlock Text="CÔNG CỤ" Margin="14,4,8,6" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
                     <Button x:Name="ShellQueueButton" Content="Hàng đợi · chưa chạy" ui:ButtonIcon.Glyph="&#xE895;" Click="OnOpenQueueStatus" Style="{StaticResource NavigationToolButton}" ToolTip="Mở Hàng đợi; khi hàng đợi đang tạm dừng, bấm để tiếp tục dịch" Visibility="Collapsed"/>
                     <Button x:Name="ProjectSidebarToggleButton" Content="Ẩn mục lục" ui:ButtonIcon.Glyph="&#xE8A0;" Click="OnToggleProjectSidebar" Style="{StaticResource NavigationToolButton}" ToolTip="Ẩn/Hiện mục lục chương (Ctrl+B)" Visibility="Collapsed">
                         <Button.ContextMenu><ContextMenu>
@@ -150,7 +148,7 @@
             </Border>
         </Popup>
         <ContentControl x:Name="ProjectSidebarDockHost" DockPanel.Dock="Left">
-        <Border x:Name="ProjectSidebar" Width="290" Visibility="Collapsed" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="0,0,10,0" Margin="0,0,10,0">
+        <Border x:Name="ProjectSidebar" Width="260" Visibility="Collapsed" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Padding="0,0,10,0" Margin="0,0,10,0">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top">
                     <DockPanel LastChildFill="False">
@@ -161,6 +159,8 @@
                         <TextBlock x:Name="ActiveProjectTitle" Text="Dự án" FontSize="18" FontWeight="SemiBold" Margin="4" TextTrimming="CharacterEllipsis"/>
                     </DockPanel>
                     <TextBox x:Name="ChapterSearchInput" ToolTip="Tìm theo số hoặc tên chương" TextChanged="OnChapterSearchChanged" AutomationProperties.Name="Tìm chương" AutomationProperties.HelpText="Tìm theo số hoặc tên chương"/>
+                    <Expander Header="Bộ lọc &amp; sắp xếp" Foreground="{DynamicResource MutedBrush}" IsExpanded="False" Margin="2,4">
+                        <StackPanel>
                     <ComboBox x:Name="ChapterStateFilter" SelectionChanged="OnChapterSearchChanged" AutomationProperties.Name="Lọc trạng thái chương">
                         <ComboBoxItem Tag="All" IsSelected="True">Tất cả trạng thái</ComboBoxItem>
                         <ComboBoxItem Tag="Untranslated">Chưa dịch</ComboBoxItem>
@@ -174,6 +174,8 @@
                         <ComboBoxItem Tag="Title">Sắp theo tên</ComboBoxItem>
                         <ComboBoxItem Tag="Updated">Mới sửa trước</ComboBoxItem>
                     </ComboBox>
+                        </StackPanel>
+                    </Expander>
                     <!-- Quick chapter actions; named legacy buttons stay for enable-state bindings. -->
                         <StackPanel>
                             <Menu Background="Transparent" Padding="0" Margin="0,0,0,4">
@@ -814,11 +816,11 @@
            </Grid>
            <ContentControl x:Name="StartScreenHost" Visibility="Collapsed" Margin="0,72,0,0" Panel.ZIndex="10"/>
            <Grid x:Name="ResourcesWorkspaceRoot" Margin="8" Visibility="Collapsed">
-               <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition/></Grid.ColumnDefinitions>
+               <Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition/></Grid.ColumnDefinitions>
                <ListBox x:Name="ResourcesNavigation" SelectionChanged="OnResourcesNavigationChanged" SelectedIndex="0" Background="{DynamicResource SurfaceBrush}" BorderThickness="0" Padding="6" AutomationProperties.Name="Danh sách nhóm tài nguyên">
-                   <ListBoxItem Tag="Dictionary">Từ điển &amp; Knowledge Context</ListBoxItem>
                    <ListBoxItem Tag="Characters">Nhân vật &amp; xưng hô</ListBoxItem>
-                   <ListBoxItem Tag="Prompts">Prompt Presets</ListBoxItem>
+                   <ListBoxItem Tag="Dictionary">Thuật ngữ &amp; ngữ cảnh</ListBoxItem>
+                   <ListBoxItem Tag="Prompts">Prompt nâng cao</ListBoxItem>
                </ListBox>
                <Grid Grid.Column="1" Margin="16,0,0,0">
                    <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -873,22 +875,26 @@
                                </WrapPanel>
                            </Grid>
                        </Border>
-                       <Border Grid.Row="2" Style="{StaticResource Card}">
-                           <StackPanel>
-                               <TextBlock Text="Ngữ cảnh ngắn đã xác nhận" FontWeight="SemiBold"/>
-                               <TextBox x:Name="ContextNotesInput" Height="110" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxLength="1000" TextChanged="OnSettingsInputChanged"/>
-                               <TextBlock x:Name="ContextCountText" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}"/>
-                           </StackPanel>
-                       </Border>
+                       <Expander Grid.Row="2" Header="Ngữ cảnh truyện (tùy chọn)" IsExpanded="False" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0">
+                           <Border Style="{StaticResource Card}">
+                               <StackPanel>
+                                   <TextBlock Text="Ngữ cảnh ngắn đã xác nhận" FontWeight="SemiBold"/>
+                                   <TextBox x:Name="ContextNotesInput" Height="110" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxLength="1000" TextChanged="OnSettingsInputChanged"/>
+                                   <TextBlock x:Name="ContextCountText" HorizontalAlignment="Right" Foreground="{DynamicResource MutedBrush}"/>
+                               </StackPanel>
+                           </Border>
+                       </Expander>
                    </Grid>
                    <!-- The character table takes all the height the window leaves; only the table scrolls. -->
                    <Grid x:Name="SettingsCharactersPanel" Visibility="Collapsed">
                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                            <TextBlock Text="Nhân vật &amp; xưng hô" Style="{StaticResource SectionTitle}"/>
                            <TextBlock Grid.Row="1" Text="Chỉ quy tắc đã xác nhận được đưa vào prompt; ứng dụng không tự suy đoán nhân vật hay vai thoại." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-                           <WrapPanel Grid.Row="2">
-                               <TextBox x:Name="CharacterSearchInput" Width="240" ToolTip="Tìm nhân vật" TextChanged="OnCharacterSearchChanged" AutomationProperties.Name="Tìm nhân vật" AutomationProperties.HelpText="Tìm nhân vật"/>
-                               <TextBox x:Name="CharacterProjectNameInput" Width="300" ToolTip="Tên dự án" AutomationProperties.Name="Tên dự án nhân vật" AutomationProperties.HelpText="Tên dự án"/>
+                           <StackPanel Grid.Row="2">
+                               <TextBox x:Name="CharacterSearchInput" Width="320" HorizontalAlignment="Left" ToolTip="Tìm nhân vật" TextChanged="OnCharacterSearchChanged" AutomationProperties.Name="Tìm nhân vật" AutomationProperties.HelpText="Tìm nhân vật"/>
+                               <Expander Header="Tùy chọn hồ sơ &amp; xưng hô" IsExpanded="False" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0">
+                                   <WrapPanel>
+                                       <TextBox x:Name="CharacterProjectNameInput" Width="300" ToolTip="Tên dự án" AutomationProperties.Name="Tên dự án nhân vật" AutomationProperties.HelpText="Tên dự án"/>
                                <CheckBox x:Name="ConsistencyLockCheck" Content="Bật khóa nhất quán Project" ToolTip="Chèn đại từ và cách xưng hô đã khóa vào prompt của đúng nhân vật xuất hiện trong đoạn"/>
                                <CheckBox x:Name="NormalizeAfterTranslationCheck" Content="Chuẩn hóa an toàn sau dịch" IsChecked="True"/>
                                <ComboBox x:Name="StorySettingCombo" Width="190" SelectedIndex="0" AutomationProperties.Name="Bối cảnh truyện"
@@ -897,18 +903,24 @@
                                    <ComboBoxItem Tag="Modern" Content="Bối cảnh: hiện đại"/>
                                    <ComboBoxItem Tag="Historical" Content="Bối cảnh: cổ trang"/>
                                </ComboBox>
-                           </WrapPanel>
+                                   </WrapPanel>
+                               </Expander>
+                           </StackPanel>
                            <WrapPanel Grid.Row="3">
-                               <Button x:Name="AddressingLedgerButton" Content="Sổ xưng hô · khảo sát &amp; Hoàn thành" ui:ButtonIcon.Glyph="&#xE716;" Click="OnOpenAddressingLedger" Style="{StaticResource PrimaryButton}" ToolTip="Khảo sát nhân vật, tên phụ, đại từ lời kể và xưng hô theo cặp bằng AI, rồi bấm Hoàn thành để ghi tất cả vào hồ sơ (có thể hoàn tác)"/>
-                               <Button x:Name="AddCharacterButton" Content="Thêm" Click="OnAddCharacter"/>
+                               <Button x:Name="AddressingLedgerButton" Content="Khảo sát nhân vật bằng AI" ui:ButtonIcon.Glyph="&#xE716;" Click="OnOpenAddressingLedger" Style="{StaticResource PrimaryButton}" ToolTip="Khảo sát nhân vật, tên phụ, đại từ lời kể và xưng hô theo cặp bằng AI, rồi bấm Hoàn thành để ghi tất cả vào hồ sơ (có thể hoàn tác)"/>
+                               <Button x:Name="AddCharacterButton" Content="Thêm nhân vật" Click="OnAddCharacter"/>
                                <Button x:Name="EditCharacterButton" Content="Sửa" Click="OnEditCharacter"/>
-                               <Button x:Name="DeleteCharacterButton" Content="Xóa" Click="OnDeleteCharacter" Style="{StaticResource DangerButton}"/>
-                               <Button x:Name="SaveCharactersButton" Content="Lưu hồ sơ" Click="OnSaveCharacters"/>
-                               <Button x:Name="PreviewCharactersButton" Content="Xem prompt khóa" Click="OnPreviewCharacters"/>
-                               <ToggleButton x:Name="CharactersOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Thêm: dự án nhân vật mới, nhập / xuất JSON" AutomationProperties.Name="Thêm lệnh nhân vật" IsTabStop="True"/>
+                               <Button x:Name="DeleteCharacterButton" Content="Xóa" Click="OnDeleteCharacter" Style="{StaticResource DangerButton}" Visibility="Collapsed"/>
+                               <Button x:Name="SaveCharactersButton" Content="Lưu hồ sơ" Click="OnSaveCharacters" Visibility="Collapsed"/>
+                               <Button x:Name="PreviewCharactersButton" Content="Xem prompt khóa" Click="OnPreviewCharacters" Visibility="Collapsed"/>
+                               <ToggleButton x:Name="CharactersOverflowToggle" Style="{StaticResource CommandOverflowToggle}" ToolTip="Tác vụ khác: xóa, lưu, xem prompt, nhập / xuất JSON" AutomationProperties.Name="Thêm lệnh nhân vật" IsTabStop="True"/>
                                <Popup IsOpen="{Binding IsChecked, ElementName=CharactersOverflowToggle, Mode=TwoWay}" PlacementTarget="{Binding ElementName=CharactersOverflowToggle}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
                                    <Border Margin="0,4,0,0" Padding="4" MinWidth="200" CornerRadius="6" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}" Focusable="True" KeyboardNavigation.TabNavigation="Cycle" PreviewKeyDown="OnPopupContentPreviewKeyDown">
                                        <StackPanel ButtonBase.Click="OnCommandOverflowClick">
+                                           <Button Content="Xóa nhân vật" Click="OnDeleteCharacter" Style="{StaticResource MenuButton}" IsEnabled="{Binding IsEnabled, ElementName=DeleteCharacterButton}"/>
+                                           <Button Content="Lưu hồ sơ" Click="OnSaveCharacters" Style="{StaticResource MenuButton}"/>
+                                           <Button Content="Xem prompt khóa" Click="OnPreviewCharacters" Style="{StaticResource MenuButton}"/>
+                                           <Separator/>
                                            <Button x:Name="NewCharacterProjectButton" Content="Dự án nhân vật mới" Click="OnNewCharacterProject" Style="{StaticResource MenuButton}"/>
                                            <Button x:Name="ImportCharactersButton" Content="Nhập JSON" Click="OnImportCharacters" Style="{StaticResource MenuButton}"/>
                                            <Button x:Name="ExportCharactersButton" Content="Xuất JSON" Click="OnExportCharacters" Style="{StaticResource MenuButton}"/>
@@ -940,13 +952,13 @@
            <Grid x:Name="SettingsWorkspaceRoot" Visibility="Collapsed">
                     <Grid x:Name="SettingsPanel" Margin="8">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="230"/>
+                            <ColumnDefinition Width="190"/>
                             <ColumnDefinition/>
                         </Grid.ColumnDefinitions>
                         <ListBox x:Name="SettingsNavigation" SelectionChanged="OnSettingsNavigationChanged" SelectedIndex="0" Background="{DynamicResource SurfaceBrush}" BorderThickness="0" Padding="6" AutomationProperties.Name="Danh sách nhóm thiết lập">
-                            <ListBoxItem Tag="Ai">AI Provider &amp; GPU</ListBoxItem>
-                            <ListBoxItem Tag="Gemini">Gemini credentials</ListBoxItem>
-                            <ListBoxItem Tag="Traditional">Data QuickTranslator</ListBoxItem>
+                            <ListBoxItem Tag="Ai">AI dịch &amp; GPU</ListBoxItem>
+                            <ListBoxItem Tag="Gemini">AI khảo sát nhân vật</ListBoxItem>
+                            <ListBoxItem Tag="Traditional">Dữ liệu QuickTranslator</ListBoxItem>
                             <ListBoxItem Tag="Appearance">Giao diện</ListBoxItem>
                             <ListBoxItem Tag="Advanced">Nâng cao</ListBoxItem>
                         </ListBox>
@@ -954,7 +966,7 @@
                             <Grid.RowDefinitions><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                             <ScrollViewer x:Name="SettingsAiPanel">
                                 <StackPanel>
-                                    <TextBlock Text="AI Provider &amp; GPU" Style="{StaticResource SectionTitle}"/>
+                                    <TextBlock Text="AI dịch chương &amp; GPU" Style="{StaticResource SectionTitle}"/>
                                     <TextBlock Text="Chọn GPU và model tại một nơi. Thay đổi hợp lệ được áp dụng khi chương tiếp theo bắt đầu; khi đổi GPU đang chạy, hãy Tạm dừng rồi Tiếp tục." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
                                     <Button Content="Mở Quản lý GPU" Click="OnOpenGpuManager" HorizontalAlignment="Left" Margin="3,8"/>
                                     <Border Style="{StaticResource Card}">
@@ -1033,10 +1045,10 @@
                             </ScrollViewer>
                             <ScrollViewer x:Name="SettingsGeminiPanel" Visibility="Collapsed">
                                 <StackPanel>
-                                    <TextBlock Text="Gemini credentials" Style="{StaticResource SectionTitle}"/>
+                                    <TextBlock Text="AI khảo sát nhân vật (Gemini)" Style="{StaticResource SectionTitle}"/>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
-                                            <TextBlock Text="Gemini API — khảo sát truyện" FontWeight="SemiBold" FontSize="16"/>
+                                            <TextBlock Text="Gemini API — chỉ dành cho khảo sát nhân vật và xưng hô" FontWeight="SemiBold" FontSize="16"/>
                                             <TextBlock Text="Nhập một API key Google AI Studio. Key được lưu riêng cho tài khoản Windows trong Credential Manager; không ghi vào Project, cấu hình dịch hoặc log." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,8"/>
                                             <TextBlock Text="Gemini API key" Style="{StaticResource FieldLabel}"/>
                                             <Grid MinWidth="320" HorizontalAlignment="Left">
@@ -1050,7 +1062,7 @@
                                                 <Button x:Name="GeminiRemoveApiKeyButton" Content="Xóa key" Click="OnRemoveGeminiApiKey" Margin="8,0,0,0" Visibility="Collapsed"/>
                                                 <TextBlock x:Name="GeminiCredentialStatus" Loaded="OnGeminiCredentialStatusLoaded" Margin="10,5,0,0" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" VerticalAlignment="Center"/>
                                             </WrapPanel>
-                                            <TextBlock Text="Khảo sát: Tài nguyên → Nhân vật &amp; xưng hô → Sổ xưng hô · khảo sát &amp; Hoàn thành, chọn Gemini Flash Pool và model (gemini-3.6-flash, gemini-3.8-flash hoặc gemini-3.5-flash-lite)." Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                            <TextBlock Text="Khảo sát: Nhân vật &amp; Từ điển → Nhân vật &amp; xưng hô → Khảo sát nhân vật bằng AI, chọn Gemini Flash Pool và model (gemini-3.6-flash, gemini-3.8-flash hoặc gemini-3.5-flash-lite)." Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
