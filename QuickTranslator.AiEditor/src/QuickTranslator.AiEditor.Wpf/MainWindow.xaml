@@ -325,9 +325,9 @@
             </Border>
             <Border x:Name="ChapterModeBar" DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,6">
                 <StackPanel Orientation="Horizontal">
-                    <RadioButton x:Name="TwoPaneModeButton" Content="Biên tập · Hai ô" GroupName="EditorLayout" IsChecked="True" Checked="OnEditorLayoutChanged" Style="{StaticResource ModeButton}" ToolTip="Chế độ Hai ô · Lưới song ngữ đồng bộ (Ctrl+1)"/>
-                    <RadioButton x:Name="FourPaneModeButton" Content="Kiểm tra &amp; Duyệt · Bốn ô" GroupName="EditorLayout" Checked="OnEditorLayoutChanged" Style="{StaticResource ModeButton}" ToolTip="Chế độ Bốn ô · Trung / Hán Việt / VietPhrase / AI (Ctrl+2)"/>
-                    <RadioButton x:Name="ReaderModeButton" Content="Đọc" GroupName="ChapterMode" Checked="OnReaderModeChanged" Visibility="Collapsed"/>
+                    <RadioButton x:Name="TwoPaneModeButton" Content="Biên tập" GroupName="EditorLayout" IsChecked="True" Checked="OnEditorLayoutChanged" Style="{StaticResource ModeButton}" ToolTip="Chế độ Hai ô · Lưới song ngữ đồng bộ (Ctrl+1)"/>
+                    <RadioButton x:Name="FourPaneModeButton" Content="Soát lỗi" GroupName="EditorLayout" Checked="OnEditorLayoutChanged" Style="{StaticResource ModeButton}" ToolTip="Chế độ Bốn ô · Trung / Hán Việt / VietPhrase / AI (Ctrl+2)"/>
+                    <RadioButton x:Name="ReaderModeButton" Content="Đọc" GroupName="EditorLayout" Checked="OnReaderModeChanged" Style="{StaticResource ModeButton}" ToolTip="Đọc bản dịch toàn chương"/>
                     <RadioButton x:Name="EditorModeButton" Content="Biên tập" GroupName="ChapterMode" IsChecked="True" Checked="OnReaderModeChanged" Visibility="Collapsed"/>
                 </StackPanel>
             </Border>

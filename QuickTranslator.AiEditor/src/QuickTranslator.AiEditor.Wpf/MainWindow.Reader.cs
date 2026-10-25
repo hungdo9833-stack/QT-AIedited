@@ -137,11 +137,16 @@ public partial class MainWindow
     {
         if (ReaderView is null || EditorView is null) return;
         bool reader = ReaderModeButton.IsChecked == true;
+        if (reader && CurrentWorkspace != WorkspaceId.Reader)
+        {
+            CurrentWorkspace = WorkspaceId.Reader;
+            ApplyWorkspaceVisibility(CurrentWorkspace);
+            EditorTabs.SelectedIndex = 0;
+            MarkActiveNavigation(CurrentWorkspace);
+        }
         ReaderView.Visibility = reader ? Visibility.Visible : Visibility.Collapsed;
         EditorView.Visibility = reader ? Visibility.Collapsed : Visibility.Visible;
         UpdateChapterModeHint();
-        TwoPaneModeButton.Visibility = FourPaneModeButton.Visibility = reader
-            ? Visibility.Collapsed : Visibility.Visible;
         ApplyProjectSidebarVisibility();
         ApplyReaderChrome();
         if (reader)

@@ -274,6 +274,7 @@ public partial class MainWindow
             }
         });
         else _switchingEditorMode = false;
+        OnReaderModeChanged(this, new RoutedEventArgs());
         _ = SaveWorkspaceLayoutAsync();
         MarkActiveNavigation(WorkspaceId.Editor);
     }
@@ -347,7 +348,7 @@ public partial class MainWindow
             [WorkspaceId.Settings] = SettingsNavButton
         };
         foreach ((WorkspaceId id, Button button) in routes)
-            NavState.SetIsActive(button, id == workspace);
+            NavState.SetIsActive(button, id == workspace || id == WorkspaceId.Editor && workspace == WorkspaceId.Reader);
     }
 
     private void ApplyWorkspaceVisibility(WorkspaceId workspace)
@@ -360,7 +361,7 @@ public partial class MainWindow
         ResourcesWorkspaceRoot.Visibility = workspace == WorkspaceId.Resources ? Visibility.Visible : Visibility.Collapsed;
         SettingsWorkspaceRoot.Visibility = workspace == WorkspaceId.Settings ? Visibility.Visible : Visibility.Collapsed;
         EditorContextHeader.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
-        ChapterModeBar.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
+        ChapterModeBar.Visibility = editorHost ? Visibility.Visible : Visibility.Collapsed;
         if (workspace == WorkspaceId.Chapters) _hostedChapterManagerView?.Attach(); else _hostedChapterManagerView?.Detach();
         if (workspace == WorkspaceId.Queue) _hostedQueueView?.Attach(); else _hostedQueueView?.Detach();
         if (workspace == WorkspaceId.Publish) _hostedPublicationView?.Attach(); else _hostedPublicationView?.Detach();
