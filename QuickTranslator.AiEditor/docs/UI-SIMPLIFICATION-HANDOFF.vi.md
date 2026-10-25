@@ -1,5 +1,7 @@
 # QTStudio - Ban giao tinh gon UI (25/10/2026)
 
+> Cập nhật sau tiếp nhận: đã build và kiểm thử Windows/WPF. Xem [kết quả sửa lỗi, test và các bước nghiệm thu còn lại](UI-SIMPLIFICATION-VALIDATION.vi.md). Nội dung bên dưới giữ làm lịch sử bàn giao ban đầu; PR vẫn Draft.
+
 > Nhanh rieng: `feat/qtstudio-simplified-ui`. Base: `codex/abi3-adaptive-semantic-batching` tai `2b51cf04890f258be91a2c500a4855ebb7bfd9bb`. KHONG merge truoc khi Codex build va test tren Windows.
 
 ## Pham vi da thuc hien theo thu tu

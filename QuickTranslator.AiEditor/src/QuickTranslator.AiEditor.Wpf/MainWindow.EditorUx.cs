@@ -8,7 +8,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow
 {
-    private readonly Dictionary<Button, object?> _normalActionTooltips = [];
+    private readonly Dictionary<Control, object?> _normalActionTooltips = [];
     private EditorActionPlan? _currentEditorActionPlan;
     private bool _pendingEditorFocus;
 
@@ -106,7 +106,7 @@ public partial class MainWindow
             primaryReason = "Hành động chưa khả dụng trong trạng thái hiện tại.";
         ApplyActionState(PrimaryActionButton, plan.Primary.IsEnabled && primaryBusinessEnabled && primaryReason is null, primaryReason);
 
-        var dedicated = new Dictionary<EditorActionKind, Button>
+        var dedicated = new Dictionary<EditorActionKind, MenuItem>
         {
             [EditorActionKind.TranslateChapter] = TranslateAllButton,
             [EditorActionKind.PauseQueue] = PauseQueueButton,
@@ -118,9 +118,12 @@ public partial class MainWindow
             [EditorActionKind.ApproveSegment] = ApproveCurrentButton,
             [EditorActionKind.ApproveChapter] = ApproveAllChapterButton
         };
-        foreach ((EditorActionKind kind, Button button) in dedicated)
+        foreach ((EditorActionKind kind, MenuItem button) in dedicated)
         {
-            button.Visibility = plan.Secondary.Contains(kind) ? Visibility.Visible : Visibility.Collapsed;
+            // Source editing must stay reachable even when it is not a suggested next action.
+            button.Visibility = plan.Secondary.Contains(kind) ||
+                kind == EditorActionKind.EditSource && chapter is not null && !_sourceEditMode
+                ? Visibility.Visible : Visibility.Collapsed;
             if (button.Visibility == Visibility.Visible)
                 ApplyActionState(button, button.IsEnabled && EditorActionPolicy.DisabledReason(kind, context) is null,
                     EditorActionPolicy.DisabledReason(kind, context) ?? PrimaryBusinessReason(kind, chapter));
@@ -128,13 +131,12 @@ public partial class MainWindow
 
         CancelQueueButton.Visibility = plan.Overflow.Contains(EditorActionKind.CancelQueue)
             ? Visibility.Visible : Visibility.Collapsed;
-        EditorActionOverflowToggle.Visibility = CancelQueueButton.Visibility;
         if (CancelQueueButton.Visibility == Visibility.Visible)
             ApplyActionState(CancelQueueButton, CancelQueueButton.IsEnabled,
                 EditorActionPolicy.DisabledReason(EditorActionKind.CancelQueue, context));
 
         EditorActionKind[] remaining = plan.Secondary.Where(kind => !dedicated.ContainsKey(kind)).ToArray();
-        Button[] slots = [SecondaryActionButton1, SecondaryActionButton2, SecondaryActionButton3];
+        MenuItem[] slots = [SecondaryActionButton1, SecondaryActionButton2, SecondaryActionButton3];
         for (int i = 0; i < slots.Length; i++)
         {
             if (i >= remaining.Length)
@@ -145,9 +147,9 @@ public partial class MainWindow
             EditorActionKind kind = remaining[i];
             slots[i].Visibility = Visibility.Visible;
             slots[i].Tag = kind;
-            slots[i].Content = ActionLabel(kind);
+            slots[i].Header = ActionLabel(kind);
             string? reason = EditorActionPolicy.DisabledReason(kind, context) ?? PrimaryBusinessReason(kind, chapter);
-            ApplyActionState(slots[i], reason is null, reason);
+            ApplyActionState(slots[i], PrimaryBusinessEnabled(kind, context) && reason is null, reason);
         }
 
         ApplyReviewActionStates(context, chapter);
@@ -247,7 +249,7 @@ public partial class MainWindow
             chapter is null ? "Chưa có chương để thay thế." : null);
     }
 
-    internal void ApplyActionState(Button button, bool enabled, string? reason)
+    internal void ApplyActionState(Control button, bool enabled, string? reason)
     {
         if (!_normalActionTooltips.ContainsKey(button)) _normalActionTooltips[button] = button.ToolTip;
         button.IsEnabled = enabled;
@@ -261,30 +263,6 @@ public partial class MainWindow
     private async void OnPrimaryAction(object sender, RoutedEventArgs e)
     {
         if (_currentEditorActionPlan is { } plan) await DispatchEditorActionAsync(plan.Primary.Kind);
-    }
-
-    // MenuItem lives in a Popup; copy the state from the live action-policy buttons
-    // when the menu opens instead of relying solely on cross-Popup ElementName bindings.
-    private void OnEditorActionsOpened(object sender, RoutedEventArgs e)
-    {
-        if (sender is not MenuItem menu) return;
-        Button[] actions =
-        [
-            TranslateAllButton, PauseQueueButton, ResumeQueueButton, RetryErrorsButton,
-            ApproveCurrentButton, ApproveAllChapterButton, EditSourceButton,
-            SaveSourceEditButton, CancelSourceEditButton, CancelQueueButton,
-            SecondaryActionButton1, SecondaryActionButton2, SecondaryActionButton3
-        ];
-        MenuItem[] commands = menu.Items.OfType<MenuItem>().ToArray();
-        if (commands.Length < actions.Length) return;
-        for (int i = 0; i < actions.Length; i++)
-        {
-            commands[i].Visibility = actions[i].Visibility;
-            commands[i].IsEnabled = actions[i].IsEnabled;
-            if (i < 10) continue;
-            commands[i].Header = actions[i].Content;
-            commands[i].Tag = actions[i].Tag;
-        }
     }
 
     private async void OnSecondaryAction(object sender, RoutedEventArgs e)

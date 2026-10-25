@@ -28,6 +28,12 @@ internal static class Glyphs
 /// <summary>Marks the navigation button of the workspace currently shown (NavigationButton style highlights it).</summary>
 public static class NavState
 {
+    public static readonly DependencyProperty IsCollapsedProperty = DependencyProperty.RegisterAttached(
+        "IsCollapsed", typeof(bool), typeof(NavState), new FrameworkPropertyMetadata(false));
+
+    public static bool GetIsCollapsed(DependencyObject element) => (bool)element.GetValue(IsCollapsedProperty);
+    public static void SetIsCollapsed(DependencyObject element, bool value) => element.SetValue(IsCollapsedProperty, value);
+
     public static readonly DependencyProperty IsActiveProperty = DependencyProperty.RegisterAttached(
         "IsActive", typeof(bool), typeof(NavState), new FrameworkPropertyMetadata(false));
 

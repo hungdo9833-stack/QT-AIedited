@@ -384,6 +384,7 @@ public partial class MainWindow
             _projectTranslationCoordinator?.IsRunning != true;
         bool one = available && count == 1;
         ProjectNewChapterButton.IsEnabled = available;
+        ProjectImportTextButton.IsEnabled = available;
         ProjectImportWebButton.IsEnabled = ProjectImportWebMenuItem.IsEnabled = available;
         ProjectRenameChapterButton.IsEnabled = ProjectChapterRenameMenuItem.IsEnabled = one;
         ProjectDuplicateChapterButton.IsEnabled = ProjectChapterDuplicateMenuItem.IsEnabled = one;

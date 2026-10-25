@@ -370,20 +370,13 @@ public partial class MainWindow
         if (!active)
         {
             ChapterWorkspace.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "AppBackgroundBrush");
-            ChapterModeBar.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "AppBackgroundBrush");
+            ChapterModeBar.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "PanelBrush");
             ChapterModeHint.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
-            // Reader is now a visible mode tab: remove local reader-only palette overrides
-            // when returning to Biên tập / Soát lỗi so ModeButton style triggers can apply.
-            foreach (var button in new[] { ReaderModeButton, EditorModeButton })
-            {
-                button.ClearValue(Control.ForegroundProperty);
-                button.ClearValue(Control.BackgroundProperty);
-                button.ClearValue(Control.BorderBrushProperty);
-            }
             return;
         }
         ChapterWorkspace.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
-        ChapterModeBar.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
+        // Keep the shared mode strip on the application palette in all three modes.
+        ChapterModeBar.SetResourceReference(Panel.BackgroundProperty, "PanelBrush");
         ReaderToolbar.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
         ChapterModeHint.SetResourceReference(TextElement.ForegroundProperty, "ReaderTextBrush");
         ReaderSearchPanel.SetResourceReference(Border.BackgroundProperty, "ReaderPanelBrush");
@@ -413,12 +406,6 @@ public partial class MainWindow
             combo.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
             combo.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
         }
-        ReaderModeButton.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
-        EditorModeButton.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
-        ReaderModeButton.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
-        EditorModeButton.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
-        ReaderModeButton.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
-        EditorModeButton.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
         ReaderCatalogPanel.SetResourceReference(Border.BackgroundProperty, "ReaderPanelBrush");
         ReaderCatalogPanel.SetResourceReference(Border.BorderBrushProperty, "ReaderBorderBrush");
         ReaderChapterSearchInput.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");

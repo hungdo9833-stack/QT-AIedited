@@ -568,7 +568,7 @@ public partial class MainWindow : Window
         PasteButton.IsEnabled = ImportTextButton.IsEnabled = !document && !active && available;
         Visibility standaloneVis = document && _projectSession is not null ? Visibility.Collapsed : Visibility.Visible;
         PasteButton.Visibility = ImportTextButton.Visibility = SplitButton.Visibility = standaloneVis;
-        if (FindName("ApproveAllChapterButton") is Button approveAllBtn) approveAllBtn.IsEnabled = document && !active && available;
+        ApproveAllChapterButton.IsEnabled = document && !active && available;
         if (FindName("ApproveAndNextButton") is Button approveNextBtn)
             approveNextBtn.IsEnabled = selectedSegment?.Status != SegmentStatus.Translating && selected &&
                 !string.IsNullOrWhiteSpace(DraftText.Text) && available;

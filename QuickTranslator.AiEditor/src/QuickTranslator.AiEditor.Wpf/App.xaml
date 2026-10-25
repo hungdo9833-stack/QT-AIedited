@@ -35,12 +35,12 @@
        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
         <Grid HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
          <TextBlock x:Name="Glyph" Text="{TemplateBinding ui:ButtonIcon.Glyph}" FontFamily="{StaticResource IconFont}" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
-         <ContentPresenter Grid.Column="1" VerticalAlignment="Center" RecognizesAccessKey="True" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+         <ContentPresenter x:Name="ButtonLabel" Grid.Column="1" VerticalAlignment="Center" RecognizesAccessKey="True" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
         </Grid>
        </Border>
        <ControlTemplate.Triggers>
         <Trigger Property="ui:ButtonIcon.Glyph" Value="{x:Null}"><Setter TargetName="Glyph" Property="Visibility" Value="Collapsed"/></Trigger>
-        <Trigger Property="Content" Value="{x:Null}"><Setter TargetName="Glyph" Property="Margin" Value="0"/></Trigger>
+        <Trigger Property="Content" Value="{x:Null}"><Setter TargetName="Glyph" Property="Margin" Value="0"/></Trigger><Trigger Property="ui:NavState.IsCollapsed" Value="True"><Setter TargetName="ButtonLabel" Property="Visibility" Value="Collapsed"/><Setter TargetName="Glyph" Property="Margin" Value="0"/></Trigger>
        </ControlTemplate.Triggers>
       </ControlTemplate>
      </Setter.Value>
@@ -65,7 +65,7 @@
      <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="{DynamicResource DangerSubtleBrush}"/></Trigger>
     </Style.Triggers>
    </Style>
-   <Style x:Key="NavigationButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Margin" Value="6,2"/><Setter Property="Padding" Value="12,9"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Style.Triggers><Trigger Property="ui:NavState.IsActive" Value="True"><Setter Property="Background" Value="{DynamicResource SelectionBrush}"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger></Style.Triggers></Style>
+   <Style x:Key="NavigationButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Margin" Value="6,2"/><Setter Property="Padding" Value="12,9"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="ContentTemplate"><Setter.Value><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap"/></DataTemplate></Setter.Value></Setter><Style.Triggers><Trigger Property="ui:NavState.IsCollapsed" Value="True"><Setter Property="Padding" Value="6,9"/><Setter Property="HorizontalContentAlignment" Value="Center"/></Trigger><Trigger Property="ui:NavState.IsActive" Value="True"><Setter Property="Background" Value="{DynamicResource SelectionBrush}"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger></Style.Triggers></Style>
    <!-- Shell tools in the left rail (queue, panels, theme, save): same look as navigation, denser. -->
    <Style x:Key="NavigationToolButton" TargetType="Button" BasedOn="{StaticResource NavigationButton}"><Setter Property="Margin" Value="6,1"/><Setter Property="Padding" Value="12,5"/><Setter Property="MinHeight" Value="0"/></Style>
    <!-- Status bar actions: look like text, behave like buttons (keyboard, focus ring, screen readers). -->
