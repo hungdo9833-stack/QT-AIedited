@@ -372,6 +372,14 @@ public partial class MainWindow
             ChapterWorkspace.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "AppBackgroundBrush");
             ChapterModeBar.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "AppBackgroundBrush");
             ChapterModeHint.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
+            // Reader is now a visible mode tab: remove local reader-only palette overrides
+            // when returning to Biên tập / Soát lỗi so ModeButton style triggers can apply.
+            foreach (var button in new[] { ReaderModeButton, EditorModeButton })
+            {
+                button.ClearValue(Control.ForegroundProperty);
+                button.ClearValue(Control.BackgroundProperty);
+                button.ClearValue(Control.BorderBrushProperty);
+            }
             return;
         }
         ChapterWorkspace.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
