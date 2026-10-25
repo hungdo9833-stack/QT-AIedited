@@ -265,7 +265,7 @@ public partial class MainWindow
 
     private async void OnSecondaryAction(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: EditorActionKind kind }) await DispatchEditorActionAsync(kind);
+        if (sender is FrameworkElement { Tag: EditorActionKind kind }) await DispatchEditorActionAsync(kind);
     }
 
     private Task DispatchEditorActionAsync(EditorActionKind kind)

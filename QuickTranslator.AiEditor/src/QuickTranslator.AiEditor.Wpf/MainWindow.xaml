@@ -95,18 +95,18 @@
                     <Button x:Name="ThemeToggleButton" Content="Light" ui:ButtonIcon.Glyph="&#xE793;" Click="OnToggleShellTheme" Style="{StaticResource NavigationToolButton}" ToolTip="Chuyển sang giao diện này (Dark / Light)"/>
                     <Button x:Name="SaveButton" Content="Lưu" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveProgress" Style="{StaticResource NavigationToolButton}" ToolTip="Lưu tiến độ và tài nguyên (Ctrl+S)"/>
                     <Separator Margin="8"/>
-                    <TextBlock Text="TIỆN ÍCH" Margin="14,4,8,6" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
-                    <Button x:Name="ResourcesNavButton" Content="Tài nguyên" ui:ButtonIcon.Glyph="&#xE8F1;" Tag="Resources" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
-                    <Button x:Name="SettingsNavButton" Content="Thiết lập" ui:ButtonIcon.Glyph="&#xE713;" Tag="Settings" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
+                    <TextBlock Text="TÙY CHỌN" Margin="14,4,8,6" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
+                    <Button x:Name="SettingsNavButton" Content="Cài đặt" ui:ButtonIcon.Glyph="&#xE713;" Tag="Settings" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
                     <Button x:Name="NavRailToggleButton" Content="«" Click="OnToggleNavRail" Style="{StaticResource NavigationButton}" HorizontalContentAlignment="Center" ToolTip="Thu gọn / Mở rộng thanh điều hướng" AutomationProperties.Name="Thu gọn hoặc mở rộng thanh điều hướng" AutomationProperties.HelpText="Thu gọn / Mở rộng thanh điều hướng"/>
                 </StackPanel>
                 <StackPanel>
-                    <TextBlock Text="WORKSPACE" Margin="14,4,8,8" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
-                    <Button x:Name="TranslateNavButton" Content="Biên tập" ui:ButtonIcon.Glyph="&#xE8C1;" Tag="Translate" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Biên tập / Kiểm tra &amp; Duyệt (Ctrl+1 / Ctrl+2)"/>
-                    <Button x:Name="ChaptersNavButton" Content="Chương" ui:ButtonIcon.Glyph="&#xE8FD;" Tag="Chapters" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
-                    <Button x:Name="QueueNavButton" Content="Hàng đợi" ui:ButtonIcon.Glyph="&#xE9D5;" Tag="Queue" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
+                    <TextBlock Text="LÀM VIỆC" Margin="14,4,8,8" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource MutedBrush}"/>
+                    <Button x:Name="TranslateNavButton" Content="Dịch &amp; Biên tập" ui:ButtonIcon.Glyph="&#xE8C1;" Tag="Translate" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Biên tập / Kiểm tra &amp; Duyệt (Ctrl+1 / Ctrl+2)"/>
+                    <Button x:Name="ResourcesNavButton" Content="Nhân vật &amp; Từ điển" ui:ButtonIcon.Glyph="&#xE8F1;" Tag="Resources" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
+                    <Button x:Name="ChaptersNavButton" Content="Chương" ui:ButtonIcon.Glyph="&#xE8FD;" Tag="Chapters" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" Visibility="Collapsed"/>
+                    <Button x:Name="QueueNavButton" Content="Hàng đợi" ui:ButtonIcon.Glyph="&#xE9D5;" Tag="Queue" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" Visibility="Collapsed"/>
                     <Button x:Name="PublishNavButton" Content="Xuất bản" ui:ButtonIcon.Glyph="&#xEDE1;" Tag="Publish" Click="OnShellNavigate" Style="{StaticResource NavigationButton}"/>
-                    <Button x:Name="ReaderNavButton" Content="Đọc" ui:ButtonIcon.Glyph="&#xE736;" Tag="Reader" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Chế độ đọc toàn chương"/>
+                    <Button x:Name="ReaderNavButton" Content="Đọc" ui:ButtonIcon.Glyph="&#xE736;" Tag="Reader" Click="OnShellNavigate" Style="{StaticResource NavigationButton}" ToolTip="Chế độ đọc toàn chương" Visibility="Collapsed"/>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -150,7 +150,23 @@
                         <ComboBoxItem Tag="Title">Sắp theo tên</ComboBoxItem>
                         <ComboBoxItem Tag="Updated">Mới sửa trước</ComboBoxItem>
                     </ComboBox>
-                    <WrapPanel>
+                    <!-- Quick chapter actions; named legacy buttons stay for enable-state bindings. -->
+                        <StackPanel>
+                            <Menu Background="Transparent" Padding="0" Margin="0,0,0,4">
+                                <MenuItem Header="Nhập truyện">
+                                    <MenuItem Header="Từ tệp TXT…" Click="OnAddChapterFromText"/>
+                                    <MenuItem Header="Từ website…" Click="OnImportWeb" IsEnabled="{Binding IsEnabled, ElementName=ProjectImportWebButton}"/>
+                                </MenuItem>
+                                <MenuItem Header="Tác vụ chương">
+                                    <MenuItem Header="Quản lý chương…" Click="OnOpenChapterManager"/>
+                                    <MenuItem Header="Chương mới" Click="OnNewProjectChapter"/>
+                                    <Separator/>
+                                    <MenuItem Header="Đổi tên chương" Click="OnRenameProjectChapter" IsEnabled="{Binding IsEnabled, ElementName=ProjectRenameChapterButton}"/>
+                                    <MenuItem Header="Nhân bản chương" Click="OnDuplicateProjectChapter" IsEnabled="{Binding IsEnabled, ElementName=ProjectDuplicateChapterButton}"/>
+                                    <MenuItem Header="Xóa chương" Click="OnDeleteProjectChapter" IsEnabled="{Binding IsEnabled, ElementName=ProjectDeleteChapterButton}"/>
+                                </MenuItem>
+                            </Menu>
+                            <WrapPanel Visibility="Collapsed">
                         <Button x:Name="ProjectImportTextButton" Content="Nhập TXT" ui:ButtonIcon.Glyph="&#xE710;" Click="OnAddChapterFromText" ToolTip="Thêm chương từ tệp TXT"/>
                         <Button x:Name="ProjectImportWebButton" Content="Nhập web" Click="OnImportWeb" IsEnabled="False" ToolTip="Nhập truyện từ URL web"/>
                         <Button x:Name="ProjectNewChapterButton" Content="Chương mới" Click="OnNewProjectChapter" ToolTip="Tạo bản nháp chương trống ở cuối dự án"/>
@@ -159,6 +175,7 @@
                         <Button x:Name="ProjectDuplicateChapterButton" Content="Nhân bản" Click="OnDuplicateProjectChapter"/>
                         <Button x:Name="ProjectDeleteChapterButton" Content="Xóa" Click="OnDeleteProjectChapter" Style="{StaticResource DangerButton}"/>
                     </WrapPanel>
+                        </StackPanel>
                 </StackPanel>
                 <StackPanel DockPanel.Dock="Bottom">
                     <WrapPanel>
@@ -263,6 +280,8 @@
                     </StackPanel>
                     <WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Button x:Name="PrimaryActionButton" Content="Mở Project" Click="OnPrimaryAction" Style="{StaticResource PrimaryButton}" ToolTipService.ShowOnDisabled="True"/>
+                        <!-- Only the state-aware primary action remains prominent; all secondary actions are in one menu. -->
+                        <StackPanel Visibility="Collapsed">
                         <Button x:Name="TranslateAllButton" Content="Dịch chương" ui:ButtonIcon.Glyph="&#xE768;" Click="OnTranslateAll" Style="{StaticResource StateButton}" ToolTipService.ShowOnDisabled="True"/>
                         <Button x:Name="PauseQueueButton" Content="Tạm dừng" ui:ButtonIcon.Glyph="&#xE769;" Click="OnPauseQueue" Style="{StaticResource StateButton}" ToolTipService.ShowOnDisabled="True"/>
                         <Button x:Name="ResumeQueueButton" Content="Tiếp tục" ui:ButtonIcon.Glyph="&#xE768;" Click="OnResumeQueue" Style="{StaticResource StateButton}" ToolTipService.ShowOnDisabled="True"/>
@@ -281,6 +300,26 @@
                                 <Button x:Name="CancelQueueButton" Content="Hủy queue chương" ui:ButtonIcon.Glyph="&#xE71A;" Click="OnCancelQueue" Style="{StaticResource StateDangerButton}" ToolTipService.ShowOnDisabled="True"/>
                             </Border>
                         </Popup>
+                        </StackPanel>
+                        <Menu Background="Transparent" Padding="0">
+                            <MenuItem Header="Thêm ▾">
+                                <MenuItem Header="Dịch chương" Click="OnTranslateAll" Visibility="{Binding Visibility, ElementName=TranslateAllButton}" IsEnabled="{Binding IsEnabled, ElementName=TranslateAllButton}"/>
+                                <MenuItem Header="Tạm dừng" Click="OnPauseQueue" Visibility="{Binding Visibility, ElementName=PauseQueueButton}" IsEnabled="{Binding IsEnabled, ElementName=PauseQueueButton}"/>
+                                <MenuItem Header="Tiếp tục" Click="OnResumeQueue" Visibility="{Binding Visibility, ElementName=ResumeQueueButton}" IsEnabled="{Binding IsEnabled, ElementName=ResumeQueueButton}"/>
+                                <MenuItem Header="Dịch lại lỗi" Click="OnRetryErrors" Visibility="{Binding Visibility, ElementName=RetryErrorsButton}" IsEnabled="{Binding IsEnabled, ElementName=RetryErrorsButton}"/>
+                                <MenuItem Header="Duyệt đoạn" Click="OnApprove" Visibility="{Binding Visibility, ElementName=ApproveCurrentButton}" IsEnabled="{Binding IsEnabled, ElementName=ApproveCurrentButton}"/>
+                                <MenuItem Header="Duyệt chương" Click="OnApproveAllSegments" Visibility="{Binding Visibility, ElementName=ApproveAllChapterButton}" IsEnabled="{Binding IsEnabled, ElementName=ApproveAllChapterButton}"/>
+                                <MenuItem Header="Sửa nguyên văn" Click="OnBeginSourceEdit" Visibility="{Binding Visibility, ElementName=EditSourceButton}" IsEnabled="{Binding IsEnabled, ElementName=EditSourceButton}"/>
+                                <MenuItem Header="Lưu nguyên văn" Click="OnSaveSourceEdit" Visibility="{Binding Visibility, ElementName=SaveSourceEditButton}" IsEnabled="{Binding IsEnabled, ElementName=SaveSourceEditButton}"/>
+                                <MenuItem Header="Hủy sửa nguồn" Click="OnCancelSourceEdit" Visibility="{Binding Visibility, ElementName=CancelSourceEditButton}" IsEnabled="{Binding IsEnabled, ElementName=CancelSourceEditButton}"/>
+                                <MenuItem Header="Hủy hàng đợi chương" Click="OnCancelQueue" Visibility="{Binding Visibility, ElementName=CancelQueueButton}" IsEnabled="{Binding IsEnabled, ElementName=CancelQueueButton}"/>
+                                <MenuItem Header="{Binding Content, ElementName=SecondaryActionButton1}" Tag="{Binding Tag, ElementName=SecondaryActionButton1}" Click="OnSecondaryAction" Visibility="{Binding Visibility, ElementName=SecondaryActionButton1}" IsEnabled="{Binding IsEnabled, ElementName=SecondaryActionButton1}"/>
+                                <MenuItem Header="{Binding Content, ElementName=SecondaryActionButton2}" Tag="{Binding Tag, ElementName=SecondaryActionButton2}" Click="OnSecondaryAction" Visibility="{Binding Visibility, ElementName=SecondaryActionButton2}" IsEnabled="{Binding IsEnabled, ElementName=SecondaryActionButton2}"/>
+                                <MenuItem Header="{Binding Content, ElementName=SecondaryActionButton3}" Tag="{Binding Tag, ElementName=SecondaryActionButton3}" Click="OnSecondaryAction" Visibility="{Binding Visibility, ElementName=SecondaryActionButton3}" IsEnabled="{Binding IsEnabled, ElementName=SecondaryActionButton3}"/>
+                                <Separator/>
+                                <MenuItem Header="Mở hàng đợi…" Tag="Queue" Click="OnShellNavigate"/>
+                            </MenuItem>
+                        </Menu>
                     </WrapPanel>
                 </DockPanel>
             </Border>
