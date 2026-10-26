@@ -19,7 +19,7 @@ public partial class MainWindow : Window
 {
     private readonly GpuBackendManager _gpuBackends;
     private readonly GpuConnectionManager _gpuConnections;
-    private readonly GpuTranslationPreferences _gpuPreferences = new();
+    private readonly GpuTranslationPreferences _gpuPreferences;
     private readonly LocalLlamaServerHost _localLlama;
     private readonly ILlmClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
@@ -43,6 +43,7 @@ public partial class MainWindow : Window
         LocalLlamaServerHost? localLlama = null, ILlmClient? translationClient = null)
     {
         _startupProjectPath = startupProjectPath;
+        _gpuPreferences = initializeApplication ? GpuTranslationPreferences.Load() : new();
         _gpuBackends = gpuBackends ?? new GpuBackendManager();
         _gpuConnections = gpuConnections ?? new GpuConnectionManager();
         _localLlama = localLlama ?? new LocalLlamaServerHost();

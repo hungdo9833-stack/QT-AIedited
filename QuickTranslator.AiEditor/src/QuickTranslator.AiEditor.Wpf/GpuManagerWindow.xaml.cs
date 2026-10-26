@@ -25,40 +25,141 @@ public partial class GpuManagerWindow : Window
     private CancellationTokenSource? _setupCancellation;
     private bool _busy;
     private bool _loadingMode;
+    private readonly Func<IReadOnlyList<string>> _keyReader;
+    private readonly Action<IReadOnlyList<string>> _keySaver;
+    private readonly Action _preferencesChanged;
+    private readonly ObservableCollection<GeminiKeyItem> _geminiKeys = [];
 
     internal GpuManagerWindow(GpuBackendManager backends, GpuConnectionManager connections,
-        GpuTranslationPreferences? preferences = null, LocalLlamaServerHost? localLlama = null)
+        GpuTranslationPreferences? preferences = null, LocalLlamaServerHost? localLlama = null,
+        Func<IReadOnlyList<string>>? keyReader = null, Action<IReadOnlyList<string>>? keySaver = null,
+        Action? preferencesChanged = null)
     {
         _backends = backends; _connections = connections;
         _local = localLlama ?? new LocalLlamaServerHost();
         _preferences = preferences ?? new();
+        _keyReader = keyReader ?? (() => []);
+        _keySaver = keySaver ?? (_ => { });
+        _preferencesChanged = preferencesChanged ?? (() => { });
         InitializeComponent();
         System.ComponentModel.DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock))
             .AddValueChanged(StatusText, (_, _) => Accessibility.Announce(StatusText));
         MainWindow.ClampWindowToWorkArea(this, 1180, 820);
         _loadingMode = true;
         TranslationModeInput.SelectedIndex = (int)_preferences.Mode;
+        ApiSourceInput.IsChecked = _preferences.Source == TranslationSource.Api;
+        GpuSourceInput.IsChecked = _preferences.Source == TranslationSource.Gpu;
         _loadingMode = false;
+        GeminiKeyList.ItemsSource = _geminiKeys;
+        RefreshGeminiKeys();
         ProfileList.ItemsSource = _profiles;
         RefreshProfiles();
+        ApplyTranslationSourceUi();
         _local.StatusChanged += OnLocalStatusChanged;
         Closed += (_, _) => _local.StatusChanged -= OnLocalStatusChanged;
     }
 
     private void OnLocalStatusChanged(object? sender, LocalLlamaServerStatus status) =>
-        Dispatcher.BeginInvoke(() => StatusText.Text = status.Message);
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_preferences.Source == TranslationSource.Gpu) StatusText.Text = status.Message;
+        });
 
     private void OnTranslationModeChanged(object sender, SelectionChangedEventArgs e)
     {
         if (TranslationModeText is null) return;
         _preferences.Mode = (GpuTranslationMode)Math.Max(0, TranslationModeInput.SelectedIndex);
-        if (!_loadingMode) _preferences.ModeExplicitlySelected = true;
+        if (!_loadingMode)
+        {
+            _preferences.ModeExplicitlySelected = true;
+            _preferencesChanged();
+        }
         TranslationModeText.Text = _preferences.Mode switch
         {
             GpuTranslationMode.LocalOnly => "Queue dùng llama-server trên máy này.",
             GpuTranslationMode.RemoteOnly => "Queue dùng profile Remote đang kích hoạt.",
             _ => "Một coordinator phân phối chapter động cho Local và Remote, tối đa hai request đồng thời."
         };
+    }
+
+    private void OnTranslationSourceChanged(object sender, RoutedEventArgs e)
+    {
+        if (ApiSourceInput is null || GpuSourceInput is null) return;
+        _preferences.Source = ApiSourceInput.IsChecked == true ? TranslationSource.Api : TranslationSource.Gpu;
+        if (!_loadingMode)
+        {
+            _preferences.ModeExplicitlySelected = true;
+            _preferencesChanged();
+        }
+        ApplyTranslationSourceUi();
+    }
+
+    private void ApplyTranslationSourceUi()
+    {
+        if (ApiTranslationPanel is null) return;
+        bool api = _preferences.Source == TranslationSource.Api;
+        ApiTranslationPanel.Visibility = api ? Visibility.Visible : Visibility.Collapsed;
+        GpuTranslationPanel.Visibility = api ? Visibility.Collapsed : Visibility.Visible;
+        GpuConfigurationPanel.Visibility = api ? Visibility.Collapsed : Visibility.Visible;
+        GpuProfilesPanel.Visibility = api ? Visibility.Collapsed : Visibility.Visible;
+        GpuActionPanel.Visibility = api ? Visibility.Collapsed : Visibility.Visible;
+        GpuProfilesColumn.Width = api ? new GridLength(0) : new GridLength(310);
+        GpuProfilesGapColumn.Width = api ? new GridLength(0) : new GridLength(12);
+        StatusText.Text = api
+            ? "API · Gemini 3.5 Flash-Lite · tự động xoay model và API key."
+            : "GPU · giữ nguyên cấu hình Local/Remote hiện tại.";
+    }
+
+    private void RefreshGeminiKeys()
+    {
+        _geminiKeys.Clear();
+        IReadOnlyList<string> keys = _keyReader();
+        for (int index = 0; index < keys.Count; index++)
+            _geminiKeys.Add(new(index, GeminiApiKeyVault.Mask(keys[index])));
+        GeminiKeysStatus.Text = keys.Count == 0
+            ? "Chưa lưu API key. Hãy thêm ít nhất một key trước khi chạy queue."
+            : $"Đã lưu {keys.Count} key; thứ tự trên là thứ tự xoay vòng.";
+    }
+
+    private void OnAddGeminiKeys(object sender, RoutedEventArgs e)
+    {
+        string[] entered = GeminiKeysInput.Text.Split(['\r', '\n'],
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (entered.Length == 0)
+        {
+            GeminiKeysStatus.Text = "Hãy nhập ít nhất một Gemini API key.";
+            return;
+        }
+        try
+        {
+            IReadOnlyList<string> current = _keyReader();
+            string[] next = current.Concat(entered).Distinct(StringComparer.Ordinal).ToArray();
+            _keySaver(next);
+            GeminiKeysInput.Clear();
+            RefreshGeminiKeys();
+        }
+        catch (Exception error)
+        {
+            GeminiKeysInput.Clear();
+            GeminiKeysStatus.Text = error.Message;
+        }
+    }
+
+    private void OnRemoveGeminiKey(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: int index }) return;
+        if (ThemedDialog.Show(this, "Xóa Gemini API key này khỏi Windows? Các Project truyện sẽ không bị ảnh hưởng.",
+            "Xóa Gemini API key", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        try
+        {
+            List<string> keys = _keyReader().ToList();
+            if ((uint)index >= (uint)keys.Count) return;
+            keys.RemoveAt(index);
+            _keySaver(keys);
+            RefreshGeminiKeys();
+        }
+        catch (Exception error) { GeminiKeysStatus.Text = error.Message; }
     }
 
     private void OnUseForRemote(object sender, RoutedEventArgs e)
@@ -628,4 +729,6 @@ public partial class GpuManagerWindow : Window
         catch (Exception error) { StatusText.Text = error.Message; }
         finally { IsEnabled = true; _busy = false; }
     }
+
+    private sealed record GeminiKeyItem(int Index, string Masked);
 }

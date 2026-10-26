@@ -177,11 +177,12 @@ public sealed class GeminiUxIntegrationTests
     public Task Gemini_key_entry_is_available_in_main_settings_without_PowerShell() => StaHost.Run(() =>
     {
         using var fixture = new WorkspaceFixture();
-        var pass = (PasswordBox)fixture.Window.FindName("GeminiApiKeyInput");
+        var pass = (TextBox)fixture.Window.FindName("GeminiApiKeyInput");
         var status = (TextBlock)fixture.Window.FindName("GeminiCredentialStatus");
         Assert.NotNull(pass);
         Assert.NotNull(status);
-        Assert.Equal(string.Empty, pass.Password);
+        Assert.Equal(string.Empty, pass.Text);
+        Assert.True(pass.AcceptsReturn);
         return Task.CompletedTask;
     });
 

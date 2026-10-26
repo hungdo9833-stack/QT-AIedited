@@ -100,7 +100,7 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.LiveSetting="Polite"/>
                     <TextBlock x:Name="AutosaveStatusText" Grid.Column="1" Text="✓ Đã tự lưu" Foreground="{DynamicResource SuccessBrush}" FontSize="12" VerticalAlignment="Center" Margin="12,0" AutomationProperties.LiveSetting="Polite"/>
-                    <Button Grid.Column="2" Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để mở Quản lý GPU (Local + Remote)" AutomationProperties.Name="Backend dịch · mở Quản lý GPU"><TextBlock x:Name="GpuBackendStatus" MaxWidth="260" TextTrimming="CharacterEllipsis" Text="Local · llama-server Local · Index-Translate-9B-Q4_K_M" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
+                    <Button Grid.Column="2" Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để chọn nguồn dịch API hoặc GPU" AutomationProperties.Name="Backend dịch · mở AI và hiệu năng"><TextBlock x:Name="GpuBackendStatus" MaxWidth="300" TextTrimming="CharacterEllipsis" Text="GPU · Local · llama-server" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
                     <TextBlock x:Name="SavePathText" Grid.Column="3" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="14,0,0,0" VerticalAlignment="Center"/>
                 </Grid>
             </StackPanel>
@@ -1005,18 +1005,18 @@
                                     <TextBlock Text="AI khảo sát nhân vật (Gemini)" Style="{StaticResource SectionTitle}"/>
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
-                                            <TextBlock Text="Gemini API — chỉ dành cho khảo sát nhân vật và xưng hô" FontWeight="SemiBold" FontSize="16"/>
-                                            <TextBlock Text="Nhập một API key Google AI Studio. Key được lưu riêng cho tài khoản Windows trong Credential Manager; không ghi vào Project, cấu hình dịch hoặc log." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,8"/>
-                                            <TextBlock Text="Gemini API key" Style="{StaticResource FieldLabel}"/>
-                                            <Grid MinWidth="320" HorizontalAlignment="Left">
-                                                <PasswordBox x:Name="GeminiApiKeyInput" PasswordChar="●" MaxLength="256" MinWidth="320" PreviewKeyDown="OnGeminiApiKeyInputPreviewKeyDown"/>
-                                                <TextBox x:Name="GeminiSavedKeyPlaceholder" Text="••••••••  (đã lưu)" IsReadOnly="True" IsTabStop="False" MinWidth="320" Visibility="Collapsed"/>
-                                            </Grid>
+                                            <TextBlock Text="Gemini API — dùng chung cho dịch và khảo sát nhân vật" FontWeight="SemiBold" FontSize="16"/>
+                                            <TextBlock Text="Key Google AI Studio được lưu theo thứ tự xoay vòng trong Windows Credential Manager; không ghi vào Project, settings JSON hoặc log." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,8"/>
+                                            <ItemsControl x:Name="GeminiSavedKeyList" AutomationProperties.Name="Danh sách Gemini API key đã lưu">
+                                                <ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,2">
+                                                    <Button DockPanel.Dock="Right" Content="Xóa" Tag="{Binding Index}" Click="OnRemoveGeminiApiKey" AutomationProperties.Name="Xóa Gemini API key"/>
+                                                    <TextBlock Text="{Binding Masked}" VerticalAlignment="Center" FontFamily="Consolas"/>
+                                                </DockPanel></DataTemplate></ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <TextBlock Text="Thêm API key (mỗi dòng một key)" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox x:Name="GeminiApiKeyInput" AcceptsReturn="True" MinWidth="320" MinHeight="72" MaxHeight="140" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" AutomationProperties.HelpText="Dán một hoặc nhiều key, mỗi dòng một key"/>
                                             <WrapPanel Margin="0,8,0,0">
-                                                <Button x:Name="GeminiSaveApiKeyButton" Content="Lưu" Click="OnSaveGeminiApiKey"/>
-                                                <Button x:Name="GeminiEditApiKeyButton" Content="Sửa" Click="OnEditGeminiApiKey" Margin="8,0,0,0"/>
-                                                <Button x:Name="GeminiCancelApiKeyEditButton" Content="Hủy" Click="OnCancelGeminiApiKeyEdit" Margin="8,0,0,0" Visibility="Collapsed"/>
-                                                <Button x:Name="GeminiRemoveApiKeyButton" Content="Xóa key" Click="OnRemoveGeminiApiKey" Margin="8,0,0,0" Visibility="Collapsed"/>
+                                                <Button x:Name="GeminiSaveApiKeyButton" Content="Lưu key mới" Click="OnSaveGeminiApiKey"/>
                                                 <TextBlock x:Name="GeminiCredentialStatus" Loaded="OnGeminiCredentialStatusLoaded" Margin="10,5,0,0" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" VerticalAlignment="Center"/>
                                             </WrapPanel>
                                             <TextBlock Text="Khảo sát: Nhân vật &amp; Từ điển → Nhân vật &amp; xưng hô → Khảo sát nhân vật bằng AI, chọn Gemini Flash Pool và model (gemini-3.6-flash, gemini-3.8-flash hoặc gemini-3.5-flash-lite)." Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>

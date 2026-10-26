@@ -9,11 +9,15 @@ using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Core.BookIntelligence;
 
-public sealed class GeminiSurveyHttpException(HttpStatusCode statusCode, TimeSpan? retryAfter = null)
+public enum GeminiQuotaExhaustionKind { Unknown, PerMinute, Daily }
+
+public sealed class GeminiSurveyHttpException(HttpStatusCode statusCode, TimeSpan? retryAfter = null,
+    GeminiQuotaExhaustionKind quotaKind = GeminiQuotaExhaustionKind.Unknown)
     : InvalidOperationException($"Gemini API trả HTTP {(int)statusCode}.")
 {
     public HttpStatusCode StatusCode { get; } = statusCode;
     public TimeSpan? RetryAfter { get; } = retryAfter;
+    public GeminiQuotaExhaustionKind QuotaKind { get; } = quotaKind;
 }
 
 /// <summary>
@@ -157,8 +161,14 @@ public sealed class GeminiSurveyClient : IJsonSchemaLlmClient, IDisposable
                 using (response)
                 {
                 if (_routeFailuresToPool && response.StatusCode == HttpStatusCode.TooManyRequests)
-                    throw new GeminiSurveyHttpException(response.StatusCode,
-                        RetryDelay(response, attempt, _utcNow()));
+                {
+                    string quotaPayload = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
+                    GeminiQuotaExhaustionKind quotaKind = ClassifyQuotaExhaustion(quotaPayload,
+                        response.Headers.RetryAfter is not null);
+                    TimeSpan? retryAfter = quotaKind == GeminiQuotaExhaustionKind.Daily
+                        ? null : RetryDelay(response, attempt, _utcNow());
+                    throw new GeminiSurveyHttpException(response.StatusCode, retryAfter, quotaKind);
+                }
                 if (IsTransient(response.StatusCode))
                 {
                     if (attempt == MaximumAttempts - 1)
@@ -321,6 +331,19 @@ public sealed class GeminiSurveyClient : IJsonSchemaLlmClient, IDisposable
         return TimeSpan.FromMilliseconds(Math.Clamp(delay.TotalMilliseconds, 100, TimeSpan.FromMinutes(2).TotalMilliseconds));
     }
 
+    private static GeminiQuotaExhaustionKind ClassifyQuotaExhaustion(string payload, bool hasRetryAfter)
+    {
+        // Provider error details contain quotaId/quotaMetric only. Never retain or surface the payload.
+        if (payload.Contains("PerDay", StringComparison.OrdinalIgnoreCase) ||
+            payload.Contains("daily", StringComparison.OrdinalIgnoreCase) ||
+            payload.Contains("RequestsPerDay", StringComparison.OrdinalIgnoreCase))
+            return GeminiQuotaExhaustionKind.Daily;
+        if (payload.Contains("PerMinute", StringComparison.OrdinalIgnoreCase) ||
+            payload.Contains("minute", StringComparison.OrdinalIgnoreCase) || hasRetryAfter)
+            return GeminiQuotaExhaustionKind.PerMinute;
+        return GeminiQuotaExhaustionKind.Unknown;
+    }
+
     public void Dispose() => _inFlight.Dispose();
 }
 
@@ -407,8 +430,10 @@ internal sealed class GeminiQuotaCoordinator
         }
     }
 
-    private static DateOnly PacificDate(DateTimeOffset now) =>
+    internal static DateOnly QuotaDay(DateTimeOffset now) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, Pacific).DateTime);
+
+    private static DateOnly PacificDate(DateTimeOffset now) => QuotaDay(now);
 
     private sealed class Bucket(DateOnly usageDay, GeminiSurveyLimits limits)
     {

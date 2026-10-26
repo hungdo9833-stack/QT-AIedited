@@ -4,8 +4,8 @@
  Title="QT Studio · AI &amp; hiệu năng" Width="1180" Height="820" MinWidth="820" MinHeight="480"
  WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
  <Grid Margin="16" TextElement.Foreground="{DynamicResource TextBrush}">
-  <Grid.ColumnDefinitions><ColumnDefinition Width="310"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-  <Border Style="{StaticResource Card}" Margin="0">
+  <Grid.ColumnDefinitions><ColumnDefinition x:Name="GpuProfilesColumn" Width="310"/><ColumnDefinition x:Name="GpuProfilesGapColumn" Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+  <Border x:Name="GpuProfilesPanel" Style="{StaticResource Card}" Margin="0">
    <DockPanel>
     <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
      <Button Content="Thêm GPU Remote" Click="OnNewProfile" ui:ButtonIcon.Glyph="&#xE710;"/>
@@ -27,16 +27,41 @@
   <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
    <StackPanel>
     <DockPanel Margin="0,0,0,10">
-     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+     <StackPanel x:Name="GpuActionPanel" DockPanel.Dock="Right" Orientation="Horizontal">
       <Button x:Name="SaveProfileButton" Content="Lưu cấu hình GPU" Click="OnSaveProfile" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE74E;"/>
       <Button Content="Kiểm tra / Kết nối" Click="OnConnect" ui:ButtonIcon.Glyph="&#xE72C;"/><Button Content="Ngắt" Click="OnDisconnect"/>
      </StackPanel>
      <StackPanel><TextBlock Text="Thiết lập AI &amp; hiệu năng" Style="{StaticResource WindowTitle}"/><TextBlock x:Name="StatusText" Text="Chọn một GPU profile." Style="{StaticResource WindowSubtitle}" AutomationProperties.LiveSetting="Polite"/></StackPanel>
     </DockPanel>
-    <Border Style="{StaticResource Card}"><DockPanel>
-     <Button x:Name="UseForRemoteButton" DockPanel.Dock="Right" Content="Dùng card này cho Remote" Click="OnUseForRemote"/>
-     <StackPanel><TextBlock Text="CHẾ ĐỘ DỊCH" FontWeight="SemiBold"/><ComboBox x:Name="TranslationModeInput" Width="310" HorizontalAlignment="Left" SelectionChanged="OnTranslationModeChanged"><ComboBoxItem Content="Chỉ GPU máy này"/><ComboBoxItem Content="Chỉ GPU từ xa"/><ComboBoxItem Content="Song song · Máy này + Từ xa"/></ComboBox><TextBlock x:Name="TranslationModeText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/></StackPanel>
-    </DockPanel></Border>
+    <Border Style="{StaticResource Card}"><StackPanel>
+     <TextBlock Text="NGUỒN DỊCH" FontWeight="SemiBold"/>
+     <TextBlock Text="Chọn API hoặc GPU. Các thiết lập không liên quan sẽ được ẩn để tránh nhầm cấu hình." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,8"/>
+     <WrapPanel>
+      <RadioButton x:Name="ApiSourceInput" GroupName="TranslationSource" Content="API · Gemini" Style="{StaticResource ModeButton}" Checked="OnTranslationSourceChanged" AutomationProperties.Name="Dùng API Gemini để dịch"/>
+      <RadioButton x:Name="GpuSourceInput" GroupName="TranslationSource" Content="GPU" Style="{StaticResource ModeButton}" Checked="OnTranslationSourceChanged" AutomationProperties.Name="Dùng GPU để dịch"/>
+     </WrapPanel>
+     <Grid x:Name="ApiTranslationPanel" Visibility="Collapsed" Margin="0,10,0,0">
+      <StackPanel>
+       <TextBlock Text="Gemini Flash-Lite" FontWeight="SemiBold" FontSize="16"/>
+       <TextBlock Text="Ưu tiên Gemini 3.5 Flash-Lite, tự chuyển sang 3.1 và key kế tiếp khi chạm hạn mức. Key chỉ lưu trong Windows Credential Manager." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,8"/>
+       <ItemsControl x:Name="GeminiKeyList" AutomationProperties.Name="Danh sách Gemini API key đã lưu">
+        <ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,2">
+         <Button DockPanel.Dock="Right" Content="Xóa" Tag="{Binding Index}" Click="OnRemoveGeminiKey" AutomationProperties.Name="Xóa Gemini API key"/>
+         <TextBlock Text="{Binding Masked}" VerticalAlignment="Center" FontFamily="Consolas"/>
+        </DockPanel></DataTemplate></ItemsControl.ItemTemplate>
+       </ItemsControl>
+       <TextBlock Text="Thêm API key (mỗi dòng một key)" Style="{StaticResource FieldLabel}"/>
+       <TextBox x:Name="GeminiKeysInput" AcceptsReturn="True" MinHeight="64" MaxHeight="120" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" AutomationProperties.HelpText="Dán một hoặc nhiều key, mỗi dòng một key"/>
+       <Button Content="Lưu key mới" Click="OnAddGeminiKeys" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+       <TextBlock x:Name="GeminiKeysStatus" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0" AutomationProperties.LiveSetting="Polite"/>
+      </StackPanel>
+     </Grid>
+     <DockPanel x:Name="GpuTranslationPanel" Margin="0,10,0,0">
+      <Button x:Name="UseForRemoteButton" DockPanel.Dock="Right" Content="Dùng card này cho Remote" Click="OnUseForRemote"/>
+      <StackPanel><TextBlock Text="Chế độ GPU" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="TranslationModeInput" Width="310" HorizontalAlignment="Left" SelectionChanged="OnTranslationModeChanged"><ComboBoxItem Content="Chỉ GPU máy này"/><ComboBoxItem Content="Chỉ GPU từ xa"/><ComboBoxItem Content="Song song · Máy này + Từ xa"/></ComboBox><TextBlock x:Name="TranslationModeText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/></StackPanel>
+     </DockPanel>
+    </StackPanel></Border>
+    <StackPanel x:Name="GpuConfigurationPanel">
     <Border Style="{StaticResource Card}"><StackPanel>
      <TextBlock Text="CẤU HÌNH GPU ĐANG CHỌN" FontWeight="SemiBold"/>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
@@ -97,6 +122,7 @@
      <TextBlock Text="Sẵn sàng chỉ hiển thị sau khi /health và /v1/models phản hồi qua SSH tunnel; kiểm tra server không phải benchmark suy luận." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="3,6"/>
     </StackPanel></Border>
     <TextBlock Text="Chi phí chỉ là ước tính. Ngắt SSH hoặc llama-server không đồng nghĩa nhà cung cấp ngừng tính phí." Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="5"/>
+    </StackPanel>
    </StackPanel>
   </ScrollViewer>
  </Grid>
