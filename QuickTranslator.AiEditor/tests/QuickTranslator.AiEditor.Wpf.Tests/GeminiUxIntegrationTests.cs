@@ -13,6 +13,22 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 public sealed class GeminiUxIntegrationTests
 {
     [Fact]
+    public void Gemini_translation_uses_cloud_specific_whole_chapter_runtime_options()
+    {
+        ModelOptions options = MainWindow.GeminiTranslationModelOptions();
+        SegmenterOptions segmentation = MainWindow.GeminiTranslationSegmentationOptions();
+
+        Assert.Equal(GeminiTranslationClient.PreferredModel, options.Model);
+        Assert.Equal(0.1, options.Temperature);
+        Assert.Equal(131_072, options.ContextSize);
+        Assert.Equal(65_536, options.MaximumOutputTokens);
+        Assert.Equal(TimeSpan.FromMinutes(10), options.RequestTimeout);
+        Assert.True(segmentation.WholeChapter);
+        options.Validate();
+        segmentation.Validate();
+    }
+
+    [Fact]
     public void Editor_split_uses_the_caret_at_a_sentence_boundary_or_suggests_the_nearest_one()
     {
         const string source = "第一句。第二句。第三句。";

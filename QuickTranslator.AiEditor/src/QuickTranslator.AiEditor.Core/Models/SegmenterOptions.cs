@@ -2,6 +2,8 @@ namespace QuickTranslator.AiEditor.Core.Models;
 
 public sealed record SegmenterOptions
 {
+    /// <summary>Keep the complete chapter body in one segment, ignoring the numeric segment-size limits.</summary>
+    public bool WholeChapter { get; init; }
     public int MinimumHanCharacters { get; init; } = 300;
     public int TargetHanCharacters { get; init; } = 400;
     public int MaximumHanCharacters { get; init; } = 500;

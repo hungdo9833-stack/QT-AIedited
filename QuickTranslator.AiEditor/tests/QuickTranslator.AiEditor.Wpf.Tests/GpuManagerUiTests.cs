@@ -22,6 +22,8 @@ public sealed class GpuManagerUiTests
             Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("GpuTranslationPanel")).Visibility);
             Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("GpuConfigurationPanel")).Visibility);
             Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("GpuProfilesPanel")).Visibility);
+            Assert.Contains("trọn một chương", ((TextBlock)window.FindName("GeminiTranslationDescription")).Text,
+                StringComparison.Ordinal);
 
             ((RadioButton)window.FindName("GpuSourceInput")).IsChecked = true;
 

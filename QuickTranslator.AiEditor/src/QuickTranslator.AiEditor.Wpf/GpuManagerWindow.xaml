@@ -43,7 +43,7 @@
      <Grid x:Name="ApiTranslationPanel" Visibility="Collapsed" Margin="0,10,0,0">
       <StackPanel>
        <TextBlock Text="Gemini Flash-Lite" FontWeight="SemiBold" FontSize="16"/>
-       <TextBlock Text="Ưu tiên Gemini 3.5 Flash-Lite, tự chuyển sang 3.1 và key kế tiếp khi chạm hạn mức. Key chỉ lưu trong Windows Credential Manager." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,8"/>
+       <TextBlock x:Name="GeminiTranslationDescription" Text="Mỗi request dịch trọn một chương, không chia segment. Ưu tiên Gemini 3.5 Flash-Lite, tự chuyển sang 3.1 và key kế tiếp khi chạm hạn mức. Key chỉ lưu trong Windows Credential Manager." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,3,0,8"/>
        <ItemsControl x:Name="GeminiKeyList" AutomationProperties.Name="Danh sách Gemini API key đã lưu">
         <ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,2">
          <Button DockPanel.Dock="Right" Content="Xóa" Tag="{Binding Index}" Click="OnRemoveGeminiKey" AutomationProperties.Name="Xóa Gemini API key"/>

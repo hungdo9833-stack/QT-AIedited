@@ -101,6 +101,13 @@ public sealed class GeminiTranslationClient : ILlmBackendClient, IJsonSchemaLlmC
                         : await _clients[keyIndex, modelIndex].TranslateAsync(prompt, routedOptions,
                             cancellationToken).ConfigureAwait(false);
                 }
+                catch (InvalidDataException error) when (
+                    error.Message.Contains("finishReason=MAX_TOKENS", StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "Gemini đã cắt bản dịch vì chạm giới hạn token (MAX_TOKENS). " +
+                        "Chương chưa được đánh dấu hoàn tất hoặc lưu như bản dịch hợp lệ.", error);
+                }
                 catch (GeminiSurveyHttpException error) when (error.StatusCode == HttpStatusCode.TooManyRequests)
                 {
                     MarkExhausted(keyIndex, modelIndex, error);

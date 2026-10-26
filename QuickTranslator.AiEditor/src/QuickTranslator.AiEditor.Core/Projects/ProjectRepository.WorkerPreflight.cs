@@ -34,9 +34,15 @@ public sealed partial class ProjectRepository
                 ProjectTranslationFingerprints.Protected(current) != expectedItem.ProtectedFingerprint)
                 throw new InvalidOperationException("Chapter đã đổi ngoài Queue trước worker preflight; không tự chia lại.");
 
-            // Retranslating from scratch: earlier AI translations do not pin the old boundaries, so the chapter takes this
-            // worker's segment size. Only what the user wrote or approved keeps its boundaries. Old segments stay in history.
-            bool releaseAi = expectedItem.RetranslateAll;
+            // Retranslating from scratch, or moving an unfinished chapter to a whole-chapter worker: earlier AI
+            // translations do not pin the old boundaries. Replaced segments remain available in segmentation history.
+            // Human work cannot be merged safely into a single translated chapter, so fail closed rather than lose it.
+            if (segmentation.WholeChapter && current.Segments.Count > 1 &&
+                current.Segments.Any(ResegmentationPlanner.HasUserData))
+                throw new InvalidOperationException(
+                    "Chương chưa hoàn tất có bản sửa hoặc bản duyệt của người dùng trong các segment cũ. " +
+                    "Gemini không tự gộp lại vì có thể làm mất bản sửa; hãy hoàn tất chương hoặc xử lý các bản sửa trước.");
+            bool releaseAi = expectedItem.RetranslateAll || segmentation.WholeChapter;
             ResegmentationPreview preview = ResegmentationPlanner.Preview(current, segmentation,
                 allowRecoverableCheckpoint: true, releaseAiTranslations: releaseAi);
             ChapterDocument candidate = ResegmentationPlanner.Apply(current, preview,

@@ -21,6 +21,19 @@ public sealed class TextSegmenter
         options.Validate();
         if (source.Length == 0) return [];
 
+        if (options.WholeChapter)
+        {
+            return [new TranslationSegment
+            {
+                Id = CreateStableId(chapterId, 0, source),
+                Order = 1,
+                StartUtf16 = 0,
+                SourceText = source,
+                HanCharacterCount = CountHanCharacters(source),
+                Status = SegmentStatus.Untranslated
+            }];
+        }
+
         var units = ReadTextElements(source);
         var result = new List<TranslationSegment>();
         for (int start = 0; start < units.Count;)

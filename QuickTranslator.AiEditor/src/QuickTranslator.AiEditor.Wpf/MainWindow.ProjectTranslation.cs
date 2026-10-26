@@ -16,6 +16,17 @@ public partial class MainWindow
     private static readonly Guid GeminiTranslationProfileId = new("a6194896-3e9e-4f68-8725-74a9fe9bbd6c");
     private GeminiTranslationClient? _activeGeminiTranslationClient;
 
+    internal static ModelOptions GeminiTranslationModelOptions() => new()
+    {
+        Model = GeminiTranslationClient.PreferredModel,
+        Temperature = 0.1,
+        ContextSize = 131_072,
+        MaximumOutputTokens = 65_536,
+        RequestTimeout = TimeSpan.FromMinutes(10)
+    };
+
+    internal static SegmenterOptions GeminiTranslationSegmentationOptions() => new() { WholeChapter = true };
+
     private void InitializeProjectTranslationCoordinator(ProjectSession session)
     {
         DropHostedQueueView();
@@ -258,14 +269,13 @@ public partial class MainWindow
             GpuBackendProfile local = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
             if (_gpuPreferences.Source == TranslationSource.Api)
             {
-                AiRuntimeProfile runtime = local.Runtime ?? AiRuntimeProfile.CreateDefault(local.Model);
-                ModelOptions options = runtime.ModelOptions with { Model = GeminiTranslationClient.PreferredModel };
+                ModelOptions options = GeminiTranslationModelOptions();
                 // Cloud API behaves like a remote worker for coordinator fault semantics: one terminal
                 // quota failure takes the worker offline instead of failing every remaining chapter.
                 var backend = new GpuBackendSnapshot(GeminiTranslationProfileId, GpuBackendKind.Remote,
                     "Gemini API", "https://generativelanguage.googleapis.com", options.Model);
                 definitions.Add(CreateWorkerDefinition(GeminiTranslationProfileId, backend, options,
-                    runtime.SegmentationOptions, null));
+                    GeminiTranslationSegmentationOptions(), null));
             }
             else if (_gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote)
             {
@@ -310,8 +320,10 @@ public partial class MainWindow
             client.RouteChanged += (_, _) => Dispatcher.BeginInvoke(UpdateGpuBackendStatus);
             _activeGeminiTranslationClient = client;
             _projectTranslationOwnedClients.Add(client);
-            return new(workerId, backend, client, options with { Model = GeminiTranslationClient.PreferredModel },
-                segmentation with { }, hourlyPrice, identity, 1);
+            ModelOptions geminiOptions = GeminiTranslationModelOptions();
+            SegmenterOptions wholeChapter = GeminiTranslationSegmentationOptions();
+            GpuBackendSnapshot geminiBackend = backend with { Model = geminiOptions.Model };
+            return new(workerId, geminiBackend, client, geminiOptions, wholeChapter, hourlyPrice, identity, 1);
         }
         if (backend.Kind == GpuBackendKind.Local)
         {
