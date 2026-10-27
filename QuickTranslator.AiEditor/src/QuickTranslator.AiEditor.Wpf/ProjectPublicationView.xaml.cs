@@ -190,6 +190,13 @@ public partial class ProjectPublicationView : UserControl
     {
         if (_inspection is null || _busy) return;
         PublicationFormat format = SelectedFormat();
+        if (format == PublicationFormat.VanCac)
+        {
+            // Upload uses the same range and draft confirmation chosen here; the window owns the network work.
+            new VanCacPublishWindow(_session, _service, _inspection, AllowIncompleteInput.IsChecked == true)
+                { Owner = Window.GetWindow(this) }.ShowDialog();
+            return;
+        }
         string extension = format switch { PublicationFormat.Pdf => ".pdf", PublicationFormat.Epub => ".epub", _ => ".txt" };
         var dialog = new SaveFileDialog
         {
@@ -293,18 +300,26 @@ public partial class ProjectPublicationView : UserControl
 
     private void UpdateExportEnabled()
     {
-        ExportButton.IsEnabled = !_busy && _inspection is { TotalChapterCount: > 0 } &&
+        bool webChinese = SelectedFormat() == PublicationFormat.VanCac && SelectedLanguage() == PublicationLanguage.Chinese;
+        ExportButton.IsEnabled = !_busy && !webChinese && _inspection is { TotalChapterCount: > 0 } &&
             (!_inspection.RequiresConfirmation || AllowIncompleteInput.IsChecked == true);
         ExportButton.ToolTip = _busy ? "Đang kiểm tra chương hoặc thực hiện tác vụ."
+            : webChinese ? "Website chỉ nhận bản dịch tiếng Việt. Chọn ngôn ngữ Bản dịch tiếng Việt."
             : _rangeError is not null ? _rangeError
             : _inspection is not { TotalChapterCount: > 0 } ? "Không có chương để duyệt để xuất."
             : _inspection.RequiresConfirmation && AllowIncompleteInput.IsChecked != true
-                ? "Xác nhận cho phép xuất bản nháp/chương cần kiểm tra." : "Chọn nơi lưu và xuất bản.";
+                ? "Xác nhận cho phép xuất bản nháp/chương cần kiểm tra."
+            : SelectedFormat() == PublicationFormat.VanCac ? "Mở cửa sổ đăng chương lên website Văn Các." : "Chọn nơi lưu và xuất bản.";
     }
 
     private void OnFormatChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (FormatDescriptionText is not null) UpdateFormatDescription();
+        if (FormatDescriptionText is null) return; // Raised while the XAML is still loading.
+        bool web = SelectedFormat() == PublicationFormat.VanCac;
+        FileContentOptionsPanel.Visibility = web ? Visibility.Collapsed : Visibility.Visible;
+        ExportButton.Content = web ? "Đăng lên Văn Các…" : "Chọn nơi lưu và xuất";
+        UpdateFormatDescription();
+        UpdateExportEnabled();
     }
 
     private async void OnLanguageChanged(object sender, SelectionChangedEventArgs e)
@@ -326,6 +341,9 @@ public partial class ProjectPublicationView : UserControl
 
     private void UpdateFormatDescription() => FormatDescriptionText.Text = SelectedFormat() switch
     {
+        PublicationFormat.VanCac when SelectedLanguage() == PublicationLanguage.Chinese =>
+            "Website Văn Các chỉ nhận bản dịch tiếng Việt. Chọn ngôn ngữ Bản dịch tiếng Việt để đăng.",
+        PublicationFormat.VanCac => "Đăng từng chương trong phạm vi lên website Văn Các bằng mã kết nối tạo ở trang Tài khoản. Nội dung giống Reader/TXT; gửi lại an toàn, chương giống hệt được bỏ qua. Dữ liệu Project không bị thay đổi.",
         PublicationFormat.Pdf when SelectedLanguage() == PublicationLanguage.Chinese =>
             "PDF khổ A4, mỗi chương bắt đầu ở trang mới; giữ nguyên bản gốc tiếng Trung và dùng phông chữ hỗ trợ tiếng Trung.",
         PublicationFormat.Pdf => "PDF khổ A4, mỗi chương bắt đầu ở trang mới; nội dung tiếng Việt dùng cùng bộ ghép văn bản với Reader/TXT.",
@@ -338,6 +356,7 @@ public partial class ProjectPublicationView : UserControl
     {
         "Pdf" => PublicationFormat.Pdf,
         "Epub" => PublicationFormat.Epub,
+        "VanCac" => PublicationFormat.VanCac,
         _ => PublicationFormat.Txt
     };
 
@@ -365,5 +384,5 @@ public partial class ProjectPublicationView : UserControl
         return string.IsNullOrWhiteSpace(safe) ? "QT-Studio-Export" : safe;
     }
 
-    private enum PublicationFormat { Txt, Pdf, Epub }
+    private enum PublicationFormat { Txt, Pdf, Epub, VanCac }
 }
