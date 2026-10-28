@@ -18,7 +18,7 @@ public sealed record VanCacPublishReport(
 }
 
 /// <summary>
-/// Uploads chapters to Văn Các one request at a time, in reading order. Chapter text comes from the caller
+/// Uploads chapters to Sắc Viện one request at a time, in reading order. Chapter text comes from the caller
 /// (ProjectPublicationService.ReadChaptersAsync, i.e. ChapterTranslationComposer), so the website receives
 /// exactly what Reader and TXT export show. The Project is never written.
 /// Per-chapter errors are recorded and the run continues; 401/403 stop the run because no later chapter can

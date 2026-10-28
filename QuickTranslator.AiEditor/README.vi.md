@@ -16,7 +16,7 @@ AI Editor lưu một bộ truyện trong một thư mục riêng có manifest `*
 4. **Bỏ khỏi danh sách** trong Thư viện chỉ xóa lối tắt recent. Lệnh xóa dự án riêng chuyển toàn bộ thư mục vào Thùng rác Windows sau khi người dùng xác nhận; không áp dụng cho dự án đang mở.
 5. Chọn **Workspace → Xuất bản** để ghép toàn bộ chương đang hoạt động theo thứ tự mục lục thành một file TXT UTF-8 hoặc PDF A4. Chương đã xóa mềm không được xuất; chương chưa hoàn tất/cần kiểm tra chỉ được đưa vào file sau khi người dùng xác nhận xuất bản nháp.
 
-**Đăng lên Văn Các:** trong **Workspace → Xuất bản**, chọn định dạng **Văn Các · Đăng lên web** để gửi bản dịch tiếng Việt lên website Văn Các bằng mã kết nối cá nhân. Mã nằm trong Windows Credential Manager, không nằm trong Project. Xem [VANCAC-PUBLISHING.vi.md](docs/VANCAC-PUBLISHING.vi.md).
+**Đăng lên Sắc Viện:** trong **Workspace → Xuất bản**, chọn định dạng **Sắc Viện · Đăng lên web** để gửi bản dịch tiếng Việt lên website Sắc Viện bằng mã kết nối cá nhân. Mã nằm trong Windows Credential Manager, không nằm trong Project. Xem [VANCAC-PUBLISHING.vi.md](docs/VANCAC-PUBLISHING.vi.md).
 
 Có thể mở dự án bằng `QuickTranslator.AiEditor.exe "D:\Truyen\TenTruyen.qtproj"`. Ứng dụng không ghi Windows Registry. Trình **Xuất bản** hiện chỉ ghép toàn bộ chương vào một file; chưa có dàn trang bìa, mục lục PDF hay xuất nhiều tập.
 

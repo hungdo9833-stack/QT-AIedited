@@ -41,7 +41,7 @@ public interface IVanCacChapterSink
 }
 
 /// <summary>
-/// Client for the Văn Các Publisher API v1 (docs/PUBLISHER_API.md in the website repo).
+/// Client for the Sắc Viện Publisher API v1 (docs/PUBLISHER_API.md in the website repo).
 /// The token is only ever sent in the Authorization header: never logged, put in URLs or serialized.
 /// Transient failures (network, 429, 5xx) are retried with backoff; PUT is idempotent so retries are safe.
 /// </summary>
@@ -176,7 +176,7 @@ public sealed class VanCacPublisherClient : IVanCacChapterSink, IDisposable
                 if (status != 429 && status < 500 || attempt >= MaximumAttempts) throw Failure(status, text);
                 wait = response.Headers.RetryAfter?.Delta;
             }
-            catch (HttpRequestException ex) when (attempt < MaximumAttempts) { wait = null; System.Diagnostics.Trace.TraceWarning($"Văn Các: lỗi mạng, thử lại ({ex.GetType().Name})."); }
+            catch (HttpRequestException ex) when (attempt < MaximumAttempts) { wait = null; System.Diagnostics.Trace.TraceWarning($"Sắc Viện: lỗi mạng, thử lại ({ex.GetType().Name})."); }
             catch (HttpRequestException ex) { throw new VanCacApiException(null, "Không kết nối được website: " + ex.Message); }
             catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < MaximumAttempts) { wait = null; }
             catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new VanCacApiException(null, "Website không phản hồi (quá thời gian chờ)."); }

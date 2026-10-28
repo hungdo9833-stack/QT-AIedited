@@ -1,15 +1,15 @@
-# Đăng lên Văn Các
+# Đăng lên Sắc Viện
 
-QT Studio đăng bản dịch tiếng Việt trực tiếp lên website Văn Các qua Publisher API v1. Hợp đồng API nằm ở `docs/PUBLISHER_API.md` trong repo website.
+QT Studio đăng bản dịch tiếng Việt trực tiếp lên website Sắc Viện qua Publisher API v1. Hợp đồng API nằm ở `docs/PUBLISHER_API.md` trong repo website.
 
 ## Cách dùng
 
 1. Trên website, đăng nhập tài khoản **Tác giả** hoặc **Quản trị** → **Tài khoản** → **Kết nối QT Studio**. Đặt tên mã, chọn thời hạn, bấm **Tạo mã** rồi sao chép mã `vcp_…`. Mã chỉ hiện một lần.
 2. Trong QT Studio: **Workspace → Xuất bản**.
-   - Chọn định dạng **Văn Các · Đăng lên web** và ngôn ngữ **Bản dịch tiếng Việt**.
+   - Chọn định dạng **Sắc Viện · Đăng lên web** và ngôn ngữ **Bản dịch tiếng Việt**.
    - Chọn phạm vi chương (toàn bộ / dải / một chương).
    - Nếu có chương chưa hoàn tất, tích xác nhận đăng bản nháp giống khi xuất file.
-   - Bấm **Đăng lên Văn Các…**.
+   - Bấm **Đăng lên Sắc Viện…**.
 3. Trong cửa sổ đăng:
    - **Kết nối:** nhập địa chỉ website (HTTPS, chỉ gốc, ví dụ `https://ten-mien.com`), dán mã, bấm **Lưu và kiểm tra kết nối**.
    - **Truyện:** chọn truyện đích, hoặc **Tạo truyện mới trên website…** (tên, đường dẫn tự sinh không dấu, giới thiệu và thể loại lấy từ Project; tạo ở trạng thái nháp). Cửa sổ cho biết bao nhiêu chương sẽ tạo mới và bao nhiêu đã có.
@@ -45,7 +45,7 @@ QT Studio đăng bản dịch tiếng Việt trực tiếp lên website Văn Cá
 | `Wpf/VanCacPublishWindow.xaml(.cs)` | Cửa sổ kết nối, chọn/tạo truyện, đăng, nhật ký |
 | `Wpf/VanCacPublisherSettings.cs` | `VanCacTokenVault` (Credential Manager) và `VanCacPublisherPreferences` (LocalAppData) |
 | `Wpf/WindowsCredentialStore.cs` | Tách từ `GeminiApiKeyVault` để dùng chung; thông báo lỗi Gemini giữ nguyên |
-| `Wpf/ProjectPublicationView.xaml(.cs)` | Thêm định dạng "Văn Các · Đăng lên web" (ẩn tùy chọn file, chặn bản gốc tiếng Trung) |
+| `Wpf/ProjectPublicationView.xaml(.cs)` | Thêm định dạng "Sắc Viện · Đăng lên web" (ẩn tùy chọn file, chặn bản gốc tiếng Trung) |
 
 ## Kiểm thử
 

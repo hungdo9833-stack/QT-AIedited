@@ -69,9 +69,9 @@ public sealed class VanCacPublishUiTests
             var format = (ComboBox)window.FindName("FormatInput");
             format.SelectedItem = format.Items.Cast<ComboBoxItem>().Single(item => (string)item.Tag == "VanCac");
             var export = (Button)window.FindName("ExportButton");
-            Assert.Equal("Đăng lên Văn Các…", export.Content);
+            Assert.Equal("Đăng lên Sắc Viện…", export.Content);
             Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("FileContentOptionsPanel")).Visibility);
-            Assert.Contains("Văn Các", ((TextBlock)window.FindName("FormatDescriptionText")).Text);
+            Assert.Contains("Sắc Viện", ((TextBlock)window.FindName("FormatDescriptionText")).Text);
             Assert.True(export.IsEnabled);
 
             var language = (ComboBox)window.FindName("LanguageInput");

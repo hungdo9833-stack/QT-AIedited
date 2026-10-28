@@ -4,11 +4,11 @@ using QuickTranslator.AiEditor.Core.Publishing;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
-/// <summary>The Văn Các publishing token lives only in Windows Credential Manager, never in Project or settings files.</summary>
+/// <summary>The Sắc Viện publishing token lives only in Windows Credential Manager, never in Project or settings files.</summary>
 internal static class VanCacTokenVault
 {
     internal const string Target = "QTStudio.VanCac.PublisherToken.v1";
-    private static readonly IGeminiCredentialStore NativeStore = new WindowsCredentialStore("mã kết nối Văn Các");
+    private static readonly IGeminiCredentialStore NativeStore = new WindowsCredentialStore("mã kết nối Sắc Viện");
 
     public static string? Read() => Read(NativeStore);
     internal static string? Read(IGeminiCredentialStore store)

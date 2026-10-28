@@ -9,7 +9,7 @@ using QuickTranslator.AiEditor.Core.Publishing;
 namespace QuickTranslator.AiEditor.Wpf;
 
 /// <summary>
-/// Uploads the chapters chosen in the Publication view (range, draft confirmation) to a Văn Các website through
+/// Uploads the chapters chosen in the Publication view (range, draft confirmation) to a Sắc Viện website through
 /// the Publisher API. Text comes from ProjectPublicationService.ReadChaptersAsync, the same composer Reader and
 /// export use. The token is kept in Windows Credential Manager; the Project is never written.
 /// </summary>
@@ -191,7 +191,7 @@ public partial class VanCacPublishWindow : Window
         _preferences.Save(_preferencesPath);
         string question = $"Đăng {_inspection.TotalChapterCount:N0} chương lên “{novel.Title}”?\n\n" +
             (publish ? "Các chương sẽ được XUẤT BẢN NGAY và người đọc thấy được (nếu truyện đã xuất bản)." : "Chương mới là bản nháp; chương đã có giữ nguyên trạng thái.");
-        if (ThemedDialog.Show(this, question, "Đăng lên Văn Các", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (ThemedDialog.Show(this, question, "Đăng lên Sắc Viện", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
         _log.Clear();
         ReportText.Visibility = Visibility.Collapsed;
@@ -219,7 +219,7 @@ public partial class VanCacPublishWindow : Window
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             ProgressText.Text = "Lỗi: " + ex.Message;
-            ThemedDialog.Show(this, ex.Message, "Đăng lên Văn Các", MessageBoxButton.OK, MessageBoxImage.Error);
+            ThemedDialog.Show(this, ex.Message, "Đăng lên Sắc Viện", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
