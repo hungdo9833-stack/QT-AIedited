@@ -83,7 +83,7 @@ public partial class MainWindow
         FrameworkElement element = PanelElement(panel);
         Popup popup = PanelPopup(panel);
         bool applicable = presentation != PanelPresentation.NotApplicable;
-        Button toggle = PanelToggle(panel);
+        Control toggle = PanelToggle(panel);
         toggle.Visibility = applicable ? Visibility.Visible : Visibility.Collapsed;
         toggle.IsEnabled = applicable && (panel != PanelId.ProjectSidebar || _projectSession is not null);
 
@@ -111,7 +111,8 @@ public partial class MainWindow
             PanelId.Inspector => _compactShell ? "Inspector" : visible ? "Ẩn Inspector" : "Hiện Inspector",
             _ => _compactShell ? "Đoạn" : visible ? "Ẩn danh sách đoạn" : "Hiện danh sách đoạn"
         };
-        PanelToggle(panel).Content = label;
+        if (PanelToggle(panel) is MenuItem menu) menu.Header = label;
+        else if (PanelToggle(panel) is Button button) button.Content = label;
     }
 
     private void OpenPanelFlyout(PanelId panel)
@@ -193,8 +194,14 @@ public partial class MainWindow
         UpdatePanelToggle(panel, CurrentPanelPresentation(panel), flyoutOpen: false);
         if (!_applyingPanelPolicy && !_closing)
         {
-            PanelToggle(panel).Focus();
-            Keyboard.Focus(PanelToggle(panel));
+            // Menu commands are in a closed submenu; return to the visible workspace entry.
+            Control target = PanelToggle(panel) is MenuItem ? TranslateNavButton : PanelToggle(panel);
+            // Popup restores its previous focus after Closed; restore our visible anchor afterwards.
+            _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, () =>
+            {
+                target.Focus();
+                Keyboard.Focus(target);
+            });
         }
     }
 
@@ -250,7 +257,7 @@ public partial class MainWindow
         PanelId.SegmentNavigator => SegmentNavigatorSplitter,
         _ => InspectorSplitter
     };
-    private Button PanelToggle(PanelId panel) => panel switch
+    private Control PanelToggle(PanelId panel) => panel switch
     {
         PanelId.ProjectSidebar => ProjectSidebarToggleButton,
         PanelId.SegmentNavigator => SegmentNavigatorToggleButton,

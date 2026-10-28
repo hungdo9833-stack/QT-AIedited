@@ -24,7 +24,7 @@ public sealed class ProductionShellUiTests
         fixture.Attach(chapter);
         fixture.Call("Refresh");
 
-        Assert.True(((RadioButton)fixture.Window.FindName("EditorModeButton")).IsChecked);
+        Assert.True(((RadioButton)fixture.Window.FindName("TwoPaneModeButton")).IsChecked);
         Assert.Equal(Visibility.Visible, ((DockPanel)fixture.Window.FindName("EditorView")).Visibility);
         Assert.Equal(Visibility.Collapsed, ((Grid)fixture.Window.FindName("ReaderView")).Visibility);
         Assert.Equal(WorkspaceId.Editor, fixture.Window.CurrentWorkspace);
@@ -117,7 +117,7 @@ public sealed class ProductionShellUiTests
             ShellTheme windows = ThemeManager.Resolve(ShellTheme.System);
             Assert.NotEqual(ShellTheme.System, windows);
             Assert.Equal(windows, ThemeManager.Current);
-            Assert.Equal(windows == ShellTheme.Dark ? "Light" : "Dark", Find<Button>("ThemeToggleButton").Content);
+            Assert.Equal(windows == ShellTheme.Dark ? "Chuyển sang sáng" : "Chuyển sang tối", Find<MenuItem>("ThemeToggleButton").Header);
             Assert.Equal(ShellTheme.System, ((WorkspaceLayoutPreferences)typeof(MainWindow).GetField("_workspaceLayout", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(fixture.Window)!).Theme);
             Find<RadioButton>("ThemeLightRadio").IsChecked = true;
             Assert.Equal(ShellTheme.Light, ThemeManager.Current);
@@ -141,8 +141,8 @@ public sealed class ProductionShellUiTests
         Button Nav(string name) => (Button)fixture.Window.FindName(name);
         fixture.Call("ShowReaderWorkspace");
         Assert.Equal(WorkspaceId.Reader, fixture.Window.CurrentWorkspace);
-        Assert.True(NavState.GetIsActive(Nav("ReaderNavButton")));
-        Assert.False(NavState.GetIsActive(Nav("TranslateNavButton")));
+        Assert.False(NavState.GetIsActive(Nav("ReaderNavButton")));
+        Assert.True(NavState.GetIsActive(Nav("TranslateNavButton")));
         fixture.Call("ShowSettingsWorkspace", (string?)null);
         Assert.Equal(WorkspaceId.Settings, fixture.Window.CurrentWorkspace);
         Assert.True(NavState.GetIsActive(Nav("SettingsNavButton")));
@@ -174,7 +174,7 @@ public sealed class ProductionShellUiTests
             Assert.Equal(Color.FromRgb(245, 246, 248), ((SolidColorBrush)fixture.Window.Background).Color);
             Assert.Equal(Color.FromRgb(245, 246, 248), ((SolidColorBrush)library.Background).Color);
             Assert.Equal(Color.FromRgb(27, 31, 36), ((SolidColorBrush)status.Foreground).Color);
-            Assert.Equal("Dark", ((Button)fixture.Window.FindName("ThemeToggleButton")).Content);
+            Assert.Equal("Chuyển sang tối", ((MenuItem)fixture.Window.FindName("ThemeToggleButton")).Header);
 
             fixture.Call("ApplyShellTheme", ShellTheme.Dark);
             Assert.Equal(Color.FromRgb(15, 17, 21), ((SolidColorBrush)fixture.Window.Background).Color);
@@ -201,10 +201,10 @@ public sealed class ProductionShellUiTests
         fixture.Call("UpdateResponsiveShell", 960d);
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("ProjectSidebar")).Visibility);
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("TranslationInspector")).Visibility);
-        Assert.Equal(172, ((Border)fixture.Window.FindName("ShellNavigation")).Width);
+        Assert.Equal(160, ((Border)fixture.Window.FindName("ShellNavigation")).Width);
         Assert.Equal(190, ((ComboBox)fixture.Window.FindName("ProjectSwitcher")).Width);
         Assert.Equal(Visibility.Visible,
-            ((Button)fixture.Window.FindName("ProjectSidebarToggleButton")).Visibility);
+            ((MenuItem)fixture.Window.FindName("ProjectSidebarToggleButton")).Visibility);
         Assert.True(fixture.Window.MinWidth <= 960);
         Assert.True(fixture.Window.MinHeight <= 540);
 
@@ -213,14 +213,14 @@ public sealed class ProductionShellUiTests
         fixture.Call("UpdateResponsiveShell", 1280d);
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("ProjectSidebar")).Visibility);
         Assert.Equal(Visibility.Visible, ((Border)fixture.Window.FindName("TranslationInspector")).Visibility);
-        Assert.Equal("Hiện mục lục", ((Button)fixture.Window.FindName("ProjectSidebarToggleButton")).Content);
+        Assert.Equal("Hiện mục lục", ((MenuItem)fixture.Window.FindName("ProjectSidebarToggleButton")).Header);
 
         fixture.Call("UpdateResponsiveShell", 1600d);
         Assert.Equal(Visibility.Visible, ((Border)fixture.Window.FindName("ProjectSidebar")).Visibility);
         Assert.Equal(Visibility.Visible, ((Border)fixture.Window.FindName("TranslationInspector")).Visibility);
         Assert.Equal(Visibility.Visible,
-            ((Button)fixture.Window.FindName("ProjectSidebarToggleButton")).Visibility);
-        Assert.Equal("Ẩn mục lục", ((Button)fixture.Window.FindName("ProjectSidebarToggleButton")).Content);
+            ((MenuItem)fixture.Window.FindName("ProjectSidebarToggleButton")).Visibility);
+        Assert.Equal("Ẩn mục lục", ((MenuItem)fixture.Window.FindName("ProjectSidebarToggleButton")).Header);
     });
 
     [Fact]

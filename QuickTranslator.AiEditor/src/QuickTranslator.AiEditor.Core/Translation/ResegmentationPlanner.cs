@@ -113,7 +113,7 @@ public static class ResegmentationPlanner
 
     private static bool Pins(TranslationSegment segment, bool releaseAi) => releaseAi ? HasUserData(segment) : HasProtectedData(segment);
 
-    private static bool HasUserData(TranslationSegment segment) => segment.UserDraft is not null || segment.Approvals.Count > 0 ||
+    internal static bool HasUserData(TranslationSegment segment) => segment.UserDraft is not null || segment.Approvals.Count > 0 ||
         segment.DraftHistory.Count > 0 || segment.PreservedText is not null || segment.ProtectedByPreviousEdit || segment.NormalizationHistory.Count > 0;
 
     internal static bool HasProtectedData(TranslationSegment segment) => segment.Attempts.Count > 0 ||

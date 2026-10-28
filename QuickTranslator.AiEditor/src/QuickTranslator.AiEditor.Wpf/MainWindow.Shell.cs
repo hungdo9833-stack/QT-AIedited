@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -96,12 +97,18 @@ public partial class MainWindow
         TogglePanelPreference(PanelId.ProjectSidebar);
 
     // The rail also holds the shell tools (queue, panels, theme, save), so it is wide enough for their labels.
-    private double NavRailWidth => _navRailCollapsed ? 56 : (_compactShell ? 172 : 204);
+    private double NavRailWidth => _navRailCollapsed ? 56 : (_compactShell ? 160 : 184);
 
     private void OnToggleNavRail(object sender, RoutedEventArgs e)
     {
         _navRailCollapsed = !_navRailCollapsed;
         ShellNavigation.Width = NavRailWidth;
+        foreach (Button button in new[] { TranslateNavButton, ResourcesNavButton, PublishNavButton, SettingsNavButton })
+        {
+            NavState.SetIsCollapsed(button, _navRailCollapsed);
+            AutomationProperties.SetName(button, button.Content?.ToString() ?? "");
+        }
+        NavWorkLabel.Visibility = NavOptionsLabel.Visibility = _navRailCollapsed ? Visibility.Collapsed : Visibility.Visible;
         if (FindName("NavRailToggleButton") is Button btn)
             btn.Content = _navRailCollapsed ? "»" : "«";
     }
@@ -182,7 +189,7 @@ public partial class MainWindow
         if (FindName("BilingualGridHeaderText") is TextBlock headerText)
             headerText.Text = showRawSourceBox
                 ? "VIỆT · BẢN ĐANG BIÊN TẬP"
-                : "LƯỚI SONG NGỮ ĐỒNG BỘ TỪNG ĐOẠN (TRUNG ↔ VIỆT · CUỘN ĐỒNG BỘ 100%)";
+                : "TRUNG ↔ VIỆT · TỪNG ĐOẠN";
     }
 
     private void SetTranslationInspectorVisibility(bool visible)
@@ -205,7 +212,7 @@ public partial class MainWindow
         if (_service is not null)
             foreach (var segment in _service.GetSnapshot().Segments)
                 _chapterBlocks.FirstOrDefault(b => b.Id == segment.Id)?.UpdateMetadataOnly(segment, segment.Id == _selectedId);
-        ThemeToggleButton.Content = ThemeManager.Current == ShellTheme.Dark ? "Light" : "Dark";
+        ThemeToggleButton.Header = ThemeManager.Current == ShellTheme.Dark ? "Chuyển sang sáng" : "Chuyển sang tối";
         SyncThemeChoice(theme);
         SetResourceReference(BackgroundProperty, "AppBackgroundBrush");
         SetResourceReference(ForegroundProperty, "TextBrush");
@@ -237,7 +244,7 @@ public partial class MainWindow
             CurrentWorkspace = WorkspaceId.Editor;
             CurrentEditorMode = targetMode;
             ApplyWorkspaceVisibility(CurrentWorkspace);
-            EditorModeButton.IsChecked = true;
+            ReaderModeButton.IsChecked = false;
             _workspaceLayout.FourPaneMode = fourPane;
             if (fourPane)
             {
@@ -274,13 +281,14 @@ public partial class MainWindow
             }
         });
         else _switchingEditorMode = false;
+        OnReaderModeChanged(this, new RoutedEventArgs());
         _ = SaveWorkspaceLayoutAsync();
         MarkActiveNavigation(WorkspaceId.Editor);
     }
 
     private void OnEditorLayoutChanged(object sender, RoutedEventArgs e)
     {
-        if (!_initialized || TwoPaneModeButton is null || FourPaneModeButton is null) return;
+        if (!_initialized || _switchingEditorMode || TwoPaneModeButton is null || FourPaneModeButton is null) return;
         ShowTranslationWorkspace(FourPaneModeButton.IsChecked == true);
     }
 
@@ -347,7 +355,7 @@ public partial class MainWindow
             [WorkspaceId.Settings] = SettingsNavButton
         };
         foreach ((WorkspaceId id, Button button) in routes)
-            NavState.SetIsActive(button, id == workspace);
+            NavState.SetIsActive(button, id == (workspace == WorkspaceId.Reader ? WorkspaceId.Editor : workspace));
     }
 
     private void ApplyWorkspaceVisibility(WorkspaceId workspace)
@@ -360,7 +368,7 @@ public partial class MainWindow
         ResourcesWorkspaceRoot.Visibility = workspace == WorkspaceId.Resources ? Visibility.Visible : Visibility.Collapsed;
         SettingsWorkspaceRoot.Visibility = workspace == WorkspaceId.Settings ? Visibility.Visible : Visibility.Collapsed;
         EditorContextHeader.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
-        ChapterModeBar.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
+        ChapterModeBar.Visibility = editorHost ? Visibility.Visible : Visibility.Collapsed;
         if (workspace == WorkspaceId.Chapters) _hostedChapterManagerView?.Attach(); else _hostedChapterManagerView?.Detach();
         if (workspace == WorkspaceId.Queue) _hostedQueueView?.Attach(); else _hostedQueueView?.Detach();
         if (workspace == WorkspaceId.Publish) _hostedPublicationView?.Attach(); else _hostedPublicationView?.Detach();
@@ -377,6 +385,7 @@ public partial class MainWindow
         ApplyWorkspaceVisibility(CurrentWorkspace);
         EditorTabs.SelectedIndex = 0;
         ReaderModeButton.IsChecked = true;
+        OnReaderModeChanged(this, new RoutedEventArgs());
         ApplyPanelPolicy();
         ChapterModeHint.Text = "Đọc bản dịch · chọn đoạn để mở đúng vị trí trong Editor";
         MarkActiveNavigation(WorkspaceId.Reader);
@@ -404,9 +413,10 @@ public partial class MainWindow
         CurrentWorkspace = WorkspaceId.Resources;
         ApplyWorkspaceVisibility(CurrentWorkspace);
         MarkActiveNavigation(WorkspaceId.Resources);
-        string target = section ?? "Dictionary";
+        string target = section ?? "Characters";
         ResourcesNavigation.SelectedItem = ResourcesNavigation.Items.OfType<ListBoxItem>()
             .FirstOrDefault(item => string.Equals(item.Tag as string, target, StringComparison.OrdinalIgnoreCase));
+        ApplyResourcesSelection();
     }
 
     internal void ActivateShellSection(string section)
@@ -446,13 +456,41 @@ public partial class MainWindow
         }
     }
 
-    private bool _shellQueueResumable;
+    private bool _queueMiniPauseRequested, _queueMiniResumeRequested;
 
-    // "Hàng đợi / tiếp tục dịch" replaces the old resume banner: while the queue is paused or interrupted the button resumes it.
-    private async void OnOpenQueueStatus(object sender, RoutedEventArgs e)
+    private async void OnShowQueueDetails(object sender, RoutedEventArgs e)
     {
-        if (_shellQueueResumable) OnResumeProjectTranslationFromShell(sender, e);
-        else await OpenQueueStatusAsync();
+        try { await OpenQueueStatusAsync(); }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private async void OnQueueMiniToggle(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            ProjectTranslationCoordinator? coordinator = _projectTranslationCoordinator;
+            if (coordinator is null || coordinator.CurrentJob is null) return;
+            if (coordinator.IsRunning)
+            {
+                if (_queueMiniPauseRequested) return;
+                _queueMiniPauseRequested = true;
+                RefreshShellQueueStatus();
+                try { await coordinator.PauseAsync(); }
+                finally { _queueMiniPauseRequested = false; }
+                RefreshShellQueueStatus();
+            }
+            else if (coordinator.CurrentJob.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted)
+            {
+                if (_queueMiniResumeRequested) return;
+                _queueMiniResumeRequested = true;
+                RefreshShellQueueStatus();
+                try { await ResumeProjectTranslationFromShellAsync(); }
+                finally { _queueMiniResumeRequested = false; }
+            }
+            else await OpenQueueStatusAsync();
+        }
+        catch (Exception ex) { ShowError(ex); }
+        finally { RefreshShellQueueStatus(); }
     }
 
     private async Task OpenQueueStatusAsync()
@@ -467,7 +505,7 @@ public partial class MainWindow
         HostProjectTranslationView(coordinator, null);
     }
 
-    private async void OnResumeProjectTranslationFromShell(object sender, RoutedEventArgs e)
+    private async Task ResumeProjectTranslationFromShellAsync()
     {
         try
         {
@@ -741,20 +779,39 @@ public partial class MainWindow
         ProjectTranslationProgress? progress = _projectTranslationCoordinator?.CurrentJob is null
             ? null : _projectTranslationCoordinator.GetProgress();
         bool resumable = progress?.Status is ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted;
-        _shellQueueResumable = resumable;
-        ShellQueueButton.ToolTip = resumable && progress is not null
-            ? $"Đã dịch {progress.CompletedChapters:N0}/{progress.TotalChapters:N0} chương. " +
-              $"Còn {Math.Max(0, progress.TotalChapters - progress.CompletedChapters - progress.SkippedChapters):N0} chương. Bấm để tiếp tục dịch."
-            : "Mở Hàng đợi";
-        if (_compactShell)
+        // Compact progress follows the queue across all workspaces, including Reader.
+        bool showQueue = progress is not null && progress.Status is
+            (ProjectTranslationJobStatus.Ready or ProjectTranslationJobStatus.Running or
+             ProjectTranslationJobStatus.PauseRequested or ProjectTranslationJobStatus.Paused or
+             ProjectTranslationJobStatus.Interrupted or ProjectTranslationJobStatus.Cancelling or
+             ProjectTranslationJobStatus.CompletedWithErrors);
+        QueueMiniBar.Visibility = showQueue ? Visibility.Visible : Visibility.Collapsed;
+        if (showQueue && progress is not null)
         {
-            ShellQueueButton.Content = progress is null ? "Hàng đợi" : resumable ? "Tiếp tục dịch" :
-                $"Hàng đợi {progress.CompletedChapters}/{progress.TotalChapters}";
-            return;
+            string state = progress.Status switch
+            {
+                ProjectTranslationJobStatus.Ready => "Sẵn sàng",
+                ProjectTranslationJobStatus.Running => "Đang dịch",
+                ProjectTranslationJobStatus.PauseRequested => "Đang tạm dừng",
+                ProjectTranslationJobStatus.Paused => "Đã tạm dừng",
+                ProjectTranslationJobStatus.Interrupted => "Chờ tiếp tục",
+                ProjectTranslationJobStatus.Cancelling => "Đang dừng",
+                ProjectTranslationJobStatus.CompletedWithErrors => "Hoàn tất có lỗi",
+                _ => "Hàng đợi"
+            };
+            QueueMiniSummary.Text = $"{state} · {progress.CompletedChapters:N0}/{progress.TotalChapters:N0} chương" +
+                (progress.FailedChapters > 0 ? $" · {progress.FailedChapters} lỗi" : "");
+            int finished = progress.CompletedChapters + progress.FailedChapters + progress.SkippedChapters;
+            QueueMiniProgress.Value = progress.TotalChapters == 0 ? 0 :
+                Math.Clamp(100d * finished / progress.TotalChapters, 0, 100);
+            QueueMiniActionButton.Content = resumable ? "Tiếp tục" : "Tạm dừng";
+            QueueMiniActionButton.Visibility = resumable || progress.Status == ProjectTranslationJobStatus.Running
+                ? Visibility.Visible : Visibility.Collapsed;
+            QueueMiniActionButton.IsEnabled = resumable && !_queueMiniResumeRequested ||
+                progress.Status == ProjectTranslationJobStatus.Running && !_queueMiniPauseRequested;
+            QueueMiniBar.ToolTip = progress.CurrentChapterTitle is null ? null :
+                $"Đang xử lý: {progress.CurrentChapterTitle}";
         }
-        ShellQueueButton.Content = progress is null ? "Hàng đợi · chưa chạy" : resumable ? "Hàng đợi / tiếp tục dịch" :
-            $"Hàng đợi · {progress.CompletedChapters}/{progress.TotalChapters}" +
-            (progress.FailedChapters > 0 ? $" · {progress.FailedChapters} lỗi" : "");
     }
 
     private void OnProjectTranslationProgressChanged(object? sender, EventArgs e)

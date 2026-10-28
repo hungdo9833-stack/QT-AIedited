@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Translation;
@@ -8,6 +10,117 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "qtaie-worker-preflight-" + Guid.NewGuid().ToString("N"));
     private readonly ProjectRepository _repository = new();
+
+    [Fact]
+    public async Task Whole_chapter_worker_sends_one_long_chapter_request_while_gpu_still_splits_the_same_project()
+    {
+        string source = new string('汉', 10_250) + "。";
+        (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =
+            await CreateProjectAsync(1, source);
+        var gemini = new CapturingClient();
+        ModelOptions geminiModel = Model("gemini-3.5-flash-lite", 131_072, 65_536, 0.1, 600);
+        SegmenterOptions wholeChapter = new() { WholeChapter = true };
+        var geminiWorker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(),
+            new GpuBackendSnapshot(Guid.NewGuid(), GpuBackendKind.Remote, "Gemini API",
+                "https://generativelanguage.googleapis.com", geminiModel.Model),
+            gemini, geminiModel, wholeChapter);
+        var geminiCoordinator = new ProjectTranslationCoordinator(session, _repository, [geminiWorker], load);
+
+        await geminiCoordinator.StartAsync(await geminiCoordinator.PlanAsync(ids));
+
+        Assert.Single(gemini.Prompts);
+        Assert.Contains(source, gemini.Prompts[0], StringComparison.Ordinal);
+        ChapterDocument afterGemini = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        TranslationSegment savedWholeChapter = Assert.Single(afterGemini.Segments);
+        Assert.Equal(source, savedWholeChapter.SourceText);
+        Assert.True(savedWholeChapter.HasCompletedTranslation);
+        Assert.True(afterGemini.SegmentationOptions.WholeChapter);
+
+        var gpu = new CapturingClient();
+        SegmenterOptions gpuSegmentation = Segmentation(300, 400, 500);
+        var gpuWorker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(),
+            GpuBackendSnapshot.LocalDefault("local-model"), gpu,
+            Model("local-model", 4096, 1024, 0.1, 300), gpuSegmentation);
+        var gpuCoordinator = new ProjectTranslationCoordinator(session, _repository, [gpuWorker], load);
+        ProjectTranslationJob gpuPlan = await gpuCoordinator.PlanAsync(ids, retranslateAll: new HashSet<Guid>(ids));
+
+        await gpuCoordinator.StartAsync(gpuPlan);
+
+        ChapterDocument afterGpu = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        Assert.True(afterGpu.Segments.Count > 1);
+        Assert.True(gpu.Prompts.Count > 1);
+        Assert.Equal(gpuSegmentation, afterGpu.SegmentationOptions);
+        Assert.False(afterGpu.SegmentationOptions.WholeChapter);
+    }
+
+    [Fact]
+    public async Task Whole_chapter_worker_replans_partial_gpu_segments_but_leaves_completed_chapter_untouched()
+    {
+        (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =
+            await CreateProjectAsync(2);
+        ChapterDocument partial = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        AddCompletedAttempt(partial.Segments[0], "Bản dịch GPU cũ.");
+        await _repository.UpdateChapterAsync(session, partial);
+        ChapterDocument completed = (await _repository.LoadChapterAsync(session, ids[1])).Chapter;
+        foreach (TranslationSegment segment in completed.Segments)
+            AddCompletedAttempt(segment, "Bản dịch GPU đã xong.");
+        await _repository.UpdateChapterAsync(session, completed);
+        Guid[] completedSegmentIds = completed.Segments.Select(segment => segment.Id).ToArray();
+        SegmenterOptions completedOptions = completed.SegmentationOptions;
+
+        var client = new CapturingClient();
+        ModelOptions model = Model("gemini-3.5-flash-lite", 131_072, 65_536, 0.1, 600);
+        SegmenterOptions wholeChapter = new() { WholeChapter = true };
+        var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(),
+            new GpuBackendSnapshot(Guid.NewGuid(), GpuBackendKind.Remote, "Gemini API",
+                "https://generativelanguage.googleapis.com", model.Model), client, model, wholeChapter);
+        var coordinator = new ProjectTranslationCoordinator(session, _repository, [worker], load);
+
+        await coordinator.StartAsync(await coordinator.PlanAsync(ids));
+
+        Assert.Single(client.Prompts);
+        ChapterDocument replanned = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        Assert.Single(replanned.Segments);
+        Assert.Equal(replanned.OriginalText, replanned.Segments[0].SourceText);
+        Assert.True(replanned.SegmentationOptions.WholeChapter);
+        Assert.Contains(replanned.SegmentationHistory,
+            history => history.PreviousSegments.Any(segment => segment.HasCompletedTranslation));
+        ChapterDocument stillCompleted = (await _repository.LoadChapterAsync(session, ids[1])).Chapter;
+        Assert.Equal(completedSegmentIds, stillCompleted.Segments.Select(segment => segment.Id));
+        Assert.Equal(completedOptions, stillCompleted.SegmentationOptions);
+        Assert.All(stillCompleted.Segments, segment => Assert.True(segment.HasCompletedTranslation));
+    }
+
+    [Fact]
+    public async Task Gemini_max_tokens_response_is_not_saved_as_a_completed_chapter()
+    {
+        (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =
+            await CreateProjectAsync(1);
+        using var http = new HttpClient(new ResponseHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Bản dịch bị cắt\"}]},\"finishReason\":\"MAX_TOKENS\"}]}",
+                Encoding.UTF8, "application/json")
+        }));
+        using var client = new GeminiTranslationClient(http, ["AIza-max-tokens-worker-test-" + Guid.NewGuid().ToString("N")]);
+        ModelOptions model = Model(GeminiTranslationClient.PreferredModel, 131_072, 65_536, 0.1, 600);
+        var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(),
+            new GpuBackendSnapshot(Guid.NewGuid(), GpuBackendKind.Remote, "Gemini API",
+                "https://generativelanguage.googleapis.com", model.Model), client, model,
+            new SegmenterOptions { WholeChapter = true });
+        var coordinator = new ProjectTranslationCoordinator(session, _repository, [worker], load);
+
+        await coordinator.StartAsync(await coordinator.PlanAsync(ids));
+
+        ProjectTranslationItem item = coordinator.CurrentJob!.Items.Single();
+        Assert.NotEqual(ProjectTranslationItemStatus.Completed, item.Status);
+        Assert.Contains("MAX_TOKENS", item.Error, StringComparison.Ordinal);
+        ChapterDocument after = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        TranslationSegment segment = Assert.Single(after.Segments);
+        Assert.False(segment.HasCompletedTranslation);
+        Assert.Equal(SegmentStatus.Error, segment.Status);
+        Assert.DoesNotContain(segment.Attempts, attempt => attempt.Outcome == AttemptOutcome.Completed);
+    }
 
     [Fact]
     public async Task Two_workers_snapshot_and_apply_independent_model_and_segmentation_options()
@@ -151,11 +264,12 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
         Assert.Equal(ProjectTranslationJobStatus.Interrupted, coordinator.CurrentJob!.Status);
     }
 
-    private async Task<(ProjectSession, Guid[], Func<CancellationToken, Task<ProjectTranslationEnvironment>>)> CreateProjectAsync(int count)
+    private async Task<(ProjectSession, Guid[], Func<CancellationToken, Task<ProjectTranslationEnvironment>>)> CreateProjectAsync(
+        int count, string? chapterSource = null)
     {
         ProjectSession session = await _repository.CreateAsync(_root, "Worker preflight synthetic");
         var ids = new List<Guid>();
-        string source = string.Concat(Enumerable.Repeat("天地玄黄宇宙洪荒。", 140));
+        string source = chapterSource ?? string.Concat(Enumerable.Repeat("天地玄黄宇宙洪荒。", 140));
         for (int number = 1; number <= count; number++)
         {
             ChapterDocument chapter = TranslationService.CreateChapter("Chương " + number, source,
@@ -185,6 +299,25 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
         MaximumHanCharacters = maximum, MaximumTextElements = 4000
     };
 
+    private static void AddCompletedAttempt(TranslationSegment segment, string translation)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        segment.Attempts.Add(new TranslationAttempt
+        {
+            StartedAt = now,
+            FinishedAt = now,
+            Outcome = AttemptOutcome.Completed,
+            ModelOptions = new() { Model = "old-gpu-model" },
+            PromptVersion = "old-gpu-test",
+            Prompt = "old prompt",
+            AiText = translation,
+            ResponseDone = true,
+            DoneReason = "stop",
+            Metrics = new()
+        });
+        segment.Status = SegmentStatus.AwaitingReview;
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
@@ -194,12 +327,24 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
     {
         private readonly object _sync = new();
         private readonly List<ModelOptions> _options = [];
+        private readonly List<string> _prompts = [];
         public IReadOnlyList<ModelOptions> Options { get { lock (_sync) return _options.ToArray(); } }
+        public IReadOnlyList<string> Prompts { get { lock (_sync) return _prompts.ToArray(); } }
         public Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions options,
             CancellationToken cancellationToken = default)
         {
-            lock (_sync) _options.Add(options with { });
+            lock (_sync)
+            {
+                _options.Add(options with { });
+                _prompts.Add(prompt);
+            }
             return Task.FromResult(FakeClient.Completion("Bản dịch synthetic."));
         }
+    }
+
+    private sealed class ResponseHandler(Func<HttpRequestMessage, HttpResponseMessage> callback) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+            CancellationToken cancellationToken) => Task.FromResult(callback(request));
     }
 }

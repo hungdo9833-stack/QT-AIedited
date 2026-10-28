@@ -239,7 +239,8 @@ public sealed class LightweightEditorUiTests
         Assert.Equal(expected.Primary, actual.Primary);
         Assert.Equal(expected.Secondary, actual.Secondary);
         Assert.Equal(expected.Overflow, actual.Overflow);
-        Button Button(string name) => (Button)f.Window.FindName(name);
+        // Queue pause/resume live in a menu (MenuItem) since the simplified shell; IsEnabled is all that is checked.
+        Control Button(string name) => (Control)f.Window.FindName(name);
         bool active = busy || running;
         Assert.Equal(!active, Button("TranslateButton").IsEnabled);
         Assert.Equal(selected.Status != SegmentStatus.Translating && !string.IsNullOrWhiteSpace(selected.EditableText), Button("ApproveButton").IsEnabled);
@@ -251,7 +252,7 @@ public sealed class LightweightEditorUiTests
         Assert.Equal(!active && chapter.BatchReplacementHistory.Any(r => !r.Reverted && !r.Automatic), Button("UndoBatchReplaceButton").IsEnabled);
         Assert.Equal(!active && chapter.SegmentationHistory.Count > 0, Button("RestoreStructureButton").IsEnabled);
         Assert.False(f.Text("DraftText").IsReadOnly);
-        Assert.Equal(selected.Attempts.Count == 0 ? "Dịch đoạn đang chọn" : "Dịch lại đoạn đang chọn", Button("TranslateButton").Content);
+        Assert.Equal(selected.Attempts.Count == 0 ? "Dịch đoạn đang chọn" : "Dịch lại đoạn đang chọn", ((Button)Button("TranslateButton")).Content);
         Assert.Equal($"{chapter.Segments.Count(s => s.Status == SegmentStatus.Approved)}/{chapter.Segments.Count} đã duyệt  ·  " +
             $"{chapter.Segments.Count(s => s.Status == SegmentStatus.AwaitingReview)} chờ duyệt  ·  " +
             $"{chapter.Segments.Count(s => s.Status == SegmentStatus.InspectionRequired || s.RequiresRetranslation)} cần kiểm tra  ·  " +

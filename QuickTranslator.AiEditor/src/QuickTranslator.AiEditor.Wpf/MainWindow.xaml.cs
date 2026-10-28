@@ -19,7 +19,7 @@ public partial class MainWindow : Window
 {
     private readonly GpuBackendManager _gpuBackends;
     private readonly GpuConnectionManager _gpuConnections;
-    private readonly GpuTranslationPreferences _gpuPreferences = new();
+    private readonly GpuTranslationPreferences _gpuPreferences;
     private readonly LocalLlamaServerHost _localLlama;
     private readonly ILlmClient _translationClient;
     private ChapterFileStore _store = new(ChapterFileStore.DefaultDirectory);
@@ -43,6 +43,7 @@ public partial class MainWindow : Window
         LocalLlamaServerHost? localLlama = null, ILlmClient? translationClient = null)
     {
         _startupProjectPath = startupProjectPath;
+        _gpuPreferences = initializeApplication ? GpuTranslationPreferences.Load() : new();
         _gpuBackends = gpuBackends ?? new GpuBackendManager();
         _gpuConnections = gpuConnections ?? new GpuConnectionManager();
         _localLlama = localLlama ?? new LocalLlamaServerHost();
@@ -560,7 +561,7 @@ public partial class MainWindow : Window
         PasteButton.IsEnabled = ImportTextButton.IsEnabled = !document && !active && available;
         Visibility standaloneVis = document && _projectSession is not null ? Visibility.Collapsed : Visibility.Visible;
         PasteButton.Visibility = ImportTextButton.Visibility = SplitButton.Visibility = standaloneVis;
-        if (FindName("ApproveAllChapterButton") is Button approveAllBtn) approveAllBtn.IsEnabled = document && !active && available;
+        ApproveAllChapterButton.IsEnabled = document && !active && available;
         if (FindName("ApproveAndNextButton") is Button approveNextBtn)
             approveNextBtn.IsEnabled = selectedSegment?.Status != SegmentStatus.Translating && selected &&
                 !string.IsNullOrWhiteSpace(DraftText.Text) && available;

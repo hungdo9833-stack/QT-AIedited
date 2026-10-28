@@ -42,9 +42,10 @@ public partial class MainWindow
         {
             await EnsureGpuBackendsLoadedAsync();
             if (_gpuManagerWindow is { IsLoaded: true }) { _gpuManagerWindow.Activate(); return; }
-            _gpuManagerWindow = new GpuManagerWindow(_gpuBackends, _gpuConnections, _gpuPreferences, _localLlama) { Owner = this };
+            _gpuManagerWindow = new GpuManagerWindow(_gpuBackends, _gpuConnections, _gpuPreferences, _localLlama,
+                GeminiApiKeyVault.ReadAll, GeminiApiKeyVault.SaveAll, SaveTranslationPreferences) { Owner = this };
             ClampWindowToWorkArea(_gpuManagerWindow, 1180, 820);
-            _gpuManagerWindow.Closed += (_, _) => _gpuManagerWindow = null;
+            _gpuManagerWindow.Closed += (_, _) => { _gpuManagerWindow = null; UpdateGpuBackendStatus(); };
             _gpuManagerWindow.Show();
         }
         catch (Exception error) { ShowError(error); }
@@ -286,6 +287,12 @@ public partial class MainWindow
 
     private async Task EnsureGpuBackendReadyAsync(CancellationToken cancellationToken = default)
     {
+        if (_gpuPreferences.Source == TranslationSource.Api)
+        {
+            if (GeminiApiKeyVault.ReadAll().Count == 0)
+                throw new InvalidOperationException("Chưa có Gemini API key cho nguồn dịch API.");
+            return;
+        }
         if (_projectGpuProfileMissing)
             throw new InvalidOperationException("Project tham chiếu profile GPU không còn tồn tại. Hãy chọn và lưu lại backend trong AI & hiệu năng.");
         if (_projectSession is not null && _gpuBackends.ActiveProfile.Id != SelectedGpuProfileId)
@@ -315,6 +322,17 @@ public partial class MainWindow
     private void UpdateGpuBackendStatus()
     {
         if (GpuBackendStatus is null) return;
+        if (_gpuPreferences.Source == TranslationSource.Api)
+        {
+            int keyCount;
+            try { keyCount = GeminiApiKeyVault.ReadAll().Count; }
+            catch { keyCount = 0; }
+            GpuBackendStatus.Text = _activeGeminiTranslationClient?.CurrentRoute.DisplayText ??
+                $"API · Gemini 3.5 Flash-Lite (key {(keyCount > 0 ? 1 : 0)}/{keyCount})";
+            GpuBackendStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,
+                keyCount > 0 ? "MutedBrush" : "DangerBrush");
+            return;
+        }
         if (_projectGpuProfileMissing)
         {
             GpuBackendStatus.Text = "GPU · thiếu profile Project";
@@ -335,5 +353,11 @@ public partial class MainWindow
     private sealed record GpuProfileItem(Guid Id, string Label)
     {
         public override string ToString() => Label;
+    }
+
+    private void SaveTranslationPreferences()
+    {
+        _gpuPreferences.Save();
+        UpdateGpuBackendStatus();
     }
 }

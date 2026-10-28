@@ -9,7 +9,7 @@ namespace QuickTranslator.AiEditor.Wpf;
 
 public partial class MainWindow
 {
-    private readonly Dictionary<Button, object?> _normalActionTooltips = [];
+    private readonly Dictionary<Control, object?> _normalActionTooltips = [];
     private EditorActionPlan? _currentEditorActionPlan;
     private bool _pendingEditorFocus;
 
@@ -36,7 +36,7 @@ public partial class MainWindow
                 ShowReaderWorkspace();
                 break;
             case WorkspaceId.Resources:
-                ShowResourcesWorkspace("Dictionary");
+                ShowResourcesWorkspace("Characters");
                 break;
             case WorkspaceId.Settings:
                 ShowSettingsWorkspace();
@@ -107,7 +107,7 @@ public partial class MainWindow
             primaryReason = "Hành động chưa khả dụng trong trạng thái hiện tại.";
         ApplyActionState(PrimaryActionButton, plan.Primary.IsEnabled && primaryBusinessEnabled && primaryReason is null, primaryReason);
 
-        var dedicated = new Dictionary<EditorActionKind, Button>
+        var dedicated = new Dictionary<EditorActionKind, MenuItem>
         {
             [EditorActionKind.TranslateChapter] = TranslateAllButton,
             [EditorActionKind.PauseQueue] = PauseQueueButton,
@@ -119,9 +119,12 @@ public partial class MainWindow
             [EditorActionKind.ApproveSegment] = ApproveCurrentButton,
             [EditorActionKind.ApproveChapter] = ApproveAllChapterButton
         };
-        foreach ((EditorActionKind kind, Button button) in dedicated)
+        foreach ((EditorActionKind kind, MenuItem button) in dedicated)
         {
-            button.Visibility = plan.Secondary.Contains(kind) ? Visibility.Visible : Visibility.Collapsed;
+            // Source editing must stay reachable even when it is not a suggested next action.
+            button.Visibility = plan.Secondary.Contains(kind) ||
+                kind == EditorActionKind.EditSource && chapter is not null && !_sourceEditMode
+                ? Visibility.Visible : Visibility.Collapsed;
             if (button.Visibility == Visibility.Visible)
                 ApplyActionState(button, button.IsEnabled && EditorActionPolicy.DisabledReason(kind, context) is null,
                     EditorActionPolicy.DisabledReason(kind, context) ?? PrimaryBusinessReason(kind, chapter));
@@ -129,13 +132,12 @@ public partial class MainWindow
 
         CancelQueueButton.Visibility = plan.Overflow.Contains(EditorActionKind.CancelQueue)
             ? Visibility.Visible : Visibility.Collapsed;
-        EditorActionOverflowToggle.Visibility = CancelQueueButton.Visibility;
         if (CancelQueueButton.Visibility == Visibility.Visible)
             ApplyActionState(CancelQueueButton, CancelQueueButton.IsEnabled,
                 EditorActionPolicy.DisabledReason(EditorActionKind.CancelQueue, context));
 
         EditorActionKind[] remaining = plan.Secondary.Where(kind => !dedicated.ContainsKey(kind)).ToArray();
-        Button[] slots = [SecondaryActionButton1, SecondaryActionButton2, SecondaryActionButton3];
+        MenuItem[] slots = [SecondaryActionButton1, SecondaryActionButton2, SecondaryActionButton3];
         for (int i = 0; i < slots.Length; i++)
         {
             if (i >= remaining.Length)
@@ -146,9 +148,9 @@ public partial class MainWindow
             EditorActionKind kind = remaining[i];
             slots[i].Visibility = Visibility.Visible;
             slots[i].Tag = kind;
-            slots[i].Content = ActionLabel(kind);
+            slots[i].Header = ActionLabel(kind);
             string? reason = EditorActionPolicy.DisabledReason(kind, context) ?? PrimaryBusinessReason(kind, chapter);
-            ApplyActionState(slots[i], reason is null, reason);
+            ApplyActionState(slots[i], PrimaryBusinessEnabled(kind, context) && reason is null, reason);
         }
 
         ApplyReviewActionStates(context, chapter);
@@ -248,7 +250,7 @@ public partial class MainWindow
             chapter is null ? "Chưa có chương để thay thế." : null);
     }
 
-    internal void ApplyActionState(Button button, bool enabled, string? reason)
+    internal void ApplyActionState(Control button, bool enabled, string? reason)
     {
         if (!_normalActionTooltips.ContainsKey(button)) _normalActionTooltips[button] = button.ToolTip;
         button.IsEnabled = enabled;
@@ -266,7 +268,7 @@ public partial class MainWindow
 
     private async void OnSecondaryAction(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: EditorActionKind kind }) await DispatchEditorActionAsync(kind);
+        if (sender is FrameworkElement { Tag: EditorActionKind kind }) await DispatchEditorActionAsync(kind);
     }
 
     private Task DispatchEditorActionAsync(EditorActionKind kind)

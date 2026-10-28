@@ -60,9 +60,9 @@ public sealed class ProjectSidebarUiTests
         finally { fixture.Set("_suppressProjectChapterOpen", false); }
         fixture.Call("UpdateProjectChapterCommands");
 
-        Assert.False(((Button)fixture.Window.FindName("ProjectRenameChapterButton")).IsEnabled);
-        Assert.False(((Button)fixture.Window.FindName("ProjectDuplicateChapterButton")).IsEnabled);
-        Assert.True(((Button)fixture.Window.FindName("ProjectDeleteChapterButton")).IsEnabled);
+        Assert.False(((MenuItem)fixture.Window.FindName("ProjectRenameChapterButton")).IsEnabled);
+        Assert.False(((MenuItem)fixture.Window.FindName("ProjectDuplicateChapterButton")).IsEnabled);
+        Assert.True(((MenuItem)fixture.Window.FindName("ProjectDeleteChapterButton")).IsEnabled);
         MenuItem[] commands = list.ContextMenu!.Items.OfType<MenuItem>().ToArray();
         Assert.False(commands.Single(item => Equals(item.Header, "Đổi tên")).IsEnabled);
         Assert.True(commands.Single(item => Equals(item.Header, "Xóa")).IsEnabled);

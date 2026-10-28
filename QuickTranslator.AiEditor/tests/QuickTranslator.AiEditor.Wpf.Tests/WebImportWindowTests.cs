@@ -309,15 +309,15 @@ public sealed class WebImportWindowTests
     {
         using var fixture = new WorkspaceFixture();
         fixture.Call("UpdateProjectChapterCommands");
-        Assert.False(((Button)fixture.Window.FindName("ProjectImportWebButton")).IsEnabled);
+        Assert.False(((MenuItem)fixture.Window.FindName("ProjectImportWebButton")).IsEnabled);
         Assert.False(((MenuItem)fixture.Window.FindName("ProjectImportWebMenuItem")).IsEnabled);
         Assert.Throws<InvalidOperationException>(() => fixture.Window.CreateWebImportWindow());
         await fixture.CreateProjectAsync();
         fixture.Call("UpdateProjectChapterCommands");
-        Assert.True(((Button)fixture.Window.FindName("ProjectImportWebButton")).IsEnabled);
+        Assert.True(((MenuItem)fixture.Window.FindName("ProjectImportWebButton")).IsEnabled);
         fixture.Set("_uiOperation", true);
         fixture.Call("UpdateProjectChapterCommands");
-        Assert.False(((Button)fixture.Window.FindName("ProjectImportWebButton")).IsEnabled);
+        Assert.False(((MenuItem)fixture.Window.FindName("ProjectImportWebButton")).IsEnabled);
         Assert.False(((MenuItem)fixture.Window.FindName("ProjectImportWebMenuItem")).IsEnabled);
     });
 

@@ -54,14 +54,14 @@ public sealed class PanelPolicyUiTests
         fixture.Window.NavigateTo(WorkspaceId.Editor, EditorMode.Translate);
         fixture.Call("UpdateResponsiveShell", 1000d);
 
-        Button sidebarToggle = FindButton("ProjectSidebarToggleButton");
-        Button inspectorToggle = FindButton("InspectorToggleButton");
+        var sidebarToggle = (MenuItem)fixture.Window.FindName("ProjectSidebarToggleButton");
+        var inspectorToggle = (MenuItem)fixture.Window.FindName("InspectorToggleButton");
         Assert.Equal(Visibility.Visible, sidebarToggle.Visibility);
         Assert.Equal(Visibility.Visible, inspectorToggle.Visibility);
         Assert.True(sidebarToggle.IsEnabled);
         Assert.True(inspectorToggle.IsEnabled);
 
-        inspectorToggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        inspectorToggle.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         await Dispatcher.Yield(DispatcherPriority.Input);
         var popup = (Popup)fixture.Window.FindName("InspectorFlyout");
         var host = (ContentControl)fixture.Window.FindName("InspectorFlyoutHost");
@@ -71,9 +71,9 @@ public sealed class PanelPolicyUiTests
         var key = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(fixture.Window), 0, Key.Escape)
         { RoutedEvent = Keyboard.PreviewKeyDownEvent };
         fixture.Call("OnPanelFlyoutPreviewKeyDown", fixture.Window.FindName("InspectorFlyoutBorder"), key);
-        await Dispatcher.Yield(DispatcherPriority.Input);
+        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
         Assert.False(popup.IsOpen);
-        Assert.True(inspectorToggle.IsKeyboardFocusWithin);
+        Assert.True(((Button)fixture.Window.FindName("TranslateNavButton")).IsKeyboardFocusWithin);
 
         fixture.Window.NavigateTo(WorkspaceId.Editor, EditorMode.Review);
         Button navigatorToggle = FindButton("SegmentNavigatorToggleButton");

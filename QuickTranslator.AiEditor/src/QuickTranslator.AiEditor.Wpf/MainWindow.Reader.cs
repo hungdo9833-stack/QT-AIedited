@@ -137,11 +137,16 @@ public partial class MainWindow
     {
         if (ReaderView is null || EditorView is null) return;
         bool reader = ReaderModeButton.IsChecked == true;
+        if (reader && CurrentWorkspace != WorkspaceId.Reader)
+        {
+            CurrentWorkspace = WorkspaceId.Reader;
+            ApplyWorkspaceVisibility(CurrentWorkspace);
+            EditorTabs.SelectedIndex = 0;
+            MarkActiveNavigation(CurrentWorkspace);
+        }
         ReaderView.Visibility = reader ? Visibility.Visible : Visibility.Collapsed;
         EditorView.Visibility = reader ? Visibility.Collapsed : Visibility.Visible;
         UpdateChapterModeHint();
-        TwoPaneModeButton.Visibility = FourPaneModeButton.Visibility = reader
-            ? Visibility.Collapsed : Visibility.Visible;
         ApplyProjectSidebarVisibility();
         ApplyReaderChrome();
         if (reader)
@@ -365,12 +370,13 @@ public partial class MainWindow
         if (!active)
         {
             ChapterWorkspace.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "AppBackgroundBrush");
-            ChapterModeBar.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "AppBackgroundBrush");
+            ChapterModeBar.SetResourceReference(System.Windows.Controls.Panel.BackgroundProperty, "PanelBrush");
             ChapterModeHint.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
             return;
         }
         ChapterWorkspace.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
-        ChapterModeBar.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
+        // Keep the shared mode strip on the application palette in all three modes.
+        ChapterModeBar.SetResourceReference(Panel.BackgroundProperty, "PanelBrush");
         ReaderToolbar.SetResourceReference(Panel.BackgroundProperty, "ReaderPageBrush");
         ChapterModeHint.SetResourceReference(TextElement.ForegroundProperty, "ReaderTextBrush");
         ReaderSearchPanel.SetResourceReference(Border.BackgroundProperty, "ReaderPanelBrush");
@@ -400,12 +406,6 @@ public partial class MainWindow
             combo.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
             combo.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
         }
-        ReaderModeButton.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
-        EditorModeButton.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
-        ReaderModeButton.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
-        EditorModeButton.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
-        ReaderModeButton.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
-        EditorModeButton.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
         ReaderCatalogPanel.SetResourceReference(Border.BackgroundProperty, "ReaderPanelBrush");
         ReaderCatalogPanel.SetResourceReference(Border.BorderBrushProperty, "ReaderBorderBrush");
         ReaderChapterSearchInput.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");

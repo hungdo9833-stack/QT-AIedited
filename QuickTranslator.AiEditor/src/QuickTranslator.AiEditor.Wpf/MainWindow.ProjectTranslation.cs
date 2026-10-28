@@ -13,6 +13,19 @@ public partial class MainWindow
     private ProjectTranslationCoordinator? _projectTranslationCoordinator;
     private Task<ProjectTranslationJob?>? _projectTranslationLoadTask;
     private readonly List<IDisposable> _projectTranslationOwnedClients = [];
+    private static readonly Guid GeminiTranslationProfileId = new("a6194896-3e9e-4f68-8725-74a9fe9bbd6c");
+    private GeminiTranslationClient? _activeGeminiTranslationClient;
+
+    internal static ModelOptions GeminiTranslationModelOptions() => new()
+    {
+        Model = GeminiTranslationClient.PreferredModel,
+        Temperature = 0.1,
+        ContextSize = 131_072,
+        MaximumOutputTokens = 65_536,
+        RequestTimeout = TimeSpan.FromMinutes(10)
+    };
+
+    internal static SegmenterOptions GeminiTranslationSegmentationOptions() => new() { WholeChapter = true };
 
     private void InitializeProjectTranslationCoordinator(ProjectSession session)
     {
@@ -185,6 +198,17 @@ public partial class MainWindow
 
     private async Task ApplyTranslationModeAsync(ProjectTranslationJob? recovered)
     {
+        if (recovered?.Workers.Any(worker => worker.ProfileId == GeminiTranslationProfileId) == true &&
+            !_gpuPreferences.ModeExplicitlySelected)
+            _gpuPreferences.Source = TranslationSource.Api;
+        if (_gpuPreferences.Source == TranslationSource.Api)
+        {
+            if (GeminiApiKeyVault.ReadAll().Count == 0)
+                throw new InvalidOperationException(
+                    "Chưa có Gemini API key. Mở AI & hiệu năng hoặc Cài đặt → Gemini để thêm key trước khi dịch.");
+            UpdateGpuBackendStatus();
+            return;
+        }
         Guid profileId;
         if (recovered?.Workers.Count > 0 && !_gpuPreferences.ModeExplicitlySelected &&
             MissingWorkerProfiles(recovered).Count == 0)
@@ -219,7 +243,7 @@ public partial class MainWindow
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
         if (_projectTranslationCoordinator?.IsRunning == true)
             throw new InvalidOperationException("Hàng đợi đang dịch; hãy Tạm dừng rồi thêm chương.");
-        if (_translationClient is GpuBackendManager &&
+        if (_gpuPreferences.Source == TranslationSource.Gpu && _translationClient is GpuBackendManager &&
             (!useCurrentWorkers && recovered?.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Local) == true ||
              _gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote))
         {
@@ -243,7 +267,17 @@ public partial class MainWindow
         else
         {
             GpuBackendProfile local = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
-            if (_gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote)
+            if (_gpuPreferences.Source == TranslationSource.Api)
+            {
+                ModelOptions options = GeminiTranslationModelOptions();
+                // Cloud API behaves like a remote worker for coordinator fault semantics: one terminal
+                // quota failure takes the worker offline instead of failing every remaining chapter.
+                var backend = new GpuBackendSnapshot(GeminiTranslationProfileId, GpuBackendKind.Remote,
+                    "Gemini API", "https://generativelanguage.googleapis.com", options.Model);
+                definitions.Add(CreateWorkerDefinition(GeminiTranslationProfileId, backend, options,
+                    GeminiTranslationSegmentationOptions(), null));
+            }
+            else if (_gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote)
             {
                 AiRuntimeProfile runtime = local.Runtime ?? AiRuntimeProfile.CreateDefault(local.Model);
                 definitions.Add(CreateWorkerDefinition(StableWorkerId(local.Id),
@@ -277,6 +311,20 @@ public partial class MainWindow
     private ProjectTranslationWorkerDefinition CreateWorkerDefinition(Guid workerId, GpuBackendSnapshot backend,
         ModelOptions options, SegmenterOptions segmentation, decimal? hourlyPrice, string? expectedIdentity = null)
     {
+        if (backend.ProfileId == GeminiTranslationProfileId)
+        {
+            const string identity = "gemini-api:flash-lite-pool-v1";
+            EnsureBackendIdentity(expectedIdentity, identity, backend.ProfileName);
+            var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+            var client = new GeminiTranslationClient(http, GeminiApiKeyVault.ReadAll(), ownsHttpClient: true);
+            client.RouteChanged += (_, _) => Dispatcher.BeginInvoke(UpdateGpuBackendStatus);
+            _activeGeminiTranslationClient = client;
+            _projectTranslationOwnedClients.Add(client);
+            ModelOptions geminiOptions = GeminiTranslationModelOptions();
+            SegmenterOptions wholeChapter = GeminiTranslationSegmentationOptions();
+            GpuBackendSnapshot geminiBackend = backend with { Model = geminiOptions.Model };
+            return new(workerId, geminiBackend, client, geminiOptions, wholeChapter, hourlyPrice, identity, 1);
+        }
         if (backend.Kind == GpuBackendKind.Local)
         {
             string identity = "local:" + backend.ProfileId.ToString("N");
@@ -367,6 +415,7 @@ public partial class MainWindow
             await ApplyTranslationModeAsync(recovered);
             foreach (ProjectTranslationWorkerState worker in recovered.Workers
                          .Where(value => value.Backend.Kind == GpuBackendKind.Remote)
+                         .Where(value => value.ProfileId != GeminiTranslationProfileId)
                          .DistinctBy(value => value.ProfileId))
             {
                 GpuBackendProfile remote = _gpuBackends.GetProfile(worker.ProfileId);
@@ -401,13 +450,20 @@ public partial class MainWindow
             useCurrentWorkers: changedMode);
     }
 
-    private bool GpuProfileExists(Guid profileId) => _gpuBackends.Catalog.Profiles.Any(profile => profile.Id == profileId);
+    private bool GpuProfileExists(Guid profileId) => profileId == GeminiTranslationProfileId ||
+        _gpuBackends.Catalog.Profiles.Any(profile => profile.Id == profileId);
 
     private List<ProjectTranslationWorkerState> MissingWorkerProfiles(ProjectTranslationJob job) =>
         job.Workers.Where(worker => !GpuProfileExists(worker.ProfileId)).DistinctBy(worker => worker.ProfileId).ToList();
 
     private string DescribeCurrentGpuSetup()
     {
+        if (_gpuPreferences.Source == TranslationSource.Api)
+        {
+            int count = GeminiApiKeyVault.ReadAll().Count;
+            return _activeGeminiTranslationClient?.CurrentRoute.DisplayText ??
+                $"API · Gemini 3.5 Flash-Lite (key {(count > 0 ? 1 : 0)}/{count})";
+        }
         string remote = _gpuPreferences.RemoteProfileId is Guid id && GpuProfileExists(id)
             ? $"Remote “{_gpuBackends.GetProfile(id).Name}”" : "Remote (chưa chọn card)";
         return _gpuPreferences.Mode switch
@@ -437,6 +493,7 @@ public partial class MainWindow
         _projectTranslationLoadTask = null;
         if (!running) foreach (IDisposable client in _projectTranslationOwnedClients) client.Dispose();
         _projectTranslationOwnedClients.Clear();
+        _activeGeminiTranslationClient = null;
         RefreshShellQueueStatus();
     }
 }

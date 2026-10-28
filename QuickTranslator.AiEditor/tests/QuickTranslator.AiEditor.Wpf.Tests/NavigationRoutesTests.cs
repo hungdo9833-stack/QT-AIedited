@@ -31,7 +31,7 @@ public sealed class NavigationRoutesTests
             [WorkspaceId.Chapters] = ("ChaptersNavButton", "ChaptersWorkspaceRoot"),
             [WorkspaceId.Queue] = ("QueueNavButton", "QueueWorkspaceRoot"),
             [WorkspaceId.Publish] = ("PublishNavButton", "PublishWorkspaceRoot"),
-            [WorkspaceId.Reader] = ("ReaderNavButton", "EditorWorkspaceRoot"),
+            [WorkspaceId.Reader] = ("TranslateNavButton", "EditorWorkspaceRoot"),
             [WorkspaceId.Resources] = ("ResourcesNavButton", "ResourcesWorkspaceRoot"),
             [WorkspaceId.Settings] = ("SettingsNavButton", "SettingsWorkspaceRoot")
         };

@@ -914,7 +914,11 @@ public sealed class ProjectTranslationCoordinator
             item.RetranslateAll && item.ChapterQueueRunId is null ? QueueMode.AllSegments : QueueMode.MissingSegments;
         bool canResumeChapter = item.ChapterQueueRunId is Guid runId && chapter.Queue.RunId == runId &&
             chapter.Queue.Status is QueueStatus.Paused or QueueStatus.Interrupted or QueueStatus.Cancelled or QueueStatus.Faulted;
-        if (workerDefinition is not null && !canResumeChapter)
+        // A finished chapter is intentionally left on its existing boundaries. In particular, switching an old GPU
+        // project to a whole-chapter worker must not discard completed translations merely to discover there is no work.
+        bool alreadyFullyTranslated = mode != QueueMode.AllSegments && chapter.Segments.Count > 0 &&
+            chapter.Segments.All(segment => segment.HasCompletedTranslation || segment.Status == SegmentStatus.Approved);
+        if (workerDefinition is not null && !canResumeChapter && !alreadyFullyTranslated)
         {
             chapter = await RunWorkerPreflightAsync(workerDefinition, chapterId, cancellationToken).ConfigureAwait(false);
             item = CurrentJob!.Items.Single(value => value.ChapterId == chapterId);

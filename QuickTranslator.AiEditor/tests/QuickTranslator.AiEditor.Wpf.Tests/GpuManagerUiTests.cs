@@ -9,6 +9,34 @@ namespace QuickTranslator.AiEditor.Wpf.Tests;
 public sealed class GpuManagerUiTests
 {
     [Fact]
+    public Task Api_and_gpu_panels_use_mutually_exclusive_progressive_disclosure() => StaHost.Run(async () =>
+    {
+        string root = CreateTestRoot();
+        using var backends = CreateBackendManager(root);
+        await using var connections = new GpuConnectionManager(new NoConnectionService(), (_, _) => new StubClient());
+        var preferences = new GpuTranslationPreferences { Source = TranslationSource.Api };
+        var window = new GpuManagerWindow(backends, connections, preferences, keyReader: () => ["AIza-test-1111"]);
+        try
+        {
+            Assert.Equal(Visibility.Visible, ((FrameworkElement)window.FindName("ApiTranslationPanel")).Visibility);
+            Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("GpuTranslationPanel")).Visibility);
+            Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("GpuConfigurationPanel")).Visibility);
+            Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("GpuProfilesPanel")).Visibility);
+            Assert.Contains("trọn một chương", ((TextBlock)window.FindName("GeminiTranslationDescription")).Text,
+                StringComparison.Ordinal);
+
+            ((RadioButton)window.FindName("GpuSourceInput")).IsChecked = true;
+
+            Assert.Equal(Visibility.Collapsed, ((FrameworkElement)window.FindName("ApiTranslationPanel")).Visibility);
+            Assert.Equal(Visibility.Visible, ((FrameworkElement)window.FindName("GpuTranslationPanel")).Visibility);
+            Assert.Equal(Visibility.Visible, ((FrameworkElement)window.FindName("GpuConfigurationPanel")).Visibility);
+            Assert.Equal(Visibility.Visible, ((FrameworkElement)window.FindName("GpuProfilesPanel")).Visibility);
+            Assert.Equal(TranslationSource.Gpu, preferences.Source);
+        }
+        finally { window.Close(); Directory.Delete(root, true); }
+    });
+
+    [Fact]
     public Task Saving_the_active_gpu_profile_reloads_runtime_model_for_new_requests() => StaHost.Run(async () =>
     {
         string root = CreateTestRoot();

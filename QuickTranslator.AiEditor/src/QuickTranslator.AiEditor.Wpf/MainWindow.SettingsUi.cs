@@ -60,6 +60,7 @@ public partial class MainWindow
         NormalizeAfterTranslationCheck.Unchecked += OnSettingsInputChanged;
         StorySettingCombo.SelectionChanged += OnSettingsInputChanged;
         UpdateSettingsCounters();
+        ApplyResourcesSelection();
     }
 
     private void OnSettingsNavigationChanged(object sender, SelectionChangedEventArgs e)
@@ -76,7 +77,10 @@ public partial class MainWindow
         if (_configurationDirty && _initialized) SetStatus("Thiết lập có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
     }
 
-    private void OnResourcesNavigationChanged(object sender, SelectionChangedEventArgs e)
+    private void OnResourcesNavigationChanged(object sender, SelectionChangedEventArgs e) =>
+        ApplyResourcesSelection();
+
+    private void ApplyResourcesSelection()
     {
         if (SettingsDictionaryPanel is null || ResourcesNavigation.SelectedItem is not ListBoxItem item) return;
         string selected = item.Tag?.ToString() ?? "Dictionary";
