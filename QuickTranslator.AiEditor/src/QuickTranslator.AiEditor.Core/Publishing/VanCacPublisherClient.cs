@@ -12,6 +12,7 @@ public enum VanCacChapterStatus { Draft, Published, Hidden }
 public enum VanCacPutAction { Created, Updated, Unchanged }
 
 public sealed record VanCacUser(string DisplayName, IReadOnlyList<string> Roles, string? AuthorId);
+public sealed record VanCacSession(string Token, DateTimeOffset ExpiresAt, VanCacUser User);
 public sealed record VanCacAuthor(string Id, string Name);
 public sealed record VanCacNovel(string Id, string Slug, string Title, string AuthorId, string Author,
     string PublicationStatus, int ChapterCount)
@@ -74,6 +75,54 @@ public sealed class VanCacPublisherClient : IVanCacChapterSink, IDisposable
     }
 
     public static bool IsValidToken(string? token) => token is not null && TokenPattern.IsMatch(token);
+
+    /// <summary>A password is sent once only, with no bearer header, redirects or automatic retries.</summary>
+    public static async Task<VanCacSession> LoginAsync(string baseUrl, string email, string password,
+        string deviceId, string deviceName, HttpMessageHandler? handler = null, CancellationToken cancellationToken = default)
+    {
+        Uri root = NormalizeBaseUrl(baseUrl);
+        if (!Guid.TryParseExact(deviceId, "D", out Guid device) || device == Guid.Empty || deviceId != device.ToString("D"))
+            throw new ArgumentException("Định danh thiết bị không hợp lệ.", nameof(deviceId));
+        if (string.IsNullOrWhiteSpace(deviceName) || deviceName.Length > 60)
+            throw new ArgumentException("Tên thiết bị cần 1–60 ký tự.", nameof(deviceName));
+        using var http = handler is null
+            ? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            : new HttpClient(handler, disposeHandler: false);
+        http.Timeout = TimeSpan.FromSeconds(60);
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(root, "api/publisher/v1/session"));
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new { email, password, deviceId, deviceName }, Json);
+        request.Content = new ByteArrayContent(payload)
+        {
+            Headers = { ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" } }
+        };
+        try
+        {
+            using HttpResponseMessage response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            string text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode != HttpStatusCode.Created)
+            {
+                VanCacApiException error = Failure((int)response.StatusCode, text);
+                throw new VanCacApiException(error.StatusCode, Redact(error.Message, password),
+                    error.Fields.ToDictionary(p => Redact(p.Key, password), p => Redact(p.Value, password)));
+            }
+            SessionResponse? session = JsonSerializer.Deserialize<SessionResponse>(text, Json);
+            if (session is null || !IsValidToken(session.Token) || session.User is null || session.User.Roles is null)
+                throw new VanCacApiException(201, "Website trả về phiên đăng nhập không hợp lệ.");
+            return new(session.Token, DateTimeOffset.FromUnixTimeSeconds(session.ExpiresAt), session.User);
+        }
+        catch (HttpRequestException) { throw new VanCacApiException(null, "Không kết nối được website. Hãy thử đăng nhập lại."); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { throw new VanCacApiException(null, "Website không phản hồi (quá thời gian chờ)."); }
+        catch (JsonException) { throw new VanCacApiException(null, "Website trả về phiên đăng nhập không hợp lệ."); }
+        catch (ArgumentOutOfRangeException) { throw new VanCacApiException(201, "Website trả về thời hạn phiên không hợp lệ."); }
+        finally { Array.Clear(payload); }
+    }
+
+    private static string Redact(string text, string password) => string.IsNullOrEmpty(password)
+        ? text : text.Replace(password, "[ẩn]", StringComparison.Ordinal);
+
+    public async Task LogoutAsync(CancellationToken cancellationToken = default)
+        => _ = await SendAsync<RevokedResponse>(HttpMethod.Delete, "session", null, cancellationToken, retry: false).ConfigureAwait(false);
 
     /// <summary>HTTPS only, except plain HTTP on loopback for local testing. Returns the origin with a trailing slash.</summary>
     public static Uri NormalizeBaseUrl(string? value)
@@ -157,9 +206,10 @@ public sealed class VanCacPublisherClient : IVanCacChapterSink, IDisposable
         }
     }
 
-    private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellationToken)
+    private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CancellationToken cancellationToken, bool retry = true)
     {
         byte[]? payload = body is null ? null : JsonSerializer.SerializeToUtf8Bytes(body, Json);
+        int maximumAttempts = retry ? MaximumAttempts : 1;
         for (int attempt = 1; ; attempt++)
         {
             TimeSpan? wait;
@@ -173,12 +223,12 @@ public sealed class VanCacPublisherClient : IVanCacChapterSink, IDisposable
                 if (response.IsSuccessStatusCode)
                     return JsonSerializer.Deserialize<T>(text, Json) ?? throw new VanCacApiException((int)response.StatusCode, "Website trả về dữ liệu rỗng.");
                 int status = (int)response.StatusCode;
-                if (status != 429 && status < 500 || attempt >= MaximumAttempts) throw Failure(status, text);
+                if (status != 429 && status < 500 || attempt >= maximumAttempts) throw Failure(status, text);
                 wait = response.Headers.RetryAfter?.Delta;
             }
-            catch (HttpRequestException ex) when (attempt < MaximumAttempts) { wait = null; System.Diagnostics.Trace.TraceWarning($"Sắc Viện: lỗi mạng, thử lại ({ex.GetType().Name})."); }
+            catch (HttpRequestException ex) when (attempt < maximumAttempts) { wait = null; System.Diagnostics.Trace.TraceWarning($"Sắc Viện: lỗi mạng, thử lại ({ex.GetType().Name})."); }
             catch (HttpRequestException ex) { throw new VanCacApiException(null, "Không kết nối được website: " + ex.Message); }
-            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < MaximumAttempts) { wait = null; }
+            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested && attempt < maximumAttempts) { wait = null; }
             catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new VanCacApiException(null, "Website không phản hồi (quá thời gian chờ)."); }
             TimeSpan backoff = TimeSpan.FromSeconds(Math.Pow(2, attempt)); // 2 s, 4 s, 8 s
             await _delay(wait is { } retryAfter && retryAfter > backoff ? TimeSpan.FromSeconds(Math.Min(retryAfter.TotalSeconds, 30)) : backoff,
@@ -209,6 +259,8 @@ public sealed class VanCacPublisherClient : IVanCacChapterSink, IDisposable
     public void Dispose() { if (_ownsHttp) _http.Dispose(); }
 
     private sealed record MeResponse(VanCacUser User);
+    private sealed record SessionResponse(string Token, long ExpiresAt, VanCacUser User);
+    private sealed record RevokedResponse(bool Revoked);
     private sealed record ItemResponse<T>(T Item);
     private sealed record ItemsResponse<T>(IReadOnlyList<T> Items);
     private sealed record Pagination(int Page, int PageSize, int Total, int TotalPages);

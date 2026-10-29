@@ -26,7 +26,8 @@ internal static class VanCacTokenVault
         store.Write(Target, value);
     }
 
-    public static void Delete() => NativeStore.Delete(Target);
+    public static void Delete() => Delete(NativeStore);
+    internal static void Delete(IGeminiCredentialStore store) => store.Delete(Target);
 
     /// <summary>Shows only the last 4 characters, matching the hint on the website's token list.</summary>
     public static string Mask(string token) => "vcp_…" + token[^4..];
@@ -43,9 +44,20 @@ internal sealed class VanCacPublisherPreferences
         "QuickTranslator.AiEditor", "vancac-publisher.json");
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    public string BaseUrl { get; set; } = "";
+    public string BaseUrl { get; set; } = "https://sacvien.com";
+    public string DeviceId { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public List<string> Roles { get; set; } = [];
+    public DateTimeOffset? ExpiresAt { get; set; }
     public Dictionary<Guid, string> NovelByProject { get; set; } = [];
     public bool PublishImmediately { get; set; }
+
+    public string EnsureDeviceId()
+    {
+        DeviceId = Guid.TryParse(DeviceId, out Guid id) && id != Guid.Empty
+            ? id.ToString("D") : Guid.NewGuid().ToString("D");
+        return DeviceId;
+    }
 
     public static VanCacPublisherPreferences Load(string? path = null)
     {

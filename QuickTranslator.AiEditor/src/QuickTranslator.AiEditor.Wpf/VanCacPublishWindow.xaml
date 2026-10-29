@@ -15,7 +15,11 @@
   <!-- 1. Kết nối -->
   <Border Style="{StaticResource Card}">
    <StackPanel>
-    <TextBlock Text="1 · Kết nối website" Style="{StaticResource SectionTitle}"/>
+    <TextBlock Text="1 · Tài khoản Sắc Viện" Style="{StaticResource SectionTitle}"/>
+    <TextBlock x:Name="AccountSummaryText" Margin="3,8,0,0" TextWrapping="Wrap"/>
+    <Button x:Name="AccountButton" Content="Đăng nhập…" Click="OnAccount" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+    <Expander x:Name="ManualCodeExpander" Header="Nâng cao: dùng mã kết nối" IsExpanded="False" Margin="0,12,0,0">
+    <StackPanel>
     <Grid Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
      <StackPanel>
       <TextBlock Text="Địa chỉ website" Style="{StaticResource FieldLabel}"/>
@@ -32,6 +36,8 @@
      <Button x:Name="ConnectButton" Content="Lưu và kiểm tra kết nối" ui:ButtonIcon.Glyph="&#xE71B;" Click="OnConnect" Style="{StaticResource PrimaryButton}"/>
      <Button x:Name="ForgetTokenButton" Content="Xóa mã đã lưu" ui:ButtonIcon.Glyph="&#xE74D;" Click="OnForgetToken" Visibility="Collapsed"/>
     </WrapPanel>
+    </StackPanel>
+    </Expander>
     <TextBlock x:Name="ConnectionText" Margin="3,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
    </StackPanel>
   </Border>

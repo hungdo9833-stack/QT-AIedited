@@ -36,6 +36,11 @@
                 <MenuItem Header="Hàng đợi dịch…" Click="OnShowQueueDetails"/>
                 <MenuItem Header="_Mở thư mục" Click="OnOpenProjectFolder"/>
             </MenuItem>
+            <MenuItem Header="_Workspace">
+                <MenuItem Header="Xuất bản…" Click="OnOpenVanCacPublication"/>
+                <MenuItem Header="Tài khoản Sắc Viện…" Click="OnOpenVanCacAccount"/>
+                <MenuItem Header="Truyện trên Sắc Viện…" Click="OnOpenVanCacNovels"/>
+            </MenuItem>
             <MenuItem x:Name="ViewMenu" Header="_Hiển thị">
                 <MenuItem x:Name="ProjectSidebarToggleButton" Header="Ẩn / hiện mục lục" Click="OnToggleProjectSidebar" InputGestureText="Ctrl+B"/>
                 <MenuItem Header="Bố cục mục lục">
@@ -97,11 +102,14 @@
                     <Button Grid.Column="3" Content="Chi tiết…" Click="OnShowQueueDetails" Padding="8,2" ToolTip="Mở danh sách và tiến độ từng chương, không tự tiếp tục dịch"/>
                 </Grid>
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                     <TextBlock x:Name="StatusText" Text="Mở Project để bắt đầu biên dịch." VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" AutomationProperties.LiveSetting="Polite"/>
                     <TextBlock x:Name="AutosaveStatusText" Grid.Column="1" Text="✓ Đã tự lưu" Foreground="{DynamicResource SuccessBrush}" FontSize="12" VerticalAlignment="Center" Margin="12,0" AutomationProperties.LiveSetting="Polite"/>
                     <Button Grid.Column="2" Style="{StaticResource StatusBarButton}" Click="OnOpenGpuManager" ToolTip="Nhấp để chọn nguồn dịch API hoặc GPU" AutomationProperties.Name="Backend dịch · mở AI và hiệu năng"><TextBlock x:Name="GpuBackendStatus" MaxWidth="300" TextTrimming="CharacterEllipsis" Text="GPU · Local · llama-server" Foreground="{DynamicResource MutedBrush}" FontSize="12" VerticalAlignment="Center"/></Button>
-                    <TextBlock x:Name="SavePathText" Grid.Column="3" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="14,0,0,0" VerticalAlignment="Center"/>
+                    <Button Grid.Column="3" Style="{StaticResource StatusBarButton}" Click="OnOpenVanCacAccount" ToolTip="Mở tài khoản Sắc Viện" AutomationProperties.Name="Tài khoản Sắc Viện">
+                        <TextBlock x:Name="VanCacAccountStatus" Text="Sắc Viện: chưa đăng nhập" MaxWidth="220" TextTrimming="CharacterEllipsis" FontSize="12" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
+                    </Button>
+                    <TextBlock x:Name="SavePathText" Grid.Column="4" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="14,0,0,0" VerticalAlignment="Center"/>
                 </Grid>
             </StackPanel>
         </Border>

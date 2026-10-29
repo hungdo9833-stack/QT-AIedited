@@ -28,6 +28,99 @@ public sealed class VanCacPublisherTests
     private static VanCacPublisherClient Client(FakeHandler handler, List<TimeSpan>? delays = null) =>
         new(Base, Token, handler, (delay, _) => { delays?.Add(delay); return Task.CompletedTask; });
 
+    private const string DeviceId = "01234567-89ab-cdef-0123-456789abcdef";
+
+    [Fact]
+    public async Task LoginSendsOnlyFourKeysWithoutBearerAndParses201()
+    {
+        var handler = new FakeHandler((_, _) => Json(HttpStatusCode.Created,
+            $$$"""{"token":"{{{Token}}}","expiresAt":1800000000,"user":{"displayName":"Tác giả","roles":["AUTHOR"],"authorId":"a1"}}"""));
+        VanCacSession session = await VanCacPublisherClient.LoginAsync(Base, "author@example.com", "secret-password", DeviceId, "Máy viết", handler);
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal(HttpMethod.Post, call.Method);
+        Assert.Equal(Base + "/api/publisher/v1/session", call.Url);
+        Assert.Null(call.Auth);
+        var body = JsonNode.Parse(call.Body!)!.AsObject();
+        Assert.Equal(new[] { "deviceId", "deviceName", "email", "password" }, body.Select(p => p.Key).Order());
+        Assert.Equal("author@example.com", (string?)body["email"]);
+        Assert.Equal("secret-password", (string?)body["password"]);
+        Assert.Equal(DeviceId, (string?)body["deviceId"]);
+        Assert.Equal("Máy viết", (string?)body["deviceName"]);
+        Assert.Equal(Token, session.Token);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1800000000), session.ExpiresAt);
+        Assert.Equal("Tác giả", session.User.DisplayName);
+        Assert.Equal(["AUTHOR"], session.User.Roles);
+        Assert.Equal("a1", session.User.AuthorId);
+    }
+
+    [Theory]
+    [InlineData(401)]
+    [InlineData(403)]
+    [InlineData(409)]
+    [InlineData(422)]
+    [InlineData(429)]
+    [InlineData(503)]
+    public async Task LoginErrorsKeepServerMessageWithoutRetry(int status)
+    {
+        var handler = new FakeHandler((_, _) =>
+        {
+            var response = Json((HttpStatusCode)status, """{"error":{"message":"Thông báo từ website.","fields":{"email":"Kiểm tra email."}}}""");
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(1));
+            return response;
+        });
+        var error = await Assert.ThrowsAsync<VanCacApiException>(() => VanCacPublisherClient.LoginAsync(Base, "a@b.c", "secret", DeviceId, "PC", handler));
+        Assert.Equal(status, error.StatusCode);
+        Assert.Equal("Thông báo từ website.", error.Message);
+        Assert.Equal("Kiểm tra email.", error.Fields["email"]);
+        Assert.Single(handler.Calls);
+        Assert.DoesNotContain("secret", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LoginRejectsInvalidTokenAndUnsafeOrigin()
+    {
+        var handler = new FakeHandler((_, _) => Json(HttpStatusCode.Created,
+            """{"token":"bad-token","expiresAt":1800000000,"user":{"displayName":"A","roles":["AUTHOR"],"authorId":"a"}}"""));
+        await Assert.ThrowsAsync<VanCacApiException>(() => VanCacPublisherClient.LoginAsync(Base, "a@b.c", "secret", DeviceId, "PC", handler));
+        await Assert.ThrowsAsync<ArgumentException>(() => VanCacPublisherClient.LoginAsync("http://sacvien.com", "a@b.c", "secret", DeviceId, "PC", handler));
+        Assert.Single(handler.Calls);
+    }
+
+    [Fact]
+    public async Task LoginNetworkFailureIsNotRetriedAndCannotExposePassword()
+    {
+        var handler = new FakeHandler((_, _) => throw new HttpRequestException("secret-password"));
+        var error = await Assert.ThrowsAsync<VanCacApiException>(() => VanCacPublisherClient.LoginAsync(Base, "a@b.c", "secret-password", DeviceId, "PC", handler));
+        Assert.DoesNotContain("secret-password", error.ToString(), StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+        Assert.Single(handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(422, "{\"error\":{\"message\":\"Bad secret-password\",\"fields\":{\"password\":\"secret-password\"}}}")]
+    [InlineData(201, "secret-password")]
+    public async Task LoginRedactsEvenAnEchoedPasswordOrMalformedResponse(int status, string body)
+    {
+        var handler = new FakeHandler((_, _) => Json((HttpStatusCode)status, body));
+        var error = await Assert.ThrowsAsync<VanCacApiException>(() => VanCacPublisherClient.LoginAsync(Base, "a@b.c", "secret-password", DeviceId, "PC", handler));
+        Assert.DoesNotContain("secret-password", error.ToString(), StringComparison.Ordinal);
+        Assert.All(error.Fields.Values, value => Assert.DoesNotContain("secret-password", value, StringComparison.Ordinal));
+        Assert.Single(handler.Calls);
+    }
+
+    [Fact]
+    public async Task LogoutDeletesOnlyCurrentSessionWithBearer()
+    {
+        var handler = new FakeHandler((_, _) => Json(HttpStatusCode.OK, """{"revoked":true}"""));
+        using VanCacPublisherClient client = Client(handler);
+        await client.LogoutAsync();
+        var call = Assert.Single(handler.Calls);
+        Assert.Equal(HttpMethod.Delete, call.Method);
+        Assert.Equal(Base + "/api/publisher/v1/session", call.Url);
+        Assert.Equal("Bearer " + Token, call.Auth);
+        Assert.Null(call.Body);
+    }
+
     [Theory]
     [InlineData("https://vancac.example.com", "https://vancac.example.com/")]
     [InlineData("https://vancac.example.com/", "https://vancac.example.com/")]

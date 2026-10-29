@@ -343,7 +343,7 @@ public partial class ProjectPublicationView : UserControl
     {
         PublicationFormat.VanCac when SelectedLanguage() == PublicationLanguage.Chinese =>
             "Website Sắc Viện chỉ nhận bản dịch tiếng Việt. Chọn ngôn ngữ Bản dịch tiếng Việt để đăng.",
-        PublicationFormat.VanCac => "Đăng từng chương trong phạm vi lên website Sắc Viện bằng mã kết nối tạo ở trang Tài khoản. Nội dung giống Reader/TXT; gửi lại an toàn, chương giống hệt được bỏ qua. Dữ liệu Project không bị thay đổi.",
+        PublicationFormat.VanCac => "Đăng nhập tài khoản Sắc Viện để đăng từng chương trong phạm vi lên website. Nội dung giống Reader/TXT; gửi lại an toàn, chương giống hệt được bỏ qua. Dữ liệu Project không bị thay đổi.",
         PublicationFormat.Pdf when SelectedLanguage() == PublicationLanguage.Chinese =>
             "PDF khổ A4, mỗi chương bắt đầu ở trang mới; giữ nguyên bản gốc tiếng Trung và dùng phông chữ hỗ trợ tiếng Trung.",
         PublicationFormat.Pdf => "PDF khổ A4, mỗi chương bắt đầu ở trang mới; nội dung tiếng Việt dùng cùng bộ ghép văn bản với Reader/TXT.",

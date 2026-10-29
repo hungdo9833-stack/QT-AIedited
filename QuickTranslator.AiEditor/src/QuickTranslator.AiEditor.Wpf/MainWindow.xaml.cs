@@ -40,7 +40,7 @@ public partial class MainWindow : Window
     // Integration tests construct controls on an STA dispatcher without loading any real user stores.
     internal MainWindow(string? startupProjectPath, bool initializeApplication,
         GpuBackendManager? gpuBackends = null, GpuConnectionManager? gpuConnections = null,
-        LocalLlamaServerHost? localLlama = null, ILlmClient? translationClient = null)
+        LocalLlamaServerHost? localLlama = null, ILlmClient? translationClient = null, VanCacAccountManager? vanCacAccount = null)
     {
         _startupProjectPath = startupProjectPath;
         _gpuPreferences = initializeApplication ? GpuTranslationPreferences.Load() : new();
@@ -53,6 +53,7 @@ public partial class MainWindow : Window
         _projectCatalog = new(_projectRepository);
         _projectCatalog.Changed += OnProjectCatalogChanged;
         _initialized = true;
+        if (initializeApplication || vanCacAccount is not null) InitializeVanCacAccount(vanCacAccount ?? VanCacAccountManager.Default);
         if (!initializeApplication) return;
         _autosave.Tick += OnAutosave;
         InitializeChapterView();
