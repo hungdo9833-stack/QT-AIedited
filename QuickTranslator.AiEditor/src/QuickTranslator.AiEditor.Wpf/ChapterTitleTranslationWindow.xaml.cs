@@ -13,7 +13,7 @@ public partial class ChapterTitleTranslationWindow : Window
     private readonly ChapterTitleTranslationSource[] _sources;
     private readonly ChapterTitleRuntimeFactory _runtimeFactory;
     private readonly ChapterTitleTranslationDraftStore _store;
-    private readonly ObservableCollection<Row> _rows = [];
+    private List<Row> _rows = [];
     private ChapterTitleTranslationDraft? _draft;
     private CancellationTokenSource? _cancellation;
     private bool _working;
@@ -113,7 +113,6 @@ public partial class ChapterTitleTranslationWindow : Window
 
     private void RefreshRows()
     {
-        _rows.Clear();
         IEnumerable<ChapterTitleTranslationItem> items = _draft?.Items ?? _sources.Select(source => new ChapterTitleTranslationItem
         {
             Id = source.Id, ChapterNumber = source.ChapterNumber, ChineseTitle = source.ChineseTitle,
@@ -122,7 +121,9 @@ public partial class ChapterTitleTranslationWindow : Window
             ExistingTitleProtected = source.ProtectExistingVietnameseTitle,
             Status = source.ProtectExistingVietnameseTitle ? ChapterTitleTranslationStatus.Protected : ChapterTitleTranslationStatus.Pending
         });
-        foreach (ChapterTitleTranslationItem item in items) _rows.Add(new(item));
+        // One ItemsSource swap instead of a UI change notification per row.
+        _rows = items.Select(item => new Row(item)).ToList();
+        TitleGrid.ItemsSource = _rows;
         int completed = items.Count(item => item.Status is ChapterTitleTranslationStatus.Completed or ChapterTitleTranslationStatus.Protected);
         int failed = items.Count(item => item.Status == ChapterTitleTranslationStatus.Failed);
         ProgressText.Text = $"{completed:N0}/{_sources.Length:N0} · {failed:N0} lỗi";

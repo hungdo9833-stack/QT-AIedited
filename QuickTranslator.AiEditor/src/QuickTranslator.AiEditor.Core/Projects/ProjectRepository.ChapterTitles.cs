@@ -34,17 +34,14 @@ public sealed partial class ProjectRepository
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Preview from manifest metadata only; reading every chapter body here made large batches crawl.
+            Dictionary<Guid, ProjectChapterEntry> active = ActiveEntries(session);
             var items = new List<ProjectChapterTitlePreviewItem>(requested.Length);
             foreach (ProjectChapterTitleProposal proposal in requested)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                ProjectChapterEntry entry = session.Manifest.Chapters.SingleOrDefault(item =>
-                    item.ChapterId == proposal.ChapterId && item.DeletedAt is null)
+                ProjectChapterEntry entry = active.GetValueOrDefault(proposal.ChapterId)
                     ?? throw new FileNotFoundException($"Không tìm thấy chương hoạt động {proposal.ChapterId:D}.");
-                ChapterDocument chapter = await ReadRegisteredChapterAsync(session, entry, cancellationToken).ConfigureAwait(false);
-                if (chapter.Id != entry.ChapterId || chapter.ProjectId != session.Manifest.ProjectId ||
-                    chapter.Title != entry.VietnameseTitle || chapter.ChineseTitle != entry.ChineseTitle)
-                    throw new InvalidDataException("Tiêu đề trong chapter và manifest không đồng bộ; chưa thể cập nhật hàng loạt.");
                 bool protectedExisting = IsProtectedVietnameseTitle(entry);
                 bool apply = !protectedExisting || policy == ExistingVietnameseTitlePolicy.OverwriteConfirmed;
                 items.Add(new(entry.ChapterId, entry.Number, entry.ChineseTitle, entry.VietnameseTitle,
@@ -65,31 +62,39 @@ public sealed partial class ProjectRepository
         await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var candidates = new List<ChapterDocument>(preview.ApplyCount);
-            foreach (ProjectChapterTitlePreviewItem item in preview.Chapters.Where(item => item.WillApply))
+            Dictionary<Guid, ProjectChapterEntry> active = ActiveEntries(session);
+            ProjectChapterTitlePreviewItem[] work = preview.Chapters.Where(item => item.WillApply).ToArray();
+            foreach (ProjectChapterTitlePreviewItem item in work)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                ProjectChapterEntry entry = session.Manifest.Chapters.Single(chapter => chapter.ChapterId == item.ChapterId && chapter.DeletedAt is null);
-                ChapterDocument current = await ReadRegisteredChapterAsync(session, entry, cancellationToken).ConfigureAwait(false);
-                if (current.Title != item.CurrentVietnameseTitle || current.ChineseTitle != item.ChineseTitle)
-                    throw new InvalidOperationException($"Tiêu đề chương {entry.Number} đã đổi sau preview.");
+                ProjectChapterEntry entry = active.GetValueOrDefault(item.ChapterId)
+                    ?? throw new FileNotFoundException($"Không tìm thấy chương hoạt động {item.ChapterId:D}.");
                 if (item.ExistingTitleProtected && preview.Policy != ExistingVietnameseTitlePolicy.OverwriteConfirmed)
                     throw new InvalidOperationException($"Tiêu đề Việt chương {entry.Number} được bảo vệ khỏi ghi đè.");
-                ChapterDocument candidate = DocumentJson.Clone(current);
-                candidate.Title = item.ProposedVietnameseTitle.Trim();
-                candidate.UpdatedAt = DateTimeOffset.UtcNow;
-                DocumentJson.Validate(candidate);
-                candidates.Add(candidate);
             }
-            foreach (ChapterDocument candidate in candidates)
+            // Read in parallel, then write all files and commit the manifest once (previously every chapter
+            // rewrote the whole manifest with fsync and fired a full UI refresh).
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            var chapters = new ChapterDocument[work.Length];
+            await Parallel.ForAsync(0, work.Length, new ParallelOptions
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await WriteFastChapterCheckpointAsync(session, candidate, "BatchTranslateChapterTitle", cancellationToken)
+                MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 2, 8),
+                CancellationToken = cancellationToken
+            }, async (index, token) =>
+            {
+                ChapterDocument chapter = await ReadRegisteredChapterAsync(session, active[work[index].ChapterId], token)
                     .ConfigureAwait(false);
-            }
+                chapter.Title = work[index].ProposedVietnameseTitle.Trim();
+                chapter.UpdatedAt = now;
+                chapters[index] = chapter;
+            }).ConfigureAwait(false);
+            await WriteFastChapterBatchAsync(session, chapters, "BatchTranslateChapterTitle", cancellationToken)
+                .ConfigureAwait(false);
         }
         finally { session.OperationGate.Release(); }
     }
+
+    private static Dictionary<Guid, ProjectChapterEntry> ActiveEntries(ProjectSession session) =>
+        session.Manifest.Chapters.Where(entry => entry.DeletedAt is null).ToDictionary(entry => entry.ChapterId);
 
     public static bool IsProtectedVietnameseTitle(ProjectChapterEntry entry)
     {

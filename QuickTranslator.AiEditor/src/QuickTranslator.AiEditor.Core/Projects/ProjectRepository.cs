@@ -7,7 +7,6 @@ namespace QuickTranslator.AiEditor.Core.Projects;
 public sealed partial class ProjectRepository
 {
     private readonly SemaphoreSlim _writeGate = new(1, 1);
-    private static readonly JsonSerializerOptions PrettyJson = new(DocumentJson.Options) { WriteIndented = true };
 
     public async Task<ProjectSession> CreateAsync(string rootDirectory, string vietnameseTitle,
         CancellationToken cancellationToken = default)
@@ -245,13 +244,43 @@ public sealed partial class ProjectRepository
         FaultPoint?.Invoke("BeforeFastChapterWrite");
         await session.ChapterStore.SaveSerializedAsync(chapter.Id, chapterBytes, cancellationToken).ConfigureAwait(false);
         FaultPoint?.Invoke("AfterFastChapterWrite");
-        ProjectManifest after = Clone(session.Manifest);
-        CopySummary(after.Chapters.Single(x => x.ChapterId == chapter.Id), chapter);
-        after.CurrentChapterId = chapter.Id;
-        NormalizeManifest(after);
-        await WriteFastManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
+        // Update the live manifest in place: a full JSON clone per save cost O(chapters) for every chapter write.
+        ProjectManifest manifest = session.Manifest;
+        CopySummary(entry, chapter);
+        manifest.CurrentChapterId = chapter.Id;
+        NormalizeManifest(manifest);
+        await WriteFastManifestAsync(session.ManifestPath, manifest, cancellationToken).ConfigureAwait(false);
         FaultPoint?.Invoke("AfterFastManifestWrite");
-        session.Manifest = after;
+        PublishManifestCommitted(session, operation);
+    }
+
+    /// <summary>Writes many chapter files in parallel, then commits the manifest and notifies listeners once.</summary>
+    private async Task WriteFastChapterBatchAsync(ProjectSession session, IReadOnlyList<ChapterDocument> chapters,
+        string operation, CancellationToken cancellationToken)
+    {
+        if (chapters.Count == 0) return;
+        ProjectManifest manifest = session.Manifest;
+        Dictionary<Guid, ProjectChapterEntry> active = manifest.Chapters.Where(x => x.DeletedAt is null)
+            .ToDictionary(x => x.ChapterId);
+        foreach (ChapterDocument chapter in chapters)
+        {
+            ProjectChapterEntry entry = active.GetValueOrDefault(chapter.Id)
+                ?? throw new InvalidOperationException("Chương không thuộc dự án đang mở.");
+            if (chapter.ProjectId is not null && chapter.ProjectId != manifest.ProjectId)
+                throw new InvalidOperationException("Chương đang thuộc dự án khác.");
+            chapter.ProjectId = manifest.ProjectId;
+            chapter.ChapterNumber = entry.Number;
+            chapter.CharacterProject.Id = manifest.ProjectId;
+        }
+        await Parallel.ForEachAsync(chapters, new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 2, 8),
+            CancellationToken = cancellationToken
+        }, async (chapter, token) => await session.ChapterStore.SaveSerializedAsync(chapter.Id,
+            ChapterFileStore.SerializeDocument(chapter), token).ConfigureAwait(false)).ConfigureAwait(false);
+        foreach (ChapterDocument chapter in chapters) CopySummary(active[chapter.Id], chapter);
+        NormalizeManifest(manifest);
+        await WriteFastManifestAsync(session.ManifestPath, manifest, cancellationToken).ConfigureAwait(false);
         PublishManifestCommitted(session, operation);
     }
 
@@ -272,7 +301,7 @@ public sealed partial class ProjectRepository
     {
         StorageIoMetricsCapture.Serialization();
         manifest.Validate();
-        return JsonSerializer.SerializeToUtf8Bytes(manifest, PrettyJson);
+        return JsonSerializer.SerializeToUtf8Bytes(manifest, DocumentJson.Options);
     }
 
     private static Task WriteManifestAsync(string path, ProjectManifest manifest, CancellationToken cancellationToken) =>

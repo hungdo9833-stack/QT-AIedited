@@ -68,8 +68,9 @@
     <DataGrid x:Name="ChapterGrid" Grid.Row="3" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended" SelectionUnit="FullRow"
               CanUserSortColumns="True" CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
               Background="{DynamicResource PanelBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" RowBackground="{DynamicResource PanelBrush}" AlternatingRowBackground="{DynamicResource PanelAltBrush}"
-              EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True"
-              VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True"
+              EnableRowVirtualization="True" EnableColumnVirtualization="False" VirtualizingPanel.IsVirtualizing="True"
+              VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Item" ScrollViewer.CanContentScroll="True"
+              RowHeight="22"
               SelectionChanged="OnSelectionChanged" MouseDoubleClick="OnGridDoubleClick" AutomationProperties.Name="Danh sách chương">
       <DataGrid.Columns>
         <DataGridTextColumn Header="#" Binding="{Binding DisplayOrder}" SortMemberPath="DisplayOrder" Width="62"/>

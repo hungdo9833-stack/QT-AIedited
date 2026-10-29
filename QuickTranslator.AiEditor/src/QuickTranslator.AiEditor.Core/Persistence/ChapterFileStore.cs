@@ -6,7 +6,6 @@ namespace QuickTranslator.AiEditor.Core.Persistence;
 public sealed class ChapterFileStore : IChapterStore
 {
     private readonly string _directory;
-    private static readonly JsonSerializerOptions PrettyJson = new(DocumentJson.Options) { WriteIndented = true };
 
     public ChapterFileStore(string directory)
     {
@@ -29,9 +28,8 @@ public sealed class ChapterFileStore : IChapterStore
     internal static byte[] SerializeDocument(ChapterDocument chapter)
     {
         StorageIoMetricsCapture.Serialization();
-        ChapterDocument snapshot = DocumentJson.Clone(chapter);
-        DocumentJson.Validate(snapshot);
-        return JsonSerializer.SerializeToUtf8Bytes(snapshot, PrettyJson);
+        DocumentJson.Validate(chapter);
+        return JsonSerializer.SerializeToUtf8Bytes(chapter, DocumentJson.Options);
     }
 
     internal static Task<ChapterDocument> ReadVerifiedFileAsync(string path,
@@ -48,7 +46,6 @@ public sealed class ChapterFileStore : IChapterStore
     internal async Task SaveSerializedAsync(Guid chapterId, byte[] bytes,
         CancellationToken cancellationToken = default)
     {
-        _ = DeserializeDocument(bytes);
         await SimpleFileStorage.WriteAsync(GetPath(chapterId), bytes, DeserializeDocument, cancellationToken)
             .ConfigureAwait(false);
     }

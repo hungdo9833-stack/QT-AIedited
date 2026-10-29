@@ -386,8 +386,8 @@ public partial class MainWindow : Window
             if (service.HasUnsavedChanges && ReferenceEquals(service, _service) && !_closing) _autosave.Start();
             if (ReferenceEquals(service, _service) && !WorkActive && !_uiOperation && !_closing)
             {
+                // The chapter list follows the catalog-changed event; rebuilding it here ran on every autosave tick.
                 Refresh();
-                RefreshProjectChapterList();
                 SetAutosaveStatus(service.HasUnsavedChanges ? "● Chờ tự lưu…" : "✓ Đã tự lưu", service.HasUnsavedChanges);
             }
         }
@@ -779,6 +779,7 @@ public partial class MainWindow : Window
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
+        _windowClosed = true;
         _progressTimer.Stop(); _readerSaveTimer.Stop();
         DropHostedProjectViews();
         _textCleanerWindow?.Close();
@@ -786,8 +787,17 @@ public partial class MainWindow : Window
         ClearProjectTranslationCoordinator();
         _projectCatalog.Changed -= OnProjectCatalogChanged;
         _projectCatalog.Dispose();
-        _gpuConnections.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _localLlama.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        // Dispose off the UI thread with a cap: blocking the dispatcher on async work that resumes on it
+        // can deadlock, and closing must never freeze the app.
+        try
+        {
+            Task.Run(async () =>
+            {
+                await _gpuConnections.DisposeAsync().ConfigureAwait(false);
+                await _localLlama.DisposeAsync().ConfigureAwait(false);
+            }).Wait(TimeSpan.FromSeconds(3));
+        }
+        catch (AggregateException ex) { System.Diagnostics.Trace.TraceError($"Dispose on close failed: {ex}"); }
         _gpuBackends.Dispose();
     }
     private sealed record SegmentItem(Guid Id, string Label)

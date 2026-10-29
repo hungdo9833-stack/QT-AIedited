@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
-using System.Security.Cryptography;
+
 
 namespace QuickTranslator.AiEditor.Core.Projects;
 
@@ -81,10 +81,7 @@ public sealed class ProjectCatalog : IDisposable
                 current.ManifestUpdatedAt == manifest.UpdatedAt &&
                 current.Chapters.Length == manifest.Chapters.Count)
                 return current;
-            string revision = ComputeRevision(manifest);
-            if (_cache.TryGetValue(manifest.ProjectId, out ProjectCatalogSnapshot? cached) && cached.Revision == revision)
-                return cached;
-            ProjectCatalogSnapshot rebuilt = Build(manifest, revision);
+            ProjectCatalogSnapshot rebuilt = Build(manifest, ComputeRevision(manifest));
             _cache[manifest.ProjectId] = rebuilt;
             return rebuilt;
         }
@@ -173,8 +170,10 @@ public sealed class ProjectCatalog : IDisposable
         return new(manifest.ProjectId, revision, manifest.UpdatedAt, chapters);
     }
 
+    // Every committed manifest change stamps UpdatedAt, so it identifies the revision without
+    // serializing and hashing the whole manifest on each refresh.
     private static string ComputeRevision(ProjectManifest manifest) =>
-        Convert.ToHexString(SHA256.HashData(ProjectRepository.SerializeManifest(manifest)));
+        $"{manifest.UpdatedAt.UtcTicks:X16}-{manifest.Chapters.Count:X}";
 
     public void Dispose()
     {

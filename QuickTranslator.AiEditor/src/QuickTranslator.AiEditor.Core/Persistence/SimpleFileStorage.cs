@@ -3,9 +3,9 @@ using System.Collections.Concurrent;
 namespace QuickTranslator.AiEditor.Core.Persistence;
 
 /// <summary>
-/// Direct primary-file storage. It validates proposed content, writes a temporary
-/// sibling file, flushes it, and replaces the target without creating backups,
-/// journals, revisions, or recovery metadata.
+/// Direct primary-file storage. It writes a temporary sibling file and replaces the
+/// target without creating backups, journals, revisions, or recovery metadata.
+/// Speed over durability: written bytes are not re-decoded and not forced to disk.
 /// </summary>
 public static class SimpleFileStorage
 {
@@ -45,8 +45,6 @@ public static class SimpleFileStorage
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(bytes);
         ArgumentNullException.ThrowIfNull(decode);
-        _ = decode(bytes);
-
         path = Path.GetFullPath(path);
         SemaphoreSlim gate = WriteGates.GetOrAdd(path, _ => new(1, 1));
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -73,13 +71,14 @@ public static class SimpleFileStorage
         try
         {
             StorageIoMetricsCapture.TemporaryCreated();
-            await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                8192, FileOptions.Asynchronous | FileOptions.WriteThrough))
+            // Unbuffered, and disposal never resumes on the caller's context: a UI thread blocked on a save
+            // (sync-over-async on close) would otherwise deadlock waiting for the final flush.
+            var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                0, FileOptions.Asynchronous);
+            await using (stream.ConfigureAwait(false))
             {
                 await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
                 StorageIoMetricsCapture.Write(bytes.Length);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
             }
 
             FaultPoint.Value?.Invoke("AfterTemporaryFlush");

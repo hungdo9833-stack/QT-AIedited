@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using QuickTranslator.AiEditor.Core.Projects;
 
 namespace QuickTranslator.AiEditor.Wpf;
@@ -24,6 +26,8 @@ public partial class ChapterManagerView : UserControl
     private bool _working;
     private bool _refreshing;
     private bool _attached;
+    private bool _refreshPending;
+    private bool _bulkSelecting;
     private int _refreshCount;
     private IReadOnlyList<ChapterManagerWindow.ChapterManagerRow> _rows = [];
 
@@ -77,7 +81,6 @@ public partial class ChapterManagerView : UserControl
         try
         {
             _refreshCount++;
-            Guid[] selection = ChapterGrid.SelectedItems.Cast<ChapterManagerWindow.ChapterManagerRow>().Select(row => row.ChapterId).ToArray();
             ProjectCatalogSnapshot snapshot = _catalog.GetSnapshot(_session);
             RefreshVolumeFilter(snapshot);
             var query = new ProjectCatalogQuery(
@@ -87,10 +90,20 @@ public partial class ChapterManagerView : UserControl
                 Parse<ProjectCatalogDeletionFilter>(DeletionFilter, ProjectCatalogDeletionFilter.Active),
                 SelectedTag(VolumeFilter) is { Length: > 0 } volume ? volume : null,
                 Parse<ProjectCatalogSort>(SortInput, ProjectCatalogSort.ReadingOrder));
-            _rows = _catalog.Query(_session, query).Select(chapter => new ChapterManagerWindow.ChapterManagerRow(chapter)).ToArray();
-            ChapterGrid.ItemsSource = _rows;
-            foreach (ChapterManagerWindow.ChapterManagerRow row in _rows.Where(row => selection.Contains(row.ChapterId)))
-                ChapterGrid.SelectedItems.Add(row);
+            ChapterManagerWindow.ChapterManagerRow[] rows = _catalog.Query(_session, query)
+                .Select(chapter => new ChapterManagerWindow.ChapterManagerRow(chapter)).ToArray();
+            // Rows are records: when nothing visible changed, keep the realized rows, selection and scroll position.
+            if (!rows.SequenceEqual(_rows))
+            {
+                var selection = ChapterGrid.SelectedItems.Cast<ChapterManagerWindow.ChapterManagerRow>()
+                    .Select(row => row.ChapterId).ToHashSet();
+                ScrollViewer? scroller = FindScrollViewer(ChapterGrid);
+                double offset = scroller?.VerticalOffset ?? 0;
+                _rows = rows;
+                ChapterGrid.ItemsSource = rows;
+                SelectRows(rows.Where(row => selection.Contains(row.ChapterId)));
+                scroller?.ScrollToVerticalOffset(offset);
+            }
             CatalogCountText.Text = $"{snapshot.ActiveCount:N0} hoạt động · {snapshot.DeletedCount:N0} trong History";
             StatusText.Text = _rows.Count == 0
                 ? "Không có chương phù hợp bộ lọc."
@@ -115,8 +128,30 @@ public partial class ChapterManagerView : UserControl
 
     private void OnCatalogChanged(object? sender, ProjectCatalogChangedEventArgs change)
     {
-        if (change.ProjectId != _session.Manifest.ProjectId || !_attached) return;
-        Dispatcher.BeginInvoke(RefreshRows);
+        if (change.ProjectId != _session.Manifest.ProjectId || !_attached || _refreshPending) return;
+        _refreshPending = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () => { _refreshPending = false; RefreshRows(); });
+    }
+
+    private void SelectRows(IEnumerable<ChapterManagerWindow.ChapterManagerRow> rows)
+    {
+        // SelectedItems.Add raises SelectionChanged per row; refresh the command bar once at the end.
+        _bulkSelecting = true;
+        try
+        {
+            ChapterGrid.SelectedItems.Clear();
+            foreach (ChapterManagerWindow.ChapterManagerRow row in rows) ChapterGrid.SelectedItems.Add(row);
+        }
+        finally { _bulkSelecting = false; }
+        UpdateCommands();
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        if (root is ScrollViewer viewer) return viewer;
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+            if (FindScrollViewer(VisualTreeHelper.GetChild(root, i)) is ScrollViewer found) return found;
+        return null;
     }
 
     private void OnFilterChanged(object sender, EventArgs e)
@@ -124,7 +159,10 @@ public partial class ChapterManagerView : UserControl
         if (IsInitialized && !_working && !_refreshing) RefreshRows();
     }
 
-    private void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateCommands();
+    private void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_bulkSelecting) UpdateCommands();
+    }
     private void OnClearSelection(object sender, RoutedEventArgs e) => ChapterGrid.UnselectAll();
 
     private void OnSelectChapterRange(object sender, RoutedEventArgs e)
@@ -142,10 +180,7 @@ public partial class ChapterManagerView : UserControl
     {
         int min = Math.Min(fromNumber, toNumber);
         int max = Math.Max(fromNumber, toNumber);
-        ChapterGrid.SelectedItems.Clear();
-        foreach (ChapterManagerWindow.ChapterManagerRow row in _rows.Where(r => r.Number >= min && r.Number <= max))
-            ChapterGrid.SelectedItems.Add(row);
-        UpdateCommands();
+        SelectRows(_rows.Where(r => r.Number >= min && r.Number <= max));
         StatusText.Text = $"Đã chọn {ChapterGrid.SelectedItems.Count:N0} chương trong dải từ số {min} đến {max}.";
         return ChapterGrid.SelectedItems.Count;
     }

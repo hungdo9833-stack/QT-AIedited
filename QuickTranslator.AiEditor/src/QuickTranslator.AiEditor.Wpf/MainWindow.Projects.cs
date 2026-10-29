@@ -5,6 +5,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
@@ -24,8 +25,10 @@ public partial class MainWindow
     private ProjectSession? _projectSession;
     private ProjectResources? _projectResources;
     private readonly ProjectCatalog _projectCatalog;
-    private readonly ObservableCollection<ProjectChapterItem> _projectChapters = [];
+    private List<ProjectChapterItem> _projectChapters = [];
     private bool _syncingProjectUi;
+    private bool _projectCatalogRefreshPending;
+    private bool _windowClosed;
     private bool _suppressProjectChapterOpen;
     private int? _pendingProjectChapterNumber;
     private BookIntelligenceState? _bookIntelligenceState;
@@ -273,9 +276,12 @@ public partial class MainWindow
         _syncingProjectUi = true;
         try
         {
-            _projectChapters.Clear();
+            // Swap in a fresh list: Clear()+Add() on an ObservableCollection raised one UI change per chapter.
+            var items = new List<ProjectChapterItem>();
+            _projectChapters = items;
             if (_projectSession is null)
             {
+                ProjectChapterList.ItemsSource = items;
                 ApplyProjectSidebarVisibility(); ActiveProjectTitle.Text = "Dự án"; return;
             }
             ApplyProjectSidebarVisibility(); ActiveProjectTitle.Text = _projectSession.Manifest.VietnameseTitle;
@@ -290,9 +296,10 @@ public partial class MainWindow
             };
             foreach (ProjectCatalogChapter entry in _projectCatalog.Query(_projectSession,
                          new(Search: query, State: state, Sort: sort)))
-                _projectChapters.Add(new(entry.ChapterId,
+                items.Add(new(entry.ChapterId,
                     $"{ProjectStateDot(entry.TranslationState)} {entry.Number:0000} · {entry.VietnameseTitle}\n{ProjectStateLabel(entry.TranslationState)}"));
-            ProjectChapterList.SelectedItem = _projectChapters.FirstOrDefault(x => x.Id == _projectSession.Manifest.CurrentChapterId);
+            ProjectChapterList.ItemsSource = items;
+            ProjectChapterList.SelectedItem = items.FirstOrDefault(x => x.Id == _projectSession.Manifest.CurrentChapterId);
             ProjectAutosaveStatus.Text = $"{_projectSession.Manifest.Chapters.Count(x => x.DeletedAt is null)} chương · lưu tại {Path.GetFileName(_projectSession.ManifestPath)}";
         }
         finally { _syncingProjectUi = false; }
@@ -383,9 +390,14 @@ public partial class MainWindow
     private void OnProjectCatalogChanged(object? sender, ProjectCatalogChangedEventArgs change)
     {
         if (_projectSession?.Manifest.ProjectId != change.ProjectId || _closing) return;
-        Dispatcher.BeginInvoke(() =>
+        // Coalesce bursts of commits (batch saves, queue progress) into one list rebuild.
+        if (_projectCatalogRefreshPending) return;
+        _projectCatalogRefreshPending = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
-            if (_projectSession?.Manifest.ProjectId == change.ProjectId && !_closing)
+            _projectCatalogRefreshPending = false;
+            // A Background-priority refresh can run after the window closed and disposed the catalog.
+            if (_projectSession?.Manifest.ProjectId == change.ProjectId && !_closing && !_windowClosed)
             {
                 RefreshProjectChapterList();
                 RefreshReaderCatalog();

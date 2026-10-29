@@ -52,12 +52,7 @@ public sealed partial class ProjectRepository
                 ChapterDocument candidate = ResegmentationPlanner.Apply(current, item.Preview, confirmed, DateTimeOffset.UtcNow);
                 candidates.Add(candidate);
             }
-            foreach (ChapterDocument candidate in candidates)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await WriteFastChapterCheckpointAsync(session, candidate, "ResegmentChapter", cancellationToken)
-                    .ConfigureAwait(false);
-            }
+            await WriteFastChapterBatchAsync(session, candidates, "ResegmentChapter", cancellationToken).ConfigureAwait(false);
         }
         finally { session.OperationGate.Release(); }
     }
