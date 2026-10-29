@@ -91,20 +91,6 @@ internal sealed class VanCacAccountManager
         finally { Changed?.Invoke(this, EventArgs.Empty); }
     }
 
-    public void SaveManualConnection(string baseUrl, string? token, VanCacUser user)
-    {
-        Preferences.EnsureDeviceId();
-        if (token is not null)
-        {
-            _write(token);
-            Token = token;
-            _needsLogin = false;
-            Preferences.ExpiresAt = null;
-        }
-        Preferences.BaseUrl = baseUrl;
-        CacheUser(user);
-    }
-
     public async Task LogoutAsync(CancellationToken cancellationToken)
     {
         try

@@ -29,7 +29,7 @@ public partial class VanCacAccountWindow : Window
         RolesText.Text = "Vai trò: " + string.Join(", ", _account.Preferences.Roles);
         WebsiteText.Text = "Website: " + _account.Preferences.BaseUrl;
         ExpiryText.Text = _account.Preferences.ExpiresAt is { } expiry
-            ? "Hết hạn: " + expiry.ToLocalTime().ToString("dd/MM/yyyy HH:mm") : "Thời hạn: chưa có thông tin (mã kết nối thủ công).";
+            ? "Hết hạn: " + expiry.ToLocalTime().ToString("dd/MM/yyyy HH:mm") : "Thời hạn: chưa có thông tin.";
     }
 
     private void SetBusy(bool busy, string message)

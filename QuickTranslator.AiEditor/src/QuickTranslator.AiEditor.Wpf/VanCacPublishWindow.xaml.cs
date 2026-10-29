@@ -48,28 +48,19 @@ public partial class VanCacPublishWindow : Window
         SubtitleText.Text = $"Gửi {inspection.TotalChapterCount:N0} chương của “{inspection.ProjectTitle}”" +
             (inspection.IsRange ? $" (chương {inspection.FromNumber}–{inspection.ToNumber})" : "") +
             " lên website, từng chương một. Gửi lại an toàn: chương giống hệt được báo “không đổi”.";
-        BaseUrlInput.Text = _preferences.BaseUrl;
         PublishNowInput.IsChecked = _preferences.PublishImmediately;
         KeepDraftInput.IsChecked = !_preferences.PublishImmediately;
         NewTitleInput.Text = session.Manifest.VietnameseTitle;
         NewDescriptionInput.Text = session.Manifest.Description.Length > 5000 ? session.Manifest.Description[..5000] : session.Manifest.Description;
-        ShowSavedToken();
+        RefreshAccount();
         Loaded += async (_, _) => { if (_account.IsSignedIn) await (InitialConnection = ConnectAsync()); };
     }
 
-    private string? SavedToken()
+    private void RefreshAccount()
     {
-        return _account.IsSignedIn ? _account.Token : null;
-    }
-
-    private void ShowSavedToken()
-    {
-        string? token = SavedToken();
-        TokenStatusText.Text = token is null ? "Tạo mã ở website: Tài khoản → Kết nối QT Studio." : $"Đang dùng mã đã lưu {VanCacTokenVault.Mask(token)}. Dán mã mới để thay.";
-        ForgetTokenButton.Visibility = token is null ? Visibility.Collapsed : Visibility.Visible;
-        AccountSummaryText.Text = token is null ? "Cần đăng nhập Sắc Viện để chọn truyện và đăng chương." :
+        AccountSummaryText.Text = !_account.IsSignedIn ? "Cần đăng nhập Sắc Viện để chọn truyện và đăng chương." :
             $"Đã đăng nhập: {_account.AccountName} · {_preferences.BaseUrl}";
-        AccountButton.Content = token is null ? "Đăng nhập…" : "Đổi tài khoản…";
+        AccountButton.Content = _account.IsSignedIn ? "Đổi tài khoản…" : "Đăng nhập…";
     }
 
     private async void OnAccount(object sender, RoutedEventArgs e)
@@ -77,9 +68,7 @@ public partial class VanCacPublishWindow : Window
         if (_busy) return;
         new VanCacAccountWindow(_account) { Owner = this }.ShowDialog();
         ResetConnection();
-        BaseUrlInput.Text = _preferences.BaseUrl;
-        TokenInput.Clear();
-        ShowSavedToken();
+        RefreshAccount();
         ConnectionText.Text = _account.IsSignedIn ? "" : "Cần đăng nhập để tiếp tục đăng chương.";
         if (_account.IsSignedIn) await ConnectAsync();
     }
@@ -99,36 +88,26 @@ public partial class VanCacPublishWindow : Window
         if (error.StatusCode != 401) return error.Message;
         _account.ExpireSession();
         ResetConnection();
-        ShowSavedToken();
+        RefreshAccount();
         ConnectionText.Text = VanCacAccountManager.SessionExpiredMessage;
         return VanCacAccountManager.SessionExpiredMessage;
     }
 
-    private async void OnConnect(object sender, RoutedEventArgs e) => await ConnectAsync();
-
-    internal async Task ConnectAsync()
+    private async Task ConnectAsync()
     {
-        if (_busy) return;
-        string typed = TokenInput.Password.Trim();
-        string? token = typed.Length > 0 ? typed : SavedToken();
-        Uri baseUrl;
-        try { baseUrl = VanCacPublisherClient.NormalizeBaseUrl(BaseUrlInput.Text); }
-        catch (ArgumentException ex) { ConnectionText.Text = ex.Message; return; }
-        if (!VanCacPublisherClient.IsValidToken(token)) { ConnectionText.Text = "Dán mã kết nối (vcp_…) tạo ở website: Tài khoản → Kết nối QT Studio."; return; }
+        if (_busy || !_account.IsSignedIn) return;
         SetBusy(true, null);
         ConnectionText.Text = "Đang kiểm tra kết nối…";
-        var client = _account.CreateClient(baseUrl.ToString(), token!);
+        VanCacPublisherClient? client = null;
         try
         {
+            client = _account.CreateClient();
             VanCacUser user = await client.GetMeAsync(_lifetime.Token);
-            // Only persist what was proven to work.
-            TokenInput.Clear();
-            _account.SaveManualConnection(baseUrl.ToString().TrimEnd('/'), typed.Length > 0 ? typed : null, user);
-            BaseUrlInput.Text = _preferences.BaseUrl;
+            _account.CacheUser(user);
             _client?.Dispose();
             _client = client; _user = user;
             ConnectionText.Text = $"Đã kết nối: {user.DisplayName} · {string.Join(", ", user.Roles)}.";
-            ShowSavedToken();
+            RefreshAccount();
             bool admin = user.Roles.Contains("ADMIN");
             AuthorPanel.Visibility = admin ? Visibility.Visible : Visibility.Collapsed;
             if (admin) AuthorInput.ItemsSource = await client.ListAuthorsAsync(_lifetime.Token);
@@ -137,7 +116,7 @@ public partial class VanCacPublishWindow : Window
         }
         catch (Exception ex) when (ex is VanCacApiException or Win32Exception or ArgumentException or System.IO.IOException or UnauthorizedAccessException)
         {
-            client.Dispose();
+            client?.Dispose();
             ResetConnection();
             ConnectionText.Text = "Không kết nối được: " + (ex is VanCacApiException api ? ApiError(api) : ex.Message);
         }
@@ -309,24 +288,10 @@ public partial class VanCacPublishWindow : Window
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException) { ProgressText.Text = ex.Message; }
     }
 
-    private async void OnForgetToken(object sender, RoutedEventArgs e)
-    {
-        if (_busy) return;
-        try { await _account.LogoutAsync(_lifetime.Token); }
-        catch (Win32Exception ex) { ConnectionText.Text = ex.Message; return; }
-        _client?.Dispose(); _client = null; _user = null;
-        NovelSection.IsEnabled = false;
-        NovelInput.ItemsSource = null;
-        ConnectionText.Text = "Đã đăng xuất và xóa mã khỏi máy này.";
-        ShowSavedToken();
-        UpdateStartEnabled();
-    }
-
     private void SetBusy(bool busy, string? message)
     {
         _busy = busy;
         AccountButton.IsEnabled = !busy;
-        ConnectButton.IsEnabled = ForgetTokenButton.IsEnabled = BaseUrlInput.IsEnabled = TokenInput.IsEnabled = !busy;
         ReloadNovelsButton.IsEnabled = NovelInput.IsEnabled = ToggleCreateButton.IsEnabled = CreateNovelButton.IsEnabled = !busy;
         KeepDraftInput.IsEnabled = PublishNowInput.IsEnabled = !busy;
         CloseButton.IsEnabled = !busy;

@@ -99,36 +99,6 @@ public sealed class VanCacPublishUiTests
         finally { window.Close(); }
     });
 
-    [Fact]
-    public Task Manual_code_fallback_connects_and_keeps_token_in_fake_vault() => StaHost.Run(async () =>
-    {
-        using var fixture = new WorkspaceFixture();
-        await fixture.CreateProjectAsync();
-        var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath.EndsWith("/me", StringComparison.Ordinal)
-            ? Json("""{"user":{"displayName":"Tác giả thủ công","roles":["AUTHOR"],"authorId":"a1"}}""")
-            : Json("""{"items":[],"pagination":{"page":1,"pageSize":100,"total":0,"totalPages":1}}"""));
-        var store = new MemoryCredentialStore();
-        string path = Path.Combine(fixture.Root, "account.json");
-        var account = new VanCacAccountManager(path, store, handler);
-        var service = new ProjectPublicationService(fixture.Repository, fixture.Get<ProjectCatalog>("_projectCatalog"));
-        var window = new VanCacPublishWindow(fixture.Project, service, await service.InspectAsync(fixture.Project), true, account: account);
-        try
-        {
-            window.Show();
-            ((Expander)window.FindName("ManualCodeExpander")).IsExpanded = true;
-            ((TextBox)window.FindName("BaseUrlInput")).Text = "http://localhost:4321";
-            ((PasswordBox)window.FindName("TokenInput")).Password = Token;
-            await window.ConnectAsync();
-            Assert.Equal(Token, VanCacTokenVault.Read(store));
-            Assert.Equal("http://localhost:4321", VanCacPublisherPreferences.Load(path).BaseUrl);
-            Assert.Contains("Đã đăng nhập: Tác giả thủ công", ((TextBlock)window.FindName("AccountSummaryText")).Text);
-            Assert.Equal("", ((PasswordBox)window.FindName("TokenInput")).Password);
-            Assert.True(((FrameworkElement)window.FindName("NovelSection")).IsEnabled);
-            Assert.DoesNotContain(Token, File.ReadAllText(path), StringComparison.Ordinal);
-        }
-        finally { window.Close(); }
-    });
-
     private static VanCacAccountManager Account(string path, MemoryCredentialStore store, FakeHandler handler, bool signedIn)
     {
         new VanCacPublisherPreferences
@@ -340,7 +310,6 @@ public sealed class VanCacPublishUiTests
         Assert.Equal(Token, store.Values[VanCacTokenVault.Target]);
         Assert.Equal(Token, VanCacTokenVault.Read(store));
         Assert.Throws<ArgumentException>(() => VanCacTokenVault.Save(store, "AIza-not-a-publisher-token"));
-        Assert.Equal("vcp_…cdef", VanCacTokenVault.Mask(Token));
         store.Values[VanCacTokenVault.Target] = "garbage";
         Assert.Null(VanCacTokenVault.Read(store));
     }
@@ -422,18 +391,15 @@ public sealed class VanCacPublishUiTests
             Assert.False(((FrameworkElement)window.FindName("NovelSection")).IsEnabled);
             Assert.Contains("Cần đăng nhập", ((TextBlock)window.FindName("AccountSummaryText")).Text);
             Assert.Equal("Đăng nhập…", ((Button)window.FindName("AccountButton")).Content);
-            var manual = (Expander)window.FindName("ManualCodeExpander");
-            Assert.Equal("Nâng cao: dùng mã kết nối", manual.Header);
-            Assert.False(manual.IsExpanded);
+            Assert.Null(window.FindName("ManualCodeExpander"));
+            Assert.Null(window.FindName("BaseUrlInput"));
+            Assert.Null(window.FindName("TokenInput"));
+            Assert.Null(window.FindName("TokenStatusText"));
+            Assert.Null(window.FindName("ConnectButton"));
+            Assert.Null(window.FindName("ForgetTokenButton"));
             Assert.Equal("Giới thiệu truyện.", ((TextBox)window.FindName("NewDescriptionInput")).Text);
             Assert.True(tokenReads > 0);
             Assert.False(File.Exists(preferences), "opening the window must not write settings");
-
-            ((TextBox)window.FindName("BaseUrlInput")).Text = "http://vancac.example";
-            ((Button)window.FindName("ConnectButton")).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-            await Task.Yield();
-            Assert.Contains("HTTPS", ((TextBlock)window.FindName("ConnectionText")).Text);
-            Assert.False(File.Exists(preferences));
         }
         finally { window.Close(); }
     });

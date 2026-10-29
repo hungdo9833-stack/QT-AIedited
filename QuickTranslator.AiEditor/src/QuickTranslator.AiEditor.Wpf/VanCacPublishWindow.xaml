@@ -18,26 +18,6 @@
     <TextBlock Text="1 · Tài khoản Sắc Viện" Style="{StaticResource SectionTitle}"/>
     <TextBlock x:Name="AccountSummaryText" Margin="3,8,0,0" TextWrapping="Wrap"/>
     <Button x:Name="AccountButton" Content="Đăng nhập…" Click="OnAccount" HorizontalAlignment="Left" Margin="0,8,0,0"/>
-    <Expander x:Name="ManualCodeExpander" Header="Nâng cao: dùng mã kết nối" IsExpanded="False" Margin="0,12,0,0">
-    <StackPanel>
-    <Grid Margin="0,6,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
-     <StackPanel>
-      <TextBlock Text="Địa chỉ website" Style="{StaticResource FieldLabel}"/>
-      <TextBox x:Name="BaseUrlInput" AutomationProperties.Name="Địa chỉ website Sắc Viện"/>
-      <TextBlock Text="Ví dụ https://ten-mien-cua-ban.com" FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="3,2,0,0"/>
-     </StackPanel>
-     <StackPanel Grid.Column="2">
-      <TextBlock Text="Mã kết nối (vcp_…)" Style="{StaticResource FieldLabel}"/>
-      <PasswordBox x:Name="TokenInput" PasswordChar="●" AutomationProperties.Name="Mã kết nối Sắc Viện"/>
-      <TextBlock x:Name="TokenStatusText" Text="Tạo mã ở website: Tài khoản → Kết nối QT Studio." FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="3,2,0,0"/>
-     </StackPanel>
-    </Grid>
-    <WrapPanel Margin="0,8,0,0">
-     <Button x:Name="ConnectButton" Content="Lưu và kiểm tra kết nối" ui:ButtonIcon.Glyph="&#xE71B;" Click="OnConnect" Style="{StaticResource PrimaryButton}"/>
-     <Button x:Name="ForgetTokenButton" Content="Xóa mã đã lưu" ui:ButtonIcon.Glyph="&#xE74D;" Click="OnForgetToken" Visibility="Collapsed"/>
-    </WrapPanel>
-    </StackPanel>
-    </Expander>
     <TextBlock x:Name="ConnectionText" Margin="3,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
    </StackPanel>
   </Border>

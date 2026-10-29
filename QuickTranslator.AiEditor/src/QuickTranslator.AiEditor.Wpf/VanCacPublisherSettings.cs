@@ -22,15 +22,12 @@ internal static class VanCacTokenVault
     {
         string value = token?.Trim() ?? "";
         if (!VanCacPublisherClient.IsValidToken(value))
-            throw new ArgumentException("Mã kết nối phải có dạng vcp_ và 64 ký tự 0–9, a–f. Sao chép lại từ trang Tài khoản trên website.");
+            throw new ArgumentException("Mã phiên đăng nhập Sắc Viện không hợp lệ. Hãy đăng nhập lại.");
         store.Write(Target, value);
     }
 
     public static void Delete() => Delete(NativeStore);
     internal static void Delete(IGeminiCredentialStore store) => store.Delete(Target);
-
-    /// <summary>Shows only the last 4 characters, matching the hint on the website's token list.</summary>
-    public static string Mask(string token) => "vcp_…" + token[^4..];
 }
 
 /// <summary>
