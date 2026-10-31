@@ -5,7 +5,9 @@ namespace QuickTranslator.AiEditor.Core.Persistence;
 /// <summary>
 /// Direct primary-file storage. It writes a temporary sibling file and replaces the
 /// target without creating backups, journals, revisions, or recovery metadata.
-/// Speed over durability: written bytes are not re-decoded and not forced to disk.
+/// Written bytes are not re-decoded, but the temporary file is forced to disk before the replace:
+/// otherwise a power loss can commit the rename while the data is still cached, leaving a target
+/// of the right length filled with zero bytes.
 /// </summary>
 public static class SimpleFileStorage
 {
@@ -78,6 +80,7 @@ public static class SimpleFileStorage
             await using (stream.ConfigureAwait(false))
             {
                 await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+                stream.Flush(flushToDisk: true);
                 StorageIoMetricsCapture.Write(bytes.Length);
             }
 
