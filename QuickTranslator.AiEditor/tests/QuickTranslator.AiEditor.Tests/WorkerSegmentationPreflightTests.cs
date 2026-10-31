@@ -202,6 +202,32 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
     }
 
     [Fact]
+    public async Task Running_checkpoint_left_by_a_power_loss_does_not_block_the_worker_preflight()
+    {
+        (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =
+            await CreateProjectAsync(1);
+        ChapterDocument crashed = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        AddCompletedAttempt(crashed.Segments[0], "Bản dịch trước lúc mất điện.");
+        crashed.Queue = new QueueCheckpoint { RunId = Guid.NewGuid(), Status = QueueStatus.Running,
+            Mode = QueueMode.MissingSegments, StartedAt = DateTimeOffset.UtcNow };
+        await _repository.UpdateChapterAsync(session, crashed);
+        var client = new CapturingClient();
+        var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(),
+            GpuBackendSnapshot.LocalDefault("local-model"), client, Model("local-model", 4096, 1024, 0.1, 300),
+            Segmentation(80, 120, 160));
+        var coordinator = new ProjectTranslationCoordinator(session, _repository, [worker], load);
+
+        await coordinator.StartAsync(await coordinator.PlanAsync(ids));
+
+        ProjectTranslationItem item = coordinator.CurrentJob!.Items.Single();
+        Assert.Equal(ProjectTranslationItemStatus.Completed, item.Status);
+        ChapterDocument after = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        Assert.False(after.Queue.IsActive);
+        Assert.All(after.Segments, segment => Assert.True(segment.HasCompletedTranslation));
+        Assert.NotEmpty(client.Options);
+    }
+
+    [Fact]
     public async Task Retranslating_a_translated_chapter_resplits_it_with_the_worker_segment_size_and_counts_the_new_run()
     {
         (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =

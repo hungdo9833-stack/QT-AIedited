@@ -451,27 +451,39 @@ public sealed partial class TranslationService
 
     private void RecoverInterruptedAttempts()
     {
-        if (_chapter.Queue.IsActive)
+        if (RecoverInterruptedState(_chapter, _clock.GetUtcNow())) Touch();
+    }
+
+    /// <summary>
+    /// A chapter freshly read from disk cannot have a live run: an active checkpoint, a Translating segment or an
+    /// in-progress attempt there was left by a process that stopped (crash, power loss). Marks them interrupted.
+    /// </summary>
+    internal static bool RecoverInterruptedState(ChapterDocument chapter, DateTimeOffset now)
+    {
+        bool changed = false;
+        if (chapter.Queue.IsActive)
         {
-            _chapter.Queue.Status = QueueStatus.Interrupted;
-            _chapter.Queue.CurrentSegmentId = null;
-            _chapter.Queue.LastError = "Đã phục hồi hàng đợi bị gián đoạn. Bấm Tiếp tục; không gửi yêu cầu tự động khi mở tệp.";
-            Touch();
+            chapter.Queue.Status = QueueStatus.Interrupted;
+            chapter.Queue.CurrentSegmentId = null;
+            chapter.Queue.LastError = "Đã phục hồi hàng đợi bị gián đoạn. Bấm Tiếp tục; không gửi yêu cầu tự động khi mở tệp.";
+            changed = true;
         }
-        foreach (var segment in _chapter.Segments)
+        foreach (var segment in chapter.Segments)
         {
             bool interrupted = segment.Status == SegmentStatus.Translating;
             foreach (var attempt in segment.Attempts.Where(a => a.Outcome == AttemptOutcome.InProgress))
             {
                 attempt.Outcome = AttemptOutcome.Interrupted;
-                attempt.FinishedAt = _clock.GetUtcNow();
+                attempt.FinishedAt = now;
                 attempt.Error = "Lần dịch trước bị gián đoạn khi ứng dụng đóng. Chỉ dịch lại khi bạn bấm Dịch lại.";
                 interrupted = true;
             }
             if (!interrupted) continue;
             segment.Status = SegmentStatus.Error;
             segment.LastError = "Đã phục hồi sau lần dịch bị gián đoạn; bản nháp cũ được giữ. Không tự dịch tiếp.";
-            Touch();
+            changed = true;
         }
+        if (changed) chapter.UpdatedAt = now;
+        return changed;
     }
 }

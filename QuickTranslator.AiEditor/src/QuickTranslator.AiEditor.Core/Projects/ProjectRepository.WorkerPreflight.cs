@@ -33,6 +33,9 @@ public sealed partial class ProjectRepository
             if (ProjectTranslationFingerprints.Source(current) != expectedItem.SourceFingerprint ||
                 ProjectTranslationFingerprints.Protected(current) != expectedItem.ProtectedFingerprint)
                 throw new InvalidOperationException("Chapter đã đổi ngoài Queue trước worker preflight; không tự chia lại.");
+            // This worker owns the chapter and has not started its run yet, so a Running checkpoint on disk is
+            // left over from a stopped process; without this, resegmentation refuses the chapter forever.
+            TranslationService.RecoverInterruptedState(current, DateTimeOffset.UtcNow);
 
             // Retranslating from scratch, or moving an unfinished chapter to a whole-chapter worker: earlier AI
             // translations do not pin the old boundaries. Replaced segments remain available in segmentation history.
