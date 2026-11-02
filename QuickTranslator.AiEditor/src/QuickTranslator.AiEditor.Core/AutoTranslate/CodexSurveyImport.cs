@@ -256,7 +256,45 @@ public static class CodexSurveyImport
         {
             return JsonSerializer.Deserialize<T>(json, Options) ?? throw new InvalidDataException($"{name} trống.");
         }
-        catch (JsonException ex) { throw new InvalidDataException($"{name} không phải JSON hợp lệ: {ex.Message}", ex); }
+        catch (JsonException ex)
+        {
+            // Seen live: a multi-paragraph synopsis written with real line breaks inside the string. The content is fine;
+            // only the escaping is wrong, so escape raw control characters inside strings and read it again.
+            string escaped = EscapeControlCharactersInStrings(json);
+            if (escaped != json)
+            {
+                try { return JsonSerializer.Deserialize<T>(escaped, Options) ?? throw new InvalidDataException($"{name} trống."); }
+                catch (JsonException) { }
+            }
+            throw new InvalidDataException($"{name} không phải JSON hợp lệ: {ex.Message}", ex);
+        }
+    }
+
+    internal static string EscapeControlCharactersInStrings(string json)
+    {
+        var builder = new System.Text.StringBuilder(json.Length + 16);
+        bool inString = false, escaped = false;
+        foreach (char c in json)
+        {
+            if (!inString)
+            {
+                if (c == '"') inString = true;
+                builder.Append(c);
+                continue;
+            }
+            if (escaped) { escaped = false; builder.Append(c); continue; }
+            switch (c)
+            {
+                case '\\': escaped = true; builder.Append(c); break;
+                case '"': inString = false; builder.Append(c); break;
+                case '\n': builder.Append("\\n"); break;
+                case '\r': builder.Append("\\r"); break;
+                case '\t': builder.Append("\\t"); break;
+                case < ' ': builder.Append($"\\u{(int)c:x4}"); break;
+                default: builder.Append(c); break;
+            }
+        }
+        return builder.ToString();
     }
 
     private static StorySetting ParseSetting(string? value) => value?.Trim().ToLowerInvariant() switch

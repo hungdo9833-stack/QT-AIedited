@@ -87,6 +87,19 @@ public sealed class CodexSurveyTests
     }
 
     [Fact]
+    public void Convert_BookFileWithRawLineBreaksInTheSynopsisStillApplies()
+    {
+        // Seen live: Codex wrote the paragraphs with real line breaks inside the JSON string.
+        string book = "{ \"vietnameseTitle\": \"Tên Truyện\", \"synopsis\": \"Đoạn một.\n\nĐoạn hai \\\"trích\\\".\",\r\n  \"genres\": [\"Đô thị\"] }";
+        CodexSurveyImportResult result = CodexSurveyImport.Convert(Characters, "[]", Guid.NewGuid(), "原名", book);
+
+        CodexBookInfo info = Assert.IsType<CodexBookInfo>(result.Book);
+        Assert.Equal("Tên Truyện", info.VietnameseTitle);
+        Assert.Equal("Đoạn một.\n\nĐoạn hai \"trích\".", info.Synopsis);
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("book.json"));
+    }
+
+    [Fact]
     public void Convert_BookFileRenamesTheProjectAndKeepsAtMostFiveGenres()
     {
         const string book = """

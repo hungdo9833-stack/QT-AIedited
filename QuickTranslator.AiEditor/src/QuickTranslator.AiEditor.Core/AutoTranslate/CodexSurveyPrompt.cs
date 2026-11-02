@@ -105,7 +105,7 @@ public static class CodexSurveyPrompt
         - synopsis: giới thiệu dài 200–400 từ, viết bằng tiếng Việt cực kỳ cuốn hút để người đọc muốn mở chương 1:
           mở bằng câu móc câu, giới thiệu nhân vật chính và mâu thuẫn trung tâm, gợi không khí và sức hút riêng của truyện,
           kết bằng một câu lửng hoặc câu hỏi. Chỉ dựa trên nội dung thật của truyện, không bịa tình tiết,
-          không tiết lộ kết cục. Có thể xuống dòng giữa các đoạn.
+          không tiết lộ kết cục. Muốn xuống dòng giữa các đoạn thì viết \n trong chuỗi JSON, không xuống dòng thật.
         - genres: 3–{{CodexSurveyImport.MaxGenres}} thể loại tiếng Việt ngắn gọn (mỗi thể loại 1–3 từ, viết hoa chữ đầu) để gắn
           tag khi đăng truyện, xếp từ nổi bật nhất. {{KnownGenresRule(knownGenres)}}
         """;
