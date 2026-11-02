@@ -22,6 +22,10 @@ internal static class ChapterContentExtractor
         foreach (var ignored in root.QuerySelectorAll("[class],[id]").Where(e =>
                      Regex.IsMatch(e.ClassName + " " + e.Id, @"(?:^|[\s_-])(?:advert|advertisement|ads|navigation|comment|replies)(?:$|[\s_-])", RegexOptions.IgnoreCase)).ToArray())
             ignored.Remove();
+        // Per-paragraph comment counters (e.g. <span onclick="togglePostComment(3)">0</span>) would end every line with a number.
+        foreach (var ignored in root.QuerySelectorAll("[onclick]").Where(e =>
+                     Regex.IsMatch(e.GetAttribute("onclick") ?? "", "comment|review", RegexOptions.IgnoreCase)).ToArray())
+            ignored.Remove();
 
         var post = root.QuerySelector("div.content-section,.t_f,.post-body,.post-content");
         var candidates = root.QuerySelectorAll("article,main,section,div,td,pre,p").Prepend(root);

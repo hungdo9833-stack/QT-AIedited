@@ -74,6 +74,18 @@ public sealed class WebNovelImporterTests
     }
 
     [Fact]
+    public async Task ParagraphCommentCounters_AreNotAppendedToLines()
+    {
+        // Seen live (banshanren): every paragraph ends with a clickable comment count.
+        string body = string.Concat(Enumerable.Range(0, 4).Select(i =>
+            $"<p>\n    {Placeholder}\n        <span class=\"z count_{i}\" onclick=\"togglePostComment({i})\">0</span>\n</p><p>\n</p>"));
+        using var handler = new FakeHandler(_ => Html($"<div class='chapter_content_box'><h2>第五章 占位</h2>{body}</div>"));
+        using var importer = new WebNovelImporter(Options, handler);
+        string text = (await importer.FetchChapterAsync(Link())).Text;
+        Assert.Equal("第五章 占位\n" + string.Join("\n", Enumerable.Repeat(Placeholder, 4)), text);
+    }
+
+    [Fact]
     public async Task NextFlight_HtmlTextRecordKeepsParagraphsAndBeatsALongerChapterTitleList()
     {
         // Seen live: the chapter is an HTML T-record with <p> paragraphs, and a model record listing chapter titles
