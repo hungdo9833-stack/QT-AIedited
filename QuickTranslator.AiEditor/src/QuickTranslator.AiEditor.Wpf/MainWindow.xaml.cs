@@ -99,14 +99,8 @@ public partial class MainWindow : Window
         if (!BeginUiOperation()) return;
         try
         {
-            var options = new SegmenterOptions
-            {
-                MinimumHanCharacters = ReadInteger(MinimumInput, "Tối thiểu"),
-                TargetHanCharacters = ReadInteger(TargetInput, "Mục tiêu"),
-                MaximumHanCharacters = ReadInteger(MaximumInput, "Tối đa"),
-                MaximumTextElements = Math.Max(2000, ReadInteger(MaximumInput, "Tối đa") * 4)
-            };
-            var chapter = TranslationService.CreateChapter(TitleInput.Text, _importedOriginalText ?? ChapterInput.Text, options, ReadModelOptions());
+            var chapter = TranslationService.CreateChapter(TitleInput.Text, _importedOriginalText ?? ChapterInput.Text,
+                ReadSegmenterOptions(), ReadModelOptions());
             chapter.CharacterProject = CharacterProjectStore.Clone(_characterProject);
             chapter.SelectedPreset = _presetManager.Selected;
             chapter.ConfirmedTerms = ReadTerms().ToList();
@@ -307,12 +301,7 @@ public partial class MainWindow : Window
         int currentIndex = _selectedId is Guid id ? ordered.FindIndex(s => s.Id == id) : 0;
         int nextIndex = Math.Clamp((currentIndex < 0 ? 0 : currentIndex) + delta, 0, ordered.Count - 1);
         var target = ordered[nextIndex];
-        FollowQueueCheck.IsChecked = false;
-        _selectedId = target.Id;
-        _shownAttemptId = null;
-        _service.SelectSegment(target.Id);
-        Refresh();
-        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
+        CoreSelectSegmentAndFocusEditor(_service, target);
         SetStatus($"Đang mở Đoạn {target.Order}/{ordered.Count} · {StatusLabel(target.Status)}.");
     }
 
@@ -322,41 +311,39 @@ public partial class MainWindow : Window
         var ordered = _service.GetSnapshot().Segments.OrderBy(s => s.Order).ToList();
         if (ordered.Count == 0) return false;
         int startIdx = _selectedId is Guid id ? ordered.FindIndex(s => s.Id == id) : -1;
-        TranslationSegment? found = null;
-        for (int offset = 1; offset <= ordered.Count; offset++)
-        {
-            var candidate = ordered[(startIdx + offset + ordered.Count) % ordered.Count];
-            if (candidate.Status is SegmentStatus.Error or SegmentStatus.InspectionRequired || candidate.RequiresRetranslation)
-            {
-                found = candidate;
-                break;
-            }
-        }
-        if (found is null)
-        {
-            for (int offset = 1; offset <= ordered.Count; offset++)
-            {
-                var candidate = ordered[(startIdx + offset + ordered.Count) % ordered.Count];
-                if (candidate.Status == SegmentStatus.Untranslated)
-                {
-                    found = candidate;
-                    break;
-                }
-            }
-        }
+        var found = CoreFindNextSegmentAfter(ordered, startIdx,
+                s => s.Status is SegmentStatus.Error or SegmentStatus.InspectionRequired || s.RequiresRetranslation)
+            ?? CoreFindNextSegmentAfter(ordered, startIdx, s => s.Status == SegmentStatus.Untranslated);
         if (found is null)
         {
             SetStatus("Không còn đoạn lỗi, cần kiểm tra hoặc chưa dịch trong chương hiện tại.");
             return false;
         }
-        FollowQueueCheck.IsChecked = false;
-        _selectedId = found.Id;
-        _shownAttemptId = null;
-        _service.SelectSegment(found.Id);
-        Refresh();
-        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
+        CoreSelectSegmentAndFocusEditor(_service, found);
         SetStatus($"Đã nhảy tới Đoạn {found.Order} ({StatusLabel(found.Status)}).");
         return true;
+    }
+
+    // Scans forward from startIdx (exclusive), wrapping around, so the current segment is checked last.
+    private static TranslationSegment? CoreFindNextSegmentAfter(List<TranslationSegment> ordered, int startIdx,
+        Func<TranslationSegment, bool> predicate)
+    {
+        for (int offset = 1; offset <= ordered.Count; offset++)
+        {
+            var candidate = ordered[(startIdx + offset + ordered.Count) % ordered.Count];
+            if (predicate(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private void CoreSelectSegmentAndFocusEditor(TranslationService service, TranslationSegment target)
+    {
+        FollowQueueCheck.IsChecked = false;
+        _selectedId = target.Id;
+        _shownAttemptId = null;
+        service.SelectSegment(target.Id);
+        Refresh();
+        _ = Dispatcher.BeginInvoke(() => FocusSelectedEditor(_workspaceLayout.FourPaneMode));
     }
 
     private void OnDraftChanged(object sender, TextChangedEventArgs e)

@@ -67,11 +67,11 @@ public partial class MainWindow
     {
         if (SettingsAiPanel is null || SettingsNavigation.SelectedItem is not ListBoxItem item) return;
         string selected = item.Tag?.ToString() ?? "Ai";
-        SettingsAiPanel.Visibility = selected == "Ai" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsGeminiPanel.Visibility = selected == "Gemini" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsTraditionalPanel.Visibility = selected == "Traditional" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsAppearancePanel.Visibility = selected == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsAdvancedPanel.Visibility = selected == "Advanced" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsAiPanel.Visibility = ShellVisibleWhen(selected == "Ai");
+        SettingsGeminiPanel.Visibility = ShellVisibleWhen(selected == "Gemini");
+        SettingsTraditionalPanel.Visibility = ShellVisibleWhen(selected == "Traditional");
+        SettingsAppearancePanel.Visibility = ShellVisibleWhen(selected == "Appearance");
+        SettingsAdvancedPanel.Visibility = ShellVisibleWhen(selected == "Advanced");
         // One primary per section: Data QuickTranslator has its own (Nạp / kiểm tra Data).
         SetPrimaryStyle(SettingsSaveButton, selected != "Traditional");
         if (_configurationDirty && _initialized) SetStatus("Thiết lập có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
@@ -84,9 +84,9 @@ public partial class MainWindow
     {
         if (SettingsDictionaryPanel is null || ResourcesNavigation.SelectedItem is not ListBoxItem item) return;
         string selected = item.Tag?.ToString() ?? "Dictionary";
-        SettingsPromptPanel.Visibility = selected == "Prompts" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsDictionaryPanel.Visibility = selected == "Dictionary" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsCharactersPanel.Visibility = selected == "Characters" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPromptPanel.Visibility = ShellVisibleWhen(selected == "Prompts");
+        SettingsDictionaryPanel.Visibility = ShellVisibleWhen(selected == "Dictionary");
+        SettingsCharactersPanel.Visibility = ShellVisibleWhen(selected == "Characters");
         // One primary per section: Nhân vật (Sổ xưng hô) and Prompt (Quản lý preset) have their own.
         SetPrimaryStyle(ResourcesSaveButton, selected == "Dictionary");
         if (_resourcesDirty && _initialized) SetStatus("Tài nguyên có thay đổi chưa lưu. Nội dung vẫn được giữ khi chuyển nhóm.");
@@ -160,7 +160,7 @@ public partial class MainWindow
         {
             _glossaryRows.Clear();
             foreach (var term in terms) _glossaryRows.Add(new(term.Chinese, term.Vietnamese));
-            TermsInput.Text = string.Join(Environment.NewLine, _glossaryRows.Select(t => t.Chinese + "=" + t.Vietnamese));
+            TermsInput.Text = SettingsUiGlossaryText();
             UpdateSettingsCounters();
         }
         finally { _syncingGlossary = false; }
@@ -244,7 +244,7 @@ public partial class MainWindow
     private void GlossaryChanged()
     {
         if (_syncingGlossary) return;
-        TermsInput.Text = string.Join(Environment.NewLine, _glossaryRows.Select(t => t.Chinese + "=" + t.Vietnamese));
+        TermsInput.Text = SettingsUiGlossaryText();
         _resourcesDirty = true;
         UpdateSettingsCounters();
         SetStatus("Từ điển có thay đổi chưa lưu.");
@@ -336,6 +336,9 @@ public partial class MainWindow
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
     }
+
+    private string SettingsUiGlossaryText() =>
+        string.Join(Environment.NewLine, _glossaryRows.Select(t => t.Chinese + "=" + t.Vietnamese));
 
     private sealed record GlossaryRow(string Chinese, string Vietnamese);
 }

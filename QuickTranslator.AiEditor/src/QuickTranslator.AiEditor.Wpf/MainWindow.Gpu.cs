@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
@@ -128,16 +129,16 @@ public partial class MainWindow
             GpuTokenInput.Password = profile.Token ?? "";
             AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
             ModelInput.Text = runtime.ModelOptions.Model;
-            TemperatureInput.Text = runtime.ModelOptions.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            ContextInput.Text = runtime.ModelOptions.ContextSize.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            OutputTokensInput.Text = runtime.ModelOptions.MaximumOutputTokens.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            TimeoutInput.Text = runtime.ModelOptions.RequestTimeout.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
-            MinimumInput.Text = runtime.SegmentationOptions.MinimumHanCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            TargetInput.Text = runtime.SegmentationOptions.TargetHanCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            MaximumInput.Text = runtime.SegmentationOptions.MaximumHanCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            TemperatureInput.Text = runtime.ModelOptions.Temperature.ToString(CultureInfo.InvariantCulture);
+            ContextInput.Text = runtime.ModelOptions.ContextSize.ToString(CultureInfo.InvariantCulture);
+            OutputTokensInput.Text = runtime.ModelOptions.MaximumOutputTokens.ToString(CultureInfo.InvariantCulture);
+            TimeoutInput.Text = runtime.ModelOptions.RequestTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
+            MinimumInput.Text = runtime.SegmentationOptions.MinimumHanCharacters.ToString(CultureInfo.InvariantCulture);
+            TargetInput.Text = runtime.SegmentationOptions.TargetHanCharacters.ToString(CultureInfo.InvariantCulture);
+            MaximumInput.Text = runtime.SegmentationOptions.MaximumHanCharacters.ToString(CultureInfo.InvariantCulture);
             ApplyGpuKindUi(profile.Kind);
             GpuConnectionStatus.Text = profile.Id == _gpuBackends.ActiveProfile.Id ? "Đang sử dụng" : "Đã lưu";
-            GpuConnectionStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
+            GpuSetForeground(GpuConnectionStatus, "MutedBrush");
         }
         finally { _syncingGpuProfile = false; }
     }
@@ -262,7 +263,7 @@ public partial class MainWindow
     {
         if (!BeginUiOperation(allowDuringTranslation: true)) return;
         GpuConnectionStatus.Text = refreshModels ? "Đang đọc /api/tags…" : "Đang kiểm tra…";
-        GpuConnectionStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
+        GpuSetForeground(GpuConnectionStatus, "MutedBrush");
         try
         {
             GpuBackendProfile profile = ReadGpuProfileEditor();
@@ -274,12 +275,12 @@ public partial class MainWindow
             GpuConnectionStatus.Text = refreshModels
                 ? $"Đã tìm thấy {models.Count:N0} model cục bộ trên server"
                 : "Đã kết nối · model sẵn sàng";
-            GpuConnectionStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "SuccessBrush");
+            GpuSetForeground(GpuConnectionStatus, "SuccessBrush");
         }
         catch (Exception ex)
         {
             GpuConnectionStatus.Text = "Không sẵn sàng";
-            GpuConnectionStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
+            GpuSetForeground(GpuConnectionStatus, "DangerBrush");
             ShowError(ex);
         }
         finally { EndUiOperation(); }
@@ -329,14 +330,13 @@ public partial class MainWindow
             catch { keyCount = 0; }
             GpuBackendStatus.Text = _activeGeminiTranslationClient?.CurrentRoute.DisplayText ??
                 $"API · Gemini 3.5 Flash-Lite (key {(keyCount > 0 ? 1 : 0)}/{keyCount})";
-            GpuBackendStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty,
-                keyCount > 0 ? "MutedBrush" : "DangerBrush");
+            GpuSetForeground(GpuBackendStatus, keyCount > 0 ? "MutedBrush" : "DangerBrush");
             return;
         }
         if (_projectGpuProfileMissing)
         {
             GpuBackendStatus.Text = "GPU · thiếu profile Project";
-            GpuBackendStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush");
+            GpuSetForeground(GpuBackendStatus, "DangerBrush");
             return;
         }
         GpuBackendProfile profile = _gpuBackends.ActiveProfile;
@@ -344,8 +344,11 @@ public partial class MainWindow
             ? (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).ModelOptions.Model
             : ModelInput.Text.Trim();
         GpuBackendStatus.Text = $"{BackendLabel(profile)} · {model}";
-        GpuBackendStatus.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
+        GpuSetForeground(GpuBackendStatus, "MutedBrush");
     }
+
+    private static void GpuSetForeground(FrameworkElement element, string brushKey) =>
+        element.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, brushKey);
 
     private static string BackendLabel(GpuBackendProfile profile) =>
         $"{(profile.Kind == GpuBackendKind.Local ? "Local" : "Remote")} · {profile.Name}";

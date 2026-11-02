@@ -108,11 +108,7 @@ public partial class MainWindow
         _characterStore = new(Path.Combine(candidate.RootDirectory, "Characters"));
         InitializeProjectTranslationCoordinator(candidate);
         ApplyProjectAssets(assets);
-        if (chapter is not null)
-        {
-            AttachChapter(chapter); _selectedId = chapter.SelectedSegmentId ?? chapter.Segments[0].Id; _shownAttemptId = null;
-            ApplyInputs(chapter); SelectChapterPreset(chapter.SelectedPreset);
-        }
+        if (chapter is not null) ProjectsAttachAndShowChapter(chapter);
         else ClearChapterEditor();
         ApplyPanelPolicy();
         RefreshProjectSwitcher(); RefreshProjectChapterList(); Refresh();
@@ -265,10 +261,18 @@ public partial class MainWindow
         _projectSession.Manifest.CurrentChapterId = chapterId;
         try { await _projectRepository.SaveManifestAsync(_projectSession); }
         catch { _projectSession.Manifest.CurrentChapterId = oldCurrent; throw; }
-        AttachChapter(loaded.Chapter); _selectedId = loaded.Chapter.SelectedSegmentId ?? loaded.Chapter.Segments[0].Id; _shownAttemptId = null;
-        ApplyInputs(loaded.Chapter); SelectChapterPreset(loaded.Chapter.SelectedPreset);
+        ProjectsAttachAndShowChapter(loaded.Chapter);
         RefreshProjectChapterList(); Refresh();
         SetStatus($"Đã mở chương “{loaded.Chapter.Title}” sau khi lưu trạng thái trước đó.");
+    }
+
+    private void ProjectsAttachAndShowChapter(ChapterDocument chapter)
+    {
+        AttachChapter(chapter);
+        _selectedId = chapter.SelectedSegmentId ?? chapter.Segments[0].Id;
+        _shownAttemptId = null;
+        ApplyInputs(chapter);
+        SelectChapterPreset(chapter.SelectedPreset);
     }
 
     private void RefreshProjectChapterList()
@@ -559,13 +563,16 @@ public partial class MainWindow
 
     private async Task<IReadOnlyList<ProjectLibraryCard>> BuildProjectLibraryCardsAsync()
     {
+        static ProjectLibraryCard UnreadCard(RecentProject recent, bool missing, string? error) =>
+            new(recent.ProjectId, recent.Title, "", null, recent.ManifestPath, null,
+                0, 0, 0, null, recent.LastOpenedAt, missing, error);
+
         var cards = new List<ProjectLibraryCard>();
         foreach (RecentProject recent in _projectLibrary.RecentProjects.OrderByDescending(project => project.LastOpenedAt))
         {
             if (recent.Missing || !File.Exists(recent.ManifestPath))
             {
-                cards.Add(new(recent.ProjectId, recent.Title, "", null, recent.ManifestPath, null,
-                    0, 0, 0, null, recent.LastOpenedAt, true, null));
+                cards.Add(UnreadCard(recent, missing: true, error: null));
                 continue;
             }
             try
@@ -577,8 +584,7 @@ public partial class MainWindow
             }
             catch (Exception ex)
             {
-                cards.Add(new(recent.ProjectId, recent.Title, "", null, recent.ManifestPath, null,
-                    0, 0, 0, null, recent.LastOpenedAt, false, "Không đọc được metadata: " + ex.Message));
+                cards.Add(UnreadCard(recent, missing: false, error: "Không đọc được metadata: " + ex.Message));
             }
         }
         return cards;
@@ -601,17 +607,17 @@ public partial class MainWindow
         if (!BeginUiOperation(allowDuringTranslation: true)) return;
         try
         {
-        manifest.VietnameseTitle = title.Text.Trim(); manifest.ChineseTitle = chinese.Text.Trim(); manifest.Author = author.Text.Trim();
-        manifest.Genres = genres.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.CurrentCultureIgnoreCase).ToList();
-        manifest.SourceUrl = source.Text.Trim(); manifest.Description = description.Text; manifest.Status = (ProjectStatus)status.SelectedItem;
-        if (selectedCover is not null)
-        {
-            string relative = "Resources/cover-" + Guid.NewGuid().ToString("N") + Path.GetExtension(selectedCover).ToLowerInvariant();
-            string destination = _projectSession.Resolve(relative);
-            File.Copy(selectedCover, destination, overwrite: false); manifest.CoverImagePath = relative;
-        }
-        await _projectRepository.SaveManifestAsync(_projectSession); ProjectLibraryStore.Remember(_projectLibrary, _projectSession); await _projectLibraryStore.SaveAsync(_projectLibrary);
-        RefreshProjectSwitcher(); RefreshProjectChapterList(); Title = manifest.VietnameseTitle + " — QuickTranslator AI Editor";
+            manifest.VietnameseTitle = title.Text.Trim(); manifest.ChineseTitle = chinese.Text.Trim(); manifest.Author = author.Text.Trim();
+            manifest.Genres = genres.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.CurrentCultureIgnoreCase).ToList();
+            manifest.SourceUrl = source.Text.Trim(); manifest.Description = description.Text; manifest.Status = (ProjectStatus)status.SelectedItem;
+            if (selectedCover is not null)
+            {
+                string relative = "Resources/cover-" + Guid.NewGuid().ToString("N") + Path.GetExtension(selectedCover).ToLowerInvariant();
+                string destination = _projectSession.Resolve(relative);
+                File.Copy(selectedCover, destination, overwrite: false); manifest.CoverImagePath = relative;
+            }
+            await _projectRepository.SaveManifestAsync(_projectSession); ProjectLibraryStore.Remember(_projectLibrary, _projectSession); await _projectLibraryStore.SaveAsync(_projectLibrary);
+            RefreshProjectSwitcher(); RefreshProjectChapterList(); Title = manifest.VietnameseTitle + " — QuickTranslator AI Editor";
         }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }

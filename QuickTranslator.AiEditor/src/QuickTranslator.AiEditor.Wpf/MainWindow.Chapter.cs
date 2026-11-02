@@ -249,10 +249,7 @@ public partial class MainWindow
     {
         if (sender is TextBox { Tag: Guid id } && _service is not null && id != _selectedId)
         {
-            _selectedId = id;
-            _shownAttemptId = null;
-            _service.SelectSegment(id);
-            foreach (var b in _chapterBlocks) b.IsSelected = b.Id == id;
+            ChapterSelectBlockSegment(_service, id);
             var seg = _service.GetSnapshot().Segments.SingleOrDefault(s => s.Id == id);
             RefreshTraditionalSegment(seg);
             RefreshTranslationInspector(seg);
@@ -264,13 +261,17 @@ public partial class MainWindow
     {
         if (_rendering || sender is not TextBox box) return;
         if (box.Tag is Guid id && id != _selectedId && _service is not null)
-        {
-            _selectedId = id;
-            _shownAttemptId = null;
-            _service.SelectSegment(id);
-            foreach (var b in _chapterBlocks) b.IsSelected = b.Id == id;
-        }
+            ChapterSelectBlockSegment(_service, id);
         if (!ShowsTranslatedSource(box)) UpdateInspectorLiveSelection(box.SelectedText);
+    }
+
+    // Selects a segment from a bilingual grid row without a full Refresh, so the row's editor keeps its caret.
+    private void ChapterSelectBlockSegment(TranslationService service, Guid id)
+    {
+        _selectedId = id;
+        _shownAttemptId = null;
+        service.SelectSegment(id);
+        foreach (var b in _chapterBlocks) b.IsSelected = b.Id == id;
     }
 
     private async void OnApproveBlockButtonClicked(object sender, RoutedEventArgs e)
@@ -508,14 +509,14 @@ public partial class MainWindow
                 if (!_suppressNotification) changed(Id, value);
             }
         }
-        public string Label { get => _label; set { if (_label == value) return; _label = value; PropertyChanged?.Invoke(this, new(nameof(Label))); } }
-        public string SourceText { get => _sourceText; set { if (_sourceText == value) return; _sourceText = value; PropertyChanged?.Invoke(this, new(nameof(SourceText))); } }
+        public string Label { get => _label; set => SetChapterBlockField(ref _label, value, nameof(Label)); }
+        public string SourceText { get => _sourceText; set => SetChapterBlockField(ref _sourceText, value, nameof(SourceText)); }
         /// <summary>What the left cell shows: the Chinese source, or its Hán Việt / VP đơn ý rendering.</summary>
-        public string DisplaySource { get => _displaySource; set { if (_displaySource == value) return; _displaySource = value; PropertyChanged?.Invoke(this, new(nameof(DisplaySource))); } }
-        public string SourceHeader { get => _sourceHeader; set { if (_sourceHeader == value) return; _sourceHeader = value; PropertyChanged?.Invoke(this, new(nameof(SourceHeader))); } }
-        public string StatusDot { get => _statusDot; set { if (_statusDot == value) return; _statusDot = value; PropertyChanged?.Invoke(this, new(nameof(StatusDot))); } }
-        public Brush StatusBrush { get => _statusBrush; set { if (ReferenceEquals(_statusBrush, value)) return; _statusBrush = value; PropertyChanged?.Invoke(this, new(nameof(StatusBrush))); } }
-        public bool IsSelected { get => _isSelected; set { if (_isSelected == value) return; _isSelected = value; PropertyChanged?.Invoke(this, new(nameof(IsSelected))); } }
+        public string DisplaySource { get => _displaySource; set => SetChapterBlockField(ref _displaySource, value, nameof(DisplaySource)); }
+        public string SourceHeader { get => _sourceHeader; set => SetChapterBlockField(ref _sourceHeader, value, nameof(SourceHeader)); }
+        public string StatusDot { get => _statusDot; set => SetChapterBlockField(ref _statusDot, value, nameof(StatusDot)); }
+        public Brush StatusBrush { get => _statusBrush; set => SetChapterBlockField(ref _statusBrush, value, nameof(StatusBrush)); }
+        public bool IsSelected { get => _isSelected; set => SetChapterBlockField(ref _isSelected, value, nameof(IsSelected)); }
 
         public void UpdateFromSegment(TranslationSegment segment, bool selected)
         {
@@ -543,6 +544,13 @@ public partial class MainWindow
                     (segment.RequiresRetranslation ? " · ranh giới đã đổi" : "") +
                     (segment.HasUserDraft ? " · nháp bảo vệ" : "");
             IsSelected = selected;
+        }
+
+        private void SetChapterBlockField<T>(ref T field, T value, string propertyName)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value)) return;
+            field = value;
+            PropertyChanged?.Invoke(this, new(propertyName));
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

@@ -37,7 +37,6 @@ public partial class MainWindow
         {
             var preferences = await store.LoadAsync();
             if (!ReferenceEquals(store, _readerStore)) return;
-            if (!ReferenceEquals(store, _readerStore)) return;
             _readerLoadFailure = null;
             _readerPreferences = preferences;
         }
@@ -116,8 +115,11 @@ public partial class MainWindow
     {
         Margin = new Thickness(0, 0, 0, _readerPreferences.ParagraphSpacing),
         TextIndent = _readerPreferences.FirstLineIndent,
-        TextAlignment = _readerPreferences.TextAlignment == ReaderTextAlignment.Justify ? TextAlignment.Justify : TextAlignment.Left
+        TextAlignment = ReaderParagraphAlignment()
     };
+
+    private TextAlignment ReaderParagraphAlignment() =>
+        _readerPreferences.TextAlignment == ReaderTextAlignment.Justify ? TextAlignment.Justify : TextAlignment.Left;
 
     private void AddReaderRuns(Paragraph paragraph, int start, int length)
     {
@@ -337,7 +339,7 @@ public partial class MainWindow
         {
             paragraph.Margin = new Thickness(0, 0, 0, _readerPreferences.ParagraphSpacing);
             paragraph.TextIndent = _readerPreferences.FirstLineIndent;
-            paragraph.TextAlignment = _readerPreferences.TextAlignment == ReaderTextAlignment.Justify ? TextAlignment.Justify : TextAlignment.Left;
+            paragraph.TextAlignment = ReaderParagraphAlignment();
         }
         ApplyReaderChrome();
     }
@@ -389,13 +391,7 @@ public partial class MainWindow
         ReaderChineseIssuesButton.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
         ReaderChineseIssuesButton.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
         ReaderProgressText.SetResourceReference(TextElement.ForegroundProperty, "ReaderMutedBrush");
-        foreach (var button in FindVisualChildren<Button>(ReaderToolbar))
-        {
-            button.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
-            button.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
-            button.SetResourceReference(Control.BorderBrushProperty, "ReaderBorderBrush");
-        }
-        foreach (var button in FindVisualChildren<Button>(ReaderSearchPanel))
+        foreach (var button in FindVisualChildren<Button>(ReaderToolbar).Concat(FindVisualChildren<Button>(ReaderSearchPanel)))
         {
             button.SetResourceReference(Control.BackgroundProperty, "ReaderPanelBrush");
             button.SetResourceReference(Control.ForegroundProperty, "ReaderTextBrush");
@@ -685,22 +681,16 @@ public partial class MainWindow
         OnMaximizeTraditionalPane(new FrameworkElement { Tag = tag }, new RoutedEventArgs());
     }
 
-    private async void TriggerQuickCharacterFromKeyboard()
-    {
-        TextBox target = SourceText.SelectionLength > 0 ? SourceText : ChapterInput;
-        CaptureSourceSelection(target);
-        if (!BeginUiOperation()) return;
-        try { await AddQuickCharacterAsync(target); }
-        catch (Exception ex) { ShowError(ex); }
-        finally { EndUiOperation(); }
-    }
+    private async void TriggerQuickCharacterFromKeyboard() => await ReaderRunOnKeyboardSourceAsync(AddQuickCharacterAsync);
 
-    private async void TriggerQuickGlossaryFromKeyboard()
+    private async void TriggerQuickGlossaryFromKeyboard() => await ReaderRunOnKeyboardSourceAsync(AddSelectedGlossaryAsync);
+
+    private async Task ReaderRunOnKeyboardSourceAsync(Func<TextBox, Task> action)
     {
         TextBox target = SourceText.SelectionLength > 0 ? SourceText : ChapterInput;
         CaptureSourceSelection(target);
         if (!BeginUiOperation()) return;
-        try { await AddSelectedGlossaryAsync(target); }
+        try { await action(target); }
         catch (Exception ex) { ShowError(ex); }
         finally { EndUiOperation(); }
     }
@@ -730,56 +720,63 @@ public partial class MainWindow
         var commands = new QuickPaletteItem[]
         {
             new("approve-next", "Duyệt đoạn & sang đoạn kế tiếp", "Ctrl+Enter", () => ApproveSegmentCoreAsync(advanceToNext: true)),
-            new("next-issue", "Nhảy tới đoạn lỗi / cần kiểm tra kế tiếp", "F8", () => { JumpToNextIssueSegment(); return Task.CompletedTask; }),
-            new("translate-seg", "Dịch / Dịch lại đoạn đang chọn", "Ctrl+Shift+R", () => { OnTranslate(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("translate-all", "Dịch toàn bộ chương hiện tại", "Queue 1 chương", () => { OnTranslateAll(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("approve-chapter", "Duyệt toàn bộ chương hiện tại", "Duyệt tất cả đoạn đã có bản dịch", () => { OnApproveAllSegments(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("scan-chinese", "Kiểm tra & Duyệt · Quét chữ Hán còn sót", "Ctrl+H", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; OnScanChineseText(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("scan-pronouns", "Kiểm tra & Duyệt · Quét xưng hô", "Checks", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; OnScanPronouns(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("mode-two", "Biên tập", "Ctrl+1 · Lưới song ngữ", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Translate); return Task.CompletedTask; }),
-            new("mode-four", "Kiểm tra & Duyệt", "Ctrl+2 · Biên tập Segment", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; return Task.CompletedTask; }),
-            new("mode-reader", "Chuyển sang Chế độ Đọc (Reader)", "Đọc thử toàn chương", () => { ActivateShellSection("reader"); return Task.CompletedTask; }),
-            new("open-editor", "Mở Biên tập · Hai ô", "Ctrl+1", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Translate); return Task.CompletedTask; }),
-            new("open-review", "Mở Kiểm tra & Duyệt · Bốn ô", "Ctrl+2", () => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); return Task.CompletedTask; }),
-            new("open-resources-dictionary", "Tài nguyên · Từ điển & Knowledge Context", "Tài nguyên", () => { ShowResourcesWorkspace("Dictionary"); return Task.CompletedTask; }),
-            new("open-resources-characters", "Tài nguyên · Nhân vật & xưng hô", "Tài nguyên", () => { ShowResourcesWorkspace("Characters"); return Task.CompletedTask; }),
-            new("open-resources-prompts", "Tài nguyên · Prompt Presets", "Tài nguyên", () => { ShowResourcesWorkspace("Prompts"); return Task.CompletedTask; }),
-            new("open-settings-ai", "Thiết lập · AI Provider & GPU", "Thiết lập", () => { ShowSettingsWorkspace("Ai"); return Task.CompletedTask; }),
-            new("open-settings-data", "Thiết lập · Data QuickTranslator", "Thiết lập", () => { ShowSettingsWorkspace("Traditional"); return Task.CompletedTask; }),
-            new("open-settings-appearance", "Thiết lập · Giao diện", "Thiết lập", () => { ShowSettingsWorkspace("Appearance"); return Task.CompletedTask; }),
-            new("open-settings-gemini", "Thiết lập · Gemini credentials", "Thiết lập", () => { ShowSettingsWorkspace("Gemini"); return Task.CompletedTask; }),
-            new("open-settings-advanced", "Thiết lập · Nâng cao", "Chẩn đoán alignment, Remote GPU", () => { ShowSettingsWorkspace("Advanced"); return Task.CompletedTask; }),
-            new("import-glossary", "Nhập từ điển TXT / JSON", "Tài nguyên · Từ điển", () => { ShowResourcesWorkspace("Dictionary"); OnImportGlossary(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("export-glossary", "Xuất từ điển TXT", "Tài nguyên · Từ điển", () => { ShowResourcesWorkspace("Dictionary"); OnExportGlossary(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("import-characters", "Nhập hồ sơ nhân vật JSON", "Tài nguyên · Nhân vật", () => { ShowResourcesWorkspace("Characters"); OnImportCharacters(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("export-characters", "Xuất hồ sơ nhân vật JSON", "Tài nguyên · Nhân vật", () => { ShowResourcesWorkspace("Characters"); OnExportCharacters(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("open-library", "Mở Thư viện Project", "Project", () => { OnShowProjectLibrary(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("open-queue", "Mở Hàng đợi Project", "Workspace", () => { NavigateTo(WorkspaceId.Queue); return Task.CompletedTask; }),
-            new("toggle-sidebar", "Ẩn / Hiện cột Mục lục bên trái", "Ctrl+B", () => { OnToggleProjectSidebar(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("toggle-inspector", "Ẩn / Hiện bảng Inspector bên phải", "Ctrl+Shift+I", () => { OnToggleInspector(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("open-chapters", "Mở Quản lý chương (Chapter Manager)", "Chọn dải chương, đổi tên, lọc", () => { NavigateTo(WorkspaceId.Chapters); return Task.CompletedTask; }),
+            new("next-issue", "Nhảy tới đoạn lỗi / cần kiểm tra kế tiếp", "F8", ReaderPaletteSync(() => JumpToNextIssueSegment())),
+            new("translate-seg", "Dịch / Dịch lại đoạn đang chọn", "Ctrl+Shift+R", ReaderPaletteSync(() => OnTranslate(this, new RoutedEventArgs()))),
+            new("translate-all", "Dịch toàn bộ chương hiện tại", "Queue 1 chương", ReaderPaletteSync(() => OnTranslateAll(this, new RoutedEventArgs()))),
+            new("approve-chapter", "Duyệt toàn bộ chương hiện tại", "Duyệt tất cả đoạn đã có bản dịch", ReaderPaletteSync(() => OnApproveAllSegments(this, new RoutedEventArgs()))),
+            new("scan-chinese", "Kiểm tra & Duyệt · Quét chữ Hán còn sót", "Ctrl+H", ReaderPaletteSync(() => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; OnScanChineseText(this, new RoutedEventArgs()); })),
+            new("scan-pronouns", "Kiểm tra & Duyệt · Quét xưng hô", "Checks", ReaderPaletteSync(() => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; OnScanPronouns(this, new RoutedEventArgs()); })),
+            new("mode-two", "Biên tập", "Ctrl+1 · Lưới song ngữ", ReaderPaletteSync(() => NavigateTo(WorkspaceId.Editor, EditorMode.Translate))),
+            new("mode-four", "Kiểm tra & Duyệt", "Ctrl+2 · Biên tập Segment", ReaderPaletteSync(() => { NavigateTo(WorkspaceId.Editor, EditorMode.Review); ReviewChecksPanel.IsExpanded = true; })),
+            new("mode-reader", "Chuyển sang Chế độ Đọc (Reader)", "Đọc thử toàn chương", ReaderPaletteSync(() => ActivateShellSection("reader"))),
+            new("open-editor", "Mở Biên tập · Hai ô", "Ctrl+1", ReaderPaletteSync(() => NavigateTo(WorkspaceId.Editor, EditorMode.Translate))),
+            new("open-review", "Mở Kiểm tra & Duyệt · Bốn ô", "Ctrl+2", ReaderPaletteSync(() => NavigateTo(WorkspaceId.Editor, EditorMode.Review))),
+            new("open-resources-dictionary", "Tài nguyên · Từ điển & Knowledge Context", "Tài nguyên", ReaderPaletteSync(() => ShowResourcesWorkspace("Dictionary"))),
+            new("open-resources-characters", "Tài nguyên · Nhân vật & xưng hô", "Tài nguyên", ReaderPaletteSync(() => ShowResourcesWorkspace("Characters"))),
+            new("open-resources-prompts", "Tài nguyên · Prompt Presets", "Tài nguyên", ReaderPaletteSync(() => ShowResourcesWorkspace("Prompts"))),
+            new("open-settings-ai", "Thiết lập · AI Provider & GPU", "Thiết lập", ReaderPaletteSync(() => ShowSettingsWorkspace("Ai"))),
+            new("open-settings-data", "Thiết lập · Data QuickTranslator", "Thiết lập", ReaderPaletteSync(() => ShowSettingsWorkspace("Traditional"))),
+            new("open-settings-appearance", "Thiết lập · Giao diện", "Thiết lập", ReaderPaletteSync(() => ShowSettingsWorkspace("Appearance"))),
+            new("open-settings-gemini", "Thiết lập · Gemini credentials", "Thiết lập", ReaderPaletteSync(() => ShowSettingsWorkspace("Gemini"))),
+            new("open-settings-advanced", "Thiết lập · Nâng cao", "Chẩn đoán alignment, Remote GPU", ReaderPaletteSync(() => ShowSettingsWorkspace("Advanced"))),
+            new("import-glossary", "Nhập từ điển TXT / JSON", "Tài nguyên · Từ điển", ReaderPaletteSync(() => { ShowResourcesWorkspace("Dictionary"); OnImportGlossary(this, new RoutedEventArgs()); })),
+            new("export-glossary", "Xuất từ điển TXT", "Tài nguyên · Từ điển", ReaderPaletteSync(() => { ShowResourcesWorkspace("Dictionary"); OnExportGlossary(this, new RoutedEventArgs()); })),
+            new("import-characters", "Nhập hồ sơ nhân vật JSON", "Tài nguyên · Nhân vật", ReaderPaletteSync(() => { ShowResourcesWorkspace("Characters"); OnImportCharacters(this, new RoutedEventArgs()); })),
+            new("export-characters", "Xuất hồ sơ nhân vật JSON", "Tài nguyên · Nhân vật", ReaderPaletteSync(() => { ShowResourcesWorkspace("Characters"); OnExportCharacters(this, new RoutedEventArgs()); })),
+            new("open-library", "Mở Thư viện Project", "Project", ReaderPaletteSync(() => OnShowProjectLibrary(this, new RoutedEventArgs()))),
+            new("open-queue", "Mở Hàng đợi Project", "Workspace", ReaderPaletteSync(() => NavigateTo(WorkspaceId.Queue))),
+            new("toggle-sidebar", "Ẩn / Hiện cột Mục lục bên trái", "Ctrl+B", ReaderPaletteSync(() => OnToggleProjectSidebar(this, new RoutedEventArgs()))),
+            new("toggle-inspector", "Ẩn / Hiện bảng Inspector bên phải", "Ctrl+Shift+I", ReaderPaletteSync(() => OnToggleInspector(this, new RoutedEventArgs()))),
+            new("open-chapters", "Mở Quản lý chương (Chapter Manager)", "Chọn dải chương, đổi tên, lọc", ReaderPaletteSync(() => NavigateTo(WorkspaceId.Chapters))),
             new("open-import", "Nhập nhiều chương từ tệp TXT", "Bulk Import Preview", () => OpenDetectedBulkImportAsync()),
-            new("open-gpu", "Mở Quản lý GPU (Local + Remote SSH)", "Dual-GPU Runtime", () => { OnOpenGpuManager(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("open-publish", "Xuất bản truyện (TXT / PDF)", "Kiểm tra & ghép chương", () => { NavigateTo(WorkspaceId.Publish); return Task.CompletedTask; }),
-            new("edit-source", "Sửa nguyên văn chương", "Hành động nâng cao", () => { OnBeginSourceEdit(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("split-segment", "Tách đoạn", "Cấu trúc đoạn", () => { OnSplitSegment(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("merge-segment", "Gộp đoạn", "Cấu trúc đoạn", () => { OnMergeSegments(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("move-boundary", "Dời ranh giới", "Cấu trúc đoạn", () => { OnMoveBoundary(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("structure-history", "Lịch sử cấu trúc", "Cấu trúc đoạn", () => { OnShowSegmentationArchive(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("restore-structure", "Khôi phục cấu trúc", "Cấu trúc đoạn", () => { OnRestoreStructure(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("segment-history", "Lịch sử đoạn", "Kiểm tra & Duyệt", () => { OnShowCurrentHistory(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("show-prompt", "Xem prompt / cấu hình", "Attempt hiện tại", () => { OnShowPrompt(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("batch-replace", "Thay thế hàng loạt", "Ctrl+H", () => { OnOpenBatchReplace(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("export-chapter", "Xuất chương TXT", "Chương hiện tại", () => { OnExportChapter(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("toggle-ai-compare", "So sánh AI gốc", "Kiểm tra & Duyệt", () => { OnToggleAiComparison(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("undo-pronouns", "Hoàn tác chuẩn hóa xưng hô", "Kiểm tra", () => { OnUndoPronouns(this, new RoutedEventArgs()); return Task.CompletedTask; }),
-            new("apply-pronouns", "Áp dụng đề xuất xưng hô", "Kiểm tra", () => { OnApplyPronouns(this, new RoutedEventArgs()); return Task.CompletedTask; })
+            new("open-gpu", "Mở Quản lý GPU (Local + Remote SSH)", "Dual-GPU Runtime", ReaderPaletteSync(() => OnOpenGpuManager(this, new RoutedEventArgs()))),
+            new("open-publish", "Xuất bản truyện (TXT / PDF)", "Kiểm tra & ghép chương", ReaderPaletteSync(() => NavigateTo(WorkspaceId.Publish))),
+            new("edit-source", "Sửa nguyên văn chương", "Hành động nâng cao", ReaderPaletteSync(() => OnBeginSourceEdit(this, new RoutedEventArgs()))),
+            new("split-segment", "Tách đoạn", "Cấu trúc đoạn", ReaderPaletteSync(() => OnSplitSegment(this, new RoutedEventArgs()))),
+            new("merge-segment", "Gộp đoạn", "Cấu trúc đoạn", ReaderPaletteSync(() => OnMergeSegments(this, new RoutedEventArgs()))),
+            new("move-boundary", "Dời ranh giới", "Cấu trúc đoạn", ReaderPaletteSync(() => OnMoveBoundary(this, new RoutedEventArgs()))),
+            new("structure-history", "Lịch sử cấu trúc", "Cấu trúc đoạn", ReaderPaletteSync(() => OnShowSegmentationArchive(this, new RoutedEventArgs()))),
+            new("restore-structure", "Khôi phục cấu trúc", "Cấu trúc đoạn", ReaderPaletteSync(() => OnRestoreStructure(this, new RoutedEventArgs()))),
+            new("segment-history", "Lịch sử đoạn", "Kiểm tra & Duyệt", ReaderPaletteSync(() => OnShowCurrentHistory(this, new RoutedEventArgs()))),
+            new("show-prompt", "Xem prompt / cấu hình", "Attempt hiện tại", ReaderPaletteSync(() => OnShowPrompt(this, new RoutedEventArgs()))),
+            new("batch-replace", "Thay thế hàng loạt", "Ctrl+H", ReaderPaletteSync(() => OnOpenBatchReplace(this, new RoutedEventArgs()))),
+            new("export-chapter", "Xuất chương TXT", "Chương hiện tại", ReaderPaletteSync(() => OnExportChapter(this, new RoutedEventArgs()))),
+            new("toggle-ai-compare", "So sánh AI gốc", "Kiểm tra & Duyệt", ReaderPaletteSync(() => OnToggleAiComparison(this, new RoutedEventArgs()))),
+            new("undo-pronouns", "Hoàn tác chuẩn hóa xưng hô", "Kiểm tra", ReaderPaletteSync(() => OnUndoPronouns(this, new RoutedEventArgs()))),
+            new("apply-pronouns", "Áp dụng đề xuất xưng hô", "Kiểm tra", ReaderPaletteSync(() => OnApplyPronouns(this, new RoutedEventArgs())))
         };
         if (cmdQuery.Length == 0) return commands;
         return commands.Where(c =>
             c.Title.Contains(cmdQuery, StringComparison.CurrentCultureIgnoreCase) ||
             c.Subtitle.Contains(cmdQuery, StringComparison.CurrentCultureIgnoreCase)).ToArray();
     }
+
+    // Palette commands that finish synchronously; a throw still surfaces through the awaited Execute().
+    private static Func<Task> ReaderPaletteSync(Action action) => () =>
+    {
+        action();
+        return Task.CompletedTask;
+    };
 
     internal void ShowQuickPalette(bool commandsMode)
     {

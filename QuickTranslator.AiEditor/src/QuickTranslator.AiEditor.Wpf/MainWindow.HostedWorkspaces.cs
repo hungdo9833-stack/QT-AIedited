@@ -74,9 +74,7 @@ public partial class MainWindow
 
     private void ShowQueueWorkspace()
     {
-        CurrentWorkspace = WorkspaceId.Queue;
-        ApplyWorkspaceVisibility(CurrentWorkspace);
-        MarkActiveNavigation(CurrentWorkspace);
+        ActivateQueueWorkspace();
         _ = EnsureQueueWorkspaceAsync();
     }
 
@@ -122,9 +120,11 @@ public partial class MainWindow
         _ = _hostedQueueView.StartPendingPlanAsync();
     }
 
-    private void ActivateQueueWorkspace()
+    private void ActivateQueueWorkspace() => HostedActivateWorkspace(WorkspaceId.Queue);
+
+    private void HostedActivateWorkspace(WorkspaceId workspace)
     {
-        CurrentWorkspace = WorkspaceId.Queue;
+        CurrentWorkspace = workspace;
         ApplyWorkspaceVisibility(CurrentWorkspace);
         MarkActiveNavigation(CurrentWorkspace);
     }
@@ -145,16 +145,14 @@ public partial class MainWindow
     private void UpdateQueueWorkspaceEmptyState()
     {
         if (QueueWorkspaceEmpty is null) return;
-        QueueWorkspaceEmpty.Visibility = _hostedQueueView is null ? Visibility.Visible : Visibility.Collapsed;
+        QueueWorkspaceEmpty.Visibility = ShellVisibleWhen(_hostedQueueView is null);
     }
 
     private async Task ShowPublicationWorkspaceAsync()
     {
         if (_projectSession is null)
         {
-            CurrentWorkspace = WorkspaceId.Publish;
-            ApplyWorkspaceVisibility(CurrentWorkspace);
-            MarkActiveNavigation(CurrentWorkspace);
+            HostedActivateWorkspace(WorkspaceId.Publish);
             return;
         }
         if (!BeginUiOperation(allowDuringTranslation: true)) return;
@@ -178,9 +176,7 @@ public partial class MainWindow
             PublishWorkspaceHost.Content = _hostedPublicationView;
             _hostedPublicationProjectId = _projectSession.Manifest.ProjectId;
         }
-        CurrentWorkspace = WorkspaceId.Publish;
-        ApplyWorkspaceVisibility(CurrentWorkspace);
-        MarkActiveNavigation(CurrentWorkspace);
+        HostedActivateWorkspace(WorkspaceId.Publish);
         await _hostedPublicationView.RefreshAsync();
     }
 

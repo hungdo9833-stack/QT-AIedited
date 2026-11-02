@@ -73,21 +73,21 @@ public partial class MainWindow
     }
 
     private bool HasNextUnfinishedProjectChapter() =>
-        _projectSession?.Manifest.Chapters.Any(chapter => chapter.DeletedAt is null &&
-            chapter.ChapterId != _projectSession.Manifest.CurrentChapterId &&
-            chapter.State != ProjectChapterState.Approved) == true;
+        _projectSession is not null && EditorUxOtherUnfinishedChapters(_projectSession.Manifest).Any();
 
     private async Task OpenNextUnfinishedProjectChapterAsync()
     {
         if (_projectSession is null) return;
-        ProjectChapterEntry? next = _projectSession.Manifest.Chapters
-            .Where(chapter => chapter.DeletedAt is null &&
-                chapter.ChapterId != _projectSession.Manifest.CurrentChapterId &&
-                chapter.State != ProjectChapterState.Approved)
+        ProjectChapterEntry? next = EditorUxOtherUnfinishedChapters(_projectSession.Manifest)
             .OrderBy(chapter => chapter.Number)
             .FirstOrDefault();
         if (next is not null) await LoadProjectChapterAsync(next.ChapterId);
     }
+
+    private static IEnumerable<ProjectChapterEntry> EditorUxOtherUnfinishedChapters(ProjectManifest manifest) =>
+        manifest.Chapters.Where(chapter => chapter.DeletedAt is null &&
+            chapter.ChapterId != manifest.CurrentChapterId &&
+            chapter.State != ProjectChapterState.Approved);
 
     private void ApplyEditorActionPlan(EditorStateSnapshot? chapter)
     {
@@ -125,9 +125,10 @@ public partial class MainWindow
             button.Visibility = plan.Secondary.Contains(kind) ||
                 kind == EditorActionKind.EditSource && chapter is not null && !_sourceEditMode
                 ? Visibility.Visible : Visibility.Collapsed;
-            if (button.Visibility == Visibility.Visible)
-                ApplyActionState(button, button.IsEnabled && EditorActionPolicy.DisabledReason(kind, context) is null,
-                    EditorActionPolicy.DisabledReason(kind, context) ?? PrimaryBusinessReason(kind, chapter));
+            if (button.Visibility != Visibility.Visible) continue;
+            string? policyReason = EditorActionPolicy.DisabledReason(kind, context);
+            ApplyActionState(button, button.IsEnabled && policyReason is null,
+                policyReason ?? PrimaryBusinessReason(kind, chapter));
         }
 
         CancelQueueButton.Visibility = plan.Overflow.Contains(EditorActionKind.CancelQueue)
@@ -305,6 +306,11 @@ public partial class MainWindow
     private void OnOpenReviewChecks(object sender, RoutedEventArgs e)
     {
         CommandOverflowToggle.IsChecked = false;
+        EditorUxShowReviewChecks();
+    }
+
+    private void EditorUxShowReviewChecks()
+    {
         NavigateTo(WorkspaceId.Editor, EditorMode.Review);
         ReviewChecksPanel.IsExpanded = true;
         _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, () =>

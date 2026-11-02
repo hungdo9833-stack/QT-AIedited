@@ -144,12 +144,13 @@ public partial class MainWindow
         BrandBlock.Width = _compactShell ? 162 : 194;
         ProjectSwitcher.Width = _compactShell ? 190 : 300;
         TitleInput.Width = _compactShell ? 250 : 360;
-        ShellChapterText.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
+        Visibility wideOnly = ShellVisibleWhen(!_compactShell);
+        ShellChapterText.Visibility = wideOnly;
         UpdateChapterModeHint();
-        ChapterSummary.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
-        ReaderBookmarkButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
-        FocusModeButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
-        ReaderFullScreenButton.Visibility = _compactShell ? Visibility.Collapsed : Visibility.Visible;
+        ChapterSummary.Visibility = wideOnly;
+        ReaderBookmarkButton.Visibility = wideOnly;
+        FocusModeButton.Visibility = wideOnly;
+        ReaderFullScreenButton.Visibility = wideOnly;
         ApplyPanelPolicy();
         ApplyReaderCatalogVisibility();
         RefreshShellQueueStatus();
@@ -164,9 +165,10 @@ public partial class MainWindow
     private void UpdateChapterModeHint()
     {
         if (ChapterModeHint is null || ReaderView is null) return;
-        ChapterModeHint.Visibility = !_compactShell && ReaderView.Visibility == Visibility.Visible
-            ? Visibility.Visible : Visibility.Collapsed;
+        ChapterModeHint.Visibility = ShellVisibleWhen(!_compactShell && ReaderView.Visibility == Visibility.Visible);
     }
+
+    private static Visibility ShellVisibleWhen(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
 
     // BL-14: In Two-Pane mode, show Aligned Bilingual Segment Grid when a chapter is segmented and not in _sourceEditMode;
     // show monolithic ChapterInput when _service is null or _sourceEditMode == true.
@@ -176,11 +178,12 @@ public partial class MainWindow
         bool showRawSourceBox = _service is null || _sourceEditMode;
         // The title / paste / import / split strip only serves a chapter that is not segmented yet; an open chapter
         // gives its height to the bilingual grid (its tools sit under "Thêm" in the grid header).
-        ChapterInitStrip.Visibility = showRawSourceBox ? Visibility.Visible : Visibility.Collapsed;
+        Visibility rawSourceVisibility = ShellVisibleWhen(showRawSourceBox);
+        ChapterInitStrip.Visibility = rawSourceVisibility;
         UpdateChapterModeHint();
         if (FindName("ChapterSourcePaneBorder") is Border sourceBorder)
-            sourceBorder.Visibility = showRawSourceBox ? Visibility.Visible : Visibility.Collapsed;
-        ChapterTwoPaneSplitter.Visibility = showRawSourceBox ? Visibility.Visible : Visibility.Collapsed;
+            sourceBorder.Visibility = rawSourceVisibility;
+        ChapterTwoPaneSplitter.Visibility = rawSourceVisibility;
         ChapterTwoPaneLeftColumn.Width = showRawSourceBox
             ? new GridLength(Math.Clamp(_workspaceLayout.TwoPaneSourceStar, 0.25, 4), GridUnitType.Star)
             : new GridLength(0);
@@ -361,19 +364,19 @@ public partial class MainWindow
     private void ApplyWorkspaceVisibility(WorkspaceId workspace)
     {
         bool editorHost = workspace is WorkspaceId.Editor or WorkspaceId.Reader;
-        EditorWorkspaceRoot.Visibility = editorHost ? Visibility.Visible : Visibility.Collapsed;
-        ChaptersWorkspaceRoot.Visibility = workspace == WorkspaceId.Chapters ? Visibility.Visible : Visibility.Collapsed;
-        QueueWorkspaceRoot.Visibility = workspace == WorkspaceId.Queue ? Visibility.Visible : Visibility.Collapsed;
-        PublishWorkspaceRoot.Visibility = workspace == WorkspaceId.Publish ? Visibility.Visible : Visibility.Collapsed;
-        ResourcesWorkspaceRoot.Visibility = workspace == WorkspaceId.Resources ? Visibility.Visible : Visibility.Collapsed;
-        SettingsWorkspaceRoot.Visibility = workspace == WorkspaceId.Settings ? Visibility.Visible : Visibility.Collapsed;
-        EditorContextHeader.Visibility = workspace == WorkspaceId.Editor ? Visibility.Visible : Visibility.Collapsed;
-        ChapterModeBar.Visibility = editorHost ? Visibility.Visible : Visibility.Collapsed;
+        EditorWorkspaceRoot.Visibility = ShellVisibleWhen(editorHost);
+        ChaptersWorkspaceRoot.Visibility = ShellVisibleWhen(workspace == WorkspaceId.Chapters);
+        QueueWorkspaceRoot.Visibility = ShellVisibleWhen(workspace == WorkspaceId.Queue);
+        PublishWorkspaceRoot.Visibility = ShellVisibleWhen(workspace == WorkspaceId.Publish);
+        ResourcesWorkspaceRoot.Visibility = ShellVisibleWhen(workspace == WorkspaceId.Resources);
+        SettingsWorkspaceRoot.Visibility = ShellVisibleWhen(workspace == WorkspaceId.Settings);
+        EditorContextHeader.Visibility = ShellVisibleWhen(workspace == WorkspaceId.Editor);
+        ChapterModeBar.Visibility = ShellVisibleWhen(editorHost);
         if (workspace == WorkspaceId.Chapters) _hostedChapterManagerView?.Attach(); else _hostedChapterManagerView?.Detach();
         if (workspace == WorkspaceId.Queue) _hostedQueueView?.Attach(); else _hostedQueueView?.Detach();
         if (workspace == WorkspaceId.Publish) _hostedPublicationView?.Attach(); else _hostedPublicationView?.Detach();
-        ChaptersWorkspaceEmpty.Visibility = _hostedChapterManagerView is null ? Visibility.Visible : Visibility.Collapsed;
-        PublishWorkspaceEmpty.Visibility = _hostedPublicationView is null ? Visibility.Visible : Visibility.Collapsed;
+        ChaptersWorkspaceEmpty.Visibility = ShellVisibleWhen(_hostedChapterManagerView is null);
+        PublishWorkspaceEmpty.Visibility = ShellVisibleWhen(_hostedPublicationView is null);
         UpdateQueueWorkspaceEmptyState();
         _ = RefreshStartScreenAsync();
         ApplyPanelPolicy();
@@ -393,16 +396,14 @@ public partial class MainWindow
 
     private void ShowSettingsWorkspace(string? section = null)
     {
-        if (section is not null && section.Equals("Dictionary", StringComparison.OrdinalIgnoreCase) ||
-            section is not null && section.Equals("Characters", StringComparison.OrdinalIgnoreCase) ||
-            section is not null && section.Equals("Prompts", StringComparison.OrdinalIgnoreCase))
+        if (section is not null && (section.Equals("Dictionary", StringComparison.OrdinalIgnoreCase) ||
+            section.Equals("Characters", StringComparison.OrdinalIgnoreCase) ||
+            section.Equals("Prompts", StringComparison.OrdinalIgnoreCase)))
         {
             ShowResourcesWorkspace(section);
             return;
         }
-        CurrentWorkspace = WorkspaceId.Settings;
-        ApplyWorkspaceVisibility(CurrentWorkspace);
-        MarkActiveNavigation(WorkspaceId.Settings);
+        HostedActivateWorkspace(WorkspaceId.Settings);
         if (section is not null)
             SettingsNavigation.SelectedItem = SettingsNavigation.Items.OfType<ListBoxItem>()
                 .FirstOrDefault(item => string.Equals(item.Tag as string, section, StringComparison.OrdinalIgnoreCase));
@@ -410,9 +411,7 @@ public partial class MainWindow
 
     private void ShowResourcesWorkspace(string? section = null)
     {
-        CurrentWorkspace = WorkspaceId.Resources;
-        ApplyWorkspaceVisibility(CurrentWorkspace);
-        MarkActiveNavigation(WorkspaceId.Resources);
+        HostedActivateWorkspace(WorkspaceId.Resources);
         string target = section ?? "Characters";
         ResourcesNavigation.SelectedItem = ResourcesNavigation.Items.OfType<ListBoxItem>()
             .FirstOrDefault(item => string.Equals(item.Tag as string, target, StringComparison.OrdinalIgnoreCase));
@@ -440,13 +439,7 @@ public partial class MainWindow
                 ShowResourcesWorkspace("Prompts");
                 break;
             case "quality":
-                NavigateTo(WorkspaceId.Editor, EditorMode.Review);
-                ReviewChecksPanel.IsExpanded = true;
-                _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, () =>
-                {
-                    ReviewChecksPanel.Focus();
-                    Keyboard.Focus(ReviewChecksPanel);
-                });
+                EditorUxShowReviewChecks();
                 break;
             case "settings":
                 ShowSettingsWorkspace();
@@ -538,10 +531,7 @@ public partial class MainWindow
     private void SelectChapterBlock(TextBox input)
     {
         if (_rendering || input.Tag is not Guid id || _service is null) return;
-        _selectedId = id;
-        _shownAttemptId = null;
-        _service.SelectSegment(id);
-        foreach (var b in _chapterBlocks) b.IsSelected = b.Id == id;
+        ChapterSelectBlockSegment(_service, id);
         var seg = _service.GetSnapshot().Segments.Single(segment => segment.Id == id);
         RefreshTraditionalSegment(seg);
         RefreshTranslationInspector(seg);
@@ -673,21 +663,14 @@ public partial class MainWindow
 
     private void FocusSelectedEditor(bool fourPane)
     {
-        if (fourPane)
-        {
-            DraftText.Focus();
-            Keyboard.Focus(DraftText);
-            if (DraftText.IsKeyboardFocusWithin) _pendingEditorFocus = false;
-            return;
-        }
-        TextBox? target = FindVisualChildren<TextBox>(ChapterBlocksItems)
-            .FirstOrDefault(input => !input.IsReadOnly && input.Tag is Guid id && id == _selectedId);
-        if (target is not null)
-        {
-            target.Focus();
-            Keyboard.Focus(target);
-            if (target.IsKeyboardFocusWithin) _pendingEditorFocus = false;
-        }
+        TextBox? target = fourPane
+            ? DraftText
+            : FindVisualChildren<TextBox>(ChapterBlocksItems)
+                .FirstOrDefault(input => !input.IsReadOnly && input.Tag is Guid id && id == _selectedId);
+        if (target is null) return;
+        target.Focus();
+        Keyboard.Focus(target);
+        if (target.IsKeyboardFocusWithin) _pendingEditorFocus = false;
     }
 
     private void OnShowCurrentHistory(object sender, RoutedEventArgs e)

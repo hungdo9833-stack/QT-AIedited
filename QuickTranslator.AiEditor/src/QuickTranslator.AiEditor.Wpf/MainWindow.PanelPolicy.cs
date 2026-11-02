@@ -22,12 +22,8 @@ public partial class MainWindow
             var context = new PanelContext(CurrentWorkspace, CurrentEditorMode, _sourceEditMode,
                 _projectSession is not null, _selectedId is not null,
                 _panelPolicyWidth > 0 ? _panelPolicyWidth : ActualWidth);
-            ApplyPanelPresentation(PanelId.ProjectSidebar,
-                PanelPolicy.Resolve(PanelId.ProjectSidebar, GetPanelPreference(PanelId.ProjectSidebar), context));
-            ApplyPanelPresentation(PanelId.SegmentNavigator,
-                PanelPolicy.Resolve(PanelId.SegmentNavigator, GetPanelPreference(PanelId.SegmentNavigator), context));
-            ApplyPanelPresentation(PanelId.Inspector,
-                PanelPolicy.Resolve(PanelId.Inspector, GetPanelPreference(PanelId.Inspector), context));
+            foreach (PanelId panel in new[] { PanelId.ProjectSidebar, PanelId.SegmentNavigator, PanelId.Inspector })
+                ApplyPanelPresentation(panel, PanelPolicy.Resolve(panel, GetPanelPreference(panel), context));
         }
         finally { _applyingPanelPolicy = false; }
     }
@@ -84,7 +80,7 @@ public partial class MainWindow
         Popup popup = PanelPopup(panel);
         bool applicable = presentation != PanelPresentation.NotApplicable;
         Control toggle = PanelToggle(panel);
-        toggle.Visibility = applicable ? Visibility.Visible : Visibility.Collapsed;
+        toggle.Visibility = ShellVisibleWhen(applicable);
         toggle.IsEnabled = applicable && (panel != PanelId.ProjectSidebar || _projectSession is not null);
 
         if (presentation != PanelPresentation.Flyout && popup.IsOpen)
@@ -93,8 +89,8 @@ public partial class MainWindow
             RestorePanelToDock(panel);
 
         bool docked = presentation == PanelPresentation.Docked;
-        element.Visibility = docked ? Visibility.Visible : Visibility.Collapsed;
-        PanelSplitter(panel).Visibility = docked ? Visibility.Visible : Visibility.Collapsed;
+        element.Visibility = ShellVisibleWhen(docked);
+        PanelSplitter(panel).Visibility = ShellVisibleWhen(docked);
         if (panel == PanelId.SegmentNavigator)
             SegmentNavigatorColumn.Width = docked
                 ? new GridLength(Math.Clamp(_workspaceLayout.SegmentNavigatorWidth, 180, 520))

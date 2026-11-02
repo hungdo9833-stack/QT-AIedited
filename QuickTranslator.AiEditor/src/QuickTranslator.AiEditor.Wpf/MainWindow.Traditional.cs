@@ -55,7 +55,7 @@ public partial class MainWindow
         bool hasDiff = !string.IsNullOrWhiteSpace(AiText.Text) &&
                        !string.Equals(AiText.Text.Trim(), DraftText.Text.Trim(), StringComparison.Ordinal);
         bool visible = _showAiComparison || hasDiff;
-        AiText.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        AiText.Visibility = ShellVisibleWhen(visible);
         if (FindName("ToggleAiCompareButton") is Button toggleBtn)
             toggleBtn.Content = visible ? "Ẩn bản AI" : "So sánh AI gốc";
     }
@@ -116,14 +116,9 @@ public partial class MainWindow
             TraditionalDiagnosticsText.Text = manifest.Diagnostics.Count == 0 ? "Không phát hiện vấn đề cấu trúc." :
                 string.Join(Environment.NewLine, manifest.Diagnostics.Select(item =>
                     $"{item.Severity}: {item.File}{(item.Line is int line ? $" dòng {line}" : "")} — {item.Message}"));
-            _traditionalResult = null;
-            _traditionalDisplayedSegmentId = null;
-            _traditionalRequestKey = null;
-            ClearTraditionalHighlights();
+            TraditionalForgetResult();
             if (savePreferences) await SaveTraditionalPreferencesAsync();
-            var selected = _service?.GetSnapshot().Segments.SingleOrDefault(segment => segment.Id == _selectedId);
-            RefreshTraditionalSegment(selected);
-            RefreshBilingualSourceDisplay();
+            TraditionalRetranslateSelected();
             SetStatus("Đã nạp Data QuickTranslator. Hán Việt và VP chạy offline bằng CPU.");
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -142,24 +137,29 @@ public partial class MainWindow
     {
         if (!_initialized || _loadingTraditionalPreferences) return;
         bool translationChanged = !ReferenceEquals(sender, TraditionalAlignmentDiagnosticsInput);
-        if (translationChanged)
-        {
-            _traditionalResult = null;
-            _traditionalDisplayedSegmentId = null;
-            _traditionalRequestKey = null;
-            ClearTraditionalHighlights();
-        }
+        if (translationChanged) TraditionalForgetResult();
         try
         {
             await SaveTraditionalPreferencesAsync();
-            if (translationChanged)
-            {
-                var selected = _service?.GetSnapshot().Segments.SingleOrDefault(segment => segment.Id == _selectedId);
-                RefreshTraditionalSegment(selected);
-                RefreshBilingualSourceDisplay();
-            }
+            if (translationChanged) TraditionalRetranslateSelected();
         }
         catch (Exception ex) { SetStatus("Chưa lưu được thiết lập dịch truyền thống: " + ex.Message); }
+    }
+
+    // Drops the displayed Hán Việt / VP result so the next refresh translates again.
+    private void TraditionalForgetResult()
+    {
+        _traditionalResult = null;
+        _traditionalDisplayedSegmentId = null;
+        _traditionalRequestKey = null;
+        ClearTraditionalHighlights();
+    }
+
+    private void TraditionalRetranslateSelected()
+    {
+        var selected = _service?.GetSnapshot().Segments.SingleOrDefault(segment => segment.Id == _selectedId);
+        RefreshTraditionalSegment(selected);
+        RefreshBilingualSourceDisplay();
     }
 
     private Task SaveTraditionalPreferencesAsync() => _traditionalPreferencesStore.SaveAsync(new()
@@ -345,17 +345,12 @@ public partial class MainWindow
         if (sender is not FrameworkElement { Tag: string tag }) return;
         var visible = Enum.GetValues<TraditionalPane>().Where(item => !_hiddenTraditionalPanes.Contains(item)).ToList();
         int visibleCount = visible.Count + (AiPane.Visibility == Visibility.Visible && _maximizedTraditionalPane is null ? 1 : 0);
-        if (tag == "Ai")
-        {
-            if (visibleCount <= 1) { SetStatus("Phải giữ lại ít nhất một ô."); return; }
-            AiPane.Visibility = Visibility.Collapsed;
-        }
-        else if (Enum.TryParse(tag, out TraditionalPane pane))
-        {
-            if (visibleCount <= 1) { SetStatus("Phải giữ lại ít nhất một ô."); return; }
-            _hiddenTraditionalPanes.Add(pane);
-        }
-        else return;
+        bool aiPane = tag == "Ai";
+        TraditionalPane pane = default;
+        if (!aiPane && !Enum.TryParse(tag, out pane)) return;
+        if (visibleCount <= 1) { SetStatus("Phải giữ lại ít nhất một ô."); return; }
+        if (aiPane) AiPane.Visibility = Visibility.Collapsed;
+        else _hiddenTraditionalPanes.Add(pane);
         _maximizedTraditionalPane = null;
         ApplyTraditionalPaneLayout();
     }
@@ -364,8 +359,9 @@ public partial class MainWindow
     {
         if (sender is not FrameworkElement { Tag: string tag }) return;
         _hiddenTraditionalPanes.Clear();
-        _maximizedTraditionalPane = tag == "Ai" ? null : Enum.TryParse(tag, out TraditionalPane pane) ? pane : null;
-        if (tag == "Ai")
+        bool aiPane = tag == "Ai";
+        _maximizedTraditionalPane = !aiPane && Enum.TryParse(tag, out TraditionalPane pane) ? pane : null;
+        if (aiPane)
         {
             foreach (var item in Enum.GetValues<TraditionalPane>()) _hiddenTraditionalPanes.Add(item);
             AiPane.Visibility = Visibility.Visible;
@@ -395,9 +391,9 @@ public partial class MainWindow
         bool vpVisible = !_hiddenTraditionalPanes.Contains(TraditionalPane.VietPhrase);
         bool aiVisible = AiPane.Visibility == Visibility.Visible;
 
-        ChinesePane.Visibility = zhVisible ? Visibility.Visible : Visibility.Collapsed;
-        HanVietPane.Visibility = hvVisible ? Visibility.Visible : Visibility.Collapsed;
-        VietPhrasePane.Visibility = vpVisible ? Visibility.Visible : Visibility.Collapsed;
+        ChinesePane.Visibility = ShellVisibleWhen(zhVisible);
+        HanVietPane.Visibility = ShellVisibleWhen(hvVisible);
+        VietPhrasePane.Visibility = ShellVisibleWhen(vpVisible);
 
         bool left = zhVisible || vpVisible;
         bool right = hvVisible || aiVisible;
@@ -408,7 +404,7 @@ public partial class MainWindow
         Grid.SetColumn(ChinesePane, 0);
         Grid.SetColumnSpan(ChinesePane, zhVisible && !hvVisible && right ? 3 : 1);
         Grid.SetRow(ChinesePane, 0);
-        Grid.SetRowSpan(ChinesePane, zhVisible && !vpVisible && bottom && (!hvVisible || aiVisible) ? 1 : 1);
+        Grid.SetRowSpan(ChinesePane, 1);
 
         Grid.SetColumn(HanVietPane, hvVisible && !zhVisible && left ? 0 : 2);
         Grid.SetColumnSpan(HanVietPane, hvVisible && !zhVisible && left ? 3 : 1);

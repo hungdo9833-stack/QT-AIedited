@@ -21,12 +21,7 @@ public partial class MainWindow
         _autosave.Stop();
         try
         {
-            if (HasPendingSourceEdit)
-            {
-                SetStatus("Nguyên văn đang sửa chưa được lưu. Hãy chọn Lưu nguyên văn hoặc Hủy sửa nguồn trước khi chuyển.");
-                return false;
-            }
-            if (_sourceEditMode) EndSourceEditMode(assignSnapshot: true);
+            if (!LifetimeLeaveSourceEdit()) return false;
             if (_service is null && !string.IsNullOrWhiteSpace(ChapterInput.Text))
             {
                 if (!ConfirmWorkspaceChange("Lưu nguyên văn chưa chia thành chương trước khi chuyển? Chọn Không để giữ nguyên cửa sổ và nội dung đang nhập.",
@@ -49,12 +44,7 @@ public partial class MainWindow
         _autosave.Stop();
         try
         {
-            if (HasPendingSourceEdit)
-            {
-                SetStatus("Nguyên văn đang sửa chưa được lưu. Hãy chọn Lưu nguyên văn hoặc Hủy sửa nguồn trước khi chuyển.");
-                return false;
-            }
-            if (_sourceEditMode) EndSourceEditMode(assignSnapshot: true);
+            if (!LifetimeLeaveSourceEdit()) return false;
             var queue = _queue;
             var request = _activeRequest;
             var completion = _activeWorkCompletion;
@@ -79,6 +69,18 @@ public partial class MainWindow
             return true;
         }
         finally { _transitioning = false; EndUiOperation(); }
+    }
+
+    // An unsaved source edit blocks the switch; a source edit without changes simply ends.
+    private bool LifetimeLeaveSourceEdit()
+    {
+        if (HasPendingSourceEdit)
+        {
+            SetStatus("Nguyên văn đang sửa chưa được lưu. Hãy chọn Lưu nguyên văn hoặc Hủy sửa nguồn trước khi chuyển.");
+            return false;
+        }
+        if (_sourceEditMode) EndSourceEditMode(assignSnapshot: true);
+        return true;
     }
 
     private async Task WaitForCurrentWorkAsync()

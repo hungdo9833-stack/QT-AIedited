@@ -231,8 +231,8 @@ public partial class MainWindow
                 _gpuPreferences.RemoteProfileId is null && GpuProfileExists(remote.ProfileId))
                 _gpuPreferences.RemoteProfileId = remote.ProfileId;
             profileId = _gpuPreferences.Mode == GpuTranslationMode.LocalOnly
-            ? GpuBackendProfile.DefaultLocalId
-            : _gpuPreferences.RemoteProfileId ?? _gpuBackends.ActiveProfile.Id;
+                ? GpuBackendProfile.DefaultLocalId
+                : _gpuPreferences.RemoteProfileId ?? _gpuBackends.ActiveProfile.Id;
         }
         GpuBackendProfile profile = _gpuBackends.GetProfile(profileId);
         if (_gpuBackends.ActiveProfile.Id != profileId) await _gpuBackends.ActivateAsync(profileId);
@@ -282,21 +282,12 @@ public partial class MainWindow
                     GeminiTranslationSegmentationOptions(), null));
             }
             else if (_gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote)
-            {
-                AiRuntimeProfile runtime = local.Runtime ?? AiRuntimeProfile.CreateDefault(local.Model);
-                definitions.Add(CreateWorkerDefinition(StableWorkerId(local.Id),
-                    BackendSnapshot(local, runtime.ModelOptions.Model), runtime.ModelOptions,
-                    runtime.SegmentationOptions, local.HourlyPrice));
-            }
+                definitions.Add(ProjectTranslationProfileWorker(local));
             if (_gpuPreferences.Mode is GpuTranslationMode.RemoteOnly or GpuTranslationMode.ParallelLocalRemote)
             {
                 Guid remoteId = _gpuPreferences.RemoteProfileId
                     ?? throw new InvalidOperationException("Mở GPU Manager, kết nối và chọn một profile Remote trước khi dùng Remote/Parallel.");
-                GpuBackendProfile remote = _gpuBackends.GetProfile(remoteId);
-                AiRuntimeProfile runtime = remote.Runtime ?? AiRuntimeProfile.CreateDefault(remote.Model);
-                definitions.Add(CreateWorkerDefinition(StableWorkerId(remote.Id),
-                    BackendSnapshot(remote, runtime.ModelOptions.Model), runtime.ModelOptions,
-                    runtime.SegmentationOptions, remote.HourlyPrice));
+                definitions.Add(ProjectTranslationProfileWorker(_gpuBackends.GetProfile(remoteId)));
             }
         }
         var coordinator = new ProjectTranslationCoordinator(_projectSession, _projectRepository, definitions,
@@ -310,6 +301,15 @@ public partial class MainWindow
             _projectTranslationLoadTask = null;
         }
         return coordinator;
+    }
+
+    // A fresh worker for a GPU profile, using the profile's runtime settings (or its model's defaults).
+    private ProjectTranslationWorkerDefinition ProjectTranslationProfileWorker(GpuBackendProfile profile)
+    {
+        AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
+        return CreateWorkerDefinition(StableWorkerId(profile.Id),
+            BackendSnapshot(profile, runtime.ModelOptions.Model), runtime.ModelOptions,
+            runtime.SegmentationOptions, profile.HourlyPrice);
     }
 
     private ProjectTranslationWorkerDefinition CreateWorkerDefinition(Guid workerId, GpuBackendSnapshot backend,
