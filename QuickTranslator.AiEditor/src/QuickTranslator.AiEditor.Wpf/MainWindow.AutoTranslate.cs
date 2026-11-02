@@ -26,27 +26,62 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// Books are prepared (download, new project, Codex survey) one after another while finished ones translate, so a
-    /// long Codex survey of the next book overlaps the translation of the current one. Translation stays one book at a
-    /// time because the queue belongs to the project open in this window.
+    /// Three stages run side by side, each one book at a time: downloading, the Codex survey and translation. The next
+    /// book downloads while Codex surveys this one, and a surveyed book translates while Codex surveys the next. Translation
+    /// stays one book at a time because the queue belongs to the project open in this window.
     /// </summary>
     internal async Task RunAutoTranslateAsync(IReadOnlyList<AutoBookRow> rows, AutoTranslateSettings settings,
         CancellationToken cancellationToken)
     {
+        AutoBookPreparer preparer = CreateAutoBookPreparer();
+        var downloaded = rows.Select(_ => new TaskCompletionSource<AutoBookDownload?>(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
         var prepared = rows.Select(_ => new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        async Task DownloadAllAsync()
+        {
+            for (int index = 0; index < rows.Count; index++)
+            {
+                if (cancellationToken.IsCancellationRequested) { downloaded[index].SetResult(null); rows[index].Stage = "Đã dừng"; continue; }
+                AutoBookRow row = rows[index];
+                var status = new Progress<AutoBookStatus>(value =>
+                {
+                    row.Stage = value.Stage;
+                    row.Detail = value.Detail;
+                    if (value.Title is not null) row.Title = value.Title;
+                });
+                try
+                {
+                    AutoBookDownload download = await preparer.DownloadAsync(row.Url, settings.DownloadDelay, status, cancellationToken);
+                    // Progress reports are posted: set the waiting state after the last one has landed.
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        row.Title = download.Title;
+                        row.Stage = "Đã tải, chờ Codex";
+                        row.Detail = "";
+                    }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+                    downloaded[index].SetResult(download);
+                }
+                catch (AutoBookPausedException paused)
+                {
+                    row.Title = paused.Title;
+                    row.Stage = $"⏸ Tạm dừng ({paused.Downloaded}/{paused.Total})";
+                    row.Detail = paused.Message;
+                    downloaded[index].SetResult(null);
+                }
+                catch (Exception ex)
+                {
+                    row.Stage = ex is OperationCanceledException ? "Đã dừng" : "Lỗi";
+                    if (ex is not OperationCanceledException) row.Detail = ex.Message;
+                    downloaded[index].SetResult(null);
+                }
+            }
+        }
         async Task PrepareAllAsync()
         {
             for (int index = 0; index < rows.Count; index++)
             {
+                if (await downloaded[index].Task is not { } download) { prepared[index].SetResult(null); continue; }
                 if (cancellationToken.IsCancellationRequested) { prepared[index].SetResult(null); rows[index].Stage = "Đã dừng"; continue; }
-                try { prepared[index].SetResult(await PrepareAutoBookAsync(rows[index], settings, cancellationToken)); }
-                catch (AutoBookPausedException paused)
-                {
-                    rows[index].Title = paused.Title;
-                    rows[index].Stage = $"⏸ Tạm dừng ({paused.Downloaded}/{paused.Total})";
-                    rows[index].Detail = paused.Message;
-                    prepared[index].SetResult(null);
-                }
+                try { prepared[index].SetResult(await PrepareAutoBookAsync(preparer, download, rows[index], settings, cancellationToken)); }
                 catch (ContentStopException stop)
                 {
                     rows[index].Stage = "⛔ Đã dừng";
@@ -62,6 +97,7 @@ public partial class MainWindow
                 }
             }
         }
+        Task downloading = DownloadAllAsync();
         Task preparing = PrepareAllAsync();
         for (int index = 0; index < rows.Count; index++)
         {
@@ -76,18 +112,20 @@ public partial class MainWindow
             }
             catch (OperationCanceledException) { rows[index].Stage = "Đã tạm dừng"; }
         }
-        await preparing;
+        await Task.WhenAll(downloading, preparing);
     }
 
-    /// <summary>Downloads the book, creates its project with all chapters, and saves the Codex characters and glossary. Returns the manifest path.</summary>
-    private async Task<string> PrepareAutoBookAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken)
+    private AutoBookPreparer CreateAutoBookPreparer() => new(_projectRepository, WebNovelImporterFactory, CodexSurveyRunnerFactory,
+        new BulkImportChapterDefaults(ReadSegmenterOptions(), ReadModelOptions(), _presetManager.Selected))
     {
-        var defaults = new BulkImportChapterDefaults(ReadSegmenterOptions(), ReadModelOptions(), _presetManager.Selected);
-        var preparer = new AutoBookPreparer(_projectRepository, WebNovelImporterFactory, CodexSurveyRunnerFactory, defaults)
-        {
-            TitleBackend = _traditionalService.CurrentSnapshot is null ? null
-                : new TraditionalChapterTitleTranslationBackend(_traditionalService, hanViet: false)
-        };
+        TitleBackend = _traditionalService.CurrentSnapshot is null ? null
+            : new TraditionalChapterTitleTranslationBackend(_traditionalService, hanViet: false)
+    };
+
+    /// <summary>Creates the project of a downloaded book and saves the Codex characters and glossary. Returns the manifest path.</summary>
+    private async Task<string> PrepareAutoBookAsync(AutoBookPreparer preparer, AutoBookDownload download, AutoBookRow row,
+        AutoTranslateSettings settings, CancellationToken cancellationToken)
+    {
         bool warned = false;
         var status = new Progress<AutoBookStatus>(value =>
         {
@@ -105,8 +143,8 @@ public partial class MainWindow
             warned = true;
         });
         CodexSurveyOptions codex = settings.Codex with { KnownGenres = await KnownGenresAsync(cancellationToken) };
-        AutoBookPrepared prepared = await preparer.PrepareAsync(row.Url, _projectLibrary.DefaultProjectsDirectory,
-            settings.DownloadDelay, codex, status, cancellationToken, content);
+        AutoBookPrepared prepared = await preparer.PrepareAsync(download, _projectLibrary.DefaultProjectsDirectory,
+            codex, status, cancellationToken, content);
         row.Title = prepared.Title;
         // A prepared book is never opened in "chỉ chuẩn bị" mode: list it in the project library now so it can be found.
         if (_projectLibraryReady)

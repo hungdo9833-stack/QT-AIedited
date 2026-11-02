@@ -9,6 +9,9 @@ namespace QuickTranslator.AiEditor.Core.AutoTranslate;
 
 public sealed record AutoBookStatus(string Stage, string Detail, string? Title = null);
 
+/// <summary>A book whose chapters are all downloaded and joined into one import text.</summary>
+public sealed record AutoBookDownload(Uri Url, string Title, string Text, string WorkDirectory);
+
 public sealed record AutoBookPrepared(ProjectSession Session, string Title, int ImportedChapters,
     CodexSurveyImportResult Survey, string Summary)
 {
@@ -41,6 +44,18 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
     public async Task<AutoBookPrepared> PrepareAsync(Uri url, string projectsDirectory, TimeSpan downloadDelay,
         CodexSurveyOptions codex, IProgress<AutoBookStatus>? status = null, CancellationToken cancellationToken = default,
         IProgress<ContentFlagReport>? contentFlags = null)
+    {
+        AutoBookDownload download = await DownloadAsync(url, downloadDelay, status, cancellationToken).ConfigureAwait(false);
+        return await PrepareAsync(download, projectsDirectory, codex, status, cancellationToken, contentFlags).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Downloads every chapter. Kept apart from <see cref="PrepareAsync(AutoBookDownload,string,CodexSurveyOptions,IProgress{AutoBookStatus},CancellationToken,IProgress{ContentFlagReport})"/>
+    /// so the next book can download while Codex surveys this one.
+    /// </summary>
+    /// <exception cref="AutoBookPausedException">The site walled off later chapters.</exception>
+    public async Task<AutoBookDownload> DownloadAsync(Uri url, TimeSpan downloadDelay, IProgress<AutoBookStatus>? status = null,
+        CancellationToken cancellationToken = default)
     {
         string work = Path.Combine(WorkRoot, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url.AbsoluteUri)))[..16]);
         string pages = Path.Combine(work, "pages");
@@ -76,7 +91,15 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
             if (string.IsNullOrWhiteSpace(text)) throw new InvalidDataException("Nội dung tải về trống.");
         }
         finally { (importer as IDisposable)?.Dispose(); }
+        return new(url, title, text, work);
+    }
 
+    /// <summary>Creates the project from a finished download, surveys it with Codex and saves the resources.</summary>
+    public async Task<AutoBookPrepared> PrepareAsync(AutoBookDownload download, string projectsDirectory,
+        CodexSurveyOptions codex, IProgress<AutoBookStatus>? status = null, CancellationToken cancellationToken = default,
+        IProgress<ContentFlagReport>? contentFlags = null)
+    {
+        (Uri url, string title, string text, string work) = download;
         status?.Report(new("Tạo dự án", ""));
         ProjectSession session = await repository.CreateAsync(NewProjectFolder(projectsDirectory, title), title, cancellationToken)
             .ConfigureAwait(false);
