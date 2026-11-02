@@ -1,0 +1,12 @@
+<!-- WPF UI (lepoco) on a leash: its Fluent brushes and only the controls this app uses (InfoBar, ProgressRing, Card).
+     Its global ControlsDictionary is deliberately NOT merged: Themes/Controls.xaml and App.xaml own every standard control,
+     so the app never mixes two templates for one control type. ThemeManager points the Fluent brush keys at our palette. -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:wpfui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <ResourceDictionary.MergedDictionaries>
+        <wpfui:ThemesDictionary Theme="Dark"/>
+        <ResourceDictionary Source="pack://application:,,,/Wpf.Ui;component/Controls/InfoBar/InfoBar.xaml"/>
+        <ResourceDictionary Source="pack://application:,,,/Wpf.Ui;component/Controls/ProgressRing/ProgressRing.xaml"/>
+        <ResourceDictionary Source="pack://application:,,,/Wpf.Ui;component/Controls/Card/Card.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+</ResourceDictionary>
