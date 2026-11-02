@@ -306,17 +306,13 @@ public partial class MainWindow
         if (character is not null && !string.Equals(character.VietnameseName, edited.Vietnamese, StringComparison.Ordinal))
         {
             if (ThemedDialog.Show(this, $"“{chinese}” đang gắn với hồ sơ {character.VietnameseName}. Mở hồ sơ nhân vật để đổi đồng bộ?",
-                "Thuật ngữ thuộc hồ sơ nhân vật", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
-            {
-                var profile = ShowCharacterEditor(CloneProfile(character));
-                if (profile is not null)
-                {
-                    int index = _characterProject.Profiles.FindIndex(p => p.Id == character.Id);
-                    _characterProject.Profiles[index] = profile;
-                    try { await SaveCharacterProjectAsync(); RefreshCharacterGrid(); }
-                    catch (Exception ex) { _resourcesDirty = true; RefreshCharacterGrid(); ShowError(ex); }
-                }
-            }
+                "Thuật ngữ thuộc hồ sơ nhân vật", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            var profile = ShowCharacterEditor(CloneProfile(character));
+            if (profile is null) return;
+            int index = _characterProject.Profiles.FindIndex(p => p.Id == character.Id);
+            _characterProject.Profiles[index] = profile;
+            try { await SaveCharacterProjectAsync(); RefreshCharacterGrid(); }
+            catch (Exception ex) { _resourcesDirty = true; RefreshCharacterGrid(); ShowError(ex); }
             return;
         }
         if (existing is not null && existing.Vietnamese != edited.Vietnamese &&

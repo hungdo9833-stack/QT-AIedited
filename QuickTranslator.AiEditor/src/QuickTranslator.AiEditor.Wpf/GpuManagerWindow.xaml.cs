@@ -665,7 +665,6 @@ public partial class GpuManagerWindow : Window
             local.Validate(); return local;
         }
         var profile = original.Clone(); profile.Name = NameInput.Text; profile.Runtime = runtime;
-        profile.Runtime = runtime;
         profile.Model = runtime.ModelOptions.Model;
         profile.ParallelRequests = ReadInt(ParallelRequestsInput, "Số request song song");
         profile.HourlyPrice = decimal.Parse(HourlyPriceInput.Text, CultureInfo.InvariantCulture);

@@ -574,9 +574,9 @@ public partial class ImportPreviewWindow : Window
         var ok = new Button { Content = "Áp dụng", IsDefault = true }; var cancel = new Button { Content = "Hủy", IsCancel = true };
         ok.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var panel = new StackPanel { Margin = new Thickness(24) };
-        var l1 = new TextBlock { Text = "Chọn dòng bắt đầu" }; l1.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
-        var l2 = new TextBlock { Text = "Số chương" }; l2.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
-        var l3 = new TextBlock { Text = "Tên chương" }; l3.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+        TextBlock l1 = ImportPreviewCreateBoundaryLabel("Chọn dòng bắt đầu");
+        TextBlock l2 = ImportPreviewCreateBoundaryLabel("Số chương");
+        TextBlock l3 = ImportPreviewCreateBoundaryLabel("Tên chương");
         panel.Children.Add(l1); panel.Children.Add(lines);
         panel.Children.Add(l2); panel.Children.Add(numberInput);
         panel.Children.Add(l3); panel.Children.Add(titleInput);
@@ -593,15 +593,23 @@ public partial class ImportPreviewWindow : Window
         offset = selected.Offset; chapterTitle = titleInput.Text.Trim(); return true;
     }
 
+    private static TextBlock ImportPreviewCreateBoundaryLabel(string text)
+    {
+        var label = new TextBlock { Text = text };
+        label.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
+        return label;
+    }
+
     private bool TrySelectedChapter([NotNullWhen(true)] out PreviewRow? row)
     {
         row = PreviewGrid.SelectedItem as PreviewRow;
-        if (row is null || _editor is null)
-        { ShowError("Hãy chọn một chương."); return false; }
-        Guid selectedId = row.Id;
-        if (!_editor.Current.Items.Single(x => x.Id == selectedId).IsChapter)
-        { ShowError("Hãy chọn một chương."); return false; }
-        return true;
+        if (row is not null && _editor is not null)
+        {
+            Guid selectedId = row.Id;
+            if (_editor.Current.Items.Single(x => x.Id == selectedId).IsChapter) return true;
+        }
+        ShowError("Hãy chọn một chương.");
+        return false;
     }
 
     private string? ProjectCollision(ImportPreviewItem item)

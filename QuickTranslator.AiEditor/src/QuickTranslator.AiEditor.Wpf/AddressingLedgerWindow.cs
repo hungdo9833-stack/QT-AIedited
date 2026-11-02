@@ -290,7 +290,7 @@ public sealed class AddressingLedgerWindow : Window
             Work = await Task.Run(() => AddressingSurveyRunner.Plan(_session.Manifest.ProjectId, sources, resources, state));
             _tasks = Work.Scenes.Concat(Work.Tasks).GroupBy(t => t.TaskId).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
             ShowWork(Work);
-            _updatingLock = true; _lock.IsChecked = CurrentResources.Characters.ConsistencyLockEnabled; _updatingLock = false;
+            AddressingLedgerUpdateLock(CurrentResources);
             await RefreshCompletionAsync();
             Refresh();
         }, "Đã nạp sổ xưng hô.");
@@ -303,7 +303,8 @@ public sealed class AddressingLedgerWindow : Window
             string summary = p.Kind == AddressingTaskKind.Character
                 ? $"{GenderLabel(p.Gender)} · " + string.Join("; ", p.Phases.Select(x => $"{Range(x)} {x.NarrativeVi}")) + (p.NameForms.Count > 0 ? " · " + string.Join(", ", p.NameForms.Select(f => $"{f.Zh}={f.Vi}")) : "")
                 : $"{p.Relationship} · " + string.Join("; ", p.Phases.Select(x => $"{Range(x)} xưng {x.SelfVi} / gọi {x.AddressVi}"));
-            string decision = State.LatestReview(p.Id)?.Decision switch { AddressingDecision.Accepted => "Đã ghi", AddressingDecision.Rejected => "Bác bỏ", AddressingDecision.Deferred => "Để sau", _ => "Chờ" } + (State.LatestReview(p.Id)?.Note == "Tự động · Hoàn thành" ? " (tự động)" : "");
+            var review = State.LatestReview(p.Id);
+            string decision = review?.Decision switch { AddressingDecision.Accepted => "Đã ghi", AddressingDecision.Rejected => "Bác bỏ", AddressingDecision.Deferred => "Để sau", _ => "Chờ" } + (review?.Note == "Tự động · Hoàn thành" ? " (tự động)" : "");
             return new(p, p.Listener is null ? p.Subject : $"{p.Subject} → {p.Listener}", p.Status, p.EvidenceValid ? "✅ hợp lệ" : "❌ " + string.Join(", ", p.Issues), summary, decision);
         }
         bool onlyValid = _onlyValid.IsChecked == true;
@@ -541,7 +542,7 @@ public sealed class AddressingLedgerWindow : Window
             done = await _service.CompleteAsync(CurrentResources.Revision);
             CurrentResources = done.Resources; _applyResources(done.Resources);
             State = await _service.LoadAsync();
-            _updatingLock = true; _lock.IsChecked = done.Resources.Characters.ConsistencyLockEnabled; _updatingLock = false;
+            AddressingLedgerUpdateLock(done.Resources);
             Refresh(); await RefreshCompletionAsync();
         }, "Đã Hoàn thành.");
         if (done is not null)
@@ -561,9 +562,16 @@ public sealed class AddressingLedgerWindow : Window
                 saved = await _service.UndoCompletionAsync(discardLaterEdits: true);
             }
             CurrentResources = saved; _applyResources(saved); State = await _service.LoadAsync();
-            _updatingLock = true; _lock.IsChecked = saved.Characters.ConsistencyLockEnabled; _updatingLock = false;
+            AddressingLedgerUpdateLock(saved);
             Refresh(); await RefreshCompletionAsync();
         }, "Đã hoàn tác lần Hoàn thành gần nhất.");
+    }
+
+    private void AddressingLedgerUpdateLock(ProjectResources resources)
+    {
+        _updatingLock = true;
+        _lock.IsChecked = resources.Characters.ConsistencyLockEnabled;
+        _updatingLock = false;
     }
 
     internal void SelectRow(AddressingTaskKind kind, string subject)

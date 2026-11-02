@@ -34,8 +34,7 @@ public partial class AutoTranslateWindow : Window
             IReadOnlyList<Uri> links = ParseLinks(LinksInput.Text);
             foreach (Uri link in links)
             {
-                AutoBookRow row = _rows.FirstOrDefault(existing => existing.Url == link) ?? AddRow(link);
-                Enqueue(row);
+                Enqueue(_rows.FirstOrDefault(existing => existing.Url == link) ?? AddRow(link));
             }
             LinksInput.Clear();
         }

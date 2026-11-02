@@ -240,7 +240,7 @@ public partial class ChapterManagerView : UserControl
 
     private async void OnQueue(object sender, RoutedEventArgs e)
     {
-        ChapterManagerWindow.ChapterManagerRow[] rows = SelectedRows().Where(row => !row.IsDeleted).OrderBy(row => row.DisplayOrder).ToArray();
+        ChapterManagerWindow.ChapterManagerRow[] rows = ChapterManagerOrderedActiveRows().ToArray();
         if (rows.Length == 0) return;
         await RunAsync(() => _commands.Queue(rows.Select(row => row.ChapterId).ToArray()),
             $"Đã bắt đầu dịch {rows.Length:N0} chương. Theo dõi tiến độ ở mục Hàng đợi.");
@@ -248,8 +248,7 @@ public partial class ChapterManagerView : UserControl
 
     private async void OnResegment(object sender, RoutedEventArgs e)
     {
-        ChapterManagerWindow.ChapterManagerRow[] rows = SelectedRows().Where(row => !row.IsDeleted)
-            .OrderBy(row => row.DisplayOrder).ToArray();
+        ChapterManagerWindow.ChapterManagerRow[] rows = ChapterManagerOrderedActiveRows().ToArray();
         if (rows.Length == 0) return;
         await RunAsync(() => _commands.Resegment(rows.Select(row => row.ChapterId).ToArray()),
             "Đã chia lại đoạn cho các chương đã chọn.");
@@ -257,7 +256,7 @@ public partial class ChapterManagerView : UserControl
 
     private async void OnTranslateSelectedTitles(object sender, RoutedEventArgs e)
     {
-        Guid[] ids = SelectedRows().Where(row => !row.IsDeleted).OrderBy(row => row.DisplayOrder)
+        Guid[] ids = ChapterManagerOrderedActiveRows()
             .Select(row => row.ChapterId).ToArray();
         if (ids.Length == 0) return;
         await RunAsync(() => _commands.TranslateTitles(ids), "Đã cập nhật tiêu đề các chương được chọn.");
@@ -295,6 +294,9 @@ public partial class ChapterManagerView : UserControl
     }
 
     private ChapterManagerWindow.ChapterManagerRow[] SelectedRows() => ChapterGrid.SelectedItems.Cast<ChapterManagerWindow.ChapterManagerRow>().ToArray();
+
+    private IEnumerable<ChapterManagerWindow.ChapterManagerRow> ChapterManagerOrderedActiveRows() =>
+        SelectedRows().Where(row => !row.IsDeleted).OrderBy(row => row.DisplayOrder);
 
     private void UpdateCommands()
     {

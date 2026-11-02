@@ -127,9 +127,7 @@ public partial class MainWindow
         catch (Exception ex)
         {
             // Adjustment B: retain confirmed inputs in memory on write failure so user can retry Save.
-            _resourcesDirty = true;
-            RefreshCharacterGrid();
-            ShowError(ex);
+            CharactersHandleSaveFailure(ex);
         }
         finally { EndUiOperation(); }
     }
@@ -150,12 +148,7 @@ public partial class MainWindow
             await SaveCharacterProjectAsync();
             SetStatus("Đã cập nhật và lưu hồ sơ nhân vật vào tài nguyên dự án.");
         }
-        catch (Exception ex)
-        {
-            _resourcesDirty = true;
-            RefreshCharacterGrid();
-            ShowError(ex);
-        }
+        catch (Exception ex) { CharactersHandleSaveFailure(ex); }
         finally { EndUiOperation(); }
     }
 
@@ -175,13 +168,15 @@ public partial class MainWindow
             await SaveCharacterProjectAsync();
             SetStatus($"Đã xóa hồ sơ {selected.VietnameseName} và lưu tài nguyên dự án.");
         }
-        catch (Exception ex)
-        {
-            _resourcesDirty = true;
-            RefreshCharacterGrid();
-            ShowError(ex);
-        }
+        catch (Exception ex) { CharactersHandleSaveFailure(ex); }
         finally { EndUiOperation(); }
+    }
+
+    private void CharactersHandleSaveFailure(Exception ex)
+    {
+        _resourcesDirty = true;
+        RefreshCharacterGrid();
+        ShowError(ex);
     }
 
     private async void OnSaveCharacters(object sender, RoutedEventArgs e)
@@ -343,14 +338,12 @@ public partial class MainWindow
             {
                 TextBox? blockBox = FindVisualChildren<TextBox>(ChapterBlocksItems)
                     .FirstOrDefault(input => input.Tag is Guid id && id == selected.Item.SegmentId);
-                if (blockBox is not null)
-                {
-                    int start = Math.Min(selected.Item.StartUtf16, blockBox.Text.Length);
-                    int length = Math.Min(selected.Item.Length, blockBox.Text.Length - start);
-                    blockBox.Focus();
-                    blockBox.Select(start, length);
-                    blockBox.BringIntoView();
-                }
+                if (blockBox is null) return;
+                int start = Math.Min(selected.Item.StartUtf16, blockBox.Text.Length);
+                int length = Math.Min(selected.Item.Length, blockBox.Text.Length - start);
+                blockBox.Focus();
+                blockBox.Select(start, length);
+                blockBox.BringIntoView();
             });
         }
         SetStatus("Đã mở đúng đoạn và vị trí đại từ ngay tại chỗ. Hãy đối chiếu câu gốc, câu dịch và lý do trước khi sửa hoặc áp dụng.");

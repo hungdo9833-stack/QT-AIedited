@@ -212,13 +212,12 @@ public partial class MainWindow
 
         IReadOnlyList<BatchReplacementRule> BuildRules(IReadOnlyList<ChapterDocument> chapters)
         {
-            var manual = new List<BatchReplacementRule>();
+            var rules = new List<BatchReplacementRule>();
             if (!string.IsNullOrEmpty(find.Text))
-                manual.Add(new() { Find = find.Text, Replacement = replace.Text, Confirmed = true,
+                rules.Add(new() { Find = find.Text, Replacement = replace.Text, Confirmed = true,
                     Source = ReplacementRuleSource.Manual, SourceLabel = "Quy tắc nhập trực tiếp" });
-            manual.AddRange(ReplacementRuleCatalog.ParseManualRules(manualRules.Text));
-            var rules = new List<BatchReplacementRule>(manual);
-            var manualKeys = manual.Select(x => x.Find).ToHashSet(StringComparer.Ordinal);
+            rules.AddRange(ReplacementRuleCatalog.ParseManualRules(manualRules.Text));
+            var manualKeys = rules.Select(x => x.Find).ToHashSet(StringComparer.Ordinal);
             if (useConfirmed.IsChecked == true)
                 foreach (var chapter in chapters)
                     rules.AddRange(ReplacementRuleCatalog.FromChapter(chapter).Rules
