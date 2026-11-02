@@ -3,13 +3,15 @@
  <Application.Resources>
   <ResourceDictionary>
    <ResourceDictionary.MergedDictionaries>
+    <ResourceDictionary Source="Themes/Fluent.xaml"/>
+    <ResourceDictionary Source="Themes/Tokens.xaml"/>
     <ResourceDictionary Source="Themes/Brushes.xaml"/>
     <ResourceDictionary Source="Themes/Controls.xaml"/>
    </ResourceDictionary.MergedDictionaries>
 
    <!-- Icons: Segoe Fluent Icons (Windows 11), Segoe MDL2 Assets on Windows 10. -->
    <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
-   <Style x:Key="IconText" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="16"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+   <Style x:Key="IconText" TargetType="TextBlock"><Setter Property="FontFamily" Value="{StaticResource IconFont}"/><Setter Property="FontSize" Value="{StaticResource FontSize.Icon}"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
 
    <!-- Keyboard focus: a 2 px ring in FocusBrush, drawn outside the control. -->
    <Style x:Key="FocusVisual">
@@ -20,7 +22,7 @@
     </Setter>
    </Style>
 
-   <Style TargetType="Window"><Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/><Setter Property="FontSize" Value="13"/><Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="TextOptions.TextFormattingMode" Value="Display"/><Setter Property="UseLayoutRounding" Value="True"/><Setter Property="SnapsToDevicePixels" Value="True"/></Style>
+   <Style TargetType="Window"><Setter Property="FontFamily" Value="{StaticResource Font.Text}"/><Setter Property="FontSize" Value="{StaticResource FontSize.Body}"/><Setter Property="Background" Value="{DynamicResource AppBackgroundBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="TextOptions.TextFormattingMode" Value="Display"/><Setter Property="UseLayoutRounding" Value="True"/><Setter Property="SnapsToDevicePixels" Value="True"/></Style>
 
    <!-- Buttons: one template for every variant, so hover/pressed never fall back to the system light-blue chrome. -->
    <Style TargetType="Button">
@@ -93,9 +95,9 @@
    <Style TargetType="DataGridColumnHeader"><Setter Property="Background" Value="{DynamicResource PanelAltBrush}"/><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="0,0,1,1"/><Setter Property="Padding" Value="8,7"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
    <Style TargetType="Menu"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
    <!-- Window heading (Title 20/28 Semibold) and its one-line subtitle; every window uses these, root margin 16. -->
-   <Style x:Key="WindowTitle" TargetType="TextBlock"><Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
+   <Style x:Key="WindowTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleText}"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
    <Style x:Key="WindowSubtitle" TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="Margin" Value="0,2,0,0"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
-   <Style x:Key="SectionTitle" TargetType="TextBlock"><Setter Property="FontSize" Value="20"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="4,4,4,12"/></Style>
+   <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleText}"><Setter Property="Margin" Value="4,4,4,12"/></Style>
    <Style x:Key="FieldLabel" TargetType="TextBlock"><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="4,8,4,3"/></Style>
    <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="12"/><Setter Property="Margin" Value="3,3,3,9"/></Style>
   </ResourceDictionary>
