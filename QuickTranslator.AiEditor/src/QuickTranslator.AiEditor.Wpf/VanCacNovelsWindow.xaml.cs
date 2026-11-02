@@ -114,15 +114,16 @@ public partial class VanCacNovelsWindow : Window
 
     private void ShowError(Exception ex)
     {
-        if (ex is VanCacApiException { StatusCode: 401 })
+        if (ex is not VanCacApiException { StatusCode: 401 })
         {
-            _account.ExpireSession();
-            StatusText.Text = VanCacAccountManager.SessionExpiredMessage;
-            NovelsList.ItemsSource = null;
-            ChaptersList.ItemsSource = null;
-            RefreshAccount();
+            StatusText.Text = "Không tải được dữ liệu: " + ex.Message;
+            return;
         }
-        else StatusText.Text = "Không tải được dữ liệu: " + ex.Message;
+        _account.ExpireSession();
+        StatusText.Text = VanCacAccountManager.SessionExpiredMessage;
+        NovelsList.ItemsSource = null;
+        ChaptersList.ItemsSource = null;
+        RefreshAccount();
     }
 
     private async void OnReload(object sender, RoutedEventArgs e) => await LoadNovelsAsync();

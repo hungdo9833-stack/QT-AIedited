@@ -192,10 +192,10 @@ public partial class ProjectTranslationQueueView : UserControl
                   $"mỗi luồng: {metrics.PerSlotTokensPerSecond:N1} tok/s từ token đầu ra / tổng thời gian sinh request."
                 : "Thông lượng sẽ hiện sau segment đầu tiên được lưu.";
         }
-        string? resumeHint = needsReview > 0 || progress.Status == ProjectTranslationJobStatus.Interrupted
-            ? needsReview > 0
-                ? "Một số chương đã đổi nguyên văn hoặc ranh giới. Hãy kiểm tra trước khi xử lý lại."
-                : "Bấm “Tiếp tục dịch”; cấu hình hợp lệ hiện tại sẽ được áp dụng tự động."
+        string? resumeHint = needsReview > 0
+            ? "Một số chương đã đổi nguyên văn hoặc ranh giới. Hãy kiểm tra trước khi xử lý lại."
+            : progress.Status == ProjectTranslationJobStatus.Interrupted
+                ? "Bấm “Tiếp tục dịch”; cấu hình hợp lệ hiện tại sẽ được áp dụng tự động."
             : null;
         StatusText.Text = planMode
             ? $"Đang chuẩn bị dịch {job.Items.Count:N0} chương bằng {Math.Max(1, job.Workers.Count)} GPU."
@@ -286,8 +286,7 @@ public partial class ProjectTranslationQueueView : UserControl
             _rowsByChapter.Clear();
             foreach (ProjectTranslationItem item in job.Items.OrderBy(item => item.Order))
             {
-                string worker = item.AssignedWorkerId is Guid workerId && workerNames.TryGetValue(workerId, out string? name)
-                    ? name : "—";
+                string worker = ProjectQueueWorkerName(item, workerNames);
                 var row = new QueueRow(item, worker);
                 _rows.Add(row);
                 _rowsByChapter[item.ChapterId] = row;
@@ -297,11 +296,13 @@ public partial class ProjectTranslationQueueView : UserControl
         }
         foreach (ProjectTranslationItem item in job.Items)
         {
-            string worker = item.AssignedWorkerId is Guid workerId && workerNames.TryGetValue(workerId, out string? name)
-                ? name : "—";
+            string worker = ProjectQueueWorkerName(item, workerNames);
             _rowsByChapter[item.ChapterId].Apply(item, worker);
         }
     }
+
+    private static string ProjectQueueWorkerName(ProjectTranslationItem item, IReadOnlyDictionary<Guid, string> workerNames) =>
+        item.AssignedWorkerId is Guid workerId && workerNames.TryGetValue(workerId, out string? name) ? name : "—";
 
     private async void OnQueueGridDoubleClick(object sender, MouseButtonEventArgs e)
     {

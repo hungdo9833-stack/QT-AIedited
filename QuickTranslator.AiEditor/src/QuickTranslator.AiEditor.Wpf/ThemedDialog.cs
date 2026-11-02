@@ -83,9 +83,7 @@ internal sealed class ThemedDialog : Window
         if (ImageGlyph(image) is { } icon) { DockPanel.SetDock(icon, Dock.Left); body.Children.Add(icon); }
         body.Children.Add(scroller);
 
-        var footerBar = new Border { Padding = new Thickness(24, 12, 24, 12), BorderThickness = new Thickness(0, 1, 0, 0), Child = footer };
-        footerBar.SetResourceReference(Border.BackgroundProperty, "PanelAltBrush");
-        footerBar.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
+        Border footerBar = ThemedDialogCreateFooterBar(footer);
         var root = new DockPanel();
         DockPanel.SetDock(footerBar, Dock.Bottom);
         root.Children.Add(footerBar);
@@ -150,6 +148,11 @@ internal sealed class ThemedDialog : Window
         }
         if (primary is not null) primary.IsDefault = true;
         if (cancel is not null) cancel.IsCancel = true;
+        return ThemedDialogCreateFooterBar(panel);
+    }
+
+    private static Border ThemedDialogCreateFooterBar(StackPanel panel)
+    {
         var bar = new Border { Padding = new Thickness(24, 12, 24, 12), BorderThickness = new Thickness(0, 1, 0, 0), Child = panel };
         bar.SetResourceReference(Border.BackgroundProperty, "PanelAltBrush");
         bar.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");

@@ -234,14 +234,15 @@ public partial class ProjectPublicationView : UserControl
         try
         {
             var progress = new Progress<ProjectPublicationProgress>(UpdateProgress);
-            ProjectPublicationReport report = format == PublicationFormat.Pdf
-                ? await ProjectPdfExporter.ExportAsync(_service, _session, _inspection, path, options,
-                    progress, _operationCancellation.Token)
-                : format == PublicationFormat.Epub
-                    ? await _service.ExportEpubAsync(_session, _inspection, path, options, progress,
-                        _operationCancellation.Token)
-                : await _service.ExportTextAsync(_session, _inspection, path, options, progress,
-                    _operationCancellation.Token);
+            ProjectPublicationReport report = format switch
+            {
+                PublicationFormat.Pdf => await ProjectPdfExporter.ExportAsync(_service, _session, _inspection, path,
+                    options, progress, _operationCancellation.Token),
+                PublicationFormat.Epub => await _service.ExportEpubAsync(_session, _inspection, path, options,
+                    progress, _operationCancellation.Token),
+                _ => await _service.ExportTextAsync(_session, _inspection, path, options, progress,
+                    _operationCancellation.Token)
+            };
             LastExportPath = report.OutputPath;
             OutputPathText.Text = "Đã xuất " + report.ExportedChapterCount.ToString("N0") + " chương:\n" + report.OutputPath;
             ExportedActionsPanel.Visibility = Visibility.Visible;
