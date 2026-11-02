@@ -106,7 +106,7 @@ internal static class EditorActionPolicy
             else
             {
                 primaryKind = EditorActionKind.OpenProject;
-                label = "Mở Project";
+                label = "Mở dự án";
                 secondary = [EditorActionKind.CreateProject];
             }
         }
@@ -170,7 +170,7 @@ internal static class EditorActionPolicy
 
         if ((kind is EditorActionKind.TranslateChapter or EditorActionKind.ResumeQueue or
              EditorActionKind.SplitChapter) && context.ProjectQueueRunning)
-            return "Hàng đợi Project đang chạy; tạm dừng hàng đợi trước.";
+            return "Hàng đợi dịch đang chạy; tạm dừng hàng đợi trước.";
 
         if ((kind is EditorActionKind.TranslateChapter or EditorActionKind.TranslateSegment or
              EditorActionKind.RetryErrors or EditorActionKind.SplitChapter) && !context.PresetsReady)
@@ -180,7 +180,7 @@ internal static class EditorActionPolicy
         {
             EditorActionKind.OpenProject or EditorActionKind.CreateProject => null,
             EditorActionKind.ImportTxt or EditorActionKind.CreateChapter when !context.ProjectOpen =>
-                "Hãy mở Project trước.",
+                "Hãy mở dự án trước.",
             EditorActionKind.SplitChapter when !context.RawSourceTextPresent =>
                 "Chưa có nguyên văn để chia đoạn.",
             EditorActionKind.EditSource when !context.ChapterSegmented => "Chưa có chương để sửa nguyên văn.",
@@ -210,7 +210,7 @@ internal static class EditorActionPolicy
             EditorActionKind.ShowHistory when context.SelectedSegmentStatus is null => "Chọn một đoạn trước.",
             EditorActionKind.NextUnfinishedChapter when !context.ProjectOpen => "Chương đã duyệt hoàn toàn.",
             EditorActionKind.NextUnfinishedChapter when !context.NextUnfinishedProjectChapterExists =>
-                "Mọi chương trong Project đã duyệt.",
+                "Mọi chương trong dự án đã duyệt.",
             _ => null
         };
     }

@@ -96,7 +96,7 @@ public partial class MainWindow
         _currentEditorActionPlan = plan;
 
         EditorContextTitleText.Text = _projectSession is null
-            ? chapter?.Title ?? "Chưa mở Project"
+            ? chapter?.Title ?? "Chưa mở dự án"
             : $"{_projectSession.Manifest.VietnameseTitle}  ›  {chapter?.Title ?? "Chưa mở chương"}";
         UpdateEditorStateLabels(chapter);
 
@@ -175,7 +175,7 @@ public partial class MainWindow
         }
 
         string? processing = _busy ? "Đang dịch đoạn"
-            : _projectTranslationCoordinator?.IsRunning == true ? "Queue Project đang chạy"
+            : _projectTranslationCoordinator?.IsRunning == true ? "Hàng đợi dịch đang chạy"
             : chapter?.QueueStatus switch
             {
                 QueueStatus.Running => "Queue chương đang chạy",
@@ -336,7 +336,7 @@ public partial class MainWindow
 
     private static string ActionLabel(EditorActionKind kind) => kind switch
     {
-        EditorActionKind.CreateProject => "Tạo Project",
+        EditorActionKind.CreateProject => "Tạo dự án",
         EditorActionKind.CreateChapter => "Tạo chương",
         EditorActionKind.TranslateSegment => "Dịch đoạn",
         EditorActionKind.ApproveAndNext => "Duyệt & Tiếp",

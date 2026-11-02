@@ -91,7 +91,7 @@ public sealed class ChineseRetranslationUiTests
             Button command = Descendants<Button>(dialog).Single(button => Equals(button.Content, "Dịch lại…"));
 
             Assert.True(command.IsEnabled);
-            Assert.Contains("toàn bộ Project", command.ToolTip?.ToString());
+            Assert.Contains("toàn bộ dự án", command.ToolTip?.ToString());
             Assert.Equal(DataGridSelectionMode.Extended, chinese.SelectionMode);
             Assert.True(chinese.Items.Count >= 2);
             chinese.SelectedItems.Add(chinese.Items[0]);

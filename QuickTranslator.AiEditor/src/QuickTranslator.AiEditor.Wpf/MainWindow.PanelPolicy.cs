@@ -104,7 +104,7 @@ public partial class MainWindow
         string label = panel switch
         {
             PanelId.ProjectSidebar => _compactShell ? "Mục lục" : visible ? "Ẩn mục lục" : "Hiện mục lục",
-            PanelId.Inspector => _compactShell ? "Inspector" : visible ? "Ẩn Inspector" : "Hiện Inspector",
+            PanelId.Inspector => _compactShell ? "Tra cứu" : visible ? "Ẩn bảng tra cứu" : "Hiện bảng tra cứu",
             _ => _compactShell ? "Đoạn" : visible ? "Ẩn danh sách đoạn" : "Hiện danh sách đoạn"
         };
         if (PanelToggle(panel) is MenuItem menu) menu.Header = label;

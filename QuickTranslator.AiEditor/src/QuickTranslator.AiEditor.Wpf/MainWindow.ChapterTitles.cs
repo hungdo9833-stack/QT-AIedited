@@ -58,7 +58,7 @@ public partial class MainWindow
             ? ExistingVietnameseTitlePolicy.OverwriteConfirmed : ExistingVietnameseTitlePolicy.KeepExisting;
         if (policy == ExistingVietnameseTitlePolicy.OverwriteConfirmed &&
             ThemedDialog.Show(dialog.Owner, "Các tên tiếng Việt hiện có trong phạm vi này sẽ được thay bằng bản xem trước. " +
-                "Nguyên văn, segments, drafts, approvals, history và queue checkpoint vẫn giữ nguyên. Tiếp tục?",
+                "Nguyên văn, đoạn, bản nháp, phê duyệt, lịch sử và điểm lưu hàng đợi vẫn giữ nguyên. Tiếp tục?",
                 "Xác nhận thay tiêu đề Việt", MessageBoxButton.YesNo, MessageBoxImage.Warning,
                 MessageBoxResult.No) != MessageBoxResult.Yes)
             throw new OperationCanceledException("Đã hủy trước khi ghi đè tiêu đề Việt hiện có.");

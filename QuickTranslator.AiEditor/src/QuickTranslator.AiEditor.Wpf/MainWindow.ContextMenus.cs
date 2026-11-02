@@ -172,7 +172,7 @@ public partial class MainWindow
         {
             var conflict = _glossaryRows.FirstOrDefault(t => string.Equals(t.Chinese, quick.Profile.ChineseName, StringComparison.Ordinal));
             if (conflict is not null && !string.Equals(conflict.Vietnamese, quick.Profile.VietnameseName, StringComparison.Ordinal) &&
-                ThemedDialog.Show(this, $"Glossary đang có “{conflict.Chinese} = {conflict.Vietnamese}”. Thay bằng “{quick.Profile.VietnameseName}”?",
+                ThemedDialog.Show(this, $"Thuật ngữ đang có “{conflict.Chinese} = {conflict.Vietnamese}”. Thay bằng “{quick.Profile.VietnameseName}”?",
                     "Xác nhận ánh xạ", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             _characterProject.Profiles.Add(quick.Profile);
             var merged = ReadTerms().Where(t => !string.Equals(t.Chinese, quick.Profile.ChineseName, StringComparison.Ordinal)).ToList();
@@ -325,7 +325,7 @@ public partial class MainWindow
             GlossaryChanged();
             if (!await PersistCurrentGlossaryAsync())
             {
-                SetStatus("Glossary còn trong bộ nhớ, chưa lưu. Hãy lưu chương rồi thử Lưu thiết lập.");
+                SetStatus("Thuật ngữ còn trong bộ nhớ, chưa lưu. Hãy lưu chương rồi thử Lưu thiết lập.");
                 return;
             }
             SetStatus("Đã lưu thuật ngữ vào glossary của chương hiện tại.");
@@ -430,7 +430,7 @@ public partial class MainWindow
             SetStatus("Đang dịch riêng vùng chọn; kết quả chỉ để xem và không ghi đè bản dịch chương.");
             var result = await translation;
             ShowTextWindow("Dịch riêng vùng chọn — chưa lưu vào bản dịch chương", result.Text);
-            SetStatus("Đã dịch riêng vùng chọn. Kết quả không làm thay đổi segment hoặc bản người dùng đã sửa.");
+            SetStatus("Đã dịch riêng vùng chọn. Kết quả không làm thay đổi đoạn hoặc bản người dùng đã sửa.");
         }
         catch (OperationCanceledException) { SetStatus("Đã hủy dịch riêng vùng chọn."); }
         catch (Exception ex) { ShowError(ex); }

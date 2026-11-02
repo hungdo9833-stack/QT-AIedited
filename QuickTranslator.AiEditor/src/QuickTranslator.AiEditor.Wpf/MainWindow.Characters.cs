@@ -281,7 +281,7 @@ public partial class MainWindow
         PronounReportSummary.Text = summary;
         if (FindName("InspectorPronounResultsList") is ListBox inspectorList) inspectorList.ItemsSource = items;
         if (FindName("InspectorPronounSummaryText") is TextBlock inspectorSummary) inspectorSummary.Text = summary;
-        SetStatus("Đã quét bằng quy tắc cục bộ. Chọn kết quả ngay trên Editor/Inspector để đối chiếu hoặc bấm Áp dụng an toàn.");
+        SetStatus("Đã quét bằng quy tắc cục bộ. Chọn kết quả ngay trong vùng biên tập hoặc bảng tra cứu để đối chiếu hoặc bấm Áp dụng an toàn.");
         UpdateButtons();
     }
 
@@ -454,7 +454,7 @@ public partial class MainWindow
         var secondary = PronounField(profile.SecondaryNarrativePronoun);
         var narrativeLocked = new CheckBox { Content = "Khóa đại từ trần thuật chính cho nhân vật này",
             IsChecked = profile.NarrativePronounLocked, Margin = new Thickness(4, 8, 4, 4) };
-        var narrativeHelp = new TextBlock { Text = "Khi khóa nhất quán của Project bật, đại từ phụ không thay thế đại từ chính trong prompt hoặc chuẩn hóa.",
+        var narrativeHelp = new TextBlock { Text = "Khi khóa nhất quán của dự án bật, đại từ phụ không thay thế đại từ chính trong prompt hoặc chuẩn hóa.",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
         narrativeHelp.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "MutedBrush");
         var disallowed = Field(string.Join(Environment.NewLine, profile.DisallowedNarrativePronouns), 85);

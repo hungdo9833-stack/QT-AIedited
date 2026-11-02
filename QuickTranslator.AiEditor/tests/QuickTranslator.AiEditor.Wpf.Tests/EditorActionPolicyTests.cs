@@ -39,7 +39,7 @@ public sealed class EditorActionPolicyTests
         EditorActionPlan projectPlan = EditorActionPolicy.Decide(project);
         Assert.Equal(EditorActionKind.TranslateChapter, projectPlan.Primary.Kind);
         Assert.False(projectPlan.Primary.IsEnabled);
-        Assert.Equal("Hàng đợi Project đang chạy; tạm dừng hàng đợi trước.", projectPlan.Primary.DisabledReason);
+        Assert.Equal("Hàng đợi dịch đang chạy; tạm dừng hàng đợi trước.", projectPlan.Primary.DisabledReason);
     }
 
     [Fact]

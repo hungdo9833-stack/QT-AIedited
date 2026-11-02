@@ -56,7 +56,7 @@ public partial class MainWindow
             else
             {
                 var result = await _service.UndoLatestBatchReplacementAsync(latest.Id);
-                SetStatus($"Đã hoàn tác {result.OccurrencesChanged} vị trí trong {result.SegmentsChanged} segment.");
+                SetStatus($"Đã hoàn tác {result.OccurrencesChanged} vị trí trong {result.SegmentsChanged} đoạn.");
             }
             Refresh();
         }
@@ -86,12 +86,12 @@ public partial class MainWindow
         var scope = new ComboBox { Width = 245, DisplayMemberPath = "Label" };
         scope.ItemsSource = new[]
         {
-            new ScopeOption(BatchReplacementScope.SelectedSegment, "Segment đang chọn"),
+            new ScopeOption(BatchReplacementScope.SelectedSegment, "Đoạn đang chọn"),
             new ScopeOption(BatchReplacementScope.CurrentChapter, "Toàn bộ chương hiện tại"),
             new ScopeOption(BatchReplacementScope.CurrentProject, "Tất cả chương trong bộ truyện")
         };
         scope.SelectedIndex = 1;
-        var useConfirmed = new CheckBox { Content = "Glossary & hồ sơ đã xác nhận", IsChecked = true, Margin = new Thickness(8, 3, 4, 3) };
+        var useConfirmed = new CheckBox { Content = "Thuật ngữ & hồ sơ đã xác nhận", IsChecked = true, Margin = new Thickness(8, 3, 4, 3) };
         var useTraditional = new CheckBox { Content = "Kèm gợi ý Data truyền thống (không tự chọn)", Margin = new Thickness(8, 3, 4, 3) };
         var allowProtected = new CheckBox
         {
@@ -125,7 +125,7 @@ public partial class MainWindow
         var retranslate = new Button
         {
             Content = "Dịch lại…",
-            ToolTip = "Dịch lại các vị trí chọn bằng Ctrl/Shift hoặc toàn bộ Project; có thể dịch cả segment hoặc chỉ cụm chữ Hán"
+            ToolTip = "Dịch lại các vị trí chọn bằng Ctrl/Shift hoặc toàn bộ dự án; có thể dịch cả đoạn hoặc chỉ cụm chữ Hán"
         };
         var cancelRetranslation = new Button { Content = "Hủy dịch lại", IsEnabled = false };
         var selectEligible = new Button { Content = "Chọn vị trí đủ điều kiện" };
@@ -134,7 +134,7 @@ public partial class MainWindow
         applySelected.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         var undo = new Button { Content = "Hoàn tác lần thay thế" };
         var keep = new Button { Content = "Đánh dấu giữ nguyên" };
-        var addGlossary = new Button { Content = "Xác nhận vào Glossary…" };
+        var addGlossary = new Button { Content = "Xác nhận vào thuật ngữ…" };
         var addCharacter = new Button { Content = "Xác nhận hồ sơ nhân vật…" };
         var close = new Button { Content = "Đóng" };
         var top = new StackPanel();
@@ -292,7 +292,7 @@ public partial class MainWindow
                     chineseRows.Add(new(item, counts[item.Text]));
                 status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextBrush");
                 status.Text = $"Có {report.TotalOccurrences} vị trí · chưa biết {report.UnknownOccurrences} · xung đột {report.ConflictOccurrences}. " +
-                    "Nhấp đúp để mở đúng segment; ứng dụng không suy đoán tên chưa xác nhận.";
+                    "Nhấp đúp để mở đúng đoạn; ứng dụng không suy đoán tên chưa xác nhận.";
                 tabs.SelectedIndex = 1; ApplyFilter();
             }
             catch (Exception ex) { status.Text = "Lỗi: " + ex.Message; status.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "DangerBrush"); }
@@ -389,7 +389,7 @@ public partial class MainWindow
                 {
                     var result = await _service!.ApplyBatchReplacementAsync(items, allowProtectedChanges,
                         ((ScopeOption)scope.SelectedItem).Scope);
-                    status.Text = $"Đã thay {result.OccurrencesChanged} vị trí trong {result.SegmentsChanged} segment. Bản AI gốc vẫn nằm trong lịch sử.";
+                    status.Text = $"Đã thay {result.OccurrencesChanged} vị trí trong {result.SegmentsChanged} đoạn. Bản AI gốc vẫn nằm trong lịch sử.";
                 }
                 Refresh();
                 loadedChapters = await ReadScopeAsync();
@@ -553,12 +553,12 @@ public partial class MainWindow
             if (await RunDialogActionAsync(async () =>
             {
                 if (chineseGrid.SelectedItem is not ChineseOccurrenceRow row) { status.Text = "Hãy chọn một cụm chữ Hán."; return false; }
-                if (row.Item.ChapterId != _service!.GetSnapshot().Id) { status.Text = "Hãy nhấp đúp mở chương đó trước khi xác nhận Glossary."; return false; }
+                if (row.Item.ChapterId != _service!.GetSnapshot().Id) { status.Text = "Hãy nhấp đúp mở chương đó trước khi xác nhận thuật ngữ."; return false; }
                 var edited = ShowGlossaryEditor(null, row.Item.Text);
                 if (edited is null) return false;
                 var existing = _glossaryRows.SingleOrDefault(x => string.Equals(x.Chinese, edited.Chinese, StringComparison.Ordinal));
                 if (existing is not null && ThemedDialog.Show(window,
-                        $"Mục này đang là “{existing.Vietnamese}”. Thay bằng “{edited.Vietnamese}”?", "Cập nhật Glossary",
+                        $"Mục này đang là “{existing.Vietnamese}”. Thay bằng “{edited.Vietnamese}”?", "Cập nhật thuật ngữ",
                         MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
                 if (existing is null) _glossaryRows.Add(edited); else _glossaryRows[_glossaryRows.IndexOf(existing)] = edited;
                 GlossaryChanged();
@@ -637,7 +637,7 @@ public partial class MainWindow
             int length = Math.Min(request.LengthUtf16, DraftText.Text.Length - start);
             DraftText.Focus(); DraftText.Select(start, length);
             int line = DraftText.GetLineIndexFromCharacterIndex(start); if (line >= 0) DraftText.ScrollToLine(line);
-            SetStatus("Đã mở đúng chương, segment và vị trí chữ Hán trong bản dịch có thể chỉnh sửa.");
+            SetStatus("Đã mở đúng chương, đoạn và vị trí chữ Hán trong bản dịch có thể chỉnh sửa.");
         }
         catch (Exception ex) { ShowError(ex); }
     }

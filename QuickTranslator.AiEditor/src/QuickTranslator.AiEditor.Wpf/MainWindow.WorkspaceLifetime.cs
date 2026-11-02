@@ -13,7 +13,7 @@ public partial class MainWindow
     {
         if (_hostedPublicationView?.IsBusy == true)
         {
-            SetStatus("Xuất bản đang chạy. Hãy chờ hoàn tất hoặc hủy tác vụ trước khi đóng/chuyển Project.");
+            SetStatus("Xuất bản đang chạy. Hãy chờ hoàn tất hoặc hủy tác vụ trước khi đóng/chuyển dự án.");
             return false;
         }
         if (!BeginUiOperation(allowDuringTranslation: true)) return false;

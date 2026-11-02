@@ -453,7 +453,7 @@ public partial class MainWindow : Window
         string details = $"Model: {options.Model}\nTemperature: {options.Temperature}\nContext: {options.ContextSize}\n" +
             $"Đầu ra: {options.MaximumOutputTokens} token; timeout: {options.RequestTimeout.TotalSeconds:0} giây\n" +
             $"Preset: {attempt.PresetSnapshot?.Name ?? "Mặc định"} (v{attempt.PresetSnapshot?.Revision})\n" +
-            $"Tài nguyên project: revision {attempt.ProjectResourceRevision?.ToString() ?? "standalone"}\nPrompt: {attempt.PromptVersion}\n\n{attempt.Prompt}";
+            $"Tài nguyên dự án: revision {attempt.ProjectResourceRevision?.ToString() ?? "standalone"}\nPrompt: {attempt.PromptVersion}\n\n{attempt.Prompt}";
         var window = new Window
         {
             Owner = this, Title = "Prompt đã lưu — chỉ hiển thị trên máy này", Width = 850, Height = 600,

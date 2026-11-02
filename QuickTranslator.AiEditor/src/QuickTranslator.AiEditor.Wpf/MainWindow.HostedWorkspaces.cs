@@ -111,7 +111,7 @@ public partial class MainWindow
             return;
         }
         DropHostedQueueView();
-        _hostedQueueView = new(_projectSession?.Manifest.VietnameseTitle ?? "Project", coordinator, plan,
+        _hostedQueueView = new(_projectSession?.Manifest.VietnameseTitle ?? "Dự án", coordinator, plan,
             ReplanProjectTranslationAsync, LoadProjectChapterAsync, RefreshProjectTranslationCoordinatorAsync);
         _hostedQueueView.EditorActivationRequested += OnHostedQueueEditorActivationRequested;
         QueueWorkspaceHost.Content = _hostedQueueView;

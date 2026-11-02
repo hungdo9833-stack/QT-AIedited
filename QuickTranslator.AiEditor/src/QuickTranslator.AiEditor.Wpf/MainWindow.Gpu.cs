@@ -206,7 +206,7 @@ public partial class MainWindow
             TemperatureInput.Text = "0.1"; ContextInput.Text = "4096"; OutputTokensInput.Text = "2048";
             TimeoutInput.Text = "300"; MinimumInput.Text = "350"; TargetInput.Text = "550"; MaximumInput.Text = "750";
             ApplyGpuKindUi(GpuBackendKind.Remote);
-            GpuConnectionStatus.Text = "Profile mới chưa lưu";
+            GpuConnectionStatus.Text = "Hồ sơ mới chưa lưu";
         }
         finally { _syncingGpuProfile = false; }
     }
@@ -226,7 +226,7 @@ public partial class MainWindow
             {
                 MessageBoxResult confirmed = ThemedDialog.Show(this,
                     $"QT Studio sẽ gửi prompt và nguyên văn segment tới server remote “{profile.Name}” tại {profile.Endpoint}. " +
-                    "Token chỉ lưu mã hóa bằng Windows DPAPI và không nằm trong Project. Tiếp tục?",
+                    "Token chỉ lưu mã hóa bằng Windows DPAPI và không nằm trong dự án. Tiếp tục?",
                     "Xác nhận gửi nội dung tới GPU thuê", MessageBoxButton.YesNo, MessageBoxImage.Warning);
                 if (confirmed != MessageBoxResult.Yes) return;
                 profile.RemoteDisclosureAccepted = true;
@@ -335,7 +335,7 @@ public partial class MainWindow
         }
         if (_projectGpuProfileMissing)
         {
-            GpuBackendStatus.Text = "GPU · thiếu profile Project";
+            GpuBackendStatus.Text = "GPU · thiếu hồ sơ dự án";
             GpuSetForeground(GpuBackendStatus, "DangerBrush");
             return;
         }

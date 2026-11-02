@@ -97,7 +97,7 @@ public partial class MainWindow
         TogglePanelPreference(PanelId.ProjectSidebar);
 
     // The rail also holds the shell tools (queue, panels, theme, save), so it is wide enough for their labels.
-    private double NavRailWidth => _navRailCollapsed ? 56 : (_compactShell ? 160 : 184);
+    private double NavRailWidth => _navRailCollapsed ? 56 : (_compactShell ? 176 : 200);
 
     private void OnToggleNavRail(object sender, RoutedEventArgs e)
     {
@@ -110,7 +110,7 @@ public partial class MainWindow
         }
         NavWorkLabel.Visibility = NavOptionsLabel.Visibility = _navRailCollapsed ? Visibility.Collapsed : Visibility.Visible;
         if (FindName("NavRailToggleButton") is Button btn)
-            btn.Content = _navRailCollapsed ? "»" : "«";
+            ButtonIcon.SetGlyph(btn, _navRailCollapsed ? "" : "");
     }
 
     private void OnSwitchLeftPanelToChapters(object sender, RoutedEventArgs e)
@@ -608,7 +608,7 @@ public partial class MainWindow
         if (existingChar is not null)
             lines.Add($"Nhân vật đã có: {existingChar.VietnameseName} ({existingChar.PrimaryNarrativePronoun})");
         if (existingTerm is not null)
-            lines.Add($"Glossary đã có: {existingTerm.Vietnamese}");
+            lines.Add($"Thuật ngữ đã có: {existingTerm.Vietnamese}");
         if (lines.Count == 1)
             lines.Add("Chưa có trong từ điển cục bộ · bấm nút bên dưới để thêm.");
         textBlock.Text = string.Join("\n", lines);
@@ -632,7 +632,7 @@ public partial class MainWindow
             await SaveCharacterProjectAsync();
             RefreshCharacterGrid();
             UpdateInspectorLiveSelection(_lastLiveSelectionChinese);
-            SetStatus($"Đã thêm nhanh nhân vật “{quick.Profile.VietnameseName}” từ Inspector.");
+            SetStatus($"Đã thêm nhanh nhân vật “{quick.Profile.VietnameseName}” từ bảng tra cứu.");
         }
         catch (Exception ex) { _resourcesDirty = true; ShowError(ex); }
         finally { EndUiOperation(); }
@@ -655,7 +655,7 @@ public partial class MainWindow
             GlossaryChanged();
             await PersistCurrentGlossaryAsync();
             UpdateInspectorLiveSelection(_lastLiveSelectionChinese);
-            SetStatus($"Đã lưu thuật ngữ “{edited.Chinese} = {edited.Vietnamese}” từ Inspector.");
+            SetStatus($"Đã lưu thuật ngữ “{edited.Chinese} = {edited.Vietnamese}” từ bảng tra cứu.");
         }
         catch (Exception ex) { _resourcesDirty = true; ShowError(ex); }
         finally { EndUiOperation(); }
@@ -681,16 +681,16 @@ public partial class MainWindow
 
     private void RefreshTranslationInspector(TranslationSegment? segment)
     {
-        InspectorSelectionText.Text = segment is null ? "Chọn một segment" :
+        InspectorSelectionText.Text = segment is null ? "Chọn một đoạn" :
             $"Đoạn {segment.Order} · {StatusLabel(segment.Status)}";
         if (segment is null)
         {
-            InspectorDictionaryText.Text = "Chưa chọn segment.";
+            InspectorDictionaryText.Text = "Chưa chọn đoạn.";
             InspectorGlossaryItems.ItemsSource = null;
             InspectorCharacterItems.ItemsSource = null;
             if (FindName("InspectorConsistencyStatusText") is TextBlock statusEmpty)
-                statusEmpty.Text = "Chưa chọn segment.";
-            InspectorContextText.Text = "Project chưa có ngữ cảnh cho segment đang chọn.";
+                statusEmpty.Text = "Chưa chọn đoạn.";
+            InspectorContextText.Text = "Dự án chưa có ngữ cảnh cho đoạn đang chọn.";
             ApplyPanelPolicy();
             return;
         }
@@ -701,7 +701,7 @@ public partial class MainWindow
             segment.SourceText.Contains(term.Chinese, StringComparison.Ordinal))
             .Select(term => $"{term.Chinese}  →  {term.Vietnamese}").ToArray();
         InspectorContextText.Text = string.IsNullOrWhiteSpace(ContextNotesInput.Text)
-            ? "Chưa có ghi chú ngữ cảnh Project." : ContextNotesInput.Text;
+            ? "Chưa có ghi chú ngữ cảnh dự án." : ContextNotesInput.Text;
 
         CharacterConsistencySelection selectedRules = _service is not null
             ? _service.PreviewCharacterConsistency(segment.Id)
@@ -711,7 +711,7 @@ public partial class MainWindow
         {
             if (!_characterProject.ConsistencyLockEnabled)
             {
-                consistencyStatus.Text = "Khóa nhất quán Project đang tắt. Chỉ hiển thị hồ sơ khớp tên trong đoạn.";
+                consistencyStatus.Text = "Khóa nhất quán dự án đang tắt. Chỉ hiển thị hồ sơ khớp tên trong đoạn.";
             }
             else if (string.IsNullOrWhiteSpace(selectedRules.PromptBlock))
             {

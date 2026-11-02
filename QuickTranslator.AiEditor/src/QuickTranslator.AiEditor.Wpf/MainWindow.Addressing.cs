@@ -28,6 +28,6 @@ public partial class MainWindow
         LoadCharacterProject(_projectResources.Characters);
         SetGlossaryTerms(_projectResources.Terms);
         ApplyCurrentProjectResources();
-        SetStatus("Đã lưu đề xuất được xác nhận vào tài nguyên Project.");
+        SetStatus("Đã lưu đề xuất được xác nhận vào tài nguyên dự án.");
     }
 }

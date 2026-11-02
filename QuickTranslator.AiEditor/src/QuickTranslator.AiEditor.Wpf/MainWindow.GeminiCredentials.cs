@@ -40,7 +40,7 @@ public partial class MainWindow
     private void OnRemoveGeminiApiKey(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: int index }) return;
-        if (ThemedDialog.Show(this, "Xóa Gemini API key này khỏi Windows? Các Project truyện sẽ không bị ảnh hưởng.",
+        if (ThemedDialog.Show(this, "Xóa Gemini API key này khỏi Windows? Các dự án truyện sẽ không bị ảnh hưởng.",
             "Xóa Gemini API key", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         try

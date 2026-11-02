@@ -79,7 +79,7 @@ public partial class MainWindow
             string warnings = string.Join("\n", preview.Chapters.SelectMany(item => item.Preview.Warnings).Take(8));
             string message = $"Xem trước {preview.Chapters.Count:N0} chương\n" +
                 $"• Đổi ranh giới: {preview.ChangedChapters:N0}\n" +
-                $"• Có segment được bảo vệ: {preview.ProtectedChapters:N0}\n" +
+                $"• Có đoạn được bảo vệ: {preview.ProtectedChapters:N0}\n" +
                 $"• Cảnh báo: {preview.WarningCount:N0}" +
                 (warnings.Length == 0 ? "" : "\n\n" + warnings) +
                 "\n\nChỉ vùng chưa dịch được chia lại; nháp, approvals và lịch sử giữ nguyên theo anchor. Áp dụng cho toàn bộ lựa chọn?";
