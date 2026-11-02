@@ -426,6 +426,21 @@ public sealed class ImportPreviewEditor
         });
     }
 
+    /// <summary>
+    /// A book whose volumes each restart at chapter 1 cannot go into a project, which needs one active chapter per number:
+    /// when included chapters share a number, numbers them 1..N in import order (volume, then number) in one edit.
+    /// Returns false and changes nothing when the numbers are already unique.
+    /// </summary>
+    public bool RenumberAcrossVolumes()
+    {
+        ImportPreviewItem[] included = Current.ImportableChapters.ToArray();
+        if (included.Select(x => x.Number).Distinct().Count() == included.Length) return false;
+        var numbers = included.Select((item, index) => (item.Id, Number: index + 1)).ToDictionary(x => x.Id, x => x.Number);
+        Mutate(Current.Items.Select(item => numbers.TryGetValue(item.Id, out int number)
+            ? item with { Number = number, AutomaticallyExcludedDuplicate = false } : item).ToImmutableArray());
+        return true;
+    }
+
     public void UpdateVietnameseTitle(Guid itemId, string? title)
     {
         ImportPreviewItem item = RequireChapter(itemId);

@@ -52,6 +52,23 @@ public sealed class SafeBulkImportTests : IDisposable
     }
 
     [Fact]
+    public async Task Volumes_restarting_at_chapter_one_import_once_numbered_on()
+    {
+        var repository = new ProjectRepository();
+        ProjectSession session = await repository.CreateAsync(Path.Combine(_root, "volumes"), "Volumes");
+        const string source = "第一卷 山门\n第一章 初见\n甲。\n第二章 入门\n乙。\n第二卷 中州\n第一章 重逢\n丙。\n第二章 风云\n丁。";
+        var editor = ImportPreviewEditor.Create(new ChapterDetector().Detect(source));
+        await Assert.ThrowsAsync<BulkImportValidationException>(() =>
+            new SafeBulkImportService(repository).ImportAsync(session, editor.Current, Defaults()));
+
+        editor.RenumberAcrossVolumes();
+        BulkImportReport report = await new SafeBulkImportService(repository).ImportAsync(session, editor.Current, Defaults());
+
+        Assert.True(report.VerifiedComplete);
+        Assert.Equal(new[] { 1, 2, 3, 4 }, session.Manifest.Chapters.Select(x => x.Number).Order());
+    }
+
+    [Fact]
     public async Task Cancel_between_chunks_reports_partial_success_and_retry_is_idempotent()
     {
         var repository = new ProjectRepository();

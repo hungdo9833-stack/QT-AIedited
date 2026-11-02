@@ -116,6 +116,21 @@ public sealed class ImportPreviewTests
     }
 
     [Fact]
+    public void Volumes_restarting_at_chapter_one_are_numbered_on_through_the_book()
+    {
+        const string source = "第一卷 山门\n第一章 初见\n甲。\n第二章 入门\n乙。\n第二卷 中州\n第一章 重逢\n丙。\n第二章 风云\n丁。";
+        var editor = ImportPreviewEditor.Create(new ChapterDetector().Detect(source));
+
+        Assert.True(editor.RenumberAcrossVolumes());
+
+        Assert.Equal(new[] { 1, 2, 3, 4 }, editor.Current.ImportableChapters.Select(x => x.Number!.Value));
+        Assert.Equal(new[] { "初见", "入门", "重逢", "风云" }, editor.Current.ImportableChapters.Select(x => x.Title));
+        Assert.False(editor.Current.HasBlockingIssues);
+        AssertExact(source, editor.Current);
+        Assert.False(editor.RenumberAcrossVolumes());
+    }
+
+    [Fact]
     public void Split_requires_a_line_boundary_inside_content()
     {
         const string source = "第1章 一\n甲。\n乙。";

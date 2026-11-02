@@ -192,6 +192,8 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
             cancellationToken).ConfigureAwait(false);
         if (!editor.Current.ImportableChapters.Any())
             throw new InvalidDataException("Không tách được chương nào từ nội dung tải về (kiểm tra dòng tiêu đề chương trong " + rawPath + ").");
+        // TXT books (and sites the web check missed) that restart 第1章 per volume: number on through the book.
+        editor.RenumberAcrossVolumes();
         string titleNote = await TranslateTitlesAsync(editor, session.Manifest.ProjectId, status, cancellationToken).ConfigureAwait(false);
         ImportPreviewPlan plan = editor.Current;
         BulkImportReport report;
