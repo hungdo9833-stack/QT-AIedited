@@ -40,15 +40,32 @@ public sealed class CodexSurveyRunner(CodexSurveyOptions options, ICodexProcessR
     public static string DefaultWorkRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "QuickTranslator", "codex-survey");
 
+    /// <summary>How often content-flags.json is read while Codex runs.</summary>
+    public TimeSpan ContentPollInterval { get; init; } = TimeSpan.FromSeconds(3);
+
+    /// <param name="contentFlags">Told at once, while Codex still runs, whenever the content scan reports something new.</param>
+    /// <exception cref="ContentStopException">The scan found rape of a minor; Codex was stopped.</exception>
     public async Task<CodexSurveyImportResult> RunAsync(string rawText, string workDirectory, Guid projectId,
-        string bookTitle, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+        string bookTitle, IProgress<string>? progress = null, CancellationToken cancellationToken = default,
+        IProgress<ContentFlagReport>? contentFlags = null)
     {
         Directory.CreateDirectory(workDirectory);
         string characters = Path.Combine(workDirectory, CharactersFile), glossary = Path.Combine(workDirectory, GlossaryFile),
-            book = Path.Combine(workDirectory, BookFile);
+            book = Path.Combine(workDirectory, BookFile), flags = Path.Combine(workDirectory, ContentFlagFile.FileName);
         File.Delete(characters);
         File.Delete(glossary);
         File.Delete(book);
+        File.Delete(flags);
+        ContentFlagReport content = ContentFlagReport.Empty;
+        // True when the scan says stop. A report reaches the caller only when it holds more than the last one.
+        async Task<bool> ScanAsync()
+        {
+            if (await ContentFlagFile.TryReadAsync(flags, cancellationToken).ConfigureAwait(false) is not { } read ||
+                read.Flags.Count <= content.Flags.Count) return false;
+            content = read;
+            contentFlags?.Report(read);
+            return read.MustStop;
+        }
         await File.WriteAllTextAsync(Path.Combine(workDirectory, "raw.txt"), rawText, new UTF8Encoding(false), cancellationToken)
             .ConfigureAwait(false);
 
@@ -58,8 +75,23 @@ public sealed class CodexSurveyRunner(CodexSurveyOptions options, ICodexProcessR
             string last = Path.Combine(workDirectory, $"codex-last-{attempt}.md");
             await File.WriteAllTextAsync(Path.Combine(workDirectory, $"prompt-{attempt}.md"), prompt, new UTF8Encoding(false),
                 cancellationToken).ConfigureAwait(false);
-            int exit = await _runner.RunAsync(new(workDirectory, prompt, last, options), progress, cancellationToken)
-                .ConfigureAwait(false);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task<int> running = _runner.RunAsync(new(workDirectory, prompt, last, options), progress, stop.Token);
+            bool mustStop = false;
+            while (!running.IsCompleted && !mustStop)
+            {
+                await Task.WhenAny(running, Task.Delay(ContentPollInterval, cancellationToken)).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                mustStop = await ScanAsync().ConfigureAwait(false);
+            }
+            if (mustStop)
+            {
+                await stop.CancelAsync().ConfigureAwait(false);
+                try { await running.ConfigureAwait(false); } catch (OperationCanceledException) { }
+                throw new ContentStopException(content);
+            }
+            int exit = await running.ConfigureAwait(false);
+            if (await ScanAsync().ConfigureAwait(false)) throw new ContentStopException(content);
             string problem;
             if (exit != 0) problem = $"Codex kết thúc với mã lỗi {exit}.";
             else if (!File.Exists(characters) || !File.Exists(glossary))
@@ -72,7 +104,8 @@ public sealed class CodexSurveyRunner(CodexSurveyOptions options, ICodexProcessR
                         await File.ReadAllTextAsync(characters, cancellationToken).ConfigureAwait(false),
                         await File.ReadAllTextAsync(glossary, cancellationToken).ConfigureAwait(false),
                         projectId, bookTitle,
-                        File.Exists(book) ? await File.ReadAllTextAsync(book, cancellationToken).ConfigureAwait(false) : null);
+                        File.Exists(book) ? await File.ReadAllTextAsync(book, cancellationToken).ConfigureAwait(false) : null)
+                        with { ContentFlags = content };
                 }
                 catch (Exception ex) when (ex is InvalidDataException or ArgumentException) { problem = ex.Message; }
             }

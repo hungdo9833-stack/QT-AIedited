@@ -40,6 +40,13 @@ public partial class MainWindow
             {
                 if (cancellationToken.IsCancellationRequested) { prepared[index].SetResult(null); rows[index].Stage = "Đã dừng"; continue; }
                 try { prepared[index].SetResult(await PrepareAutoBookAsync(rows[index], settings, cancellationToken)); }
+                catch (ContentStopException stop)
+                {
+                    rows[index].Stage = "⛔ Đã dừng";
+                    rows[index].Detail = stop.Message;
+                    prepared[index].SetResult(null);
+                    ShowContentReport(rows[index], stop.Report, stopped: true);
+                }
                 catch (Exception ex)
                 {
                     rows[index].Stage = ex is OperationCanceledException ? "Đã dừng" : "Lỗi";
@@ -74,15 +81,25 @@ public partial class MainWindow
             TitleBackend = _traditionalService.CurrentSnapshot is null ? null
                 : new TraditionalChapterTitleTranslationBackend(_traditionalService, hanViet: false)
         };
+        bool warned = false;
         var status = new Progress<AutoBookStatus>(value =>
         {
-            row.Stage = value.Stage;
+            row.Stage = (warned ? "⚠ " : "") + value.Stage;
             row.Detail = value.Detail;
             if (value.Title is not null) row.Title = value.Title;
         });
+        // Shown the moment Codex's content scan reports, while the survey still runs. A stop is shown by the caller.
+        var content = new Progress<ContentFlagReport>(report =>
+        {
+            if (report.MustStop) return;
+            row.Stage = "⚠ Cảnh báo nội dung";
+            row.Detail = $"{report.Flags.Count} sự kiện: " + string.Join("; ", report.Flags.Select(f => $"{f.TypeLabel} ({f.Chapter})"));
+            if (!warned) ShowContentReport(row, report, stopped: false);
+            warned = true;
+        });
         CodexSurveyOptions codex = settings.Codex with { KnownGenres = await KnownGenresAsync(cancellationToken) };
         AutoBookPrepared prepared = await preparer.PrepareAsync(row.Url, _projectLibrary.DefaultProjectsDirectory,
-            settings.DownloadDelay, codex, status, cancellationToken);
+            settings.DownloadDelay, codex, status, cancellationToken, content);
         row.Title = prepared.Title;
         // A prepared book is never opened in "chỉ chuẩn bị" mode: list it in the project library now so it can be found.
         if (_projectLibraryReady)
@@ -94,6 +111,22 @@ public partial class MainWindow
         row.Stage = settings.PrepareOnly ? "Đã chuẩn bị" : "Chờ dịch";
         row.Detail = prepared.Summary;
         return prepared.ManifestPath;
+    }
+
+    internal Action<string, string>? ContentReportPresenter;
+
+    private void ShowContentReport(AutoBookRow row, ContentFlagReport report, bool stopped)
+    {
+        string title = stopped ? "Đã dừng truyện vì nội dung" : "Cảnh báo nội dung";
+        string message = (stopped
+                ? $"“{row.Title}”: phát hiện cưỡng hiếp liên quan nhân vật dưới 18 tuổi. Đã dừng Codex; truyện không được khảo sát tiếp và không dịch."
+                : $"“{row.Title}”: Codex phát hiện nội dung cần lưu ý. Khảo sát vẫn tiếp tục.") +
+            Environment.NewLine + Environment.NewLine + report.Describe() + Environment.NewLine + Environment.NewLine +
+            "Báo cáo được lưu trong Settings/content-flags.json của dự án.";
+        if (ContentReportPresenter is not null) { ContentReportPresenter(title, message); return; }
+        // Non-blocking: the survey keeps running (or the next book starts) while the dialog is open.
+        Dispatcher.BeginInvoke(() => ThemedDialog.Show((Window?)_autoTranslateWindow ?? this, message, title,
+            MessageBoxButton.OK, stopped ? MessageBoxImage.Error : MessageBoxImage.Warning));
     }
 
     /// <summary>Genres of the books in the project library, most used first, so new books reuse the site's existing tags.</summary>

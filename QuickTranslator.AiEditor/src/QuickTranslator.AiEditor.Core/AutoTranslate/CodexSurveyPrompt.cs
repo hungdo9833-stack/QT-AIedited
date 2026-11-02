@@ -10,7 +10,20 @@ public static class CodexSurveyPrompt
         Cách làm:
         - raw.txt có thể rất dài. Đọc theo từng đoạn bằng lệnh shell (rg, Select-String, Get-Content với -TotalCount/-Skip...),
           đếm tần suất tên để tìm đủ nhân vật chính và nhân vật lặp lại; đọc kỹ các cảnh hội thoại để biết ai xưng hô thế nào với ai.
-        - Không sửa raw.txt. Không tạo file nào khác ngoài ba file dưới đây. Không chạy git.
+        - Không sửa raw.txt. Không tạo file nào khác ngoài các file dưới đây. Không chạy git.
+
+        0) content-flags.json: LÀM ĐẦU TIÊN, trước mọi file khác.
+        Quét toàn bộ raw.txt tìm hai loại nội dung và ghi file này ngay khi quét xong (kể cả khi không có gì: {"flags": []}):
+        - "minor": cảnh tình dục có nhân vật dưới 18 tuổi (tuổi được nêu, hoặc là học sinh tiểu học/trung học cơ sở/trung học
+          phổ thông, hoặc được mô tả rõ là trẻ em/thiếu niên chưa thành niên) tại thời điểm xảy ra cảnh đó.
+        - "rape": cưỡng hiếp mức độ nặng: quan hệ tình dục rõ ràng không có sự đồng ý, bằng bạo lực, đe dọa, chuốc thuốc
+          hoặc khi nạn nhân mất khả năng kháng cự. Không tính nhập vai/đồng thuận, cám dỗ hay tình huống mập mờ được đồng ý.
+        - "minorRape": khi một cảnh thuộc cả hai loại trên (cưỡng hiếp nhân vật dưới 18 tuổi). Ghi mục này ngay lập tức.
+        {"flags": [ { "type": "minor" | "rape" | "minorRape", "chapter": "dòng tiêu đề chương",
+                      "characters": ["chineseName"], "ageEvidence": "câu nguyên văn nêu tuổi/cấp học, nếu có",
+                      "description": "mô tả trung tính bằng tiếng Việt, 1–2 câu, chỉ nói sự kiện là gì" } ] }
+        - Mỗi sự kiện một mục. TUYỆT ĐỐI không trích hay mô tả chi tiết hành vi tình dục; ageEvidence chỉ trích câu nêu tuổi.
+        - Không suy đoán: chỉ ghi khi văn bản cho thấy rõ. Sau đó mới làm các file dưới đây.
 
         1) characters.json
         {

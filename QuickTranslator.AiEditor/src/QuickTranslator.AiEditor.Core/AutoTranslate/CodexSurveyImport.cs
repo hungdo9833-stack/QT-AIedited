@@ -54,6 +54,8 @@ public sealed record CodexSurveyImportResult(CharacterProject Characters, IReadO
 {
     /// <summary>Null when Codex wrote no usable book.json; characters and glossary still apply.</summary>
     public CodexBookInfo? Book { get; init; }
+    /// <summary>Warnings of the content-safety scan (never a stop: that ends the survey with ContentStopException).</summary>
+    public ContentFlagReport ContentFlags { get; init; } = ContentFlagReport.Empty;
 }
 
 public static class CodexSurveyImport

@@ -27,7 +27,8 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
     public IChapterTitleTranslationBackend? TitleBackend { get; init; }
 
     public async Task<AutoBookPrepared> PrepareAsync(Uri url, string projectsDirectory, TimeSpan downloadDelay,
-        CodexSurveyOptions codex, IProgress<AutoBookStatus>? status = null, CancellationToken cancellationToken = default)
+        CodexSurveyOptions codex, IProgress<AutoBookStatus>? status = null, CancellationToken cancellationToken = default,
+        IProgress<ContentFlagReport>? contentFlags = null)
     {
         string work = Path.Combine(WorkRoot, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url.AbsoluteUri)))[..16]);
         string pages = Path.Combine(work, "pages");
@@ -97,8 +98,19 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
 
         var codexProgress = new Progress<string>(line =>
             status?.Report(new("Codex khảo sát", line.Length > 300 ? line[..300] + "…" : line)));
-        CodexSurveyImportResult survey = await surveyFactory(codex).RunAsync(text, Path.Combine(work, "codex"),
-            session.Manifest.ProjectId, title, codexProgress, cancellationToken).ConfigureAwait(false);
+        CodexSurveyImportResult survey;
+        try
+        {
+            survey = await surveyFactory(codex).RunAsync(text, Path.Combine(work, "codex"),
+                session.Manifest.ProjectId, title, codexProgress, cancellationToken, contentFlags).ConfigureAwait(false);
+        }
+        catch (ContentStopException stop)
+        {
+            await SaveContentFlagsAsync(session, stop.Report, cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+        if (survey.ContentFlags.HasFlags)
+            await SaveContentFlagsAsync(session, survey.ContentFlags, cancellationToken).ConfigureAwait(false);
         var store = new ProjectResourceStore(session);
         ProjectResources resources = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
         resources.Characters = survey.Characters;
@@ -110,12 +122,27 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
             await repository.SaveManifestAsync(session, cancellationToken).ConfigureAwait(false);
             title = book.VietnameseTitle;
         }
-        string summary = (missingNote is null ? "" : "⚠ " + missingNote + ". ") +
+        string summary = (survey.ContentFlags.HasFlags ? $"⚠ {survey.ContentFlags.Flags.Count} cảnh báo nội dung. " : "") +
+            (missingNote is null ? "" : "⚠ " + missingNote + ". ") +
             (survey.Book is { } info ? $"“{info.VietnameseTitle}” · {string.Join(", ", info.Genres)} · " : "") +
             $"{report.ImportedCount:N0} chương, {titleNote}, {survey.Characters.Profiles.Count} nhân vật, " +
             $"{survey.Characters.Profiles.Sum(p => p.Relationships.Count)} quan hệ, {survey.Terms.Count} thuật ngữ" +
             (survey.Warnings.Count > 0 ? $"; {survey.Warnings.Count} ghi chú: {survey.Warnings[0]}" : "");
         return new(session, title, report.ImportedCount, survey, summary);
+    }
+
+    /// <summary>Keeps the content-safety findings with the project (Settings/content-flags.json) for later review.</summary>
+    public static async Task SaveContentFlagsAsync(ProjectSession session, ContentFlagReport report, CancellationToken cancellationToken)
+    {
+        string path = session.Resolve("Settings/" + ContentFlagFile.FileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, System.Text.Json.JsonSerializer.Serialize(new { report.MustStop, report.Flags },
+            new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+            }), new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Renames the project to the translated title and fills the blurb and genres used when publishing.</summary>
