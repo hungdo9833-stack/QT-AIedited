@@ -391,6 +391,58 @@ public sealed class WebNovelImporterTests
     }
 
     [Fact]
+    public async Task LoginWallIsReportedAndNeverServedFromTheCache()
+    {
+        // Shape of the live banshanren.com guest limit: a short preview, then a "log in to read" card.
+        const string wall = $"<div class='chapter_content_box'><p>{Placeholder}</p><div class='limit_box'>" +
+            "<div class='card_title'>更多精彩内容，请登录后阅读</div><div class='card_sub'>注册以继续阅读</div></div></div>";
+        var directory = Path.Combine(Path.GetTempPath(), "qt-web-fixtures-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var options = Options with { CacheDirectory = directory };
+            using (var walled = new FakeHandler(_ => Html(wall)))
+            using (var importer = new WebNovelImporter(options, walled))
+            {
+                var error = await Assert.ThrowsAsync<WebImportBlockedException>(() => importer.FetchChapterAsync(Link()));
+                Assert.Equal(WebImportBlockReason.RequiresLogin, error.Reason);
+                Assert.Contains("đăng nhập", error.Message);
+            }
+            Assert.False(Directory.Exists(directory) && Directory.EnumerateFiles(directory).Any());
+
+            // A wall cached by an older build is forgotten and fetched again once the site's limit has reset.
+            Directory.CreateDirectory(directory);
+            string cacheFile = Path.Combine(directory, Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(Link().Url.AbsoluteUri))) + ".json");
+            File.WriteAllText(cacheFile, JsonSerializer.Serialize(new { Url = Link().Url.AbsoluteUri, Charset = "utf-8", Bytes = Encoding.UTF8.GetBytes(wall) }));
+            using var open = new FakeHandler(_ => Html($"<article><p>{Placeholder}</p><p>他说登录后阅读这本书吧，结果还是没有看完。{Placeholder}</p></article>"));
+            using var reset = new WebNovelImporter(options, open);
+            var chapter = await reset.FetchChapterAsync(Link());
+            Assert.StartsWith(Placeholder, chapter.Text);
+            Assert.Single(open.Calls);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public async Task ThrottlingNoticeIsReportedAsRateLimitedAndNotCached()
+    {
+        // The live site answers fast guests with this card (codes 438/478) instead of the chapter.
+        const string throttled = $"<div class='chapter_content_box'><p>{Placeholder}</p><div class='limit_box'>" +
+            "<div class='card_title'>系统检测到您访问异常</div></div></div>";
+        var directory = Path.Combine(Path.GetTempPath(), "qt-web-fixtures-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var handler = new FakeHandler(_ => Html(throttled));
+            using var importer = new WebNovelImporter(Options with { CacheDirectory = directory }, handler);
+            var error = await Assert.ThrowsAsync<WebImportBlockedException>(() => importer.FetchChapterAsync(Link()));
+            Assert.Equal(WebImportBlockReason.RateLimited, error.Reason);
+            Assert.Contains("thời gian nghỉ", error.Message);
+            Assert.False(Directory.Exists(directory) && Directory.EnumerateFiles(directory).Any());
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
     public async Task RequestsAreSerializedDelayedAndHaveBrowserHeaders()
     {
         using var handler = new FakeHandler(_ => Html($"<article>{Placeholder}</article>"));

@@ -50,6 +50,9 @@ internal sealed class PageFetcher : IDisposable
                     }
                 }
                 catch (JsonException) { /* Interrupted or damaged cache: download again. */ }
+                // A login or throttling notice cached before it was detected expires with the site's limit: forget it and ask again.
+                catch (WebImportBlockedException ex) when (ex.Reason is WebImportBlockReason.RequiresLogin or WebImportBlockReason.RateLimited)
+                { File.Delete(cachePath); }
             }
 
             for (var attempt = 0; ; attempt++)

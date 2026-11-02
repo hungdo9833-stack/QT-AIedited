@@ -78,7 +78,7 @@ public interface IWebNovelImporter
     string ComposeImportText(IReadOnlyList<WebChapterContent> chapters, bool keepSiteOrder = false);
 }
 
-public enum WebImportBlockReason { RequiresBrowser, RequiresUserConfirmation, BotChallenge, NotFound, NoChapterList }
+public enum WebImportBlockReason { RequiresBrowser, RequiresUserConfirmation, BotChallenge, NotFound, NoChapterList, RequiresLogin, RateLimited }
 
 /// <summary>The page cannot be read with plain HTTP. Phase 1 reports it; it never tries to get around the block.</summary>
 public sealed class WebImportBlockedException(Uri url, WebImportBlockReason reason, string message)
