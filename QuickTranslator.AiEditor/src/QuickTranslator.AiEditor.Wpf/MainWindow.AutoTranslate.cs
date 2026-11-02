@@ -80,6 +80,13 @@ public partial class MainWindow
         });
         AutoBookPrepared prepared = await preparer.PrepareAsync(row.Url, _projectLibrary.DefaultProjectsDirectory,
             settings.DownloadDelay, settings.Codex, status, cancellationToken);
+        // A prepared book is never opened in "chỉ chuẩn bị" mode: list it in the project library now so it can be found.
+        if (_projectLibraryReady)
+        {
+            ProjectLibraryStore.Remember(_projectLibrary, prepared.Session);
+            await _projectLibraryStore.SaveAsync(_projectLibrary);
+            RefreshProjectSwitcher();
+        }
         row.Stage = settings.PrepareOnly ? "Đã chuẩn bị" : "Chờ dịch";
         row.Detail = prepared.Summary;
         return prepared.ManifestPath;

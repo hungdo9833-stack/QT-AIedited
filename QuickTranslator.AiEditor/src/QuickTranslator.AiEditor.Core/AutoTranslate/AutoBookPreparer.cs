@@ -9,8 +9,11 @@ namespace QuickTranslator.AiEditor.Core.AutoTranslate;
 
 public sealed record AutoBookStatus(string Stage, string Detail, string? Title = null);
 
-public sealed record AutoBookPrepared(string ManifestPath, string Title, int ImportedChapters,
-    CodexSurveyImportResult Survey, string Summary);
+public sealed record AutoBookPrepared(ProjectSession Session, string Title, int ImportedChapters,
+    CodexSurveyImportResult Survey, string Summary)
+{
+    public string ManifestPath => Session.ManifestPath;
+}
 
 /// <summary>
 /// Prepares one book from a web link without any UI: downloads every chapter, creates a new project holding them, and
@@ -102,7 +105,7 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
             $"{report.ImportedCount:N0} chương, {titleNote}, {survey.Characters.Profiles.Count} nhân vật, " +
             $"{survey.Characters.Profiles.Sum(p => p.Relationships.Count)} quan hệ, {survey.Terms.Count} thuật ngữ" +
             (survey.Warnings.Count > 0 ? $"; {survey.Warnings.Count} mục bị bỏ: {survey.Warnings[0]}" : "");
-        return new(session.ManifestPath, title, report.ImportedCount, survey, summary);
+        return new(session, title, report.ImportedCount, survey, summary);
     }
 
     private async Task<string> TranslateTitlesAsync(ImportPreviewEditor editor, Guid projectId, IProgress<AutoBookStatus>? status,
