@@ -192,6 +192,25 @@ public sealed class AutoBookPipelineTests
     }
 
     [Fact]
+    public async Task A_txt_book_is_not_held_back_by_a_web_book_downloading()
+    {
+        var stages = new FakeStages();
+        stages.DownloadGate["web"] = new();
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow web = Row("web"), txt = new(new Uri("file:///C:/books/txt"));
+        pipeline.TryEnqueue(web);
+        pipeline.TryEnqueue(txt);
+        Assert.Equal("Chờ đọc file", txt.Stage);
+        Task run = pipeline.RunAsync();
+
+        await stages.WaitForAsync("translate:C:/books/txt");
+        Assert.DoesNotContain("survey:web", stages.Log);
+        stages.DownloadGate["web"].SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(web.Finished && txt.Finished);
+    }
+
+    [Fact]
     public void Pasted_txt_paths_become_file_links_and_other_files_are_refused()
     {
         string folder = Path.Combine(Path.GetTempPath(), "qt-txt-" + Guid.NewGuid().ToString("N"));

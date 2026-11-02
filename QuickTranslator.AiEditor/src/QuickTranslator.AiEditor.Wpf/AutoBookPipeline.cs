@@ -65,7 +65,8 @@ internal interface IAutoBookStages
 /// </summary>
 internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSettings settings)
 {
-    private readonly Channel<AutoBookRow> _downloads = Channel.CreateUnbounded<AutoBookRow>(),
+    // Local TXT books are read on their own line: a web book downloading for an hour must not hold them back.
+    private readonly Channel<AutoBookRow> _downloads = Channel.CreateUnbounded<AutoBookRow>(), _files = Channel.CreateUnbounded<AutoBookRow>(),
         _surveys = Channel.CreateUnbounded<AutoBookRow>(), _translations = Channel.CreateUnbounded<AutoBookRow>();
     private readonly CancellationTokenSource _stop = new();
     private readonly object _gate = new();
@@ -88,6 +89,7 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
             {
                 AutoBookStep.Translate => (_translations, "Chờ dịch"),
                 AutoBookStep.Survey => (_surveys, "Đã tải, chờ Codex"),
+                _ when row.Url.IsFile => (_files, "Chờ đọc file"),
                 _ => (_downloads, "Chờ tải")
             };
             row.Cancellation?.Dispose();
@@ -115,7 +117,8 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
     {
         try
         {
-            await Task.WhenAll(RunStageAsync(_downloads, DownloadAsync), RunStageAsync(_surveys, SurveyAsync),
+            await Task.WhenAll(RunStageAsync(_downloads, DownloadAsync), RunStageAsync(_files, DownloadAsync),
+                RunStageAsync(_surveys, SurveyAsync),
                 RunStageAsync(_translations, TranslateAsync));
         }
         finally { _stop.Dispose(); }
@@ -251,6 +254,7 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
         if (--_active > 0) return;
         _closed = true;
         _downloads.Writer.TryComplete();
+        _files.Writer.TryComplete();
         _surveys.Writer.TryComplete();
         _translations.Writer.TryComplete();
     }
