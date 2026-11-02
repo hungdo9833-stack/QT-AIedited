@@ -16,7 +16,9 @@ string Option(string name, string fallback) { int i = Array.IndexOf(args, name);
 
 if (args.Contains("--analyze-only"))
 {
-    using var importer = new WebNovelImporter(new WebImportOptions());
+    // --dump <folder>: keep the chapter pages QuickTranslator's own fetcher downloaded, as .html, to study a new site.
+    string? dump = Option("--dump", "") is { Length: > 0 } folder ? Path.GetFullPath(folder) : null;
+    using var importer = new WebNovelImporter(new WebImportOptions { CacheDirectory = dump });
     WebBookAnalysis analysis = await importer.AnalyzeAsync(url);
     Console.WriteLine($"Title: {analysis.BookTitle}; chapters: {analysis.Chapters.Count}; {analysis.DetectionSummary}");
     foreach (string warning in analysis.Warnings) Console.WriteLine("  warning: " + warning);
@@ -26,6 +28,14 @@ if (args.Contains("--analyze-only"))
     string[] lines = first.Text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToArray();
     foreach (string line in lines.Take(6)) Console.WriteLine("  | " + line);
     Console.WriteLine($"  lines ending in a digit: {lines.Count(l => char.IsAsciiDigit(l[^1]))}/{lines.Length}");
+    if (dump is not null)
+        foreach (string cached in Directory.EnumerateFiles(dump).Where(f => !f.EndsWith(".html", StringComparison.Ordinal)))
+        {
+            using var json = System.Text.Json.JsonDocument.Parse(await File.ReadAllBytesAsync(cached));
+            byte[] bytes = json.RootElement.GetProperty("Bytes").GetBytesFromBase64();
+            await File.WriteAllBytesAsync(cached + ".html", bytes);
+            Console.WriteLine($"  dumped {json.RootElement.GetProperty("Url").GetString()} -> {cached}.html");
+        }
     return 0;
 }
 

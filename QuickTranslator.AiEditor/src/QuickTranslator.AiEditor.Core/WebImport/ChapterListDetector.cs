@@ -92,7 +92,10 @@ internal static class ChapterListDetector
         if (string.IsNullOrWhiteSpace(title)) title = page.Document.Title?.Trim();
         if (string.IsNullOrWhiteSpace(title)) return null;
         if (IsThread(page.Url) && BracketedBook(title) is string book) return book;
-        return Regex.Split(title, @"\s*[|｜_—]\s*|\s+-\s+")[0].Trim();
+        title = Regex.Split(title, @"\s*[|｜_—]\s*|\s+-\s+")[0].Trim();
+        // A status badge set inside the heading ("將門棄婦又震懾邊關了！熱文") is not part of the book's name.
+        string clean = Regex.Replace(title, @"\s*(?:熱文|热文|熱門|热门|連載中?|连载中?|已完結|已完结|完結|完结|完本|全本|新書|新书)$", "").Trim();
+        return clean.Length >= 2 ? clean : title;
     }
 
     private static bool IsThread(Uri uri) => Regex.IsMatch(uri.Query, @"(?:\?|&)act=threadview(?:&|$)", RegexOptions.IgnoreCase) &&
@@ -120,6 +123,8 @@ internal static class ChapterListDetector
         Collect(anchor);
         string title = Regex.Replace(string.Join(" ", cells), @"\s+", " ").Trim();
         title = Regex.Replace(title, @"\s*(?:\d{4}[-/.])?\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$", "").Trim();
+        // A price cell ("0金幣", "免費", "VIP") is not part of the chapter's name.
+        title = Regex.Replace(title, @"\s+(?:\d+\s*(?:金幣|金币|書幣|书币|幣|币|點|点)|免費|免费|VIP|vip)$", "").Trim();
         var counter = Regex.Match(title, @"^第\s*\d+\s*[章回节節]\s*(?=第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節])");
         return counter.Success ? title[counter.Length..].Trim() : title;
     }

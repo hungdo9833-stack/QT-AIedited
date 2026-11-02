@@ -197,6 +197,37 @@ public sealed class WebNovelImporterTests
         Assert.Equal("测试书名", analysis.BookTitle);
     }
 
+    [Fact]
+    public async Task Invisible_decoy_text_is_dropped_and_price_and_badge_are_not_part_of_names()
+    {
+        // Seen live on m.tks.tw: a passage of another chapter hidden in rgba(0,0,0,0.01) before the real text,
+        // "0金幣" in every TOC row and a "熱文" badge after the book's name.
+        string Row(int i) => $"<li><a href='/b1/read_{i}.html'>第{i}章 占位<span>0金幣</span></a></li>";
+        string toc = "<h1>測試書名！<span>熱文</span></h1><ul>" + string.Concat(Enumerable.Range(1, 12).Select(Row)) + "</ul>";
+        string body = string.Concat(Enumerable.Range(1, 8).Select(i => $"<p>真正的正文第{i}段，宋惜惜坐在椅上，雙手交疊在身前，望著眼前的人。</p>"));
+        string chapter = "<div class='pt-read-cont'><p><span style=\"color: rgba(0, 0, 0, 0.01);\">別的章節的誘餌文字，讀者看不見…</span>-</p>" + body + "</div>";
+        using var handler = new FakeHandler(r => Html(r.RequestUri!.AbsolutePath.Contains("read_") ? chapter : toc));
+        using var importer = new WebNovelImporter(Options, handler);
+        var analysis = await importer.AnalyzeAsync(Url("b1/"));
+
+        Assert.Equal("測試書名！", analysis.BookTitle);
+        Assert.Equal(Enumerable.Range(1, 12).Select(i => $"第{i}章 占位"), analysis.Chapters.Select(c => c.Title));
+        var content = await importer.FetchChapterAsync(analysis.Chapters[0]);
+        Assert.DoesNotContain("誘餌", content.Text);
+        Assert.StartsWith("真正的正文第1段", content.Text.TrimStart());
+    }
+
+    [Theory]
+    [InlineData("color: rgba(0, 0, 0, 0.01);", true)]
+    [InlineData("display:none", true)]
+    [InlineData("font-size: 0px", true)]
+    [InlineData("color: transparent", true)]
+    [InlineData("color: rgba(0,0,0,0.8)", false)]
+    [InlineData("font-size: 0.9em", false)]
+    [InlineData("opacity: 0.5", false)]
+    public void Invisible_styles_are_recognised(string style, bool invisible) =>
+        Assert.Equal(invisible, ChapterContentExtractor.InvisibleStyle(style));
+
     [Theory]
     [InlineData("/book/55315/9556b73c60aec.html", "/book/#/#.html")]
     [InlineData("/book/55315/01ed98aa62f94.html", "/book/#/#.html")]

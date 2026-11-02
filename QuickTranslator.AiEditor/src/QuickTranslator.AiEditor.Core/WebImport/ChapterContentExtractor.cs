@@ -13,12 +13,33 @@ internal static class ChapterContentExtractor
 
     internal static string Extract(WebPage page) => ExtractWithSignature(page).Text;
 
+    /// <summary>Inline styles that hide text: display/visibility/opacity/zero size, or a (nearly) transparent color.</summary>
+    internal static bool InvisibleStyle(string? style)
+    {
+        if (string.IsNullOrWhiteSpace(style)) return false;
+        string s = Regex.Replace(style.ToLowerInvariant(), @"\s+", "");
+        if (Regex.IsMatch(s, @"(?:^|;)(?:display:none|visibility:hidden|opacity:0(?:\.0+)?(?:;|$|!)|font-size:0(?:px|em|rem|pt)?(?:;|$|!))")) return true;
+        if (Regex.IsMatch(s, @"(?:^|;)color:transparent")) return true;
+        var alpha = Regex.Match(s, @"(?:^|;)color:(?:rgba|hsla)\([^,]+,[^,]+,[^,]+,([0-9.]+)(%?)\)");
+        return alpha.Success && double.TryParse(alpha.Groups[1].Value, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out double a) && (alpha.Groups[2].Value == "%" ? a / 100 : a) < 0.1;
+    }
+
     internal static Extraction ExtractWithSignature(WebPage page, string? expectedSignature = null,
         CancellationToken cancellationToken = default)
     {
         // Work on a clone: pagination and challenge detection still need the original document.
         var root = (IElement)(page.Document.Body ?? page.Document.DocumentElement).Clone(true);
         foreach (var ignored in root.QuerySelectorAll(Ignored)) ignored.Remove();
+        // Anti-copy decoys readers never see (seen live: a passage of another chapter in color: rgba(0,0,0,0.01)).
+        foreach (var hidden in root.QuerySelectorAll("[style]").Where(e => InvisibleStyle(e.GetAttribute("style"))).ToArray())
+        {
+            var holder = hidden.ParentElement;
+            hidden.Remove();
+            // The decoy's paragraph keeps only a separator ("-"): drop it too, or it imports as a line of its own.
+            if (holder is { LocalName: "p" or "div" or "span" } && holder != root &&
+                Regex.IsMatch(holder.TextContent, @"^[\s\-–—_·.。…]*$")) holder.Remove();
+        }
         foreach (var ignored in root.QuerySelectorAll("[class],[id]").Where(e =>
                      Regex.IsMatch(e.ClassName + " " + e.Id, @"(?:^|[\s_-])(?:advert|advertisement|ads|navigation|comment|replies)(?:$|[\s_-])", RegexOptions.IgnoreCase)).ToArray())
             ignored.Remove();
