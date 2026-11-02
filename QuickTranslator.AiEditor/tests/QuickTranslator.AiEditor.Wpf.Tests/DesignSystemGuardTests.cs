@@ -49,6 +49,18 @@ public sealed class DesignSystemGuardTests
     }
 
     [Fact]
+    public void Icon_only_buttons_have_an_accessible_name()
+    {
+        var emptyButton = new Regex(@"<Button\b(?![^>]*\bContent=)(?![^>]*AutomationProperties\.Name=)[^>]*/>");
+        var offenders = XamlFiles()
+            .SelectMany(path => File.ReadLines(path).Select((line, index) => (path, line, index)))
+            .Where(x => emptyButton.IsMatch(x.line))
+            .Select(x => $"{Path.GetFileName(x.path)}:{x.index + 1}")
+            .ToArray();
+        Assert.True(offenders.Length == 0, "Give icon-only buttons AutomationProperties.Name: " + string.Join(", ", offenders));
+    }
+
+    [Fact]
     public void Dialogs_go_through_ThemedDialog()
     {
         string[] offenders = CodeFiles()
