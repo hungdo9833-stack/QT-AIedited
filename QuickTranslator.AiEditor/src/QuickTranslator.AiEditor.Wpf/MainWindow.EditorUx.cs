@@ -178,15 +178,15 @@ public partial class MainWindow
             : _projectTranslationCoordinator?.IsRunning == true ? "Hàng đợi dịch đang chạy"
             : chapter?.QueueStatus switch
             {
-                QueueStatus.Running => "Queue chương đang chạy",
+                QueueStatus.Running => "Hàng đợi chương đang chạy",
                 QueueStatus.PauseRequested => "Đã yêu cầu tạm dừng",
                 QueueStatus.Paused => "Đã tạm dừng",
                 QueueStatus.Interrupted => "Bị gián đoạn",
                 QueueStatus.Cancelled => "Đã hủy",
                 _ => null
             };
-        EditorProcessingStateText.Text = processing ?? "";
-        EditorProcessingStateText.Visibility = processing is null ? Visibility.Collapsed : Visibility.Visible;
+        EditorProcessingInfoBar.Message = processing ?? "";
+        EditorProcessingInfoBar.IsOpen = processing is not null;
     }
 
     private string? PrimaryBusinessReason(EditorActionKind kind, EditorStateSnapshot? chapter) => kind switch

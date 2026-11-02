@@ -1,4 +1,4 @@
-<Window x:Class="QuickTranslator.AiEditor.Wpf.MainWindow" xmlns:ui="clr-namespace:QuickTranslator.AiEditor.Wpf" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+<Window x:Class="QuickTranslator.AiEditor.Wpf.MainWindow" xmlns:ui="clr-namespace:QuickTranslator.AiEditor.Wpf" xmlns:wpfui="http://schemas.lepo.co/wpfui/2022/xaml" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  Title="QT Studio · Biên dịch truyện Trung–Việt" Width="1600" Height="950" MinWidth="900" MinHeight="520" Closing="OnWindowClosing" Closed="OnWindowClosed" PreviewKeyDown="OnWindowPreviewKeyDown" GotKeyboardFocus="OnWindowGotKeyboardFocus" SizeChanged="OnShellSizeChanged" AllowDrop="True" PreviewDragOver="OnWindowPreviewDragOver" Drop="OnWindowDrop" Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
     <Window.Resources>
         <Style x:Key="ShellTabControl" TargetType="TabControl">
@@ -297,12 +297,13 @@
           <Grid x:Name="WorkspaceHost">
            <DockPanel x:Name="EditorWorkspaceRoot">
             <Border x:Name="EditorContextHeader" DockPanel.Dock="Top" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="10,8">
-                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                     <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
                         <TextBlock x:Name="EditorContextTitleText" Text="Chưa mở dự án" Style="{StaticResource SubtitleText}"/>
                         <TextBlock x:Name="EditorContentStateText" Text="Chưa có chương" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
-                        <TextBlock x:Name="EditorProcessingStateText" Visibility="Collapsed" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap"/>
                     </StackPanel>
+                    <!-- Why the chapter cannot be edited right now (queue running, source edit…): one Fluent InfoBar, not colored text. -->
+                    <ui:StatusInfoBar x:Name="EditorProcessingInfoBar" Style="{StaticResource {x:Type wpfui:InfoBar}}" Grid.Row="1" Grid.ColumnSpan="2" Margin="{StaticResource Gap.Top.S}" Severity="Warning" IsClosable="False" IsOpen="False" AutomationProperties.LiveSetting="Polite"/>
                     <WrapPanel Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center">
                         <Button x:Name="PrimaryActionButton" MaxWidth="250" Content="Mở dự án" Click="OnPrimaryAction" Style="{StaticResource PrimaryButton}" ToolTipService.ShowOnDisabled="True"/>
                         <Menu Background="Transparent" Padding="0">
