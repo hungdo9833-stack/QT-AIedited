@@ -111,7 +111,7 @@ public partial class ProjectPublicationView : UserControl
             _inspectionLoaded = true;
             ApplyRange();
             ProgressText.Text = _wholeInspection.TotalChapterCount == 0
-                ? "Project chưa có chương đang hoạt động." : "Đã kiểm tra xong. Chọn định dạng, phạm vi và nơi lưu.";
+                ? "Dự án chưa có chương đang hoạt động." : "Đã kiểm tra xong. Chọn định dạng, phạm vi và nơi lưu.";
         }
         catch (OperationCanceledException) { ProgressText.Text = "Đã hủy kiểm tra."; }
         catch (Exception ex) { ShowError(ex); }
@@ -247,8 +247,8 @@ public partial class ProjectPublicationView : UserControl
             OutputPathText.Text = "Đã xuất " + report.ExportedChapterCount.ToString("N0") + " chương:\n" + report.OutputPath;
             ExportedActionsPanel.Visibility = Visibility.Visible;
             ProgressText.Text = report.IncompleteChapterCount > 0 || report.InspectionChapterCount > 0
-                ? "Đã xuất bản nháp theo xác nhận của người dùng. Dữ liệu Project không bị thay đổi."
-                : "Xuất bản hoàn tất. Dữ liệu Project không bị thay đổi.";
+                ? "Đã xuất bản nháp theo xác nhận của người dùng. Dữ liệu dự án không bị thay đổi."
+                : "Xuất bản hoàn tất. Dữ liệu dự án không bị thay đổi.";
             Exported?.Invoke(this, report.OutputPath);
         }
         catch (OperationCanceledException) { ProgressText.Text = "Đã hủy. File đích cũ được giữ nguyên."; }
@@ -344,7 +344,7 @@ public partial class ProjectPublicationView : UserControl
     {
         PublicationFormat.VanCac when SelectedLanguage() == PublicationLanguage.Chinese =>
             "Website Sắc Viện chỉ nhận bản dịch tiếng Việt. Chọn ngôn ngữ Bản dịch tiếng Việt để đăng.",
-        PublicationFormat.VanCac => "Đăng nhập tài khoản Sắc Viện để đăng từng chương trong phạm vi lên website. Nội dung giống Reader/TXT; gửi lại an toàn, chương giống hệt được bỏ qua. Dữ liệu Project không bị thay đổi.",
+        PublicationFormat.VanCac => "Đăng nhập tài khoản Sắc Viện để đăng từng chương trong phạm vi lên website. Nội dung giống Reader/TXT; gửi lại an toàn, chương giống hệt được bỏ qua. Dữ liệu dự án không bị thay đổi.",
         PublicationFormat.Pdf when SelectedLanguage() == PublicationLanguage.Chinese =>
             "PDF khổ A4, mỗi chương bắt đầu ở trang mới; giữ nguyên bản gốc tiếng Trung và dùng phông chữ hỗ trợ tiếng Trung.",
         PublicationFormat.Pdf => "PDF khổ A4, mỗi chương bắt đầu ở trang mới; nội dung tiếng Việt dùng cùng bộ ghép văn bản với Reader/TXT.",

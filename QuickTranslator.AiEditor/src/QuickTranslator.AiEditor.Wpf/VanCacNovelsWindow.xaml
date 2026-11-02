@@ -3,11 +3,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Truyện trên Sắc Viện" Width="1000" Height="650" MinWidth="660" MinHeight="420"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}"
-        Foreground="{DynamicResource TextBrush}" Closed="OnClosed">
- <DockPanel Margin="16">
+        Foreground="{DynamicResource TextBrush}" Closed="OnClosed" ResizeMode="CanResize">
+ <DockPanel Margin="{StaticResource Inset.Window}">
   <StackPanel DockPanel.Dock="Top">
    <TextBlock Text="Truyện trên Sắc Viện" Style="{StaticResource WindowTitle}"/>
-   <TextBlock x:Name="AccountText" Margin="0,6,0,8" TextWrapping="Wrap"/>
+   <TextBlock x:Name="AccountText" Style="{StaticResource WindowSubtitle}" Margin="0,8,0,8" TextWrapping="Wrap"/>
    <WrapPanel>
     <Button x:Name="AccountButton" Content="Đăng nhập…" Click="OnAccount"/>
     <Button x:Name="ReloadButton" Content="Tải lại" Click="OnReload"/>
@@ -15,13 +15,13 @@
    <TextBlock x:Name="StatusText" Margin="0,8,0,8" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
    <ProgressBar x:Name="BusyProgress" IsIndeterminate="True" Height="5" Visibility="Collapsed" Margin="0,0,0,8"/>
   </StackPanel>
-  <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+  <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
    <TextBlock x:Name="LinkedNovelText" TextWrapping="Wrap" Margin="0,0,0,8"/>
-   <DockPanel>
-    <Button DockPanel.Dock="Right" Content="Đóng" IsCancel="True" Click="OnClose"/>
-    <WrapPanel>
-     <Button x:Name="LinkButton" Content="Liên kết với Project đang mở" IsEnabled="False" Click="OnLink"/>
+   <DockPanel HorizontalAlignment="Right">
+    <WrapPanel HorizontalAlignment="Right">
      <Button x:Name="OpenWebButton" Content="Mở trên web" IsEnabled="False" Click="OnOpenWeb"/>
+     <Button Content="Đóng" IsCancel="True" Click="OnClose"/>
+     <Button x:Name="LinkButton" Style="{StaticResource PrimaryButton}" Content="Liên kết với dự án đang mở" IsEnabled="False" Click="OnLink"/>
     </WrapPanel>
    </DockPanel>
   </StackPanel>

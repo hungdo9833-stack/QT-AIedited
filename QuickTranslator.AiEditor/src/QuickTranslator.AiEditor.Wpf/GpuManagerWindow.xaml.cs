@@ -76,8 +76,8 @@ public partial class GpuManagerWindow : Window
         }
         TranslationModeText.Text = _preferences.Mode switch
         {
-            GpuTranslationMode.LocalOnly => "Queue dùng llama-server trên máy này.",
-            GpuTranslationMode.RemoteOnly => "Queue dùng profile Remote đang kích hoạt.",
+            GpuTranslationMode.LocalOnly => "Hàng đợi dịch dùng llama-server trên máy này.",
+            GpuTranslationMode.RemoteOnly => "Hàng đợi dịch dùng hồ sơ Remote đang kích hoạt.",
             _ => "Một coordinator phân phối chapter động cho Local và Remote, tối đa hai request đồng thời."
         };
     }
@@ -117,7 +117,7 @@ public partial class GpuManagerWindow : Window
         for (int index = 0; index < keys.Count; index++)
             _geminiKeys.Add(new(index, GeminiApiKeyVault.Mask(keys[index])));
         GeminiKeysStatus.Text = keys.Count == 0
-            ? "Chưa lưu API key. Hãy thêm ít nhất một key trước khi chạy queue."
+            ? "Chưa lưu API key. Hãy thêm ít nhất một key trước khi chạy hàng đợi dịch."
             : $"Đã lưu {keys.Count} key; thứ tự trên là thứ tự xoay vòng.";
     }
 
@@ -148,7 +148,7 @@ public partial class GpuManagerWindow : Window
     private void OnRemoveGeminiKey(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: int index }) return;
-        if (ThemedDialog.Show(this, "Xóa Gemini API key này khỏi Windows? Các Project truyện sẽ không bị ảnh hưởng.",
+        if (ThemedDialog.Show(this, "Xóa Gemini API key này khỏi Windows? Các dự án truyện sẽ không bị ảnh hưởng.",
             "Xóa Gemini API key", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
         try
@@ -165,7 +165,7 @@ public partial class GpuManagerWindow : Window
     private void OnUseForRemote(object sender, RoutedEventArgs e)
     {
         if (ProfileList.SelectedItem is not GpuBackendProfile { Kind: GpuBackendKind.Remote } profile)
-        { StatusText.Text = "Hãy chọn một profile Remote."; return; }
+        { StatusText.Text = "Hãy chọn một hồ sơ Remote."; return; }
         _preferences.RemoteProfileId = profile.Id;
         StatusText.Text = $"Đã chọn “{profile.Name}” làm worker Remote cho chế độ Parallel.";
     }
@@ -268,21 +268,21 @@ public partial class GpuManagerWindow : Window
     {
         GpuBackendProfile profile = ReadProfile();
         if (profile.Kind == GpuBackendKind.Remote && !profile.RemoteDisclosureAccepted &&
-            ThemedDialog.Show(this, "Remote GPU sẽ nhận prompt và nguyên văn segment. Xác nhận lưu profile Remote?",
+            ThemedDialog.Show(this, "Remote GPU sẽ nhận prompt và nguyên văn đoạn. Xác nhận lưu hồ sơ Remote?",
                 "Quyền gửi dữ liệu", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         profile.RemoteDisclosureAccepted = profile.Kind == GpuBackendKind.Remote;
         bool isActive = _backends.ActiveProfile.Id == profile.Id;
         await _backends.SaveProfileAsync(profile, activate: isActive);
         RefreshProfiles(profile.Id);
         StatusText.Text = isActive
-            ? "Đã lưu và áp dụng profile đang dùng. Request mới sẽ dùng model này."
-            : "Đã lưu profile. Credential được bảo vệ bằng Windows DPAPI.";
+            ? "Đã lưu và áp dụng hồ sơ đang dùng. Request mới sẽ dùng model này."
+            : "Đã lưu hồ sơ. Credential được bảo vệ bằng Windows DPAPI.";
     });
 
     private async void OnDeleteProfile(object sender, RoutedEventArgs e) => await RunAsync(async () =>
     {
         if (ProfileList.SelectedItem is not GpuBackendProfile profile) return;
-        if (ThemedDialog.Show(this, $"Xóa profile “{profile.Name}”?", "Xóa profile",
+        if (ThemedDialog.Show(this, $"Xóa hồ sơ “{profile.Name}”?", "Xóa hồ sơ",
             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         await _backends.DetachRuntimeClientAsync(profile.Id);
         await _connections.DisconnectAsync(profile.Id);
@@ -321,7 +321,7 @@ public partial class GpuManagerWindow : Window
             await _backends.AttachRuntimeClientAsync(profile.Id, handle.Client);
             await _backends.ActivateAsync(profile.Id);
             _preferences.RemoteProfileId = profile.Id;
-            RefreshProfiles(profile.Id); StatusText.Text = "Đã kết nối SSH tunnel loopback. Profile đang sẵn sàng.";
+            RefreshProfiles(profile.Id); StatusText.Text = "Đã kết nối SSH tunnel loopback. Hồ sơ đang sẵn sàng.";
             return true;
         }
         catch (SshHostKeyVerificationException error)
@@ -330,7 +330,7 @@ public partial class GpuManagerWindow : Window
             StatusText.Text = error.Message + " Fingerprint quan sát: " + error.ObservedFingerprint;
             // The SSH server on this machine was created by QT Studio's own setup a moment ago, so its first key is trusted.
             if (trustNewHostKey || IsVisible && ThemedDialog.Show(this,
-                    $"Máy chủ trả về SSH Host Key Fingerprint:\n{error.ObservedFingerprint}\n\nTin cậy fingerprint này, lưu profile và kết nối ngay?",
+                    $"Máy chủ trả về SSH Host Key Fingerprint:\n{error.ObservedFingerprint}\n\nTin cậy fingerprint này, lưu hồ sơ và kết nối ngay?",
                     "Xác nhận SSH Fingerprint (1 chạm)", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
             {
                 GpuBackendProfile confirmedProfile = ReadProfile();
@@ -341,7 +341,7 @@ public partial class GpuManagerWindow : Window
                 await _backends.ActivateAsync(confirmedProfile.Id);
                 _preferences.RemoteProfileId = confirmedProfile.Id;
                 RefreshProfiles(confirmedProfile.Id);
-                StatusText.Text = "Đã xác nhận SSH Fingerprint, lưu profile và kết nối tunnel sẵn sàng.";
+                StatusText.Text = "Đã xác nhận SSH Fingerprint, lưu hồ sơ và kết nối tunnel sẵn sàng.";
                 return true;
             }
             return false;
@@ -406,7 +406,7 @@ public partial class GpuManagerWindow : Window
     internal void ApplyRdpFile(RdpConnectionFile file)
     {
         if (ProfileList.SelectedItem is not GpuBackendProfile { Kind: GpuBackendKind.Remote })
-        { StatusText.Text = "Hãy chọn hoặc thêm một profile GPU Remote trước khi nhập file RDP."; return; }
+        { StatusText.Text = "Hãy chọn hoặc thêm một hồ sơ GPU Remote trước khi nhập file RDP."; return; }
         // A different machine has a different host key, so the pinned fingerprint must not carry over.
         if (!string.Equals(HostInput.Text.Trim(), file.Host, StringComparison.OrdinalIgnoreCase)) FingerprintInput.Text = "";
         ConnectionTypeInput.SelectedIndex = 0;
@@ -436,7 +436,7 @@ public partial class GpuManagerWindow : Window
         {
             GpuBackendProfile profile = ReadProfile();
             if (profile.Kind != GpuBackendKind.Remote || profile.Ssh is null)
-            { StatusText.Text = "Cài đặt tự động dành cho profile GPU Remote qua SSH."; return; }
+            { StatusText.Text = "Cài đặt tự động dành cho hồ sơ GPU Remote qua SSH."; return; }
             string model = profile.Model;
             SshReadiness readiness = await EnsureSshReachableAsync(profile, cancellation.Token);
             if (readiness == SshReadiness.Failed) return;
@@ -651,7 +651,7 @@ public partial class GpuManagerWindow : Window
     private GpuBackendProfile ReadProfile()
     {
         GpuBackendProfile original = ProfileList.SelectedItem as GpuBackendProfile
-            ?? throw new InvalidOperationException("Chưa chọn profile.");
+            ?? throw new InvalidOperationException("Chưa chọn hồ sơ.");
         // The provider's panel shows "address:port" as one text, so accept it pasted into the address box.
         (string host, int? pastedPort) = RemoteAddress.Split(HostInput.Text);
         if (pastedPort is int port) { HostInput.Text = host; PortInput.Text = port.ToString(CultureInfo.InvariantCulture); }

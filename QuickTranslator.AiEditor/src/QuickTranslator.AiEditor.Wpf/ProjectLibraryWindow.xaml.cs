@@ -10,7 +10,7 @@ internal sealed record ProjectLibraryCard(Guid ProjectId, string Title, string A
     string? CurrentChapter, DateTimeOffset LastOpenedAt, bool Missing, string? Error)
 {
     public double ProgressPercent => Math.Round(Progress * 100, 1);
-    public string Metadata => Missing ? "Mất liên kết Project" :
+    public string Metadata => Missing ? "Mất liên kết dự án" :
         $"{(string.IsNullOrWhiteSpace(Author) ? "Chưa rõ tác giả" : Author)} · {StatusLabel}";
     public string StatusLabel => Status switch { ProjectStatus.Translating => "Đang dịch", ProjectStatus.Editing => "Biên tập",
         ProjectStatus.Completed => "Hoàn thành", ProjectStatus.Archived => "Lưu trữ", _ => "Chuẩn bị" };
@@ -18,7 +18,7 @@ internal sealed record ProjectLibraryCard(Guid ProjectId, string Title, string A
         $"{ProgressPercent:0.#}% · {CompletedChapterCount}/{ChapterCount} chương duyệt";
     public string CurrentChapterLabel => string.IsNullOrWhiteSpace(CurrentChapter) ? "Chưa có chương đang đọc" : "Đang làm: " + CurrentChapter;
     public string UpdatedLabel => "Mở gần nhất " + LastOpenedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm");
-    public string Warning => Missing ? "Chọn “Tìm lại vị trí” để nối đúng Project ID." : Error ?? "";
+    public string Warning => Missing ? "Chọn “Tìm lại vị trí” để nối đúng ID dự án." : Error ?? "";
 }
 
 internal sealed record ProjectLibraryRequest(ProjectLibraryAction Action, ProjectLibraryCard? Project);

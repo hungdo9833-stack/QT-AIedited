@@ -2,51 +2,51 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:ui="clr-namespace:QuickTranslator.AiEditor.Wpf"
  MinWidth="620" MinHeight="480" Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
- <Grid Margin="16"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-  <StackPanel Margin="2,0,2,14"><TextBlock Text="Xuất bản truyện" Style="{StaticResource WindowTitle}"/><TextBlock Text="Ghép các chương đang hoạt động theo thứ tự đọc thành một file TXT, PDF hoặc EPUB: toàn bộ truyện, một dải chương hoặc một chương." Style="{StaticResource WindowSubtitle}"/></StackPanel>
+ <Grid Margin="{StaticResource Inset.Window}"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <StackPanel Margin="2,0,2,16"><TextBlock Text="Xuất bản truyện" Style="{StaticResource WindowTitle}"/><TextBlock Text="Ghép các chương đang hoạt động theo thứ tự đọc thành một file TXT, PDF hoặc EPUB: toàn bộ truyện, một dải chương hoặc một chương." Style="{StaticResource WindowSubtitle}"/></StackPanel>
   <Border Grid.Row="1" Style="{StaticResource Card}"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-   <StackPanel><TextBlock Text="PROJECT" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ProjectTitleText" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap"/></StackPanel>
-   <StackPanel Grid.Column="1"><TextBlock Text="CHƯƠNG SẼ XUẤT" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ChapterCountText" Text="Đang kiểm tra…" FontSize="17" FontWeight="SemiBold"/></StackPanel>
+   <StackPanel><TextBlock Text="DỰ ÁN" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ProjectTitleText" Style="{StaticResource SubtitleText}" TextWrapping="Wrap"/></StackPanel>
+   <StackPanel Grid.Column="1"><TextBlock Text="CHƯƠNG SẼ XUẤT" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="ChapterCountText" Text="Đang kiểm tra…" Style="{StaticResource SubtitleText}"/></StackPanel>
    <StackPanel Grid.Column="2"><TextBlock Text="TRẠNG THÁI" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="InspectionText" Text="Đang đọc metadata và bản dịch…" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"/></StackPanel>
   </Grid></Border>
   <Border Grid.Row="2" Style="{StaticResource Card}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="300"/><ColumnDefinition/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
    <StackPanel><TextBlock Text="Định dạng" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="FormatInput" SelectionChanged="OnFormatChanged" AutomationProperties.Name="Định dạng xuất bản"><ComboBoxItem Tag="Txt" IsSelected="True">TXT · UTF-8</ComboBoxItem><ComboBoxItem Tag="Pdf">PDF · A4</ComboBoxItem><ComboBoxItem Tag="Epub">EPUB · Sách điện tử</ComboBoxItem><ComboBoxItem Tag="VanCac">Sắc Viện · Đăng lên web</ComboBoxItem></ComboBox></StackPanel>
-   <StackPanel Grid.Column="1" Margin="14,0,0,0"><TextBlock Text="Ngôn ngữ" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="LanguageInput" SelectionChanged="OnLanguageChanged" AutomationProperties.Name="Ngôn ngữ xuất bản"><ComboBoxItem Tag="Vietnamese" IsSelected="True">Bản dịch tiếng Việt</ComboBoxItem><ComboBoxItem Tag="Chinese">Bản gốc tiếng Trung</ComboBoxItem></ComboBox></StackPanel>
-   <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,14,0,0">
+   <StackPanel Grid.Column="1" Margin="16,0,0,0"><TextBlock Text="Ngôn ngữ" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="LanguageInput" SelectionChanged="OnLanguageChanged" AutomationProperties.Name="Ngôn ngữ xuất bản"><ComboBoxItem Tag="Vietnamese" IsSelected="True">Bản dịch tiếng Việt</ComboBoxItem><ComboBoxItem Tag="Chinese">Bản gốc tiếng Trung</ComboBoxItem></ComboBox></StackPanel>
+   <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,16,0,0">
     <TextBlock Text="Phạm vi" Style="{StaticResource FieldLabel}"/>
     <ComboBox x:Name="RangeModeInput" SelectionChanged="OnRangeChanged" AutomationProperties.Name="Phạm vi xuất">
      <ComboBoxItem Tag="All" IsSelected="True">Toàn bộ truyện</ComboBoxItem>
      <ComboBoxItem Tag="Range">Dải chương</ComboBoxItem>
      <ComboBoxItem Tag="Single">Một chương</ComboBoxItem>
     </ComboBox>
-    <StackPanel x:Name="RangeInputsPanel" Orientation="Horizontal" Margin="0,6,0,0" Visibility="Collapsed">
-     <TextBlock x:Name="RangeFromLabel" Text="Từ chương" VerticalAlignment="Center" Margin="0,0,6,0"/>
+    <StackPanel x:Name="RangeInputsPanel" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed">
+     <TextBlock x:Name="RangeFromLabel" Text="Từ chương" VerticalAlignment="Center" Margin="0,0,8,0"/>
      <TextBox x:Name="RangeFromInput" Width="64" TextChanged="OnRangeChanged" AutomationProperties.Name="Từ chương số"/>
-     <TextBlock x:Name="RangeToLabel" Text="đến" VerticalAlignment="Center" Margin="8,0,6,0"/>
+     <TextBlock x:Name="RangeToLabel" Text="đến" VerticalAlignment="Center" Margin="8,0,8,0"/>
      <TextBox x:Name="RangeToInput" Width="64" TextChanged="OnRangeChanged" AutomationProperties.Name="Đến chương số"/>
     </StackPanel>
-    <TextBlock x:Name="RangeHintText" Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Visibility="Collapsed"/>
+    <TextBlock x:Name="RangeHintText" Margin="0,4,0,0" Style="{StaticResource CaptionText}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Visibility="Collapsed"/>
    </StackPanel>
-   <StackPanel Grid.Column="2" Grid.RowSpan="2" Margin="14,0,0,0"><TextBlock Text="Nội dung" Style="{StaticResource FieldLabel}"/><StackPanel x:Name="FileContentOptionsPanel"><CheckBox x:Name="IncludeProjectTitleInput" Content="Gồm tên Project" IsChecked="True"/><CheckBox x:Name="IncludeChapterTitlesInput" Content="Gồm tiêu đề từng chương" IsChecked="True"/></StackPanel><CheckBox x:Name="AllowIncompleteInput" Content="Cho phép xuất bản nháp/chương cần kiểm tra" Visibility="Collapsed" Checked="OnAllowIncompleteChanged" Unchecked="OnAllowIncompleteChanged" Foreground="{DynamicResource WarningBrush}"/></StackPanel>
+   <StackPanel Grid.Column="2" Grid.RowSpan="2" Margin="16,0,0,0"><TextBlock Text="Nội dung" Style="{StaticResource FieldLabel}"/><StackPanel x:Name="FileContentOptionsPanel"><CheckBox x:Name="IncludeProjectTitleInput" Content="Gồm tên dự án" IsChecked="True"/><CheckBox x:Name="IncludeChapterTitlesInput" Content="Gồm tiêu đề từng chương" IsChecked="True"/></StackPanel><CheckBox x:Name="AllowIncompleteInput" Content="Cho phép xuất bản nháp/chương cần kiểm tra" Visibility="Collapsed" Checked="OnAllowIncompleteChanged" Unchecked="OnAllowIncompleteChanged" Foreground="{DynamicResource WarningBrush}"/></StackPanel>
   </Grid></Border>
   <Border Grid.Row="3" Style="{StaticResource Card}">
    <DockPanel>
     <StackPanel DockPanel.Dock="Top">
      <TextBlock x:Name="FormatDescriptionText" Text="TXT giữ nguyên nội dung tiếng Việt do Reader và trình xuất chương đang sử dụng." TextWrapping="Wrap"/>
-     <ProgressBar x:Name="ExportProgress" Height="7" Minimum="0" Maximum="1" Margin="4,14,4,6" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
+     <ProgressBar x:Name="ExportProgress" Height="7" Minimum="0" Maximum="1" Margin="4,16,4,8" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
      <TextBlock x:Name="ProgressText" Text="Chưa bắt đầu." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
      <TextBlock x:Name="OutputPathText" Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource SuccessBrush}"/>
-     <WrapPanel x:Name="ExportedActionsPanel" Visibility="Collapsed" Margin="0,6,0,0">
+     <WrapPanel x:Name="ExportedActionsPanel" Visibility="Collapsed" Margin="0,8,0,0">
       <Button x:Name="OpenExportedFileButton" Content="Mở tệp vừa xuất" ui:ButtonIcon.Glyph="&#xE70F;" Click="OnOpenExportedFile"/>
       <Button x:Name="OpenExportFolderButton" Content="Mở thư mục" ui:ButtonIcon.Glyph="&#xE70F;" Click="OnOpenExportFolder"/>
      </WrapPanel>
     </StackPanel>
-    <StackPanel x:Name="IssueChaptersPanel" Visibility="Collapsed" Margin="0,10,0,0">
-     <TextBlock Text="Danh sách chương chưa hoàn tất / cần kiểm tra (nhấp đúp để mở trong Editor):" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}" Margin="0,0,0,4"/>
+    <StackPanel x:Name="IssueChaptersPanel" Visibility="Collapsed" Margin="0,12,0,0">
+     <TextBlock Text="Danh sách chương chưa hoàn tất / cần kiểm tra (nhấp đúp để mở trong Editor):" Style="{StaticResource CaptionText}" FontWeight="SemiBold" Foreground="{DynamicResource WarningBrush}" Margin="0,0,0,4"/>
      <ListBox x:Name="IssueChaptersList" MaxHeight="140" MouseDoubleClick="OnIssueChapterDoubleClick" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Danh sách chương chưa hoàn tất"/>
     </StackPanel>
    </DockPanel>
   </Border>
-  <Border Grid.Row="4" Style="{StaticResource Card}" Padding="8"><DockPanel><Button x:Name="CancelTaskButton" DockPanel.Dock="Left" Content="Hủy tác vụ" ui:ButtonIcon.Glyph="&#xE71A;" Click="OnCancelTask" Visibility="Collapsed" Style="{StaticResource DangerButton}"/><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="ExportButton" Content="Chọn nơi lưu và xuất" ui:ButtonIcon.Glyph="&#xEDE1;" Click="OnExport" Style="{StaticResource PrimaryButton}" IsEnabled="False" ToolTip="Đang kiểm tra chương…" ToolTipService.ShowOnDisabled="True"/><Button x:Name="CloseButton" Content="Đóng" Click="OnClose" ToolTip="Chờ tác vụ hiện tại hoàn tất hoặc hủy tác vụ." ToolTipService.ShowOnDisabled="True"/></StackPanel><TextBlock Text="Chương đã xóa mềm không được đưa vào file." VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/></DockPanel></Border>
+  <Border Grid.Row="4" Style="{StaticResource Card}" Padding="8"><DockPanel><Button x:Name="CancelTaskButton" DockPanel.Dock="Left" Content="Hủy tác vụ" ui:ButtonIcon.Glyph="&#xE71A;" Click="OnCancelTask" Visibility="Collapsed" Style="{StaticResource DangerButton}"/><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="CloseButton" IsCancel="True" Content="Đóng" Click="OnClose" ToolTip="Chờ tác vụ hiện tại hoàn tất hoặc hủy tác vụ." ToolTipService.ShowOnDisabled="True"/><Button x:Name="ExportButton" IsDefault="True" Content="Chọn nơi lưu và xuất" ui:ButtonIcon.Glyph="&#xEDE1;" Click="OnExport" Style="{StaticResource PrimaryButton}" IsEnabled="False" ToolTip="Đang kiểm tra chương…" ToolTipService.ShowOnDisabled="True"/></StackPanel><TextBlock Text="Chương đã xóa mềm không được đưa vào file." VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/></DockPanel></Border>
  </Grid>
 </UserControl>

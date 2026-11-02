@@ -170,7 +170,7 @@ public sealed class ProjectHostableViewsUiTests
         Button create = (Button)view.FindName("CreateButton");
         Button continueButton = (Button)view.FindName("ContinueButton");
         Assert.Equal("Bắt đầu", ((TextBlock)view.FindName("HeaderTitleText")).Text);
-        Assert.Equal("Tạo Project", create.Content);
+        Assert.Equal("Tạo dự án", create.Content);
         Assert.Equal(Visibility.Visible, create.Visibility);
         Assert.Equal(Visibility.Collapsed, continueButton.Visibility);
         Assert.Single(VisiblePrimaryButtons(create, continueButton, primary));

@@ -52,8 +52,8 @@ public partial class VanCacNovelsWindow : Window
     {
         string? linkedId = _project is null ? null : _account.Preferences.NovelByProject.GetValueOrDefault(_project.Manifest.ProjectId);
         NovelRow? linked = NovelsList.Items.OfType<NovelRow>().FirstOrDefault(n => n.Novel.Id == linkedId);
-        LinkedNovelText.Text = _project is null ? "Chưa mở Project. Mở Project để liên kết truyện." :
-            $"Project “{_project.Manifest.VietnameseTitle}”: " + (linkedId is null ? "chưa liên kết truyện." :
+        LinkedNovelText.Text = _project is null ? "Chưa mở dự án. Mở dự án để liên kết truyện." :
+            $"Dự án “{_project.Manifest.VietnameseTitle}”: " + (linkedId is null ? "chưa liên kết truyện." :
                 $"đã liên kết “{linked?.Novel.Title ?? linkedId}”.");
         LinkButton.IsEnabled = _account.IsSignedIn && _project is not null && NovelsList.SelectedItem is NovelRow;
         OpenWebButton.IsEnabled = _account.IsSignedIn && NovelsList.SelectedItem is NovelRow;

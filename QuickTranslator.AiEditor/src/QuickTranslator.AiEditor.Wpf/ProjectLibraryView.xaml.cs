@@ -79,8 +79,8 @@ public partial class ProjectLibraryView : UserControl
     {
         HeaderTitleText.Text = _startScreenMode ? "Bắt đầu" : "Thư viện truyện";
         HeaderSubtitleText.Text = _startScreenMode
-            ? "Mở Project gần đây, tạo Project mới hoặc tìm lại vị trí Project."
-            : "Mở nhanh Project, xem tiến độ và tiếp tục biên dịch";
+            ? "Mở dự án gần đây, tạo dự án mới hoặc tìm lại vị trí dự án."
+            : "Mở nhanh dự án, xem tiến độ và tiếp tục biên dịch";
     }
 
     private void UpdateButtons()
@@ -92,7 +92,7 @@ public partial class ProjectLibraryView : UserControl
         LocateButton.IsEnabled = has;
         RemoveButton.IsEnabled = has;
         DeleteButton.IsEnabled = has && !selected!.Missing;
-        SelectionHint.Text = selected?.ManifestPath ?? "Chọn một Project để tiếp tục.";
+        SelectionHint.Text = selected?.ManifestPath ?? "Chọn một dự án để tiếp tục.";
 
         Style primary = (Style)FindResource("PrimaryButton");
         if (_startScreenMode && _projects.Count == 0)

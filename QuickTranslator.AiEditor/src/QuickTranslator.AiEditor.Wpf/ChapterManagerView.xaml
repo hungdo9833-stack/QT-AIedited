@@ -4,7 +4,7 @@
         xmlns:ui="clr-namespace:QuickTranslator.AiEditor.Wpf"
         MinWidth="700" MinHeight="420"
         Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
-  <Grid Margin="16">
+  <Grid Margin="{StaticResource Inset.Window}">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <DockPanel Margin="4,0,4,8">
       <StackPanel>
@@ -21,7 +21,7 @@
         </StackPanel>
       </StackPanel>
     </DockPanel>
-    <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="8">
+    <Border Grid.Row="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource Radius.Overlay}" Padding="8">
       <Grid>
         <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
         <TextBox x:Name="SearchInput" ToolTip="Tìm theo số, tên Việt hoặc tên Trung" TextChanged="OnFilterChanged" AutomationProperties.Name="Tìm chương" AutomationProperties.HelpText="Tìm theo số, tên Việt hoặc tên Trung"/>
@@ -47,8 +47,8 @@
         <Button x:Name="DeleteButton" Content="Chuyển vào History" Style="{StaticResource DangerButton}" ui:ButtonIcon.Glyph="&#xE74D;" Click="OnDelete"/>
         <Button x:Name="RestoreButton" Content="Phục hồi" ui:ButtonIcon.Glyph="&#xE7A7;" Click="OnRestore"/>
         <Button x:Name="QueueButton" Content="Dịch các chương đã chọn" ui:ButtonIcon.Glyph="&#xE768;" Click="OnQueue" ToolTip="Tạo hàng đợi an toàn và bắt đầu dịch ngay" ToolTipService.ShowOnDisabled="True"/>
-        <Expander Header="Tùy chọn chương" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="6,0">
-          <WrapPanel Margin="0,5,0,0">
+        <Expander Header="Tùy chọn chương" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" Margin="8,0">
+          <WrapPanel Margin="0,4,0,0">
             <Button x:Name="ResegmentButton" Content="Chia lại đoạn" Click="OnResegment" ToolTip="Xem trước ranh giới mới; giữ nguyên các đoạn đã có dữ liệu dịch/duyệt."/>
             <Button x:Name="TranslateSelectedTitlesButton" Content="Dịch tiêu đề đã chọn" Click="OnTranslateSelectedTitles"/>
             <Button x:Name="TranslateAllTitlesButton" Content="Dịch tất cả tiêu đề" Click="OnTranslateAllTitles"/>
@@ -85,7 +85,7 @@
         <DataGridTextColumn Header="Lưu trữ" Binding="{Binding DeletedLabel}" SortMemberPath="IsDeleted" Width="105"/>
       </DataGrid.Columns>
     </DataGrid>
-    <Border Grid.Row="4" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10" Margin="0,8,0,0">
+    <Border Grid.Row="4" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource Radius.Overlay}" Padding="{StaticResource Inset.Panel}" Margin="0,8,0,0">
       <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
     </Border>
   </Grid>

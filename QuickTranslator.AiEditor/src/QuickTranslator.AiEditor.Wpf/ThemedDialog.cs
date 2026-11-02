@@ -37,7 +37,7 @@ internal sealed class ThemedDialog : Window
         MinWidth = 380;
         MaxWidth = 600;
         FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
-        FontSize = 13;
+        SetResourceReference(FontSizeProperty, "FontSize.Caption");
         UseLayoutRounding = true;
         SetResourceReference(BackgroundProperty, "PanelBrush");
         SetResourceReference(ForegroundProperty, "TextBrush");
@@ -124,9 +124,10 @@ internal sealed class ThemedDialog : Window
         if (spec is not { } s) return null;
         var icon = new TextBlock
         {
-            Text = s.glyph, FontSize = 24, Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Top,
+            Text = s.glyph, Margin = new Thickness(0, 0, 16, 0), VerticalAlignment = VerticalAlignment.Top,
             FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets")
         };
+        icon.SetResourceReference(TextBlock.FontSizeProperty, "FontSize.Display");
         icon.SetResourceReference(TextElement.ForegroundProperty, s.brush);
         System.Windows.Automation.AutomationProperties.SetName(icon, image.ToString());
         return icon;
