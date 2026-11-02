@@ -134,6 +134,42 @@ public sealed class CodexSurveyTests
     }
 
     [Fact]
+    public async Task Convert_TitleNamedCharacterMatchesTheGlossaryAndSavesIntoAProject()
+    {
+        // Live case: the husband has no given name, so Codex named him by his title in both files with different casing.
+        const string characters = """
+            { "setting": "Modern", "characters": [
+              { "chineseName": "覃先生", "vietnameseName": "Đàm Tiên Sinh", "gender": "Male", "narrativePronoun": "anh" },
+              { "chineseName": "蔓露", "vietnameseName": "Mạn Lộ", "gender": "Female", "narrativePronoun": "cô" },
+              { "chineseName": "王经理", "vietnameseName": "Mạn Lộ", "gender": "Male" } ] }
+            """;
+        const string glossary = """
+            [ {"chinese":"覃先生","vietnamese":"Đàm tiên sinh"}, {"chinese":"覃","vietnamese":"Đàm"},
+              {"chinese":"蔓露","vietnamese":"Tiểu Mạn"} ]
+            """;
+        string root = Path.Combine(Path.GetTempPath(), "qt-codex-save-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var repository = new QuickTranslator.AiEditor.Core.Projects.ProjectRepository();
+            var session = await repository.CreateAsync(root, "Thử");
+            CodexSurveyImportResult result = CodexSurveyImport.Convert(characters, glossary, session.Manifest.ProjectId, "Thử");
+
+            Assert.Equal("Đàm tiên sinh", result.Characters.Profiles[0].VietnameseName);
+            // "Tiểu Mạn" for 蔓露 would clash with her name: the term goes, the name stays.
+            Assert.Equal("Mạn Lộ", result.Characters.Profiles[1].VietnameseName);
+            Assert.DoesNotContain(result.Terms, t => t.Chinese == "蔓露");
+
+            var store = new QuickTranslator.AiEditor.Core.Projects.ProjectResourceStore(session);
+            var resources = await store.LoadAsync();
+            resources.Characters = result.Characters;
+            resources.Terms = result.Terms.ToList();
+            var saved = await store.SaveAsync(resources);
+            Assert.Contains(new ConfirmedTerm("覃先生", "Đàm tiên sinh"), saved.Terms);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void Convert_RejectsFilesThatAreNotJson()
     {
         Assert.Throws<InvalidDataException>(() => CodexSurveyImport.Convert("{ not json", "[]", Guid.NewGuid(), "x"));

@@ -36,7 +36,7 @@ if (args[0] == "--reapply")
     var repository = new ProjectRepository();
     ProjectSession session = (await repository.OpenAsync(Path.GetFullPath(args[2]))).Session;
     var store = new ProjectResourceStore(session);
-    File.Copy(store.PathName, store.PathName + ".before-reapply-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), overwrite: false);
+    if (File.Exists(store.PathName)) File.Copy(store.PathName, store.PathName + ".before-reapply-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), overwrite: false);
     string bookPath = Path.Combine(args[1], CodexSurveyRunner.BookFile);
     CodexSurveyImportResult result = CodexSurveyImport.Convert(
         await File.ReadAllTextAsync(Path.Combine(args[1], CodexSurveyRunner.CharactersFile)),

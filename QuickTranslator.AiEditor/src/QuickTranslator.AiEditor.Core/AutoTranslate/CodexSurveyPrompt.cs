@@ -36,7 +36,9 @@ public static class CodexSurveyPrompt
             }
           ]
         }
-        - Tên tiếng Việt dùng Hán-Việt chuẩn, viết hoa từng chữ. Mỗi tên tiếng Việt chỉ dùng cho một nhân vật.
+        - Tên tiếng Việt dùng Hán-Việt chuẩn, viết hoa từng chữ của tên riêng; danh xưng đi kèm viết thường (Đàm tiên sinh,
+          Trương tổng). Mỗi tên tiếng Việt chỉ dùng cho một nhân vật. Khi nguyên tác không cho biết tên riêng và nhân vật
+          chỉ được gọi bằng danh xưng, chineseName/vietnameseName ghi đúng như mục tương ứng trong glossary.json.
         - aliases: các cách gọi tiếng Trung khác của cùng nhân vật (biệt danh, tên gọi thân mật, danh xưng chỉ người đó),
           không lặp tên chính. Alias chỉ dùng để nhận ra nhân vật; cách dịch của danh xưng phải ghi trong glossary.json.
         - setting: "Modern" khi truyện lấy bối cảnh hiện đại (điện thoại, công ty, đô thị...), "Historical" khi cổ trang/tiên hiệp.

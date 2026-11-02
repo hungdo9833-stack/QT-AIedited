@@ -177,7 +177,44 @@ public static class CodexSurveyImport
             if (terms.Count >= MaxTerms) { warnings.Add($"Từ điển quá {MaxTerms:N0} mục; phần còn lại bị bỏ qua."); break; }
             terms.Add(new(chinese, vietnamese));
         }
+        ReconcileNamesWithGlossary(project, terms, warnings);
         return new(project, terms, warnings);
+    }
+
+    /// <summary>
+    /// The project store keeps one spelling per Chinese name: a character's name is also its glossary entry and saving
+    /// refuses two different ones. Codex may spell a title-like name both ways (覃先生 = "Đàm Tiên Sinh" as a character,
+    /// "Đàm tiên sinh" in the glossary): the glossary casing wins, any other difference drops the term, and the result
+    /// always fits the store (at most <see cref="MaxTerms"/> terms once every character name is added).
+    /// </summary>
+    private static void ReconcileNamesWithGlossary(CharacterProject project, List<ConfirmedTerm> terms, List<string> warnings)
+    {
+        foreach (CharacterProfile profile in project.Profiles.Where(p => p.ChineseName.Length > 0))
+        {
+            int index = terms.FindIndex(t => t.Chinese == profile.ChineseName);
+            if (index < 0 || terms[index].Vietnamese == profile.VietnameseName) continue;
+            string spelling = terms[index].Vietnamese;
+            // Only a casing difference is the same name (title words lower-case in the glossary). A different word is
+            // usually a nickname: the character's name is authoritative and the term goes.
+            if (string.Equals(spelling, profile.VietnameseName, StringComparison.OrdinalIgnoreCase))
+            {
+                warnings.Add($"Đổi tên “{profile.VietnameseName}” thành “{spelling}” cho khớp từ điển.");
+                profile.VietnameseName = spelling;
+            }
+            else
+            {
+                warnings.Add($"Bỏ mục từ điển “{profile.ChineseName} = {spelling}”: trùng tên nhân vật “{profile.VietnameseName}”.");
+                terms.RemoveAt(index);
+            }
+        }
+        int namesToAdd = project.Profiles.Count(p => p.ChineseName.Length > 0 && terms.All(t => t.Chinese != p.ChineseName));
+        int room = Math.Max(0, MaxTerms - namesToAdd);
+        if (terms.Count > room)
+        {
+            warnings.Add($"Bớt {terms.Count - room} mục từ điển cuối để đủ chỗ cho tên nhân vật.");
+            terms.RemoveRange(room, terms.Count - room);
+        }
+        project.Validate();
     }
 
     /// <summary>Narrative pronouns of period fiction; a modern book reads them as archaic.</summary>
