@@ -16,10 +16,10 @@
      <TextBlock Text="AI &amp; hiệu năng" Style="{StaticResource TitleText}" Margin="0,4,0,4"/>
      <TextBlock Text="Chọn GPU để xem model và trạng thái kết nối." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
     </StackPanel>
-    <ListBox x:Name="ProfileList" SelectionChanged="OnProfileSelected" BorderThickness="0" Background="Transparent" AutomationProperties.Name="Danh sách GPU">
+    <ListBox x:Name="ProfileList" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" SelectionChanged="OnProfileSelected" BorderThickness="0" Background="Transparent" AutomationProperties.Name="Danh sách GPU">
      <ListBox.ItemTemplate><DataTemplate><Border Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="{StaticResource Radius.Overlay}" Padding="{StaticResource Inset.Panel}" Margin="1,4"><StackPanel>
-      <DockPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock DockPanel.Dock="Right" Text="{Binding Kind}" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"/></DockPanel>
-      <TextBlock Text="{Binding Runtime.ModelOptions.Model}" Foreground="{DynamicResource AccentTextBrush}" TextTrimming="CharacterEllipsis"/>
+      <DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding Kind}" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0"/><TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/></DockPanel>
+      <TextBlock Text="{Binding Runtime.ModelOptions.Model}" ToolTip="{Binding Runtime.ModelOptions.Model}" Foreground="{DynamicResource AccentTextBrush}" TextTrimming="CharacterEllipsis"/>
      </StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
     </ListBox>
    </DockPanel>

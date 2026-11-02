@@ -78,7 +78,7 @@ public partial class GpuManagerWindow : Window
         {
             GpuTranslationMode.LocalOnly => "Hàng đợi dịch dùng llama-server trên máy này.",
             GpuTranslationMode.RemoteOnly => "Hàng đợi dịch dùng hồ sơ Remote đang kích hoạt.",
-            _ => "Một coordinator phân phối chapter động cho Local và Remote, tối đa hai request đồng thời."
+            _ => "Chia chương tự động cho máy này và máy từ xa, tối đa hai request cùng lúc."
         };
     }
 

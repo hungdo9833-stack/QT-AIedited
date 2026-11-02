@@ -101,14 +101,19 @@ internal static class ThemeManager
         if (palette["PrimaryBrush"] is Color accent) ApplicationAccentColorManager.Apply(accent, fluent);
     }
 
-    // Every window, including ones created later, gets a title bar that matches the app theme rather than Windows' app mode.
+    // Every window, including ones created later, gets the app's Window style and a title bar that matches the app theme.
+    // An implicit Window style only reaches windows whose type is exactly Window, so subclasses (every real window here)
+    // would otherwise fall back to the system font (Segoe UI 12) and ignore the type ramp.
     private static void RegisterTitleBarHook()
     {
         if (_titleBarHookRegistered) return;
         _titleBarHookRegistered = true;
         EventManager.RegisterClassHandler(typeof(Window), FrameworkElement.LoadedEvent, new RoutedEventHandler((sender, _) =>
         {
-            if (sender is Window window) ApplyTitleBar(window);
+            if (sender is not Window window) return;
+            if (window.ReadLocalValue(FrameworkElement.StyleProperty) == DependencyProperty.UnsetValue)
+                window.SetResourceReference(FrameworkElement.StyleProperty, typeof(Window));
+            ApplyTitleBar(window);
         }));
     }
 

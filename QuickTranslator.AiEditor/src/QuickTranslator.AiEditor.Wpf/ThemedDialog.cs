@@ -37,7 +37,7 @@ internal sealed class ThemedDialog : Window
         MinWidth = 380;
         MaxWidth = 600;
         FontFamily = new FontFamily("Segoe UI Variable Text, Segoe UI");
-        SetResourceReference(FontSizeProperty, "FontSize.Caption");
+        SetResourceReference(FontSizeProperty, "FontSize.Body");
         UseLayoutRounding = true;
         SetResourceReference(BackgroundProperty, "PanelBrush");
         SetResourceReference(ForegroundProperty, "TextBrush");
