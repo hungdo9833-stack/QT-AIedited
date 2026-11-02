@@ -13,8 +13,18 @@ public sealed record AutoBookPrepared(ProjectSession Session, string Title, int 
     CodexSurveyImportResult Survey, string Summary)
 {
     public string ManifestPath => Session.ManifestPath;
-    /// <summary>Set when the site walled off later chapters: which ones are missing and why.</summary>
-    public string? MissingNote { get; init; }
+}
+
+/// <summary>The site walled off later chapters. No project was made; the same link resumes from the cached pages.</summary>
+public sealed class AutoBookPausedException(string title, int downloaded, int total, string nextChapter, WebImportBlockReason reason)
+    : Exception($"Đã tải {downloaded}/{total} chương, dừng ở {nextChapter}: " + (reason == WebImportBlockReason.RequiresLogin
+        ? "web yêu cầu đăng nhập."
+        : "web chặn vì tải quá nhanh. Chạy lại link này sau (có thể tăng thời gian nghỉ) để tải tiếp các chương còn thiếu."))
+{
+    public string Title { get; } = title;
+    public int Downloaded { get; } = downloaded;
+    public int Total { get; } = total;
+    public WebImportBlockReason Reason { get; } = reason;
 }
 
 /// <summary>
@@ -37,7 +47,6 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
         Directory.CreateDirectory(pages);
         IWebNovelImporter importer = importerFactory(new WebImportOptions { DelayBetweenRequests = downloadDelay, CacheDirectory = pages });
         string text, title;
-        string? missingNote = null;
         try
         {
             status?.Report(new("Đọc mục lục", ""));
@@ -54,13 +63,12 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
                                    .WithCancellation(cancellationToken).ConfigureAwait(false))
                     chapters.Add(chapter);
             }
-            // Later chapters sit behind the same wall: keep the complete chapters already downloaded and say what is missing.
-            catch (WebImportBlockedException ex) when (ex.Reason is WebImportBlockReason.RequiresLogin or WebImportBlockReason.RateLimited &&
-                                                       chapters.Count > 0)
+            // A survey of part of a book misses most characters, so nothing is created until every chapter is in. The pages
+            // already downloaded stay in the cache: running the same link again only fetches the rest.
+            catch (WebImportBlockedException ex) when (ex.Reason is WebImportBlockReason.RequiresLogin or WebImportBlockReason.RateLimited)
             {
-                missingNote = $"thiếu chương {analysis.Chapters[chapters.Count].Title} trở đi ({analysis.Chapters.Count - chapters.Count} chương): " +
-                    (ex.Reason == WebImportBlockReason.RequiresLogin ? "web yêu cầu đăng nhập"
-                        : "web chặn vì tải quá nhanh, hãy chạy lại sau với thời gian nghỉ lớn hơn");
+                throw new AutoBookPausedException(title, chapters.Count, analysis.Chapters.Count,
+                    analysis.Chapters[chapters.Count].Title, ex.Reason);
             }
             if (chapters.Count == 0) throw new InvalidDataException("Không tải được chương nào có nội dung.");
             // Sites that restart numbering per volume (第1章 again) would collide in the project: number by TOC order instead.
@@ -127,12 +135,11 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
             title = book.VietnameseTitle;
         }
         string summary = (survey.ContentFlags.HasFlags ? $"⚠ {survey.ContentFlags.Flags.Count} cảnh báo nội dung. " : "") +
-            (missingNote is null ? "" : "⚠ " + missingNote + ". ") +
             (survey.Book is { } info ? $"“{info.VietnameseTitle}” · {string.Join(", ", info.Genres)} · " : "") +
             $"{report.ImportedCount:N0} chương, {titleNote}, {survey.Characters.Profiles.Count} nhân vật, " +
             $"{survey.Characters.Profiles.Sum(p => p.Relationships.Count)} quan hệ, {survey.Terms.Count} thuật ngữ" +
             (survey.Warnings.Count > 0 ? $"; {survey.Warnings.Count} ghi chú: {survey.Warnings[0]}" : "");
-        return new(session, title, report.ImportedCount, survey, summary) { MissingNote = missingNote };
+        return new(session, title, report.ImportedCount, survey, summary);
     }
 
     /// <summary>Keeps the content-safety findings with the project (Settings/content-flags.json) for later review.</summary>

@@ -40,6 +40,13 @@ public partial class MainWindow
             {
                 if (cancellationToken.IsCancellationRequested) { prepared[index].SetResult(null); rows[index].Stage = "Đã dừng"; continue; }
                 try { prepared[index].SetResult(await PrepareAutoBookAsync(rows[index], settings, cancellationToken)); }
+                catch (AutoBookPausedException paused)
+                {
+                    rows[index].Title = paused.Title;
+                    rows[index].Stage = $"⏸ Tạm dừng ({paused.Downloaded}/{paused.Total})";
+                    rows[index].Detail = paused.Message;
+                    prepared[index].SetResult(null);
+                }
                 catch (ContentStopException stop)
                 {
                     rows[index].Stage = "⛔ Đã dừng";
@@ -101,7 +108,6 @@ public partial class MainWindow
         AutoBookPrepared prepared = await preparer.PrepareAsync(row.Url, _projectLibrary.DefaultProjectsDirectory,
             settings.DownloadDelay, codex, status, cancellationToken, content);
         row.Title = prepared.Title;
-        row.MissingNote = prepared.MissingNote;
         // A prepared book is never opened in "chỉ chuẩn bị" mode: list it in the project library now so it can be found.
         if (_projectLibraryReady)
         {
@@ -109,7 +115,7 @@ public partial class MainWindow
             await _projectLibraryStore.SaveAsync(_projectLibrary);
             RefreshProjectSwitcher();
         }
-        row.Stage = (settings.PrepareOnly ? "Đã chuẩn bị" : "Chờ dịch") + (prepared.MissingNote is null ? "" : " (thiếu chương)");
+        row.Stage = settings.PrepareOnly ? "Đã chuẩn bị" : "Chờ dịch";
         row.Detail = prepared.Summary;
         return prepared.ManifestPath;
     }
@@ -181,11 +187,11 @@ public partial class MainWindow
                 (progress.CurrentChapterTitle is { } current ? $" · {current}" : "");
             switch (progress.Status)
             {
-                case ProjectTranslationJobStatus.Completed or ProjectTranslationJobStatus.CompletedWithErrors:
-                    row.Stage = (progress.Status == ProjectTranslationJobStatus.Completed ? "Xong" : "Xong (có lỗi)") +
-                        (row.MissingNote is null ? "" : " — chưa đủ truyện");
-                    // The site walled off later chapters: the book is not finished, so the reason stays visible.
-                    if (row.MissingNote is { } missing) row.Detail = $"Đã dịch {progress.CompletedChapters} chương; ⚠ {missing}";
+                case ProjectTranslationJobStatus.Completed:
+                    row.Stage = "Xong";
+                    return;
+                case ProjectTranslationJobStatus.CompletedWithErrors:
+                    row.Stage = "Xong (có lỗi)";
                     return;
                 case ProjectTranslationJobStatus.Cancelled or ProjectTranslationJobStatus.Paused or ProjectTranslationJobStatus.Interrupted
                     when !coordinator.IsRunning:
