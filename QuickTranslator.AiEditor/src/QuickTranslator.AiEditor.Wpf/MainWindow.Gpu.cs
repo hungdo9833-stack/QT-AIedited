@@ -295,9 +295,9 @@ public partial class MainWindow
             return;
         }
         if (_projectGpuProfileMissing)
-            throw new InvalidOperationException("Project tham chiếu profile GPU không còn tồn tại. Hãy chọn và lưu lại backend trong AI & hiệu năng.");
+            throw new InvalidOperationException("Dự án đang dùng hồ sơ GPU không còn tồn tại. Hãy chọn và lưu lại nguồn dịch trong AI & hiệu năng.");
         if (_projectSession is not null && _gpuBackends.ActiveProfile.Id != SelectedGpuProfileId)
-            throw new InvalidOperationException("Backend đang hoạt động không khớp cấu hình Project. Hãy chọn lại profile trước khi dịch.");
+            throw new InvalidOperationException("Nguồn dịch đang chạy không khớp cấu hình dự án. Hãy chọn lại hồ sơ trước khi dịch.");
         GpuBackendProfile profile = _gpuBackends.ActiveProfile;
         if (profile.Kind == GpuBackendKind.Local && _translationClient is GpuBackendManager)
         {

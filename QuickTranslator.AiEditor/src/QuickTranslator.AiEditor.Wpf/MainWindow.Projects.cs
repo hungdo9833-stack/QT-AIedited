@@ -684,7 +684,7 @@ public partial class MainWindow
 
     internal async Task RenameProjectChapterAsync(Guid chapterId, string title, string chineseTitle)
     {
-        if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_projectSession is null) throw new InvalidOperationException("Dự án đã đóng.");
         if (!BeginUiOperation(allowDuringTranslation: true))
             throw new InvalidOperationException("Editor đang xử lý một thao tác khác. Hãy thử lại sau khi thao tác đó hoàn tất.");
         try

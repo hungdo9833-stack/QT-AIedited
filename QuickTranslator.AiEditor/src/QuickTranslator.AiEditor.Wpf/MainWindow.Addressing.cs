@@ -11,7 +11,7 @@ public partial class MainWindow
     {
         if (_projectSession is null || _projectResources is null)
         {
-            ShowError(new InvalidOperationException("Hãy mở một Project trước khi mở sổ xưng hô."));
+            ShowError(new InvalidOperationException("Hãy mở một dự án trước khi mở sổ xưng hô."));
             return;
         }
         if (_addressingLedgerWindow is { IsVisible: true }) { _addressingLedgerWindow.Activate(); return; }

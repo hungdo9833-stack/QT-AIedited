@@ -48,7 +48,7 @@ public partial class MainWindow
 
     private async Task<ProjectTranslationCoordinator> EnsureProjectTranslationCoordinatorAsync()
     {
-        if (_projectSession is null) throw new InvalidOperationException("Hãy mở Project trước khi tạo translation queue.");
+        if (_projectSession is null) throw new InvalidOperationException("Hãy mở dự án trước khi tạo hàng đợi dịch.");
         if (_projectTranslationCoordinator is null) InitializeProjectTranslationCoordinator(_projectSession);
         Task<ProjectTranslationJob?>? loading = _projectTranslationLoadTask;
         if (loading is not null)
@@ -78,7 +78,7 @@ public partial class MainWindow
         // editor profile is not required to match a particular worker after restart.
         bool pinnedWorkers = _projectTranslationCoordinator?.CurrentJob?.Workers.Count > 0;
         if (!pinnedWorkers && _gpuBackends.ActiveProfile.Id != profile.Id)
-            throw new InvalidOperationException("Profile GPU của Project chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại backend.");
+            throw new InvalidOperationException("Hồ sơ GPU của dự án chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại nguồn dịch.");
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         IBookKnowledgeContextProvider? knowledge = null;
         if (translation.BookKnowledgeContextEnabled)
@@ -93,7 +93,7 @@ public partial class MainWindow
     /// <param name="askRetranslation">False (automatic runs): translate only what is missing without asking.</param>
     private async Task OpenProjectTranslationQueueCoreAsync(IReadOnlyList<Guid> chapterIds, bool askRetranslation)
     {
-        if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_projectSession is null) throw new InvalidOperationException("Dự án đã đóng.");
         if (!BeginUiOperation(allowDuringTranslation: true))
             throw new InvalidOperationException("Ứng dụng đang xử lý thao tác khác; hãy thử lại sau.");
         try
@@ -244,7 +244,7 @@ public partial class MainWindow
     private async Task<ProjectTranslationCoordinator> RebuildParallelCoordinatorAsync(ProjectTranslationJob? recovered,
         bool closeWindow = true, bool loadExisting = true, bool useCurrentWorkers = false)
     {
-        if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_projectSession is null) throw new InvalidOperationException("Dự án đã đóng.");
         if (_projectTranslationCoordinator?.IsRunning == true)
             throw new InvalidOperationException("Hàng đợi đang dịch; hãy Tạm dừng rồi thêm chương.");
         if (_gpuPreferences.Source == TranslationSource.Gpu && _translationClient is GpuBackendManager &&

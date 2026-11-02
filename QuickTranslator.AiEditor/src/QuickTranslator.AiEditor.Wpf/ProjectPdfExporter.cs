@@ -27,7 +27,7 @@ internal static class ProjectPdfExporter
         ArgumentNullException.ThrowIfNull(options);
         if (inspection.TotalChapterCount == 0)
             throw new InvalidOperationException(inspection.IsRange ? "Không có chương nào trong phạm vi đã chọn."
-                : "Project chưa có chương để xuất bản.");
+                : "Dự án chưa có chương để xuất bản.");
         if (inspection.RequiresConfirmation && !options.AllowIncomplete)
             throw new InvalidOperationException((inspection.IsRange ? "Phạm vi đã chọn" : "Project") +
                 " còn chương chưa hoàn tất hoặc cần kiểm tra. Hãy xác nhận xuất bản nháp trước khi tiếp tục.");

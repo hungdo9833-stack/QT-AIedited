@@ -13,7 +13,7 @@ public partial class MainWindow
 
     private async Task SoftDeleteFromManagerAsync(IReadOnlyList<Guid> chapterIds)
     {
-        if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_projectSession is null) throw new InvalidOperationException("Dự án đã đóng.");
         ProjectSession session = _projectSession;
         Guid[] selected = chapterIds.Distinct().ToArray();
         if (selected.Length == 0) return;
@@ -31,7 +31,7 @@ public partial class MainWindow
 
     private async Task RestoreFromManagerAsync(IReadOnlyList<Guid> chapterIds)
     {
-        if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_projectSession is null) throw new InvalidOperationException("Dự án đã đóng.");
         ProjectSession session = _projectSession;
         ProjectChapterEntry[] selected = chapterIds.Distinct().Select(id =>
             session.Manifest.Chapters.SingleOrDefault(entry => entry.ChapterId == id && entry.DeletedAt is not null)
@@ -66,11 +66,11 @@ public partial class MainWindow
 
     private async Task ResegmentFromManagerAsync(IReadOnlyList<Guid> chapterIds)
     {
-        if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_projectSession is null) throw new InvalidOperationException("Dự án đã đóng.");
         Guid[] selected = chapterIds.Distinct().ToArray();
         EnsureChaptersNotOwnedByActiveTranslationJob(selected);
         if (_projectTranslationCoordinator?.IsRunning == true)
-            throw new InvalidOperationException("Hãy Pause Project Queue và chờ worker lưu checkpoint trước khi chia lại đoạn.");
+            throw new InvalidOperationException("Hãy tạm dừng hàng đợi dịch và chờ lưu điểm dừng trước khi chia lại đoạn.");
         ProjectSession session = _projectSession;
         bool completed = await RunWorkspaceTransitionAsync(async () =>
         {

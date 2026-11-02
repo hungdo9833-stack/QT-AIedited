@@ -75,19 +75,19 @@
                     <TextBlock Text="Trung–Việt" FontSize="{StaticResource FontSize.Caption}" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
                 <DockPanel>
-                    <ToggleButton x:Name="ProjectMenuButton" DockPanel.Dock="Left" Content="Project ▾" MinWidth="92" ToolTip="Lệnh Project" AutomationProperties.Name="Mở menu Project"/>
+                    <ToggleButton x:Name="ProjectMenuButton" DockPanel.Dock="Left" Content="Dự án ▾" MinWidth="92" ToolTip="Lệnh dự án" AutomationProperties.Name="Mở menu dự án"/>
                     <Popup IsOpen="{Binding IsChecked, ElementName=ProjectMenuButton, Mode=TwoWay}" PlacementTarget="{Binding ElementName=ProjectMenuButton}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
                         <Border Margin="0,4,0,0" Padding="4" MinWidth="220" CornerRadius="{StaticResource Radius.Overlay}" BorderThickness="1" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderStrongBrush}">
                             <StackPanel>
                                 <Button Content="Mở dự án…" Click="OnOpenProject" Style="{StaticResource MenuButton}"/>
-                                <Button Content="Tạo Project…" Click="OnNewProject" Style="{StaticResource MenuButton}"/>
-                                <Button Content="Thư viện Project…" Click="OnShowProjectLibrary" Style="{StaticResource MenuButton}"/>
+                                <Button Content="Tạo dự án…" Click="OnNewProject" Style="{StaticResource MenuButton}"/>
+                                <Button Content="Thư viện dự án…" Click="OnShowProjectLibrary" Style="{StaticResource MenuButton}"/>
                                 <Menu Background="Transparent" Padding="0">
                                     <MenuItem x:Name="RecentProjectsPopupMenu" Header="Dự án gần đây" SubmenuOpened="OnRecentProjectsOpened"/>
                                 </Menu>
                                 <Separator/>
-                                <Button Content="Thuộc tính Project…" Click="OnEditProjectProperties" Style="{StaticResource MenuButton}"/>
-                                <Button Content="Mở thư mục Project" Click="OnOpenProjectFolder" Style="{StaticResource MenuButton}"/>
+                                <Button Content="Thuộc tính dự án…" Click="OnEditProjectProperties" Style="{StaticResource MenuButton}"/>
+                                <Button Content="Mở thư mục dự án" Click="OnOpenProjectFolder" Style="{StaticResource MenuButton}"/>
                             </StackPanel>
                         </Border>
                     </Popup>
@@ -916,7 +916,7 @@
                    </Grid>
                    <Border Grid.Row="1" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,8" Margin="0,8,0,0">
                        <DockPanel>
-                           <Button x:Name="ResourcesSaveButton" DockPanel.Dock="Right" Content="Lưu tài nguyên" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu từ điển, ngữ cảnh, nhân vật và preset của Project (cấu hình AI đang sửa cũng được lưu cùng lúc)"/>
+                           <Button x:Name="ResourcesSaveButton" DockPanel.Dock="Right" Content="Lưu tài nguyên" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu từ điển, ngữ cảnh, nhân vật và preset của dự án (cấu hình AI đang sửa cũng được lưu cùng lúc)"/>
                            <TextBlock x:Name="ResourcesDirtyText" Text="Mọi thay đổi đã được lưu" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
                        </DockPanel>
                    </Border>
@@ -1022,7 +1022,7 @@
                                     <Border Style="{StaticResource Card}">
                                         <StackPanel>
                                             <TextBlock Text="Gemini API — dùng chung cho dịch và khảo sát nhân vật" FontWeight="SemiBold" FontSize="{StaticResource FontSize.Subtitle}"/>
-                                            <TextBlock Text="Key Google AI Studio được lưu theo thứ tự xoay vòng trong Windows Credential Manager; không ghi vào Project, settings JSON hoặc log." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,8"/>
+                                            <TextBlock Text="Key Google AI Studio được lưu theo thứ tự xoay vòng trong Windows Credential Manager; không ghi vào dự án, settings JSON hoặc log." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,8"/>
                                             <ItemsControl x:Name="GeminiSavedKeyList" AutomationProperties.Name="Danh sách Gemini API key đã lưu">
                                                 <ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,2">
                                                     <Button DockPanel.Dock="Right" Content="Xóa" Tag="{Binding Index}" Click="OnRemoveGeminiApiKey" AutomationProperties.Name="Xóa Gemini API key"/>
@@ -1105,7 +1105,7 @@
                             <!-- One save for every settings page, always in the same place. API key, GPU profiles and Data preferences keep their own buttons or save on change (stored separately). -->
                             <Border Grid.Row="1" Background="{DynamicResource PanelAltBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="12,8" Margin="0,8,0,0">
                                 <DockPanel>
-                                    <Button x:Name="SettingsSaveButton" DockPanel.Dock="Right" Content="Lưu thiết lập" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu cấu hình ứng dụng (tài nguyên Project đang sửa cũng được lưu cùng lúc)"/>
+                                    <Button x:Name="SettingsSaveButton" DockPanel.Dock="Right" Content="Lưu thiết lập" ui:ButtonIcon.Glyph="&#xE74E;" Click="OnSaveSettings" Style="{StaticResource PrimaryButton}" ToolTip="Lưu cấu hình ứng dụng (tài nguyên dự án đang sửa cũng được lưu cùng lúc)"/>
                                     <TextBlock x:Name="SettingsDirtyText" Text="Mọi thay đổi đã được lưu" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
                                 </DockPanel>
                             </Border>

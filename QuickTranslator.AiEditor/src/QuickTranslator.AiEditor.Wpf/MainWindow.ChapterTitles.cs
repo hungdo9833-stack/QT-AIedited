@@ -35,7 +35,7 @@ public partial class MainWindow
 
     private async Task TranslateChapterTitlesFromManagerAsync(IReadOnlyList<Guid> chapterIds)
     {
-        if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
+        if (_projectSession is null) throw new InvalidOperationException("Dự án đã đóng.");
         Guid[] ids = chapterIds.Distinct().ToArray();
         if (ids.Length == 0) return;
         EnsureChaptersNotOwnedByActiveTranslationJob(ids);

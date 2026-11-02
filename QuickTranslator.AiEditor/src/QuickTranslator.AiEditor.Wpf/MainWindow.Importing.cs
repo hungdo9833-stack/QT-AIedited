@@ -14,7 +14,7 @@ public partial class MainWindow
     {
         if (_projectSession is null)
         {
-            ShowError(new InvalidOperationException("Hãy mở hoặc tạo Project trước khi nhập nhiều chương."));
+            ShowError(new InvalidOperationException("Hãy mở hoặc tạo dự án trước khi nhập nhiều chương."));
             return;
         }
 
@@ -110,7 +110,7 @@ public partial class MainWindow
         bool replaceSoftDeletedHistory, IProgress<BulkImportProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        if (_projectSession is null) throw new InvalidOperationException("Chưa mở Project.");
+        if (_projectSession is null) throw new InvalidOperationException("Chưa mở dự án.");
         var defaults = new BulkImportChapterDefaults(ReadSegmenterOptions(), ReadModelOptions(), _presetManager.Selected);
         return new SafeBulkImportService(_projectRepository).ImportAsync(_projectSession, plan, defaults,
             new BulkImportOptions(ReplaceSoftDeletedHistory: replaceSoftDeletedHistory), progress, cancellationToken);
