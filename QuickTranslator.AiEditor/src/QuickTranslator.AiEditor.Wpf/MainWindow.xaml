@@ -162,8 +162,8 @@
                 <StackPanel DockPanel.Dock="Top">
                     <DockPanel LastChildFill="False">
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                            <Button x:Name="SidebarChaptersTabButton" Content="Chương" ui:ButtonIcon.Glyph="&#xE8FD;" Padding="{StaticResource Inset.ButtonCompact}" Click="OnSwitchLeftPanelToChapters" ToolTip="Xem mục lục chương"/>
-                            <Button x:Name="SidebarSegmentsTabButton" Content="Đoạn" ui:ButtonIcon.Glyph="&#xE8A4;" Padding="{StaticResource Inset.ButtonCompact}" Click="OnSwitchLeftPanelToSegments" ToolTip="Chuyển sang danh sách đoạn"/>
+                            <Button x:Name="SidebarChaptersTabButton" Content="Chương" Padding="{StaticResource Inset.ButtonCompact}" Click="OnSwitchLeftPanelToChapters" ToolTip="Xem mục lục chương"/>
+                            <Button x:Name="SidebarSegmentsTabButton" Content="Đoạn" Padding="{StaticResource Inset.ButtonCompact}" Click="OnSwitchLeftPanelToSegments" ToolTip="Chuyển sang danh sách đoạn"/>
                         </StackPanel>
                         <TextBlock x:Name="ActiveProjectTitle" Text="Dự án" Style="{StaticResource SubtitleText}" Margin="4" VerticalAlignment="Center"/>
                     </DockPanel>
