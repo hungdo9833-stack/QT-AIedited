@@ -150,6 +150,18 @@ public sealed class CharacterConsistencyLockTests
 
         Assert.Contains("覃太太 = Đàm phu nhân", attempt.Prompt);
         Assert.Equal(1, Count(attempt.Prompt, "蔓露 = Mạn Lộ"));
+        Assert.Contains("never turn them into bà/ông", attempt.Prompt);
+    }
+
+    [Theory]
+    [InlineData("Thanh Vân Tông", false)]
+    [InlineData("Tổng bộ", false)]
+    [InlineData("Trương tổng", true)]
+    [InlineData("Lâm thiếu gia", true)]
+    public void TitleRuleAppearsOnlyWhenTheGlossaryHasHanVietTitles(string vietnamese, bool expected)
+    {
+        string prompt = new TranslationPromptBuilder().Build("原文。", [new GlossaryEntry("某某", vietnamese)], "");
+        Assert.Equal(expected, prompt.Contains("never turn them into bà/ông", StringComparison.Ordinal));
     }
 
     [Fact]

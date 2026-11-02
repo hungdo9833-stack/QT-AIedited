@@ -26,7 +26,7 @@ public sealed class EmptyContextMemory : IContextMemory
     public ValueTask<string> GetNotesAsync(ChapterDocument chapter, Guid segmentId, CancellationToken cancellationToken) => ValueTask.FromResult("");
 }
 
-public sealed class TranslationPromptBuilder
+public sealed partial class TranslationPromptBuilder
 {
     public const string Version = "translategemma-zh-vi-v3-character-notes-in-context";
     internal const string CharacterNotesHeader =
@@ -48,6 +48,10 @@ public sealed class TranslationPromptBuilder
         {
             prompt.AppendLine("Reference glossary (reference only, do not translate this list):");
             foreach (var entry in glossary) prompt.AppendLine($"{entry.Chinese} = {entry.Vietnamese}");
+            // Chinese novels keep their Hán-Việt titles: a model left alone turns 覃太太 into "bà Đàm".
+            if (glossary.Any(entry => HanVietTitle().IsMatch(entry.Vietnamese)))
+                prompt.AppendLine("Keep the Hán-Việt titles of this glossary exactly as written (e.g. Đàm phu nhân, Trương tổng, " +
+                    "Lâm thiếu gia); never turn them into bà/ông/cậu/cô/anh/chị.");
         }
         string context = string.IsNullOrWhiteSpace(contextNotes) ? "" :
             "Context notes (reference only, do not translate these notes):\n" + contextNotes;
@@ -70,6 +74,11 @@ public sealed class TranslationPromptBuilder
             ? rendered
             : characters + Environment.NewLine + Environment.NewLine + rendered;
     }
+
+    // Office titles count only after a name (Trương tổng), so a term like "Tổng bộ" does not trigger the rule.
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<!\p{L})(?:phu nhân|thái thái|tiên sinh|lão gia|thiếu gia|tiểu thư|công tử|cô nương|lão bản)(?!\p{L})|\p{L}\s+(?:tổng|quản lý|kinh lý)(?!\p{L})",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex HanVietTitle();
 }
 
 internal static class PromptTokenBudget

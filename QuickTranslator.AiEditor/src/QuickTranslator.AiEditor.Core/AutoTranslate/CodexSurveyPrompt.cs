@@ -55,7 +55,7 @@ public static class CodexSurveyPrompt
           ghi mỗi dạng một mục với cách dịch thống nhất. Giữ danh xưng Hán-Việt quen thuộc của truyện Trung thay vì Việt hóa
           cứng: phu nhân, thái thái, tiên sinh, lão gia, thiếu gia, thiếu phu nhân, tiểu thư, tổng, quản lý...,
           đặt sau họ theo trật tự tiếng Việt (覃太太 = Đàm phu nhân, 张总 = Trương tổng, 林少爷 = Lâm thiếu gia).
-          Chỉ dùng bà/ông/cậu khi chính truyện dùng như đại từ thường ngày, không phải danh xưng.
+          Không bao giờ đổi danh xưng gốc thành bà/ông/cậu/cô/anh/chị (覃太太 KHÔNG phải "bà Đàm", 覃先生 KHÔNG phải "ông Đàm").
         - Họ của các gia đình/nhân vật chính xuất hiện đứng riêng hoặc ghép (覃, 张...): thêm mục một chữ = họ Hán-Việt
           (覃 = Đàm) để QuickTranslator sửa được chữ Hán còn sót sau khi dịch.
         - Cột vietnamese chỉ chứa tiếng Việt, không còn chữ Hán. Tối đa {{CodexSurveyImport.MaxTerms}} mục, ưu tiên mục
