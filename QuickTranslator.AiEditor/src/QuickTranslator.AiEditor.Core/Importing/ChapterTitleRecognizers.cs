@@ -51,6 +51,16 @@ internal sealed class ChineseOrdinalHeadingRecognizer : IChapterTitleRecognizer
 {
     public bool TryRecognize(string line, out HeadingRecognition recognition)
     {
+        if (!TryRecognizeOne(line, out recognition)) return false;
+        // "第一卷 第1章 标题": a chapter heading prefixed with its volume is the chapter, not a volume named "第1章 标题".
+        if (recognition.Kind == ChapterHeadingKind.Volume && recognition.Title.Length > 0 &&
+            TryRecognizeOne(recognition.Title, out HeadingRecognition inner) && inner.Kind == ChapterHeadingKind.Chapter)
+            recognition = inner;
+        return true;
+    }
+
+    private static bool TryRecognizeOne(string line, out HeadingRecognition recognition)
+    {
         recognition = null!;
         string text = HeadingText.NormalizeOuter(line);
         if (text.Length < 2) return false;

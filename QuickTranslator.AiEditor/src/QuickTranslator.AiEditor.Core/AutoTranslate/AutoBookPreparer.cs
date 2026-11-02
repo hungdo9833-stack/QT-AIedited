@@ -80,6 +80,8 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
             .ConfigureAwait(false);
         ImportPreviewEditor editor = await Task.Run(() => ImportPreviewEditor.Create(new ChapterDetector().Detect(source)),
             cancellationToken).ConfigureAwait(false);
+        if (!editor.Current.ImportableChapters.Any())
+            throw new InvalidDataException("Không tách được chương nào từ nội dung tải về (kiểm tra dòng tiêu đề chương trong " + rawPath + ").");
         string titleNote = await TranslateTitlesAsync(editor, session.Manifest.ProjectId, status, cancellationToken).ConfigureAwait(false);
         ImportPreviewPlan plan = editor.Current;
         BulkImportReport report;

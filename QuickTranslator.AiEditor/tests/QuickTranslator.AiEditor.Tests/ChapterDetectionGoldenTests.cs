@@ -29,6 +29,16 @@ public sealed class ChapterDetectionGoldenTests
     }
 
     [Fact]
+    public void Chapter_headings_prefixed_with_their_volume_are_chapters()
+    {
+        const string source = "第一卷 第1章 取液体为证\n甲。\n第一卷 第2章 他会看妇科病吗？\n乙。\n第一卷 第3章 很大\n丙。";
+        ImmutableImportPlan plan = new ChapterDetector().Detect(source);
+        Assert.Equal(new[] { "取液体为证", "他会看妇科病吗？", "很大" }, plan.Chapters.Select(x => x.Title));
+        Assert.Equal(new int?[] { 1, 2, 3 }, plan.Candidates.Where(x => x.Kind == ChapterHeadingKind.Chapter && x.Decision != CandidateDecision.Rejected).Select(x => x.Number));
+        Assert.Equal(source, plan.ReconstructSource());
+    }
+
+    [Fact]
     public void Supports_volume_resets_without_cross_volume_sequence_errors()
     {
         const string source = "第一卷 山门\n第一章 初见\n甲。\n第二章 入门\n乙。\n第二卷 中州\n第一章 重逢\n丙。\n第二章 风云\n丁。";
