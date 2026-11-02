@@ -39,8 +39,22 @@ public sealed class CodexRelationship
 
 public sealed record CodexGlossaryEntry(string Chinese, string Vietnamese);
 
+/// <summary>book.json: the translated title, a blurb for readers and genre tags for publishing.</summary>
+public sealed class CodexBookFile
+{
+    public string VietnameseTitle { get; set; } = "";
+    public string Synopsis { get; set; } = "";
+    public List<string> Genres { get; set; } = [];
+}
+
+public sealed record CodexBookInfo(string VietnameseTitle, string Synopsis, IReadOnlyList<string> Genres);
+
 public sealed record CodexSurveyImportResult(CharacterProject Characters, IReadOnlyList<ConfirmedTerm> Terms,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings)
+{
+    /// <summary>Null when Codex wrote no usable book.json; characters and glossary still apply.</summary>
+    public CodexBookInfo? Book { get; init; }
+}
 
 public static class CodexSurveyImport
 {
@@ -55,7 +69,34 @@ public static class CodexSurveyImport
     };
 
     /// <summary>Throws <see cref="InvalidDataException"/> only when a file is not readable JSON of the expected shape.</summary>
-    public static CodexSurveyImportResult Convert(string charactersJson, string glossaryJson, Guid projectId, string projectName)
+    public const int MaxGenres = 5;
+
+    public static CodexSurveyImportResult Convert(string charactersJson, string glossaryJson, Guid projectId, string projectName,
+        string? bookJson = null)
+    {
+        var bookWarnings = new List<string>();
+        CodexBookInfo? book = ConvertBook(bookJson, bookWarnings);
+        if (book is not null) projectName = book.VietnameseTitle;
+        CodexSurveyImportResult result = ConvertCore(charactersJson, glossaryJson, projectId, projectName);
+        return result with { Warnings = [.. bookWarnings, .. result.Warnings], Book = book };
+    }
+
+    private static CodexBookInfo? ConvertBook(string? json, List<string> warnings)
+    {
+        if (json is null) { warnings.Add("Codex chưa tạo book.json: giữ tên truyện gốc, chưa có giới thiệu và thể loại."); return null; }
+        CodexBookFile file;
+        try { file = Parse<CodexBookFile>(json, "book.json"); }
+        catch (InvalidDataException ex) { warnings.Add(ex.Message); return null; }
+        string title = Clip(file.VietnameseTitle?.Trim() ?? "", 200);
+        if (title.Length == 0) { warnings.Add("book.json thiếu tên tiếng Việt: giữ tên truyện gốc."); return null; }
+        var genres = new List<string>();
+        foreach (string genre in (file.Genres ?? []).Select(g => g?.Trim() ?? ""))
+            if (genre.Length is > 0 and <= 50 && !genres.Contains(genre, StringComparer.CurrentCultureIgnoreCase) && genres.Count < MaxGenres)
+                genres.Add(genre);
+        return new(title, Clip(file.Synopsis?.Trim() ?? "", 5000), genres);
+    }
+
+    private static CodexSurveyImportResult ConvertCore(string charactersJson, string glossaryJson, Guid projectId, string projectName)
     {
         CodexCharacterFile file = Parse<CodexCharacterFile>(charactersJson, "characters.json");
         List<CodexGlossaryEntry> glossary = Parse<List<CodexGlossaryEntry>>(glossaryJson, "glossary.json");

@@ -10,7 +10,7 @@ using QuickTranslator.AiEditor.Core.WebImport;
 // Usage: AutoTranslate.Probe <url> <projects-dir> [--analyze-only] [--model gpt-6-luna] [--effort high] [--workspace business]
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 if (args.Length < 2) { Console.Error.WriteLine("Usage: <url> <projects-dir> [--analyze-only] [--model m] [--effort e] [--workspace w]"); return 1; }
-var url = args[0] == "--reapply" ? null! : new Uri(args[0]);
+var url = args[0].StartsWith("--", StringComparison.Ordinal) ? null! : new Uri(args[0]);
 string projects = Path.GetFullPath(args[1]);
 string Option(string name, string fallback) { int i = Array.IndexOf(args, name); return i >= 0 && i + 1 < args.Length ? args[i + 1] : fallback; }
 
@@ -37,18 +37,47 @@ if (args[0] == "--reapply")
     ProjectSession session = (await repository.OpenAsync(Path.GetFullPath(args[2]))).Session;
     var store = new ProjectResourceStore(session);
     File.Copy(store.PathName, store.PathName + ".before-reapply-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), overwrite: false);
+    string bookPath = Path.Combine(args[1], CodexSurveyRunner.BookFile);
     CodexSurveyImportResult result = CodexSurveyImport.Convert(
         await File.ReadAllTextAsync(Path.Combine(args[1], CodexSurveyRunner.CharactersFile)),
         await File.ReadAllTextAsync(Path.Combine(args[1], CodexSurveyRunner.GlossaryFile)),
-        session.Manifest.ProjectId, session.Manifest.VietnameseTitle);
+        session.Manifest.ProjectId, session.Manifest.VietnameseTitle,
+        File.Exists(bookPath) ? await File.ReadAllTextAsync(bookPath) : null);
     ProjectResources resources = await store.LoadAsync();
     resources.Characters = result.Characters;
     resources.Terms = result.Terms.ToList();
     await store.SaveAsync(resources);
+    if (result.Book is { } book)
+    {
+        AutoBookPreparer.ApplyBookInfo(session.Manifest, book);
+        await repository.SaveManifestAsync(session);
+        Console.WriteLine($"Title: {book.VietnameseTitle}\nGenres: {string.Join(", ", book.Genres)}\nSynopsis ({book.Synopsis.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length} words):\n{book.Synopsis}\n");
+    }
     foreach (var profile in result.Characters.Profiles)
         Console.WriteLine($"  {profile.VietnameseName}: {profile.PrimaryNarrativePronoun} / {profile.SecondaryNarrativePronoun}");
     foreach (string warning in result.Warnings) Console.WriteLine("  note: " + warning);
     return 0;
+}
+
+// --book-info <codex-folder> <project.qtproj>: ask Codex for book.json only (title, blurb, genres) in a folder that still holds
+// raw.txt and characters.json, then run --reapply with the same arguments to apply it.
+if (args[0] == "--book-info")
+{
+    var options = new CodexSurveyOptions
+    {
+        Model = Option("--model", "gpt-6-luna"), Effort = Option("--effort", "high"),
+        CodexHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex-" + Option("--workspace", "business"))
+    };
+    ProjectSession session = (await new ProjectRepository().OpenAsync(Path.GetFullPath(args[2]))).Session;
+    string folder = Path.GetFullPath(args[1]);
+    File.Delete(Path.Combine(folder, CodexSurveyRunner.BookFile));
+    string prompt = CodexSurveyPrompt.BookOnly(session.Manifest.ChineseTitle.Length > 0 ? session.Manifest.ChineseTitle : session.Manifest.VietnameseTitle);
+    await File.WriteAllTextAsync(Path.Combine(folder, "prompt-book.md"), prompt);
+    var codexStarted = DateTime.Now;
+    int exit = await new CodexCliRunner().RunAsync(new(folder, prompt, Path.Combine(folder, "codex-last-book.md"), options),
+        new Progress<string>(line => { if (line.Contains("ERROR")) Console.WriteLine("  " + line); }), CancellationToken.None);
+    Console.WriteLine($"Codex exit {exit} after {(DateTime.Now - codexStarted).TotalMinutes:N1} phút; book.json: {File.Exists(Path.Combine(folder, CodexSurveyRunner.BookFile))}");
+    return exit;
 }
 
 if (args.Contains("--fetch-all"))

@@ -1,3 +1,5 @@
+using System.IO;
+using System.Text.Json;
 using System.Windows;
 using QuickTranslator.AiEditor.Core.AutoTranslate;
 using QuickTranslator.AiEditor.Core.Importing;
@@ -78,8 +80,10 @@ public partial class MainWindow
             row.Detail = value.Detail;
             if (value.Title is not null) row.Title = value.Title;
         });
+        CodexSurveyOptions codex = settings.Codex with { KnownGenres = await KnownGenresAsync(cancellationToken) };
         AutoBookPrepared prepared = await preparer.PrepareAsync(row.Url, _projectLibrary.DefaultProjectsDirectory,
-            settings.DownloadDelay, settings.Codex, status, cancellationToken);
+            settings.DownloadDelay, codex, status, cancellationToken);
+        row.Title = prepared.Title;
         // A prepared book is never opened in "chỉ chuẩn bị" mode: list it in the project library now so it can be found.
         if (_projectLibraryReady)
         {
@@ -90,6 +94,25 @@ public partial class MainWindow
         row.Stage = settings.PrepareOnly ? "Đã chuẩn bị" : "Chờ dịch";
         row.Detail = prepared.Summary;
         return prepared.ManifestPath;
+    }
+
+    /// <summary>Genres of the books in the project library, most used first, so new books reuse the site's existing tags.</summary>
+    private async Task<IReadOnlyList<string>> KnownGenresAsync(CancellationToken cancellationToken)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.CurrentCultureIgnoreCase);
+        foreach (RecentProject recent in _projectLibrary.RecentProjects.Where(project => !project.Missing).Take(100))
+        {
+            try
+            {
+                await using FileStream stream = File.OpenRead(recent.ManifestPath);
+                using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+                if (!document.RootElement.TryGetProperty("genres", out JsonElement genres) || genres.ValueKind != JsonValueKind.Array) continue;
+                foreach (JsonElement genre in genres.EnumerateArray())
+                    if (genre.GetString()?.Trim() is { Length: > 0 and <= 50 } name) counts[name] = counts.GetValueOrDefault(name) + 1;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
+        }
+        return counts.OrderByDescending(pair => pair.Value).Select(pair => pair.Key).Take(60).ToArray();
     }
 
     private async Task TranslateAutoBookAsync(AutoBookRow row, string manifestPath, CancellationToken cancellationToken)

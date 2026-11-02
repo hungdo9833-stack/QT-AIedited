@@ -69,6 +69,9 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
         status?.Report(new("Tạo dự án", ""));
         ProjectSession session = await repository.CreateAsync(NewProjectFolder(projectsDirectory, title), title, cancellationToken)
             .ConfigureAwait(false);
+        session.Manifest.ChineseTitle = title;
+        session.Manifest.SourceUrl = url.AbsoluteUri;
+        await repository.SaveManifestAsync(session, cancellationToken).ConfigureAwait(false);
         string rawPath = session.Resolve("Cache/web-import/" + SafeName(title) + ".txt");
         Directory.CreateDirectory(Path.GetDirectoryName(rawPath)!);
         await File.WriteAllTextAsync(rawPath, text, new UTF8Encoding(false), cancellationToken).ConfigureAwait(false);
@@ -101,11 +104,28 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
         resources.Characters = survey.Characters;
         resources.Terms = survey.Terms.ToList();
         await store.SaveAsync(resources, cancellationToken).ConfigureAwait(false);
+        if (survey.Book is CodexBookInfo book)
+        {
+            ApplyBookInfo(session.Manifest, book);
+            await repository.SaveManifestAsync(session, cancellationToken).ConfigureAwait(false);
+            title = book.VietnameseTitle;
+        }
         string summary = (missingNote is null ? "" : "⚠ " + missingNote + ". ") +
+            (survey.Book is { } info ? $"“{info.VietnameseTitle}” · {string.Join(", ", info.Genres)} · " : "") +
             $"{report.ImportedCount:N0} chương, {titleNote}, {survey.Characters.Profiles.Count} nhân vật, " +
             $"{survey.Characters.Profiles.Sum(p => p.Relationships.Count)} quan hệ, {survey.Terms.Count} thuật ngữ" +
             (survey.Warnings.Count > 0 ? $"; {survey.Warnings.Count} ghi chú: {survey.Warnings[0]}" : "");
         return new(session, title, report.ImportedCount, survey, summary);
+    }
+
+    /// <summary>Renames the project to the translated title and fills the blurb and genres used when publishing.</summary>
+    public static void ApplyBookInfo(ProjectManifest manifest, CodexBookInfo book)
+    {
+        if (string.IsNullOrWhiteSpace(manifest.ChineseTitle)) manifest.ChineseTitle = manifest.VietnameseTitle;
+        manifest.VietnameseTitle = book.VietnameseTitle;
+        if (book.Synopsis.Length > 0) manifest.Description = book.Synopsis;
+        if (book.Genres.Count > 0) manifest.Genres = book.Genres.ToList();
+        manifest.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     private async Task<string> TranslateTitlesAsync(ImportPreviewEditor editor, Guid projectId, IProgress<AutoBookStatus>? status,

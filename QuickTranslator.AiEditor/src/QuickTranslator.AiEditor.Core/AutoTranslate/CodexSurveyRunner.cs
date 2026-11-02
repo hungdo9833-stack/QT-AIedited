@@ -13,6 +13,8 @@ public sealed record CodexSurveyOptions
     public TimeSpan Timeout { get; init; } = TimeSpan.FromHours(2);
     /// <summary>How many times Codex may fix files QuickTranslator could not read.</summary>
     public int RepairAttempts { get; init; } = 1;
+    /// <summary>Genre tags already used on other books, offered first so the published site groups them together.</summary>
+    public IReadOnlyList<string> KnownGenres { get; init; } = [];
 }
 
 public sealed record CodexRunRequest(string WorkDirectory, string Prompt, string LastMessagePath, CodexSurveyOptions Options);
@@ -31,6 +33,7 @@ public sealed class CodexSurveyRunner(CodexSurveyOptions options, ICodexProcessR
 {
     public const string CharactersFile = "characters.json";
     public const string GlossaryFile = "glossary.json";
+    public const string BookFile = "book.json";
     private readonly ICodexProcessRunner _runner = runner ?? new CodexCliRunner();
 
     // Not under AppData: Codex's elevated Windows sandbox runs commands as a separate user that cannot open it (error 267).
@@ -41,13 +44,15 @@ public sealed class CodexSurveyRunner(CodexSurveyOptions options, ICodexProcessR
         string bookTitle, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(workDirectory);
-        string characters = Path.Combine(workDirectory, CharactersFile), glossary = Path.Combine(workDirectory, GlossaryFile);
+        string characters = Path.Combine(workDirectory, CharactersFile), glossary = Path.Combine(workDirectory, GlossaryFile),
+            book = Path.Combine(workDirectory, BookFile);
         File.Delete(characters);
         File.Delete(glossary);
+        File.Delete(book);
         await File.WriteAllTextAsync(Path.Combine(workDirectory, "raw.txt"), rawText, new UTF8Encoding(false), cancellationToken)
             .ConfigureAwait(false);
 
-        string prompt = CodexSurveyPrompt.Survey(bookTitle);
+        string prompt = CodexSurveyPrompt.Survey(bookTitle, options.KnownGenres);
         for (int attempt = 0; ; attempt++)
         {
             string last = Path.Combine(workDirectory, $"codex-last-{attempt}.md");
@@ -66,7 +71,8 @@ public sealed class CodexSurveyRunner(CodexSurveyOptions options, ICodexProcessR
                     return CodexSurveyImport.Convert(
                         await File.ReadAllTextAsync(characters, cancellationToken).ConfigureAwait(false),
                         await File.ReadAllTextAsync(glossary, cancellationToken).ConfigureAwait(false),
-                        projectId, bookTitle);
+                        projectId, bookTitle,
+                        File.Exists(book) ? await File.ReadAllTextAsync(book, cancellationToken).ConfigureAwait(false) : null);
                 }
                 catch (Exception ex) when (ex is InvalidDataException or ArgumentException) { problem = ex.Message; }
             }

@@ -49,7 +49,7 @@ public sealed class CodexSurveyTests
         Assert.False(plain.Enabled);
 
         Assert.Equal([new ConfirmedTerm("青云宗", "Thanh Vân Tông")], result.Terms);
-        Assert.Equal(3, result.Warnings.Count);
+        Assert.Equal(4, result.Warnings.Count); // 3 dropped entries + no book.json
         project.Validate();
     }
 
@@ -82,8 +82,43 @@ public sealed class CodexSurveyTests
             Assert.Contains("nàng", profile.DisallowedNarrativePronouns);
             Assert.True(profile.NormalizationEnabled);
         });
-        Assert.Equal(2, result.Warnings.Count);
+        Assert.Equal(3, result.Warnings.Count); // 2 modernized + no book.json
         result.Characters.Validate();
+    }
+
+    [Fact]
+    public void Convert_BookFileRenamesTheProjectAndKeepsAtMostFiveGenres()
+    {
+        const string book = """
+            { "vietnameseTitle": " Vợ Tôi Là Đóa Hoa Công Sở ", "synopsis": "Một câu móc câu.\n\nĐoạn hai.",
+              "genres": ["Đô thị", "Sắc", "đô thị", "", "Hiện đại", "NTR", "Hài hước", "Ngôn tình"] }
+            """;
+        CodexSurveyImportResult result = CodexSurveyImport.Convert(Characters, "[]", Guid.NewGuid(), "人妻", book);
+
+        CodexBookInfo info = Assert.IsType<CodexBookInfo>(result.Book);
+        Assert.Equal("Vợ Tôi Là Đóa Hoa Công Sở", info.VietnameseTitle);
+        Assert.Equal("Một câu móc câu.\n\nĐoạn hai.", info.Synopsis);
+        Assert.Equal(["Đô thị", "Sắc", "Hiện đại", "NTR", "Hài hước"], info.Genres);
+        Assert.Equal("Vợ Tôi Là Đóa Hoa Công Sở", result.Characters.Name);
+
+        var manifest = new QuickTranslator.AiEditor.Core.Projects.ProjectManifest { VietnameseTitle = "人妻", ChineseTitle = "" };
+        AutoBookPreparer.ApplyBookInfo(manifest, info);
+        Assert.Equal(("Vợ Tôi Là Đóa Hoa Công Sở", "人妻"), (manifest.VietnameseTitle, manifest.ChineseTitle));
+        Assert.Equal(info.Synopsis, manifest.Description);
+        Assert.Equal(info.Genres, manifest.Genres);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{ broken")]
+    [InlineData("""{ "vietnameseTitle": "", "genres": ["Đô thị"] }""")]
+    public void Convert_UnusableBookFileKeepsCharactersAndOnlyWarns(string? book)
+    {
+        CodexSurveyImportResult result = CodexSurveyImport.Convert(Characters, "[]", Guid.NewGuid(), "人妻", book);
+        Assert.Null(result.Book);
+        Assert.Equal(3, result.Characters.Profiles.Count);
+        Assert.Equal("人妻", result.Characters.Name);
+        Assert.Contains(result.Warnings, warning => warning.Contains("book.json"));
     }
 
     [Fact]
