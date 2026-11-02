@@ -30,6 +30,7 @@
             </MenuItem>
             <MenuItem Header="_Dự án">
                 <MenuItem x:Name="ProjectImportWebMenuItem" Header="Nhập truyện từ web…" Click="OnImportWeb" IsEnabled="False"/>
+                <MenuItem Header="Tự động dịch từ link…" Click="OnAutoTranslateFromLinks"/>
                 <MenuItem Header="_Thư viện dự án…" Click="OnShowProjectLibrary"/>
                 <MenuItem Header="Th_uộc tính…" Click="OnEditProjectProperties"/>
                 <MenuItem Header="Quản lý chương…" Click="OnOpenChapterManager"/>
