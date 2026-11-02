@@ -66,6 +66,10 @@ internal static class Program
             if (window is not MainWindow) return;
             if (string.Equals(mode, "reader", StringComparison.OrdinalIgnoreCase))
                 Invoke(window, "ShowReaderWorkspace");
+            else if (string.Equals(mode, "settings", StringComparison.OrdinalIgnoreCase))
+                Invoke(window, "ShowSettingsWorkspace", new object?[] { null });
+            else if (string.Equals(mode, "resources", StringComparison.OrdinalIgnoreCase))
+                Invoke(window, "ShowResourcesWorkspace", new object?[] { null });
             else
                 Invoke(window, "ShowTranslationWorkspace", string.Equals(mode, "four", StringComparison.OrdinalIgnoreCase));
             Invoke(window, "ApplyShellTheme", theme);

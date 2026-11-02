@@ -54,6 +54,9 @@ Văn bản truyện (ô nguyên văn/bản dịch, Reader) có cỡ riêng do ng
 | Đang tải > 1 giây | `wpfui:ProgressRing` hoặc ProgressBar + chữ "Đang …" | Treo UI không phản hồi |
 | Icon | `ui:ButtonIcon.Glyph` / `IconText` (Segoe Fluent Icons) | Emoji, ký tự "×", "«", "▾" làm icon |
 | Hộp thoại | `ThemedDialog` | `MessageBox.Show` |
+| Ô tìm kiếm | `SearchTextBox` (kính lúp + gợi ý lấy từ `Tag`) | TextBox trống không gợi ý |
+| Nhãn dài trong Button/CheckBox | `ContentTemplate="{StaticResource WrappingText}"` | Để chữ bị cắt |
+| Trạng thái "vì sao chưa thao tác được" | `ui:StatusInfoBar` + `Style="{StaticResource {x:Type wpfui:InfoBar}}"` | Chữ vàng/đỏ tự đặt |
 
 Thanh nút cuối hộp thoại: căn phải, thứ tự **[Phụ] [Hủy] [Chính]**, nút hủy/đóng `IsCancel` (Esc).
 Nút chính chỉ `IsDefault` (Enter) khi hành động an toàn và chưa ghi dữ liệu (đăng nhập, chọn nơi lưu, mở tiếp).

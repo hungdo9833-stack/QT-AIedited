@@ -415,7 +415,7 @@
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Content="Đóng" Click="OnCloseReaderSearch"/>
                                     <Button DockPanel.Dock="Right" Content="Tiếp" Click="OnFindNext"/>
-                                    <TextBox x:Name="ReaderSearchInput" KeyDown="OnReaderSearchKeyDown" ToolTip="Nhập từ cần tìm trong chương hiện tại" AutomationProperties.Name="Tìm trong chương hiện tại" AutomationProperties.HelpText="Nhập từ cần tìm trong chương hiện tại"/>
+                                    <TextBox x:Name="ReaderSearchInput" Style="{StaticResource SearchTextBox}" Tag="Nhập từ cần tìm trong chương hiện tại" KeyDown="OnReaderSearchKeyDown" ToolTip="Nhập từ cần tìm trong chương hiện tại" AutomationProperties.Name="Tìm trong chương hiện tại" AutomationProperties.HelpText="Nhập từ cần tìm trong chương hiện tại"/>
                                 </DockPanel>
                             </Border>
                             <Grid Grid.Row="2" Grid.Column="2">
@@ -868,7 +868,7 @@
                            <TextBlock Text="Nhân vật &amp; xưng hô" Style="{StaticResource SectionTitle}"/>
                            <TextBlock Grid.Row="1" Text="Chỉ quy tắc đã xác nhận được đưa vào prompt; ứng dụng không tự suy đoán nhân vật hay vai thoại." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap"/>
                            <StackPanel Grid.Row="2">
-                               <TextBox x:Name="CharacterSearchInput" Width="320" HorizontalAlignment="Left" ToolTip="Tìm nhân vật" TextChanged="OnCharacterSearchChanged" AutomationProperties.Name="Tìm nhân vật" AutomationProperties.HelpText="Tìm nhân vật"/>
+                               <TextBox x:Name="CharacterSearchInput" Style="{StaticResource SearchTextBox}" Tag="Tìm nhân vật" Width="320" HorizontalAlignment="Left" ToolTip="Tìm nhân vật" TextChanged="OnCharacterSearchChanged" AutomationProperties.Name="Tìm nhân vật" AutomationProperties.HelpText="Tìm nhân vật"/>
                                <Expander Header="Tùy chọn hồ sơ &amp; xưng hô" IsExpanded="False" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0">
                                    <WrapPanel>
                                        <TextBox x:Name="CharacterProjectNameInput" Width="300" ToolTip="Tên dự án" AutomationProperties.Name="Tên dự án nhân vật" AutomationProperties.HelpText="Tên dự án"/>
