@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using QuickTranslator.AiEditor.Core.AutoTranslate;
 using QuickTranslator.AiEditor.Wpf;
 using Xunit;
@@ -76,7 +77,8 @@ public sealed class AutoBookPipelineTests
         await retry.RunAsync().WaitAsync(TimeSpan.FromSeconds(10));
 
         // a only translates again (its project exists); b downloads again and goes on.
-        Assert.Equal(["translate:a", "find:b", "download:b", "survey:b", "translate:b"], stages.Log.OrderBy(x => x.EndsWith('a') ? 0 : 1));
+        // b was looked up in the library on its first run: retrying goes straight to downloading.
+        Assert.Equal(["translate:a", "download:b", "survey:b", "translate:b"], stages.Log.OrderBy(x => x.EndsWith('a') ? 0 : 1));
         Assert.True(a.Finished && b.Finished);
     }
 
@@ -158,6 +160,57 @@ public sealed class AutoBookPipelineTests
         Assert.Equal("a.qtproj", a.ManifestPath);
     }
 
+    [Fact]
+    public async Task A_throttled_download_continues_on_its_own_after_the_wait()
+    {
+        var stages = new FakeStages { ThrottleTimes = { ["a"] = 2 } };
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow a = Row("a"), b = Row("b");
+        pipeline.TryEnqueue(a);
+        pipeline.TryEnqueue(b);
+        await pipeline.RunAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Two throttled attempts, then the third download goes through; b is not held up meanwhile.
+        Assert.Equal(["find:a", "download:a", "download:a", "download:a", "survey:a", "translate:a"], stages.Log.Where(x => x.EndsWith(":a")));
+        Assert.True(a.Finished && b.Finished);
+    }
+
+    [Fact]
+    public async Task Removing_a_book_while_it_waits_to_retry_ends_the_run()
+    {
+        var stages = new FakeStages { ThrottleTimes = { ["a"] = 100 }, ThrottleWait = TimeSpan.FromSeconds(30) };
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow a = Row("a");
+        pipeline.TryEnqueue(a);
+        Task run = pipeline.RunAsync();
+        await stages.WaitForAsync("download:a");
+        await Task.Delay(100);
+
+        AutoBookPipeline.Remove(a);
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Single(stages.Log, x => x == "download:a");
+    }
+
+    [Fact]
+    public void Pasted_txt_paths_become_file_links_and_other_files_are_refused()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "qt-txt-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string txt = Path.Combine(folder, "书.txt"), epub = Path.Combine(folder, "书.epub");
+            File.WriteAllText(txt, "第1章");
+            File.WriteAllText(epub, "");
+            IReadOnlyList<Uri> links = AutoTranslateWindow.ParseLinks($"\"{txt}\"\nhttps://example.com/book");
+            Assert.True(links[0].IsFile);
+            Assert.Equal(txt, links[0].LocalPath);
+            Assert.Equal("https://example.com/book", links[1].AbsoluteUri);
+            Assert.Throws<InvalidOperationException>(() => AutoTranslateWindow.ParseLinks(epub));
+            Assert.Throws<InvalidOperationException>(() => AutoTranslateWindow.ParseLinks(Path.Combine(folder, "missing.txt")));
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
     private static AutoBookRow Row(string name) => new(new Uri("https://example.com/" + name));
 
     private sealed class FakeStages : IAutoBookStages
@@ -167,6 +220,8 @@ public sealed class AutoBookPipelineTests
         public ConcurrentDictionary<string, TaskCompletionSource> SurveyGate { get; } = new();
         public HashSet<string> FailTranslate { get; } = [];
         public HashSet<string> PauseDownload { get; } = [];
+        public ConcurrentDictionary<string, int> ThrottleTimes { get; } = new();
+        public TimeSpan ThrottleWait { get; init; } = TimeSpan.FromMilliseconds(20);
         public ConcurrentDictionary<string, AutoBookExisting> Existing { get; } = new();
 
         public Task<AutoBookExisting?> FindExistingAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken)
@@ -181,6 +236,12 @@ public sealed class AutoBookPipelineTests
             Log.Enqueue("download:" + name);
             if (DownloadGate.TryGetValue(name, out var gate)) await gate.Task.WaitAsync(cancellationToken);
             await Task.Yield();
+            if (ThrottleTimes.TryGetValue(name, out int left) && left > 0)
+            {
+                ThrottleTimes[name] = left - 1;
+                row.RetryAfter = ThrottleWait;
+                return null;
+            }
             return PauseDownload.Contains(name) ? null : new AutoBookDownload(row.Url, name, "", "");
         }
 

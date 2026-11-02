@@ -37,6 +37,24 @@ public sealed class AutoBookPauseTests : IDisposable
         Assert.False(Directory.Exists(projects) && Directory.EnumerateFileSystemEntries(projects).Any());
     }
 
+    [Fact]
+    public async Task A_local_txt_book_loads_without_any_download()
+    {
+        Directory.CreateDirectory(_root);
+        string path = Path.Combine(_root, "测试书名.txt");
+        await File.WriteAllTextAsync(path, "第1章 开始\n正文。\n第2章 继续\n正文。", new System.Text.UTF8Encoding(true));
+        bool fetched = false;
+        var preparer = new AutoBookPreparer(new ProjectRepository(), _ => { fetched = true; return null!; },
+            options => new CodexSurveyRunner(options), null!) { WorkRoot = Path.Combine(_root, "work") };
+
+        AutoBookDownload download = await preparer.DownloadAsync(new Uri(path), TimeSpan.Zero);
+
+        Assert.False(fetched);
+        Assert.Equal("测试书名", download.Title);
+        Assert.StartsWith("第1章 开始", download.Text);
+        Assert.StartsWith(Path.Combine(_root, "work"), download.WorkDirectory);
+    }
+
     private sealed class WalledImporter(int total, int wallAt, WebImportBlockReason reason) : IWebNovelImporter
     {
         private readonly WebChapterLink[] _links = Enumerable.Range(1, total)

@@ -30,6 +30,13 @@ public sealed class AutoBookRow(Uri url) : INotifyPropertyChanged
     internal bool Removed { get; set; }
     /// <summary>The user saw that the link's project is incomplete and retried: make a new, complete project.</summary>
     internal bool NewProject { get; set; }
+    /// <summary>The library held no project for this link when it was looked up.</summary>
+    internal bool CheckedExisting { get; set; }
+    /// <summary>Set by a stage that paused on a passing limit (the site throttled): the pipeline downloads again after it.</summary>
+    internal TimeSpan? RetryAfter { get; set; }
+    /// <summary>Chapters downloaded at the last pause, and how many automatic retries in a row added none.</summary>
+    internal int LastDownloaded { get; set; } = -1;
+    internal int StalledRetries { get; set; }
     internal CancellationTokenSource? Cancellation { get; set; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -141,7 +148,14 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
     private async Task<Channel<AutoBookRow>?> DownloadAsync(AutoBookRow row, CancellationToken cancellationToken)
     {
         row.Step = AutoBookStep.Download;
-        if (!row.NewProject && await stages.FindExistingAsync(row, settings, cancellationToken) is { } existing)
+        AutoBookExisting? existing = null;
+        if (!row.NewProject && !row.CheckedExisting)
+        {
+            existing = await stages.FindExistingAsync(row, settings, cancellationToken);
+            // Looked up once: a throttled download coming back on its own goes straight on downloading.
+            row.CheckedExisting = existing is null;
+        }
+        if (existing is not null)
         {
             row.Title = existing.Title;
             if (existing.Complete)
@@ -196,13 +210,48 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
                 next.Writer.TryWrite(row);
                 return;
             }
-            row.Busy = false;
-            row.CanRetry = !row.Finished && !row.Removed;
-            if (--_active > 0) return;
-            _closed = true;
-            _downloads.Writer.TryComplete();
-            _surveys.Writer.TryComplete();
-            _translations.Writer.TryComplete();
+            // Throttled: the book stays in the run (still counted) and downloads again on its own after the wait.
+            if (row.RetryAfter is { } wait && !row.Removed && !row.Cancellation!.IsCancellationRequested)
+            {
+                row.RetryAfter = null;
+                _ = RequeueLaterAsync(row, wait);
+                return;
+            }
+            row.RetryAfter = null;
+            Leave(row);
         }
+    }
+
+    private async Task RequeueLaterAsync(AutoBookRow row, TimeSpan wait)
+    {
+        try
+        {
+            await Task.Delay(wait, row.Cancellation!.Token).ConfigureAwait(true);
+            lock (_gate)
+            {
+                row.Stage = "Chờ tải";
+                _downloads.Writer.TryWrite(row);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            lock (_gate)
+            {
+                if (!row.Removed) row.Stage = "Đã dừng";
+                Leave(row);
+            }
+        }
+    }
+
+    /// <summary>The book leaves the run; the run ends with its last book.</summary>
+    private void Leave(AutoBookRow row)
+    {
+        row.Busy = false;
+        row.CanRetry = !row.Finished && !row.Removed;
+        if (--_active > 0) return;
+        _closed = true;
+        _downloads.Writer.TryComplete();
+        _surveys.Writer.TryComplete();
+        _translations.Writer.TryComplete();
     }
 }

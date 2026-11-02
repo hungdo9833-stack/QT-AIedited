@@ -42,9 +42,44 @@ public partial class AutoTranslateWindow : Window
         catch (InvalidOperationException ex) { StatusText.Text = ex.Message; }
     }
 
+    private void OnAddTxtFiles(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Chọn file TXT truyện tiếng Trung", Filter = "Truyện TXT (*.txt)|*.txt", Multiselect = true
+        };
+        if (dialog.ShowDialog(this) == true) AddPaths(dialog.FileNames);
+    }
+
+    private void OnDragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void OnDropFiles(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(DataFormats.FileDrop) is string[] files) AddPaths(files);
+        e.Handled = true;
+    }
+
+    /// <summary>TXT files join the queue at once, like pasted links; anything else is reported.</summary>
+    private void AddPaths(IEnumerable<string> paths)
+    {
+        string[] txt = paths.Where(path => path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (txt.Length == 0) { StatusText.Text = "Chỉ nhận file .txt."; return; }
+        foreach (string path in txt)
+        {
+            var uri = new Uri(Path.GetFullPath(path));
+            Enqueue(_rows.FirstOrDefault(existing => existing.Url == uri) ?? AddRow(uri));
+        }
+    }
+
     private void OnRetryRow(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is AutoBookRow row && row.CanRetry) Enqueue(row);
+        if ((sender as FrameworkElement)?.DataContext is not AutoBookRow row || !row.CanRetry) return;
+        row.StalledRetries = 0; // the user asked: automatic retries may start over
+        Enqueue(row);
     }
 
     private void OnRemoveRow(object sender, RoutedEventArgs e)
@@ -58,6 +93,7 @@ public partial class AutoTranslateWindow : Window
     private AutoBookRow AddRow(Uri link)
     {
         var row = new AutoBookRow(link);
+        if (link.IsFile) row.Title = Path.GetFileNameWithoutExtension(link.LocalPath);
         // A book leaving the run flips CanRetry just before the run's count drops: refresh once both have happened.
         row.PropertyChanged += (_, e) =>
         {
@@ -130,12 +166,20 @@ public partial class AutoTranslateWindow : Window
         StopButton.IsEnabled = running;
     }
 
+    /// <summary>Web links, or paths of local .txt books (pasted, picked or dropped) as file:// links.</summary>
     internal static IReadOnlyList<Uri> ParseLinks(string text)
     {
         var links = new List<Uri>();
-        foreach (string line in text.Split('\n').Select(x => x.Trim()).Where(x => x.Length > 0))
+        foreach (string line in text.Split('\n').Select(x => x.Trim().Trim('"')).Where(x => x.Length > 0))
         {
-            if (!Uri.TryCreate(line, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https"))
+            Uri? uri;
+            if (Path.IsPathFullyQualified(line))
+            {
+                if (!line.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException($"Chỉ nhận file .txt: {line}");
+                if (!File.Exists(line)) throw new InvalidOperationException($"Không tìm thấy file: {line}");
+                uri = new Uri(Path.GetFullPath(line));
+            }
+            else if (!Uri.TryCreate(line, UriKind.Absolute, out uri) || uri.Scheme is not ("http" or "https"))
                 throw new InvalidOperationException($"Link không hợp lệ: {line}");
             if (!links.Contains(uri)) links.Add(uri);
         }

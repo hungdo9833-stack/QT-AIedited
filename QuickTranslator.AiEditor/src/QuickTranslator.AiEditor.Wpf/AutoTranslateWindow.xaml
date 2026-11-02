@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Tự động dịch từ link" Width="1020" Height="720" MinWidth="720" MinHeight="480"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}"
-        Foreground="{DynamicResource TextBrush}" Closing="OnWindowClosing">
+        Foreground="{DynamicResource TextBrush}" Closing="OnWindowClosing"
+        AllowDrop="True" PreviewDragOver="OnDragOver" PreviewDrop="OnDropFiles">
  <Window.Resources>
   <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/><Setter Property="Padding" Value="12"/></Style>
  </Window.Resources>
@@ -12,7 +13,7 @@
   <Border Style="{StaticResource Card}">
    <StackPanel>
     <TextBlock Text="Tự động dịch từ link" Style="{StaticResource WindowTitle}"/>
-    <TextBlock Text="Mỗi dòng một link mục lục truyện. Mỗi truyện được tải về, tạo dự án mới, Codex khảo sát nhân vật và từ điển, rồi dịch toàn bộ bằng backend đang chọn trong QT Studio. Khi đang chạy vẫn dán thêm link được; truyện bị dừng thì bấm Thử lại ở dòng của nó." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+    <TextBlock Text="Mỗi dòng một link mục lục truyện. Mỗi truyện được tải về, tạo dự án mới, Codex khảo sát nhân vật và từ điển, rồi dịch toàn bộ bằng backend đang chọn trong QT Studio. Khi đang chạy vẫn dán thêm link được; truyện bị dừng thì bấm Thử lại ở dòng của nó. File TXT: bấm Thêm file TXT, kéo thả vào cửa sổ hoặc dán đường dẫn file." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,6"/>
     <TextBox x:Name="LinksInput" AcceptsReturn="True" TextWrapping="NoWrap" Height="110" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Danh sách link truyện, mỗi dòng một link"/>
     <WrapPanel Margin="0,6,0,0">
      <TextBlock Text="Model Codex" VerticalAlignment="Center" Margin="4"/>
@@ -27,6 +28,9 @@
      </ComboBox>
      <TextBlock Text="Nghỉ giữa các yêu cầu (giây)" VerticalAlignment="Center" Margin="12,4,4,4"/>
      <TextBox x:Name="DelayInput" Text="1.5" Width="60" AutomationProperties.Name="Thời gian nghỉ giữa các yêu cầu tải web"/>
+     <Button Content="Thêm file TXT…" Click="OnAddTxtFiles" Margin="12,4,4,4" Padding="10,2"
+             ToolTip="Chọn một hoặc nhiều file TXT truyện tiếng Trung (hoặc kéo thả file vào cửa sổ). Truyện từ file bỏ qua bước tải."
+             AutomationProperties.Name="Thêm file TXT vào hàng chờ"/>
      <CheckBox x:Name="PrepareOnlyCheck" Content="Chỉ chuẩn bị (tải + khảo sát), chưa dịch" VerticalAlignment="Center" Margin="12,4,4,4"/>
     </WrapPanel>
    </StackPanel>

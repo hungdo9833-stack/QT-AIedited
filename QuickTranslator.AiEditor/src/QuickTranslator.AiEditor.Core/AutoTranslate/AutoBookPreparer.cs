@@ -101,6 +101,7 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
     /// <summary>Chapters the site's table of contents lists now; null when it cannot be read (offline, walled).</summary>
     private async Task<int?> CountSourceChaptersAsync(Uri url, TimeSpan downloadDelay, CancellationToken cancellationToken)
     {
+        if (url.IsFile) return null;
         IWebNovelImporter importer = importerFactory(new WebImportOptions { DelayBetweenRequests = downloadDelay, CacheDirectory = PagesDirectory(url) });
         try { return (await importer.AnalyzeAsync(url, cancellationToken).ConfigureAwait(false)).Chapters.Count; }
         catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
@@ -120,6 +121,7 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
     public async Task<AutoBookDownload> DownloadAsync(Uri url, TimeSpan downloadDelay, IProgress<AutoBookStatus>? status = null,
         CancellationToken cancellationToken = default)
     {
+        if (url.IsFile) return await LoadFileAsync(url, status, cancellationToken).ConfigureAwait(false);
         string work = WorkDirectory(url), pages = PagesDirectory(url);
         Directory.CreateDirectory(pages);
         IWebNovelImporter importer = importerFactory(new WebImportOptions { DelayBetweenRequests = downloadDelay, CacheDirectory = pages });
@@ -154,6 +156,19 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
         }
         finally { (importer as IDisposable)?.Dispose(); }
         return new(url, title, text, work);
+    }
+
+    /// <summary>A local TXT book (file:// link): read with encoding detection; the file name is the book's title.</summary>
+    private async Task<AutoBookDownload> LoadFileAsync(Uri file, IProgress<AutoBookStatus>? status, CancellationToken cancellationToken)
+    {
+        string path = file.LocalPath;
+        string title = Path.GetFileNameWithoutExtension(path).Trim();
+        status?.Report(new("Đọc file TXT", path, title));
+        if (!File.Exists(path)) throw new FileNotFoundException("Không tìm thấy file TXT: " + path, path);
+        RawSourceSnapshot source = await RawSourceReader.ReadFileAsync(path, SourceTextEncoding.Auto, cancellationToken)
+            .ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(source.Text)) throw new InvalidDataException("File TXT trống: " + path);
+        return new(file, title.Length > 0 ? title : "Truyện", source.Text, WorkDirectory(file));
     }
 
     /// <summary>Creates the project from a finished download, surveys it with Codex and saves the resources.</summary>

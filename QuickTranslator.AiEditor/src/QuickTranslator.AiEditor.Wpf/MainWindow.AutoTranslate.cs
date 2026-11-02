@@ -12,6 +12,9 @@ public partial class MainWindow
     private AutoTranslateWindow? _autoTranslateWindow;
     internal Func<CodexSurveyOptions, CodexSurveyRunner> CodexSurveyRunnerFactory = options => new CodexSurveyRunner(options);
     internal TimeSpan AutoTranslatePollInterval = TimeSpan.FromSeconds(3);
+    /// <summary>Wait before a throttled download continues on its own.</summary>
+    internal TimeSpan AutoRetryDelay = TimeSpan.FromSeconds(30);
+    private const int MaxStalledRetries = 5;
 
     private void OnAutoTranslateFromLinks(object sender, RoutedEventArgs e)
     {
@@ -58,11 +61,21 @@ public partial class MainWindow
             }
             catch (AutoBookPausedException paused)
             {
+                // A throttle passes: download again on its own, unless several waits in a row brought no new chapter.
+                // A login wall never passes, so it waits for the user.
+                row.StalledRetries = paused.Downloaded > row.LastDownloaded ? 0 : row.StalledRetries + 1;
+                row.LastDownloaded = paused.Downloaded;
+                bool again = paused.Reason == Core.WebImport.WebImportBlockReason.RateLimited && row.StalledRetries < MaxStalledRetries;
+                row.RetryAfter = again ? window.AutoRetryDelay : null;
                 await window.SettleAsync(() =>
                 {
                     row.Title = paused.Title;
                     row.Stage = $"⏸ Tạm dừng ({paused.Downloaded}/{paused.Total})";
-                    row.Detail = paused.Message;
+                    row.Detail = again
+                        ? $"Web chặn vì tải quá nhanh; tự tải tiếp sau {window.AutoRetryDelay.TotalSeconds:N0} giây (dừng ở {paused.Downloaded}/{paused.Total})."
+                        : paused.Message + (paused.Reason == Core.WebImport.WebImportBlockReason.RateLimited
+                            ? $" Đã tự thử {MaxStalledRetries} lần không tải thêm được chương nào; bấm Thử lại khi muốn."
+                            : "");
                 });
                 return null;
             }
