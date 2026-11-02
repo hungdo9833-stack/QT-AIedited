@@ -55,7 +55,9 @@ Văn bản truyện (ô nguyên văn/bản dịch, Reader) có cỡ riêng do ng
 | Icon | `ui:ButtonIcon.Glyph` / `IconText` (Segoe Fluent Icons) | Emoji, ký tự "×", "«", "▾" làm icon |
 | Hộp thoại | `ThemedDialog` | `MessageBox.Show` |
 
-Thanh nút cuối hộp thoại: căn phải, thứ tự **[Phụ] [Hủy] [Chính]**, nút chính `IsDefault`, nút hủy `IsCancel`.
+Thanh nút cuối hộp thoại: căn phải, thứ tự **[Phụ] [Hủy] [Chính]**, nút hủy/đóng `IsCancel` (Esc).
+Nút chính chỉ `IsDefault` (Enter) khi hành động an toàn và chưa ghi dữ liệu (đăng nhập, chọn nơi lưu, mở tiếp).
+Nhập chương, áp dụng hàng loạt, tải về, liên kết, đăng lên Sắc Viện, xóa: **không** gán Enter.
 Lệnh không hợp lệ ở trạng thái hiện tại: ẩn (`StateButton`) nếu là lệnh chạy/dừng; còn lại disabled + ToolTip lý do (`ToolTipService.ShowOnDisabled`).
 
 ## 4. Thuật ngữ giao diện (tiếng Việt thống nhất)

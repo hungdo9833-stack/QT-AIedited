@@ -422,10 +422,10 @@ public partial class MainWindow
             var header = new TextBlock
             {
                 Text = title,
-                FontSize = 16,
                 FontWeight = FontWeights.SemiBold,
                 Margin = new Thickness(4, 0, 4, 8)
             };
+            header.SetResourceReference(TextBlock.FontSizeProperty, "FontSize.Subtitle");
             header.SetResourceReference(System.Windows.Documents.TextElement.ForegroundProperty, "TextBrush");
             content.Children.Add(header);
             foreach (UIElement child in children) content.Children.Add(child);
