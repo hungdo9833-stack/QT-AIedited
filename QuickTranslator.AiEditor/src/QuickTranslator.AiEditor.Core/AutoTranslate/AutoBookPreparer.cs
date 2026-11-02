@@ -104,7 +104,7 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
         string summary = (missingNote is null ? "" : "⚠ " + missingNote + ". ") +
             $"{report.ImportedCount:N0} chương, {titleNote}, {survey.Characters.Profiles.Count} nhân vật, " +
             $"{survey.Characters.Profiles.Sum(p => p.Relationships.Count)} quan hệ, {survey.Terms.Count} thuật ngữ" +
-            (survey.Warnings.Count > 0 ? $"; {survey.Warnings.Count} mục bị bỏ: {survey.Warnings[0]}" : "");
+            (survey.Warnings.Count > 0 ? $"; {survey.Warnings.Count} ghi chú: {survey.Warnings[0]}" : "");
         return new(session, title, report.ImportedCount, survey, summary);
     }
 

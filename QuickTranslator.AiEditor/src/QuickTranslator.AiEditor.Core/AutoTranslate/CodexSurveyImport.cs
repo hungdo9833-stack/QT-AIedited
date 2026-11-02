@@ -88,7 +88,8 @@ public static class CodexSurveyImport
                 DisallowedNarrativePronouns = CleanList(source.AvoidPronouns, 100),
                 AddressingNotes = Clip(source.Notes?.Trim() ?? "", 2000)
             };
-            profile.ApplyGenderDefaults();
+            if (project.Setting == StorySetting.Modern) ModernizeNarrativePronouns(profile, warnings);
+            else profile.ApplyGenderDefaults();
             // Pronoun normalization needs both a pronoun and words to avoid; without them the profile still names the character.
             profile.NormalizationEnabled = profile.PrimaryNarrativePronoun.Length > 0 && profile.DisallowedNarrativePronouns.Count > 0;
             project.Profiles.Add(profile);
@@ -133,6 +134,37 @@ public static class CodexSurveyImport
             terms.Add(new(chinese, vietnamese));
         }
         return new(project, terms, warnings);
+    }
+
+    /// <summary>Narrative pronouns of period fiction; a modern book reads them as archaic.</summary>
+    public static IReadOnlyList<string> ArchaicNarrativePronouns { get; } = ["hắn", "hắn ta", "nàng", "nàng ấy", "chàng", "y", "thị"];
+
+    /// <summary>
+    /// A modern book never narrates with hắn / nàng: archaic choices (or none) become the gender's modern default, and the
+    /// archaic forms join the words to avoid so the translation is normalized the same way.
+    /// </summary>
+    private static void ModernizeNarrativePronouns(CharacterProfile profile, List<string> warnings)
+    {
+        (string primary, string secondary) = profile.Gender switch
+        {
+            CharacterGender.Male => ("anh", "anh ta"),
+            CharacterGender.Female => ("cô", "cô ấy"),
+            _ => ("", "")
+        };
+        bool IsArchaic(string pronoun) => ArchaicNarrativePronouns.Contains(pronoun.Trim(), StringComparer.OrdinalIgnoreCase);
+        if (IsArchaic(profile.PrimaryNarrativePronoun) || IsArchaic(profile.SecondaryNarrativePronoun))
+            warnings.Add($"Đổi đại từ cổ trang “{profile.PrimaryNarrativePronoun}/{profile.SecondaryNarrativePronoun}” của " +
+                $"{profile.VietnameseName} sang hiện đại.");
+        // A modern secondary pronoun already tells age and attitude ("ông ta", "bà ấy", "lão ta"): its head word is the primary.
+        string secondaryHead = profile.SecondaryNarrativePronoun.Trim().Split(' ')[0];
+        if (profile.PrimaryNarrativePronoun.Length == 0 || IsArchaic(profile.PrimaryNarrativePronoun))
+            profile.PrimaryNarrativePronoun = secondaryHead.Length > 0 && !IsArchaic(profile.SecondaryNarrativePronoun) &&
+                !IsArchaic(secondaryHead) ? secondaryHead : primary;
+        if (profile.SecondaryNarrativePronoun.Length == 0 || IsArchaic(profile.SecondaryNarrativePronoun))
+            profile.SecondaryNarrativePronoun = primary.Length == 0 ? "" : secondary;
+        string[] chosen = [profile.PrimaryNarrativePronoun, profile.SecondaryNarrativePronoun];
+        profile.DisallowedNarrativePronouns = CleanList(profile.DisallowedNarrativePronouns
+            .Concat(ArchaicNarrativePronouns), 100, chosen);
     }
 
     private static T Parse<T>(string json, string name) where T : class

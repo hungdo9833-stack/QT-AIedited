@@ -54,6 +54,39 @@ public sealed class CodexSurveyTests
     }
 
     [Fact]
+    public void Convert_ModernBookNeverNarratesWithArchaicPronouns()
+    {
+        const string modern = """
+            {
+              "setting": "Modern",
+              "characters": [
+                { "chineseName": "张忠", "vietnameseName": "Trương Trung", "gender": "Male", "narrativePronoun": "hắn", "secondaryPronoun": "ông ta", "avoidPronouns": ["anh"] },
+                { "chineseName": "蔓蔓", "vietnameseName": "Mạn Lộ", "gender": "Female", "narrativePronoun": "nàng", "secondaryPronoun": "cô ta" },
+                { "chineseName": "小浩", "vietnameseName": "Tiểu Hạo", "gender": "Male", "narrativePronoun": "cậu", "secondaryPronoun": "cậu ta" },
+                { "chineseName": "王部长", "vietnameseName": "Vương Bộ Trưởng", "gender": "Male" }
+              ]
+            }
+            """;
+        CodexSurveyImportResult result = CodexSurveyImport.Convert(modern, "[]", Guid.NewGuid(), "Truyện hiện đại");
+
+        CharacterProfile[] profiles = result.Characters.Profiles.ToArray();
+        Assert.Equal(StorySetting.Modern, result.Characters.Setting);
+        Assert.Equal(("ông", "ông ta"), (profiles[0].PrimaryNarrativePronoun, profiles[0].SecondaryNarrativePronoun));
+        Assert.Contains("anh", profiles[0].DisallowedNarrativePronouns);
+        Assert.Equal(("cô", "cô ta"), (profiles[1].PrimaryNarrativePronoun, profiles[1].SecondaryNarrativePronoun));
+        Assert.Equal(("cậu", "cậu ta"), (profiles[2].PrimaryNarrativePronoun, profiles[2].SecondaryNarrativePronoun));
+        Assert.Equal(("anh", "anh ta"), (profiles[3].PrimaryNarrativePronoun, profiles[3].SecondaryNarrativePronoun));
+        Assert.All(profiles, profile =>
+        {
+            Assert.Contains("hắn", profile.DisallowedNarrativePronouns);
+            Assert.Contains("nàng", profile.DisallowedNarrativePronouns);
+            Assert.True(profile.NormalizationEnabled);
+        });
+        Assert.Equal(2, result.Warnings.Count);
+        result.Characters.Validate();
+    }
+
+    [Fact]
     public void Convert_RejectsFilesThatAreNotJson()
     {
         Assert.Throws<InvalidDataException>(() => CodexSurveyImport.Convert("{ not json", "[]", Guid.NewGuid(), "x"));

@@ -38,8 +38,11 @@ public static class CodexSurveyPrompt
         }
         - Tên tiếng Việt dùng Hán-Việt chuẩn, viết hoa từng chữ. Mỗi tên tiếng Việt chỉ dùng cho một nhân vật.
         - aliases: các cách gọi tiếng Trung khác của cùng nhân vật (biệt danh, danh xưng), không lặp tên chính.
-        - narrativePronoun/secondaryPronoun: đại từ người kể dùng cho nhân vật, hợp bối cảnh (cổ trang: hắn/nàng/lão...;
-          hiện đại: anh ấy/cô ấy/cậu ta...). avoidPronouns: các đại từ sai cần tránh cho nhân vật đó.
+        - setting: "Modern" khi truyện lấy bối cảnh hiện đại (điện thoại, công ty, đô thị...), "Historical" khi cổ trang/tiên hiệp.
+        - narrativePronoun/secondaryPronoun: đại từ người kể dùng cho nhân vật, theo tuổi, vai và thái độ người kể.
+          Cổ trang: hắn/nàng/chàng/lão... Hiện đại: anh/anh ta, cô/cô ấy, cậu, ông, bà, chị, gã, lão...
+          Với truyện "Modern" TUYỆT ĐỐI không dùng hắn, nàng, chàng, y, thị; đưa các từ đó vào avoidPronouns.
+          avoidPronouns: các đại từ sai cần tránh cho nhân vật đó.
         - relationships: mỗi dòng là một chiều nói (speaker nói với listener), dùng chineseName để chỉ nhân vật.
           Ghi cho các cặp có hội thoại thực sự; nếu hai chiều xưng hô khác nhau thì ghi cả hai chiều.
 

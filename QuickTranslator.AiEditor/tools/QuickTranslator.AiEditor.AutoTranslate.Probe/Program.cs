@@ -10,7 +10,7 @@ using QuickTranslator.AiEditor.Core.WebImport;
 // Usage: AutoTranslate.Probe <url> <projects-dir> [--analyze-only] [--model gpt-6-luna] [--effort high] [--workspace business]
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 if (args.Length < 2) { Console.Error.WriteLine("Usage: <url> <projects-dir> [--analyze-only] [--model m] [--effort e] [--workspace w]"); return 1; }
-var url = new Uri(args[0]);
+var url = args[0] == "--reapply" ? null! : new Uri(args[0]);
 string projects = Path.GetFullPath(args[1]);
 string Option(string name, string fallback) { int i = Array.IndexOf(args, name); return i >= 0 && i + 1 < args.Length ? args[i + 1] : fallback; }
 
@@ -26,6 +26,28 @@ if (args.Contains("--analyze-only"))
     string[] lines = first.Text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToArray();
     foreach (string line in lines.Take(6)) Console.WriteLine("  | " + line);
     Console.WriteLine($"  lines ending in a digit: {lines.Count(l => char.IsAsciiDigit(l[^1]))}/{lines.Length}");
+    return 0;
+}
+
+// --reapply <codex-folder> <project.qtproj>: convert an earlier Codex result again with the current rules (no Codex call)
+// and replace the project's characters and glossary. The previous resources file is kept next to it as a backup.
+if (args[0] == "--reapply")
+{
+    var repository = new ProjectRepository();
+    ProjectSession session = (await repository.OpenAsync(Path.GetFullPath(args[2]))).Session;
+    var store = new ProjectResourceStore(session);
+    File.Copy(store.PathName, store.PathName + ".before-reapply-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"), overwrite: false);
+    CodexSurveyImportResult result = CodexSurveyImport.Convert(
+        await File.ReadAllTextAsync(Path.Combine(args[1], CodexSurveyRunner.CharactersFile)),
+        await File.ReadAllTextAsync(Path.Combine(args[1], CodexSurveyRunner.GlossaryFile)),
+        session.Manifest.ProjectId, session.Manifest.VietnameseTitle);
+    ProjectResources resources = await store.LoadAsync();
+    resources.Characters = result.Characters;
+    resources.Terms = result.Terms.ToList();
+    await store.SaveAsync(resources);
+    foreach (var profile in result.Characters.Profiles)
+        Console.WriteLine($"  {profile.VietnameseName}: {profile.PrimaryNarrativePronoun} / {profile.SecondaryNarrativePronoun}");
+    foreach (string warning in result.Warnings) Console.WriteLine("  note: " + warning);
     return 0;
 }
 
