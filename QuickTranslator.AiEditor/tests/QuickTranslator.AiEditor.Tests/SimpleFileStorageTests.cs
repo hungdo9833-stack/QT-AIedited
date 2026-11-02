@@ -21,6 +21,22 @@ public sealed class SimpleFileStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task Save_WaitsOutAReaderBriefly_HoldingTheTarget()
+    {
+        string path = Path.Combine(_directory, "project.qtproj");
+        await SimpleFileStorage.WriteAsync(path, JsonSerializer.SerializeToUtf8Bytes(new Sample("one")), Decode);
+        // A reader that does not share delete blocks the replace on Windows until it closes.
+        var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Task release = Task.Delay(300).ContinueWith(_ => reader.Dispose());
+
+        await SimpleFileStorage.WriteAsync(path, JsonSerializer.SerializeToUtf8Bytes(new Sample("two")), Decode);
+        await release;
+
+        Assert.Equal("two", (await SimpleFileStorage.ReadRequiredAsync(path, Decode)).Value);
+        Assert.Empty(Directory.GetFiles(_directory, "*.tmp-*"));
+    }
+
+    [Fact]
     public async Task FailedReplacement_PreservesPreviousTarget()
     {
         string path = Path.Combine(_directory, "settings.json");

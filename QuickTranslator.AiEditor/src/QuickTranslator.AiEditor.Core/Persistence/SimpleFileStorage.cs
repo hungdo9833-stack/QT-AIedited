@@ -66,6 +66,12 @@ public static class SimpleFileStorage
         finally { gate.Release(); }
     }
 
+    private const int ReplaceAttempts = 9;
+
+    // ERROR_SHARING_VIOLATION (32) / ERROR_LOCK_VIOLATION (33).
+    private static bool IsSharingViolation(Exception error) =>
+        error is IOException && (error.HResult & 0xFFFF) is 32 or 33;
+
     private static async Task WriteAtomicAsync(string path, byte[] bytes, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -86,14 +92,22 @@ public static class SimpleFileStorage
 
             FaultPoint.Value?.Invoke("AfterTemporaryFlush");
             cancellationToken.ThrowIfCancellationRequested();
-            try
+            // A reader, antivirus or the search indexer holding the target for a moment makes the replace fail on Windows:
+            // wait it out (about 2 s in all) before calling the file locked.
+            for (int attempt = 1; ; attempt++)
             {
-                File.Move(temporary, path, overwrite: true);
-                StorageIoMetricsCapture.Replaced();
-            }
-            catch (UnauthorizedAccessException error)
-            {
-                throw new IOException($"Không thể thay thế file {Path.GetFileName(path)} vì bị khóa hoặc không có quyền ghi.", error);
+                try
+                {
+                    File.Move(temporary, path, overwrite: true);
+                    StorageIoMetricsCapture.Replaced();
+                    break;
+                }
+                catch (Exception error) when (error is UnauthorizedAccessException || IsSharingViolation(error))
+                {
+                    if (attempt >= ReplaceAttempts)
+                        throw new IOException($"Không thể thay thế file {Path.GetFileName(path)} vì bị khóa hoặc không có quyền ghi.", error);
+                    await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         finally

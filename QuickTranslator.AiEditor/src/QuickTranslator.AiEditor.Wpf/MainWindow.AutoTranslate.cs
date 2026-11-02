@@ -182,7 +182,9 @@ public partial class MainWindow
         {
             try
             {
-                await using FileStream stream = File.OpenRead(recent.ManifestPath);
+                // Shared for delete: the open project may be saved (replaced) while its genres are read.
+                await using var stream = new FileStream(recent.ManifestPath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
                 using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
                 if (!document.RootElement.TryGetProperty("genres", out JsonElement genres) || genres.ValueKind != JsonValueKind.Array) continue;
                 foreach (JsonElement genre in genres.EnumerateArray())
