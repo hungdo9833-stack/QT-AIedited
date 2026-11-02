@@ -190,7 +190,7 @@ public partial class ProjectTranslationQueueView : UserControl
             ThroughputDiagnosticText.Text = measured
                 ? $"Tổng GPU: {metrics.TotalTokensPerSecond:N1} tok/s từ token đầu ra / thời gian bận; " +
                   $"mỗi luồng: {metrics.PerSlotTokensPerSecond:N1} tok/s từ token đầu ra / tổng thời gian sinh request."
-                : "Thông lượng sẽ hiện sau segment đầu tiên được lưu.";
+                : "Thông lượng sẽ hiện sau đoạn đầu tiên được lưu.";
         }
         string? resumeHint = needsReview > 0
             ? "Một số chương đã đổi nguyên văn hoặc ranh giới. Hãy kiểm tra trước khi xử lý lại."
@@ -201,7 +201,7 @@ public partial class ProjectTranslationQueueView : UserControl
             ? $"Đang chuẩn bị dịch {job.Items.Count:N0} chương bằng {Math.Max(1, job.Workers.Count)} GPU."
             : string.Join(" ", new[]
             {
-                progress.Error ?? "Tiến độ được lưu sau từng segment; đóng/mở lại không tự Resume.", resumeHint
+                progress.Error ?? "Tiến độ được lưu sau từng đoạn; đóng/mở lại không tự Resume.", resumeHint
             }.Where(value => !string.IsNullOrWhiteSpace(value)));
         bool runningQueue = _coordinator.IsRunning;
         bool canResume = !runningQueue && progress.Status is ProjectTranslationJobStatus.Paused or
@@ -315,7 +315,7 @@ public partial class ProjectTranslationQueueView : UserControl
         if (_openChapter is null) return;
         if (_coordinator.IsChapterLockedByRunningQueue(chapterId))
         {
-            StatusText.Text = "Chương này đang chờ hoặc đang dịch trong Queue. Hãy chọn chương đã hoàn tất/lỗi hoặc bấm Pause.";
+            StatusText.Text = "Chương này đang chờ hoặc đang dịch trong hàng đợi dịch. Hãy chọn chương đã hoàn tất/lỗi hoặc bấm Pause.";
             return;
         }
         try
@@ -392,7 +392,7 @@ public partial class ProjectTranslationQueueView : UserControl
     {
         if (ThemedDialog.Show(Window.GetWindow(this),
             "Tạo hàng đợi mới cho toàn bộ chapter chưa hoàn tất bằng card/model, prompt và tài nguyên hiện tại?\n\n" +
-            "Các chapter và segment đã hoàn tất vẫn được giữ nguyên.",
+            "Các chapter và đoạn đã hoàn tất vẫn được giữ nguyên.",
             "Tạo lại phần chưa xong", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         if (_commandBusy) return;
         _commandBusy = true;
@@ -493,8 +493,8 @@ public partial class ProjectTranslationQueueView : UserControl
     private void ReportError(Exception ex)
     {
         if (!_attached) return;
-        StatusText.Text = "Translation Queue dừng: " + ex.Message;
-        ThemedDialog.Show(Window.GetWindow(this), ex.Message, "Translation Queue", MessageBoxButton.OK, MessageBoxImage.Error);
+        StatusText.Text = "Hàng đợi dịch dừng: " + ex.Message;
+        ThemedDialog.Show(Window.GetWindow(this), ex.Message, "Hàng đợi dịch", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     internal sealed class QueueRow : INotifyPropertyChanged

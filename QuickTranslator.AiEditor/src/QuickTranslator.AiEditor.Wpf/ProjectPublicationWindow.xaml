@@ -3,6 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="QT Studio · Xuất bản" Width="780" Height="640" MinWidth="650" MinHeight="520"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}"
-        Foreground="{DynamicResource TextBrush}" Closing="OnClosing">
+        Foreground="{DynamicResource TextBrush}" Closing="OnClosing" ResizeMode="CanResize">
   <ContentControl x:Name="ViewHost"/>
 </Window>

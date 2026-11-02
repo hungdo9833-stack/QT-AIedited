@@ -4,10 +4,10 @@
         xmlns:ui="clr-namespace:QuickTranslator.AiEditor.Wpf"
         Title="QT Studio · Đăng lên Sắc Viện" Width="760" Height="760" MinWidth="640" MinHeight="600"
         WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}"
-        Foreground="{DynamicResource TextBrush}" Closing="OnClosing">
+        Foreground="{DynamicResource TextBrush}" Closing="OnClosing" ResizeMode="CanResize">
  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
- <StackPanel Margin="16">
-  <StackPanel Margin="2,0,2,14">
+ <StackPanel Margin="{StaticResource Inset.Window}">
+  <StackPanel Margin="2,0,2,16">
    <TextBlock Text="Đăng lên Sắc Viện" Style="{StaticResource WindowTitle}"/>
    <TextBlock x:Name="SubtitleText" Style="{StaticResource WindowSubtitle}" TextWrapping="Wrap"/>
   </StackPanel>
@@ -16,9 +16,9 @@
   <Border Style="{StaticResource Card}">
    <StackPanel>
     <TextBlock Text="1 · Tài khoản Sắc Viện" Style="{StaticResource SectionTitle}"/>
-    <TextBlock x:Name="AccountSummaryText" Margin="3,8,0,0" TextWrapping="Wrap"/>
+    <TextBlock x:Name="AccountSummaryText" Margin="4,8,0,0" TextWrapping="Wrap"/>
     <Button x:Name="AccountButton" Content="Đăng nhập…" Click="OnAccount" HorizontalAlignment="Left" Margin="0,8,0,0"/>
-    <TextBlock x:Name="ConnectionText" Margin="3,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
+    <TextBlock x:Name="ConnectionText" Margin="4,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
    </StackPanel>
   </Border>
 
@@ -26,23 +26,23 @@
   <Border Style="{StaticResource Card}">
    <StackPanel x:Name="NovelSection" IsEnabled="False">
     <TextBlock Text="2 · Truyện trên website" Style="{StaticResource SectionTitle}"/>
-    <DockPanel Margin="0,6,0,0">
+    <DockPanel Margin="0,8,0,0">
      <Button DockPanel.Dock="Right" x:Name="ReloadNovelsButton" Content="Tải lại" ui:ButtonIcon.Glyph="&#xE72C;" Click="OnReloadNovels"/>
      <ComboBox x:Name="NovelInput" SelectionChanged="OnNovelChanged" AutomationProperties.Name="Truyện đích trên website"/>
     </DockPanel>
-    <TextBlock x:Name="PlanText" Margin="3,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
+    <TextBlock x:Name="PlanText" Margin="4,8,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
     <Button x:Name="ToggleCreateButton" Content="Tạo truyện mới trên website…" ui:ButtonIcon.Glyph="&#xE710;" Click="OnToggleCreate" HorizontalAlignment="Left" Margin="0,8,0,0"/>
     <StackPanel x:Name="CreatePanel" Visibility="Collapsed" Margin="0,8,0,0">
      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="12"/><ColumnDefinition/></Grid.ColumnDefinitions>
       <StackPanel><TextBlock Text="Tên truyện" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NewTitleInput" MaxLength="200" TextChanged="OnNewTitleChanged" AutomationProperties.Name="Tên truyện mới"/></StackPanel>
       <StackPanel Grid.Column="2"><TextBlock Text="Đường dẫn (slug)" Style="{StaticResource FieldLabel}"/><TextBox x:Name="NewSlugInput" MaxLength="120" TextChanged="OnNewSlugChanged" AutomationProperties.Name="Đường dẫn truyện mới"/>
-       <TextBlock Text="Chữ thường không dấu, số và dấu gạch nối." FontSize="12" Foreground="{DynamicResource MutedBrush}" Margin="3,2,0,0"/></StackPanel>
+       <TextBlock Text="Chữ thường không dấu, số và dấu gạch nối." Style="{StaticResource CaptionText}" Foreground="{DynamicResource MutedBrush}" Margin="4,2,0,0"/></StackPanel>
      </Grid>
      <StackPanel x:Name="AuthorPanel" Visibility="Collapsed"><TextBlock Text="Tác giả (bút danh trên website)" Style="{StaticResource FieldLabel}"/><ComboBox x:Name="AuthorInput" DisplayMemberPath="Name" AutomationProperties.Name="Tác giả của truyện mới"/></StackPanel>
      <TextBlock Text="Giới thiệu" Style="{StaticResource FieldLabel}"/>
      <TextBox x:Name="NewDescriptionInput" MaxLength="5000" Height="80" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Giới thiệu truyện mới"/>
-     <CheckBox x:Name="NewCompletedInput" Content="Truyện đã hoàn thành" Margin="3,6,0,0"/>
-     <TextBlock Text="Truyện được tạo ở trạng thái bản nháp; xuất bản truyện trên website khi sẵn sàng." FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="3,4,0,0"/>
+     <CheckBox x:Name="NewCompletedInput" Content="Truyện đã hoàn thành" Margin="4,8,0,0"/>
+     <TextBlock Text="Truyện được tạo ở trạng thái bản nháp; xuất bản truyện trên website khi sẵn sàng." Style="{StaticResource CaptionText}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="4,4,0,0"/>
      <Button x:Name="CreateNovelButton" Content="Tạo truyện trên website" ui:ButtonIcon.Glyph="&#xE710;" Click="OnCreateNovel" HorizontalAlignment="Left" Margin="0,8,0,0"/>
     </StackPanel>
    </StackPanel>
@@ -52,10 +52,10 @@
   <Border Style="{StaticResource Card}">
    <StackPanel x:Name="PublishSection" IsEnabled="False">
     <TextBlock Text="3 · Đăng chương" Style="{StaticResource SectionTitle}"/>
-    <RadioButton x:Name="KeepDraftInput" GroupName="Status" IsChecked="True" Margin="3,6,0,0"
+    <RadioButton x:Name="KeepDraftInput" GroupName="Status" IsChecked="True" Margin="4,8,0,0"
                  Content="Bản nháp: chương mới là nháp, chương đã có giữ trạng thái; duyệt rồi xuất bản trên website"/>
-    <RadioButton x:Name="PublishNowInput" GroupName="Status" Margin="3,4,0,0" Content="Xuất bản ngay: mọi chương gửi lên đều được xuất bản"/>
-    <ProgressBar x:Name="PublishProgress" Height="7" Minimum="0" Maximum="1" Margin="4,14,4,6" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
+    <RadioButton x:Name="PublishNowInput" GroupName="Status" Margin="4,4,0,0" Content="Xuất bản ngay: mọi chương gửi lên đều được xuất bản"/>
+    <ProgressBar x:Name="PublishProgress" Height="7" Minimum="0" Maximum="1" Margin="4,16,4,8" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
     <TextBlock x:Name="ProgressText" Text="Chưa bắt đầu." TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
     <TextBlock x:Name="ReportText" Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
     <ListBox x:Name="LogList" Margin="0,8,0,0" Height="150" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Nhật ký đăng chương"/>
@@ -67,10 +67,10 @@
     <Button x:Name="CancelButton" DockPanel.Dock="Left" Content="Dừng sau chương hiện tại" ui:ButtonIcon.Glyph="&#xE71A;" Click="OnCancel" Visibility="Collapsed" Style="{StaticResource DangerButton}"/>
     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
      <Button x:Name="OpenSiteButton" Content="Mở trang quản lý" ui:ButtonIcon.Glyph="&#xE774;" Click="OnOpenSite" Visibility="Collapsed"/>
+     <Button x:Name="CloseButton" IsCancel="True" Content="Đóng" Click="OnClose"/>
      <Button x:Name="StartButton" Content="Bắt đầu đăng" ui:ButtonIcon.Glyph="&#xE898;" Click="OnStart" Style="{StaticResource PrimaryButton}" IsEnabled="False"/>
-     <Button x:Name="CloseButton" Content="Đóng" Click="OnClose"/>
     </StackPanel>
-    <TextBlock Text="Dữ liệu Project không bị thay đổi." VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
+    <TextBlock Text="Dữ liệu dự án không bị thay đổi." VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
    </DockPanel>
   </Border>
  </StackPanel>

@@ -28,7 +28,7 @@ public sealed class AddressingLedgerWindow : Window
     private readonly Action<ProjectResources> _applyResources;
     private readonly AddressingReviewService _service;
     private readonly TextBlock _summary = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 6) };
-    private readonly CheckBox _lock = new() { Content = "Bật khóa nhất quán Project (trình dịch dùng hồ sơ nhân vật)", Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly CheckBox _lock = new() { Content = "Bật khóa nhất quán dự án (trình dịch dùng hồ sơ nhân vật)", Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly CheckBox _onlyValid = new() { Content = "Chỉ hiện đề xuất đã kiểm chứng", IsChecked = true, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _reload = new() { Content = "Nạp lại" };
     private readonly TabControl _tabs = new();
@@ -135,7 +135,12 @@ public sealed class AddressingLedgerWindow : Window
         help.Click += (_, _) => instructions.Visibility = instructions.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         top.Children.Add(instructions);
 
-        static TextBlock StepTitle(string text) => new() { Text = text, FontSize = 16, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) };
+        static TextBlock StepTitle(string text)
+        {
+            var title = new TextBlock { Text = text, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) };
+            title.SetResourceReference(TextBlock.FontSizeProperty, "FontSize.Subtitle");
+            return title;
+        }
         static TextBlock FieldLabel(string text) => new() { Text = text, FontWeight = FontWeights.SemiBold, Margin = new Thickness(3, 0, 3, 3) };
         static Border Card(UIElement content) => new() { Style = Themed("Card"), Margin = new Thickness(0), Child = content };
 
@@ -491,7 +496,7 @@ public sealed class AddressingLedgerWindow : Window
         if (Work is { Complete: true }) { ShowWork(Work); return; }
         string where = profile.Id == GeminiSurveyProfile.Id ? "Google Gemini (dịch vụ trên mạng)" : profile.Name;
         if (!ConfirmSend($"Gửi trích đoạn nguyên tác tới {where}, model {options.Model}? Tối đa {maximum} request lần này, mỗi request thử một lần. " +
-                         "Kết quả chỉ ghi vào sổ khảo sát của Project; hồ sơ nhân vật chỉ đổi khi bạn bấm Hoàn thành.")) return;
+                         "Kết quả chỉ ghi vào sổ khảo sát của dự án; hồ sơ nhân vật chỉ đổi khi bạn bấm Hoàn thành.")) return;
         _surveyCancel = new(); var ct = _surveyCancel.Token;
         foreach (var c in new UIElement[] { _survey, _complete, _undo, _reload, _accept, _reject, _defer, _lock, _backend, _model, _maxRequests }) c.IsEnabled = false;
         _stop.IsEnabled = true;

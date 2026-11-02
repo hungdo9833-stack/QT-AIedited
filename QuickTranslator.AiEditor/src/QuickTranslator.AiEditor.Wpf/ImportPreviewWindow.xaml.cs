@@ -228,7 +228,7 @@ public partial class ImportPreviewWindow : Window
             if (more > 0) reasons.Add($"… và {more:N0} lỗi khác trong danh sách Cảnh báo.");
             if (collisions > 0)
             {
-                reasons.Add($"{collisions:N0} chương trùng số với chương đã có trong Project. Bấm “Bỏ qua chương đã có” hoặc đổi số.");
+                reasons.Add($"{collisions:N0} chương trùng số với chương đã có trong dự án. Bấm “Bỏ qua chương đã có” hoặc đổi số.");
                 _blockingItemId ??= plan.ImportableChapters.FirstOrDefault(x => ProjectCollision(x) is not null)?.Id;
             }
             if (_translatingTitles) reasons.Add("Đang dịch tiêu đề; chờ xong hoặc bấm Hủy.");
