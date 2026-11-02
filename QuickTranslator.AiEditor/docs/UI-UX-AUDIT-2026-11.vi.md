@@ -95,3 +95,22 @@ Không xóa chức năng nào: mọi lệnh hiện có vẫn còn, chỉ thêm �
 
 Nguyên tắc an toàn: giữ mọi `x:Name`, handler, thứ tự item mà code-behind phụ thuộc (ví dụ `OnEditorActionsOpened` sao trạng thái 13 lệnh theo thứ tự),
 và layout JSON trong LocalAppData.
+
+## 5. Kết quả (03/11/2026)
+
+| Bước | Trạng thái |
+|---|---|
+| 0 · Code-simplifier | Xong. 25 file code-behind gọn hơn, không đổi member/chuỗi/thứ tự. |
+| 1 · Design system | Xong. `Themes/Tokens.xaml`, tài liệu `UI-DESIGN-SYSTEM.vi.md`. |
+| 2 · WPF UI | Xong, có chọn lọc: brush Fluent theo bảng màu app, InfoBar (trạng thái editor), ProgressRing, Card, font icon. Thanh tiêu đề theo theme app. |
+| 3 · MainWindow | Xong. Menu Tệp · Nhập · Dự án · Xuất bản · Hiển thị; thuật ngữ thống nhất; token; icon Fluent; ô tìm kiếm có gợi ý. |
+| 4 · Cửa sổ phụ | Xong. 16 file XAML theo token, thanh nút chuẩn, Esc đóng; Enter chỉ cho thao tác an toàn. |
+| 5 · Guard test | Xong. `DesignSystemGuardTests` (6 luật). |
+| 6 · Co giãn/DPI/theme | Xong. Ảnh trước/sau: `ux-redesign/compare.html` (12 màn × 2 theme, 144/192 DPI, 900×520, 1366×768). |
+
+Phát hiện ngoài kế hoạch: implicit style `Window` trong App.xaml chưa bao giờ áp vào cửa sổ thật (đều là lớp con của `Window`),
+nên toàn app chạy Segoe UI 12 thay vì Segoe UI Variable theo thang chữ. Đã sửa trong `ThemeManager`; thân chữ chốt 13 (Fluent compact)
+vì 14 làm cắt chữ ở các cửa sổ dày đặc.
+
+Còn mở (không chặn): bỏ hẳn `GlobalToolbar` đã ẩn (code còn tham chiếu control trong đó); chuyển dần UI dựng bằng C#
+(Sổ xưng hô, Thay thế hàng loạt, hồ sơ nhân vật) sang XAML — ngân sách guard test sẽ giảm theo.
