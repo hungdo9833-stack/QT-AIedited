@@ -169,6 +169,43 @@ public sealed class WebNovelImporterTests
     }
 
     [Fact]
+    public async Task Chapters_behind_opaque_hex_ids_form_one_table_of_contents()
+    {
+        // Seen live: /book/55315/9556b73c60aec.html. Replacing only digit runs gave each link its own shape, and a
+        // chance match of three links won over the 599-entry list.
+        string Id(int i) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(BitConverter.GetBytes(i)))[..13].ToLowerInvariant();
+        string catalog = "<ul class='mulu_list'>" + string.Concat(Enumerable.Range(1, 30).Select(i =>
+            $"<li><a href='/book/55315/{Id(i)}.html'>第{i}章 占位</a></li>")) + "</ul>";
+        using var handler = new FakeHandler(_ => Html("<h1>测试书名</h1>" + catalog));
+        using var importer = new WebNovelImporter(Options, handler);
+        var analysis = await importer.AnalyzeAsync(Url("other/chapters/id/53978.html"));
+        Assert.Equal(Enumerable.Range(1, 30).Select(i => $"第{i}章 占位"), analysis.Chapters.Select(chapter => chapter.Title));
+    }
+
+    [Fact]
+    public async Task A_book_page_with_only_the_latest_chapters_follows_its_all_chapters_link()
+    {
+        string Id(int i) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(BitConverter.GetBytes(i)))[..13].ToLowerInvariant();
+        string Row(int i) => $"<li><a href='/book/55315/{Id(i)}.html'>第{i}章 占位</a></li>";
+        string book = "<title>测试书名-奇幻-某书屋</title><ul>" + Row(28) + Row(29) + Row(30) + "</ul>" +
+            "<a href='/other/chapters/id/53978.html'>查看所有章节</a>";
+        string directory = "<h1>测试书名</h1><ul class='mulu_list'>" + string.Concat(Enumerable.Range(1, 30).Select(Row)) + "</ul>";
+        using var handler = new FakeHandler(r => Html(r.RequestUri!.AbsolutePath.StartsWith("/other/") ? directory : book));
+        using var importer = new WebNovelImporter(Options, handler);
+        var analysis = await importer.AnalyzeAsync(Url("novel/53978.html"));
+        Assert.Equal(30, analysis.Chapters.Count);
+        Assert.Equal("测试书名", analysis.BookTitle);
+    }
+
+    [Theory]
+    [InlineData("/book/55315/9556b73c60aec.html", "/book/#/#.html")]
+    [InlineData("/book/55315/01ed98aa62f94.html", "/book/#/#.html")]
+    [InlineData("/novel/abcdefgh/12.html", "/novel/abcdefgh/#.html")]
+    [InlineData("/read/chapter_12.html", "/read/chapter_#.html")]
+    public void Url_shape_treats_hex_ids_like_numbers(string path, string shape) =>
+        Assert.Equal(shape, ChapterListDetector.UrlShape(new Uri("https://example.com" + path)));
+
+    [Fact]
     public async Task Directory_with_out_of_order_title_numbers_is_ordered_by_its_urls()
     {
         // Seen live on a dir.html: one title carries an unrelated number, which used to reject the whole list.

@@ -33,7 +33,7 @@ internal static class ChapterListDetector
         }
 
         var group = links.Where(a => a.Url != page.Url && LooksLikeChapter(a))
-            .GroupBy(a => Regex.Replace(a.Url.AbsolutePath + a.Url.Query, @"\d+", "#"))
+            .GroupBy(a => UrlShape(a.Url))
             .Where(g => PlausibleSequence(g))
             .OrderByDescending(g => g.Count()).FirstOrDefault();
         if (group is null) return [];
@@ -44,6 +44,12 @@ internal static class ChapterListDetector
             ordered = ordered.OrderBy(key).ToList();
         return Index(ordered);
     }
+
+    // Links of one table of contents differ only in their ids. Besides numbers, an opaque hex id (/book/55315/9556b73c60aec.html,
+    // seen live) is an id too: replacing only its digit runs would give every chapter its own shape.
+    internal static string UrlShape(Uri url) =>
+        Regex.Replace(Regex.Replace(url.AbsolutePath + url.Query,
+            @"(?<![0-9A-Za-z])(?=[0-9a-fA-F]*\d)(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{8,}(?![0-9A-Za-z])", "#"), @"\d+", "#");
 
     // Order by whichever numbering is more consistently sorted: titles usually (第一章…, even behind opaque URL ids), but
     // URL numbers when a title carries an unrelated number or an extra chapter (番外) out of place. Ties keep the titles.
@@ -77,7 +83,7 @@ internal static class ChapterListDetector
         .Where(a => a.Url is not null && WebPage.SameHost(page.Url, a.Url) && a.Url != page.Url)
         .FirstOrDefault(a => !a.Url!.Query.Contains("sort=desc", StringComparison.OrdinalIgnoreCase) &&
             (Regex.IsMatch(a.Url.AbsolutePath, @"(?:^|/)(?:dir\.html?|catalog|toc)(?:/|$)", RegexOptions.IgnoreCase) ||
-             Regex.IsMatch(a.Text, @"^(?:目录|目錄|章节目录|章節目錄|全部章节|全部章節|查看目录|查看目錄)$")))?.Url;
+             Regex.IsMatch(a.Text, @"^(?:目录|目錄|章节目录|章節目錄|全部章节|全部章節|查看目录|查看目錄|查看所有章节|查看所有章節|所有章节|所有章節|查看全部章节|查看全部章節)$")))?.Url;
 
     internal static string? Title(WebPage page)
     {

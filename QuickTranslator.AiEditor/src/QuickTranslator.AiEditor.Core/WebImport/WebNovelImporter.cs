@@ -25,7 +25,13 @@ public sealed class WebNovelImporter : IWebNovelImporter, IDisposable
         {
             page = await _fetcher.FetchAsync(directory, cancellationToken, useCache: false).ConfigureAwait(false);
             var directoryChapters = ChapterListDetector.Detect(page);
-            if (directoryChapters.Count > chapters.Count) { chapters = directoryChapters; followed = true; }
+            if (directoryChapters.Count > chapters.Count)
+            {
+                chapters = directoryChapters;
+                followed = true;
+                // A book page without <h1> falls back to the <title>, which carries the genre and site name.
+                if (page.Document.QuerySelector("h1") is not null) title = ChapterListDetector.Title(page) ?? title;
+            }
         }
         if (chapters.Count == 0)
         {
