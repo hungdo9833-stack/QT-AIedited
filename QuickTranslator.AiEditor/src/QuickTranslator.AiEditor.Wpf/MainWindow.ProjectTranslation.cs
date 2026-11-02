@@ -87,7 +87,11 @@ public partial class MainWindow
             BackendSnapshot(profile, runtime.ModelOptions.Model), knowledge);
     }
 
-    private async Task OpenProjectTranslationQueueAsync(IReadOnlyList<Guid> chapterIds)
+    private Task OpenProjectTranslationQueueAsync(IReadOnlyList<Guid> chapterIds) =>
+        OpenProjectTranslationQueueCoreAsync(chapterIds, askRetranslation: true);
+
+    /// <param name="askRetranslation">False (automatic runs): translate only what is missing without asking.</param>
+    private async Task OpenProjectTranslationQueueCoreAsync(IReadOnlyList<Guid> chapterIds, bool askRetranslation)
     {
         if (_projectSession is null) throw new InvalidOperationException("Project đã đóng.");
         if (!BeginUiOperation(allowDuringTranslation: true))
@@ -120,10 +124,10 @@ public partial class MainWindow
             if (existing?.Status is ProjectTranslationJobStatus.Paused or
                 ProjectTranslationJobStatus.Interrupted or ProjectTranslationJobStatus.Ready)
             {
-                await AppendToProjectTranslationQueueAsync(coordinator, existing, chapterIds);
+                await AppendToProjectTranslationQueueAsync(coordinator, existing, chapterIds, askRetranslation);
                 return;
             }
-            if (AskRetranslation(chapterIds) is not { } retranslate) return;
+            if ((askRetranslation ? AskRetranslation(chapterIds) : new HashSet<Guid>()) is not { } retranslate) return;
             ProjectTranslationJob plan = await coordinator.PlanAsync(chapterIds, retranslateAll: retranslate);
             // Only detach the open chapter if it is part of the planned queue items.
             if (_service?.GetSnapshot().Id is Guid openId && chapterIds.Contains(openId))
@@ -142,7 +146,7 @@ public partial class MainWindow
     /// of ignoring them. Chapters still waiting in the job are left as they are; Tiếp tục then translates the rest.
     /// </summary>
     private async Task AppendToProjectTranslationQueueAsync(ProjectTranslationCoordinator coordinator,
-        ProjectTranslationJob existing, IReadOnlyList<Guid> chapterIds)
+        ProjectTranslationJob existing, IReadOnlyList<Guid> chapterIds, bool askRetranslation = true)
     {
         Guid[] candidates = chapterIds.Where(id => existing.Items.FirstOrDefault(item => item.ChapterId == id) is not { } item ||
             item.Status is ProjectTranslationItemStatus.Completed or ProjectTranslationItemStatus.Skipped or
@@ -156,7 +160,7 @@ public partial class MainWindow
             SetStatus("Các chương đã chọn đều đang chờ trong hàng đợi. Bấm Tiếp tục để dịch.");
             return;
         }
-        if (AskRetranslation(candidates) is not { } retranslate) return;
+        if ((askRetranslation ? AskRetranslation(candidates) : new HashSet<Guid>()) is not { } retranslate) return;
         ProjectTranslationAppendResult result = await coordinator.AppendAsync(candidates, retranslate);
         HostProjectTranslationView(coordinator, null);
         SetStatus(result.Added == 0 && result.Reopened == 0

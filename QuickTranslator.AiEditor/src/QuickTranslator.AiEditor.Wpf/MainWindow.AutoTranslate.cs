@@ -28,6 +28,14 @@ public partial class MainWindow
     /// <summary>The work of each stage of <see cref="AutoBookPipeline"/>, done in this window (projects, library, queue).</summary>
     private sealed class AutoBookStages(MainWindow window) : IAutoBookStages
     {
+        public Task<AutoBookExisting?> FindExistingAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken)
+        {
+            row.Stage = "Tìm dự án đã có";
+            string[] manifests = window._projectLibrary.RecentProjects.Where(project => !project.Missing)
+                .Select(project => project.ManifestPath).ToArray();
+            return window.CreateAutoBookPreparer().FindExistingAsync(row.Url, manifests, settings.DownloadDelay, cancellationToken);
+        }
+
         public async Task<AutoBookDownload?> DownloadAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken)
         {
             var status = new Progress<AutoBookStatus>(value =>
@@ -189,7 +197,8 @@ public partial class MainWindow
         Guid[] chapterIds = _projectSession!.Manifest.Chapters.Where(entry => entry.DeletedAt is null)
             .OrderBy(entry => entry.Number).Select(entry => entry.ChapterId).ToArray();
         row.Stage = "Đang dịch";
-        await OpenProjectTranslationQueueAsync(chapterIds);
+        // No dialog: a book coming back translates only what is missing; nobody is there to answer.
+        await OpenProjectTranslationQueueCoreAsync(chapterIds, askRetranslation: false);
         ProjectTranslationCoordinator coordinator = _projectTranslationCoordinator
             ?? throw new InvalidOperationException("Không tạo được hàng đợi dịch.");
         DateTimeOffset waitingSince = DateTimeOffset.UtcNow;

@@ -9,6 +9,14 @@ namespace QuickTranslator.AiEditor.Core.AutoTranslate;
 
 public sealed record AutoBookStatus(string Stage, string Detail, string? Title = null);
 
+/// <summary>A project made earlier from the same link.</summary>
+/// <param name="SourceChapters">Chapters the site lists now; null when the site could not be read.</param>
+public sealed record AutoBookExisting(string ManifestPath, string Title, int Chapters, int? SourceChapters, bool Surveyed)
+{
+    /// <summary>Surveyed and holding every chapter: translation can simply continue in it.</summary>
+    public bool Complete => Surveyed && (SourceChapters is null || Chapters >= SourceChapters);
+}
+
 /// <summary>A book whose chapters are all downloaded and joined into one import text.</summary>
 public sealed record AutoBookDownload(Uri Url, string Title, string Text, string WorkDirectory);
 
@@ -50,6 +58,61 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
     }
 
     /// <summary>
+    /// The best project already made from <paramref name="url"/> among <paramref name="manifestPaths"/> (a complete one
+    /// first, then the one with most chapters), so the same link continues it instead of surveying again.
+    /// </summary>
+    public async Task<AutoBookExisting?> FindExistingAsync(Uri url, IEnumerable<string> manifestPaths, TimeSpan downloadDelay,
+        CancellationToken cancellationToken = default)
+    {
+        AutoBookExisting? best = null;
+        int? sourceChapters = null;
+        bool counted = false;
+        foreach (string path in manifestPaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            ProjectManifest manifest;
+            try { manifest = await ProjectRepository.ReadManifestAsync(path, cancellationToken).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { continue; }
+            if (!SameLink(manifest.SourceUrl, url)) continue;
+            bool surveyed;
+            try
+            {
+                ProjectResources resources = await new ProjectResourceStore(new ProjectSession(path, manifest))
+                    .LoadAsync(cancellationToken).ConfigureAwait(false);
+                surveyed = resources.Characters.Profiles.Count > 0;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { surveyed = false; }
+            if (!counted)
+            {
+                sourceChapters = await CountSourceChaptersAsync(url, downloadDelay, cancellationToken).ConfigureAwait(false);
+                counted = true;
+            }
+            var found = new AutoBookExisting(path, manifest.VietnameseTitle,
+                manifest.Chapters.Count(entry => entry.DeletedAt is null), sourceChapters, surveyed);
+            if (best is null || found.Complete && !best.Complete || found.Complete == best.Complete && found.Chapters > best.Chapters)
+                best = found;
+        }
+        return best;
+    }
+
+    private static bool SameLink(string? saved, Uri url) =>
+        Uri.TryCreate(saved, UriKind.Absolute, out Uri? savedUri) &&
+        string.Equals(savedUri.AbsoluteUri.TrimEnd('/'), url.AbsoluteUri.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Chapters the site's table of contents lists now; null when it cannot be read (offline, walled).</summary>
+    private async Task<int?> CountSourceChaptersAsync(Uri url, TimeSpan downloadDelay, CancellationToken cancellationToken)
+    {
+        IWebNovelImporter importer = importerFactory(new WebImportOptions { DelayBetweenRequests = downloadDelay, CacheDirectory = PagesDirectory(url) });
+        try { return (await importer.AnalyzeAsync(url, cancellationToken).ConfigureAwait(false)).Chapters.Count; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
+        finally { (importer as IDisposable)?.Dispose(); }
+    }
+
+    private string WorkDirectory(Uri url) =>
+        Path.Combine(WorkRoot, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url.AbsoluteUri)))[..16]);
+
+    private string PagesDirectory(Uri url) => Path.Combine(WorkDirectory(url), "pages");
+
+    /// <summary>
     /// Downloads every chapter. Kept apart from <see cref="PrepareAsync(AutoBookDownload,string,CodexSurveyOptions,IProgress{AutoBookStatus},CancellationToken,IProgress{ContentFlagReport})"/>
     /// so the next book can download while Codex surveys this one.
     /// </summary>
@@ -57,8 +120,7 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
     public async Task<AutoBookDownload> DownloadAsync(Uri url, TimeSpan downloadDelay, IProgress<AutoBookStatus>? status = null,
         CancellationToken cancellationToken = default)
     {
-        string work = Path.Combine(WorkRoot, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url.AbsoluteUri)))[..16]);
-        string pages = Path.Combine(work, "pages");
+        string work = WorkDirectory(url), pages = PagesDirectory(url);
         Directory.CreateDirectory(pages);
         IWebNovelImporter importer = importerFactory(new WebImportOptions { DelayBetweenRequests = downloadDelay, CacheDirectory = pages });
         string text, title;

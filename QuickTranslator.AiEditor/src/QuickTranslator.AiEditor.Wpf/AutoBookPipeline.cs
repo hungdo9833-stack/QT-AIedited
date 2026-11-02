@@ -28,6 +28,8 @@ public sealed class AutoBookRow(Uri url) : INotifyPropertyChanged
     /// <summary>Translated, prepared only, or stopped for good (content): nothing left to retry.</summary>
     internal bool Finished { get; set; }
     internal bool Removed { get; set; }
+    /// <summary>The user saw that the link's project is incomplete and retried: make a new, complete project.</summary>
+    internal bool NewProject { get; set; }
     internal CancellationTokenSource? Cancellation { get; set; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -43,6 +45,8 @@ public sealed class AutoBookRow(Uri url) : INotifyPropertyChanged
 /// <summary>The work of each stage. A stage that returns null/false has already said why on the row.</summary>
 internal interface IAutoBookStages
 {
+    /// <summary>A project already made from this link, if any.</summary>
+    Task<AutoBookExisting?> FindExistingAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken);
     Task<AutoBookDownload?> DownloadAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken);
     Task<string?> PrepareAsync(AutoBookRow row, AutoBookDownload download, AutoTranslateSettings settings, CancellationToken cancellationToken);
     Task<bool> TranslateAsync(AutoBookRow row, string manifestPath, CancellationToken cancellationToken);
@@ -137,6 +141,28 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
     private async Task<Channel<AutoBookRow>?> DownloadAsync(AutoBookRow row, CancellationToken cancellationToken)
     {
         row.Step = AutoBookStep.Download;
+        if (!row.NewProject && await stages.FindExistingAsync(row, settings, cancellationToken) is { } existing)
+        {
+            row.Title = existing.Title;
+            if (existing.Complete)
+            {
+                // Surveyed with every chapter: translate what is left in it; never survey or create it again.
+                row.ManifestPath = existing.ManifestPath;
+                row.Step = AutoBookStep.Translate;
+                row.Detail = "Dùng dự án đã có: " + existing.ManifestPath;
+                if (!settings.PrepareOnly) return _translations;
+                row.Stage = "Đã có dự án";
+                row.Finished = true;
+                return null;
+            }
+            row.NewProject = true;
+            row.Stage = "Đã có dự án chưa đủ";
+            row.Detail = (existing.Surveyed
+                    ? $"Dự án đã có chỉ có {existing.Chapters}/{existing.SourceChapters} chương."
+                    : "Dự án đã có chưa được Codex khảo sát.") +
+                " Bấm Thử lại để tải đủ, khảo sát và tạo dự án mới; dự án cũ được giữ nguyên.";
+            return null;
+        }
         if (await stages.DownloadAsync(row, settings, cancellationToken) is not { } download) return null;
         row.Download = download;
         row.Step = AutoBookStep.Survey;

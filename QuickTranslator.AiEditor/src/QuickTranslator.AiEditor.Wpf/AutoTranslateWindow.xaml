@@ -39,7 +39,7 @@
      <DataGridTextColumn Header="Chi tiết" Binding="{Binding Detail}" Width="3*">
       <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style></DataGridTextColumn.ElementStyle>
      </DataGridTextColumn>
-     <DataGridTemplateColumn Header="" Width="Auto">
+     <DataGridTemplateColumn Header="Thao tác" Width="130" MinWidth="130" DisplayIndex="1">
       <DataGridTemplateColumn.CellTemplate>
        <DataTemplate>
         <StackPanel Orientation="Horizontal">
