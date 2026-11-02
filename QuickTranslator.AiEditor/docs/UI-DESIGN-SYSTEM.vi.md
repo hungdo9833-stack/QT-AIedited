@@ -25,8 +25,8 @@ Muốn dùng thêm một control WPF UI → thêm đúng dictionary của nó v�
 |---|---|---|
 | `CaptionText` | 12, Muted | Chú thích, trạng thái, metadata |
 | `OverlineText` | 12 SemiBold, Muted, CHỮ HOA | Nhãn nhóm (rail, header panel) |
-| `BodyText` / mặc định Window | 14 | Nội dung, nút, ô nhập |
-| `BodyStrongText` | 14 SemiBold | Nhãn trường, tiêu đề thẻ |
+| `BodyText` / mặc định Window | 13 | Nội dung, nút, ô nhập (Fluent compact) |
+| `BodyStrongText` | 13 SemiBold | Nhãn trường, tiêu đề thẻ |
 | `SubtitleText` | 16 SemiBold | Tiêu đề vùng, tên chương đang mở |
 | `TitleText` / `WindowTitle` | 20 SemiBold | Tiêu đề cửa sổ, tiêu đề trang |
 | `DisplayText` | 28 SemiBold | Số liệu lớn (tiến độ hàng đợi) |

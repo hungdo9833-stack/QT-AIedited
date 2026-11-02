@@ -28,7 +28,7 @@ public sealed class AddressingLedgerWindow : Window
     private readonly Action<ProjectResources> _applyResources;
     private readonly AddressingReviewService _service;
     private readonly TextBlock _summary = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 6) };
-    private readonly CheckBox _lock = new() { Content = "Bật khóa nhất quán dự án (trình dịch dùng hồ sơ nhân vật)", Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly CheckBox _lock = new() { Content = "Bật khóa nhất quán dự án (trình dịch dùng hồ sơ nhân vật)", ContentTemplate = WrappingText(), Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly CheckBox _onlyValid = new() { Content = "Chỉ hiện đề xuất đã kiểm chứng", IsChecked = true, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _reload = new() { Content = "Nạp lại" };
     private readonly TabControl _tabs = new();
@@ -40,9 +40,10 @@ public sealed class AddressingLedgerWindow : Window
     private readonly StackPanel _characterFields = new(), _pairFields = new();
     private static Style Themed(string key) => (Style)Application.Current.FindResource(key);
     private static Button WithGlyph(Button button, string glyph) { ButtonIcon.SetGlyph(button, glyph); return button; }
+    private static DataTemplate WrappingText() => (DataTemplate)Application.Current.FindResource("WrappingText");
     private readonly Button _accept = new() { Content = "Chấp nhận & ghi vào hồ sơ" }, _reject = new() { Content = "Bác bỏ", Style = Themed("DangerButton") }, _defer = new() { Content = "Để sau" };
     // "Hoàn thành" is the window's one primary action.
-    private readonly Button _complete = WithGlyph(new() { Content = "Hoàn thành: ghi tất cả vào hồ sơ và dùng khi dịch", Style = Themed("PrimaryButton"), Padding = new Thickness(12, 6, 12, 6) }, Glyphs.Accept);
+    private readonly Button _complete = WithGlyph(new() { Content = "Hoàn thành: ghi tất cả vào hồ sơ và dùng khi dịch", ContentTemplate = WrappingText(), Style = Themed("PrimaryButton"), Padding = new Thickness(12, 6, 12, 6) }, Glyphs.Accept);
     private readonly Button _undo = WithGlyph(new() { Content = "Hoàn tác lần Hoàn thành gần nhất", Margin = new Thickness(8, 0, 0, 0), IsEnabled = false }, Glyphs.Undo);
     private readonly TextBox _completion = new() { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxHeight = 140, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0, 6, 0, 0) };
     internal AddressingCompletion? Preview { get; private set; }

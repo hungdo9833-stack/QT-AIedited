@@ -121,6 +121,8 @@
    <Style x:Key="WindowTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleText}"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
    <Style x:Key="WindowSubtitle" TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Setter Property="Margin" Value="0,2,0,0"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
    <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleText}"><Setter Property="Margin" Value="4,4,4,12"/></Style>
+   <!-- Content template for a long label inside a Button/CheckBox: wraps instead of being clipped. -->
+   <DataTemplate x:Key="WrappingText"><TextBlock Text="{Binding}" TextWrapping="Wrap"/></DataTemplate>
    <Style x:Key="FieldLabel" TargetType="TextBlock"><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="4,8,4,3"/></Style>
    <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="{StaticResource Radius.Overlay}"/><Setter Property="Padding" Value="12"/><Setter Property="Margin" Value="3,3,3,9"/></Style>
   </ResourceDictionary>

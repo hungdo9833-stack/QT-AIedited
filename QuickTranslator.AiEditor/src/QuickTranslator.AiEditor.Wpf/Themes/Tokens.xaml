@@ -1,11 +1,11 @@
 <!-- Design tokens: the only place where type sizes, spacing, radii and control heights are numbers.
      XAML elsewhere refers to these keys (StaticResource) or to the text styles below; see docs/UI-DESIGN-SYSTEM.vi.md.
-     Type ramp follows Fluent (Caption 12 · Body 14 · Subtitle · Title), tightened for a dense desktop editor. -->
+     Type ramp follows Fluent in its compact density (Caption 12 · Body 13 · Subtitle 16 · Title 20) for a dense desktop editor. -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
     <!-- Type ramp -->
     <sys:Double x:Key="FontSize.Caption">12</sys:Double>
-    <sys:Double x:Key="FontSize.Body">14</sys:Double>
+    <sys:Double x:Key="FontSize.Body">13</sys:Double>
     <sys:Double x:Key="FontSize.Subtitle">16</sys:Double>
     <sys:Double x:Key="FontSize.Title">20</sys:Double>
     <sys:Double x:Key="FontSize.Display">28</sys:Double>

@@ -299,7 +299,7 @@ public sealed class ProjectTranslationQueueUiTests
         Assert.All(window.CurrentRows, row => Assert.Equal("Đã dịch", row.StatusLabel));
         ((DataGrid)window.FindName("QueueGrid")).SelectedIndex = 0;
         await Dispatcher.Yield(DispatcherPriority.DataBind);
-        Assert.Contains("Eligibility", ((TextBlock)window.FindName("SelectedDiagnosticText")).Text,
+        Assert.Contains("Đủ điều kiện", ((TextBlock)window.FindName("SelectedDiagnosticText")).Text,
             StringComparison.Ordinal);
         Assert.False(((Button)window.FindName("StartButton")).IsEnabled);
         Assert.Contains("3/3", ((TextBlock)window.FindName("SummaryText")).Text);

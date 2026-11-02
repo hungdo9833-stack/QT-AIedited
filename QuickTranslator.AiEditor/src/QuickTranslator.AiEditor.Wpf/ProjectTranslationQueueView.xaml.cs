@@ -625,13 +625,13 @@ public partial class ProjectTranslationQueueView : UserControl
     private static string EligibilityDiagnosticLabel(TranslationEligibilityDiagnostic? diagnostic)
     {
         if (diagnostic is null) return "";
-        return $"Eligibility {diagnostic.EligibleSegmentCount:N0}/{diagnostic.SegmentCount:N0}; " +
-            $"chưa dịch {diagnostic.UntranslatedSegmentCount:N0}; draft {diagnostic.ProtectedByUserDraftCount:N0}; " +
+        return $"Đủ điều kiện {diagnostic.EligibleSegmentCount:N0}/{diagnostic.SegmentCount:N0} đoạn; " +
+            $"chưa dịch {diagnostic.UntranslatedSegmentCount:N0}; nháp {diagnostic.ProtectedByUserDraftCount:N0}; " +
             $"duyệt {diagnostic.ProtectedByApprovalCount:N0}; bảo vệ sửa {diagnostic.ProtectedByPreviousEditCount:N0}; " +
-            $"attempt {diagnostic.ExistingAttemptCount:N0} " +
-            $"(lỗi {diagnostic.FailedAttemptCount:N0}, invalid {diagnostic.InvalidOutputAttemptCount:N0}, " +
+            $"lần dịch {diagnostic.ExistingAttemptCount:N0} " +
+            $"(lỗi {diagnostic.FailedAttemptCount:N0}, không hợp lệ {diagnostic.InvalidOutputAttemptCount:N0}, " +
             $"hủy {diagnostic.CancelledAttemptCount:N0}, gián đoạn {diagnostic.InterruptedAttemptCount:N0}); " +
-            $"mode {diagnostic.QueueMode}; preflight {(diagnostic.WorkerPreflightChangedSegmentation ? "có đổi phân đoạn" : "không đổi phân đoạn")}.";
+            $"chế độ {diagnostic.QueueMode}; kiểm tra trước {(diagnostic.WorkerPreflightChangedSegmentation ? "có đổi phân đoạn" : "không đổi phân đoạn")}.";
     }
 
     private static string WorkerStatusLabel(ProjectTranslationWorkerStatus status) => status switch
