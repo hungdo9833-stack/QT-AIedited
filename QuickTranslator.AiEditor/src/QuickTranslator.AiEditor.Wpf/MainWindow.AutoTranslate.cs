@@ -20,100 +20,83 @@ public partial class MainWindow
             _autoTranslateWindow.Activate();
             return;
         }
-        _autoTranslateWindow = new AutoTranslateWindow(RunAutoTranslateAsync) { Owner = this };
+        _autoTranslateWindow = new AutoTranslateWindow(new AutoBookStages(this)) { Owner = this };
         _autoTranslateWindow.Closed += (_, _) => _autoTranslateWindow = null;
         _autoTranslateWindow.Show();
     }
 
-    /// <summary>
-    /// Three stages run side by side, each one book at a time: downloading, the Codex survey and translation. The next
-    /// book downloads while Codex surveys this one, and a surveyed book translates while Codex surveys the next. Translation
-    /// stays one book at a time because the queue belongs to the project open in this window.
-    /// </summary>
-    internal async Task RunAutoTranslateAsync(IReadOnlyList<AutoBookRow> rows, AutoTranslateSettings settings,
-        CancellationToken cancellationToken)
+    /// <summary>The work of each stage of <see cref="AutoBookPipeline"/>, done in this window (projects, library, queue).</summary>
+    private sealed class AutoBookStages(MainWindow window) : IAutoBookStages
     {
-        AutoBookPreparer preparer = CreateAutoBookPreparer();
-        var downloaded = rows.Select(_ => new TaskCompletionSource<AutoBookDownload?>(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
-        var prepared = rows.Select(_ => new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
-        async Task DownloadAllAsync()
+        public async Task<AutoBookDownload?> DownloadAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken)
         {
-            for (int index = 0; index < rows.Count; index++)
+            var status = new Progress<AutoBookStatus>(value =>
             {
-                if (cancellationToken.IsCancellationRequested) { downloaded[index].SetResult(null); rows[index].Stage = "Đã dừng"; continue; }
-                AutoBookRow row = rows[index];
-                var status = new Progress<AutoBookStatus>(value =>
+                row.Stage = value.Stage;
+                row.Detail = value.Detail;
+                if (value.Title is not null) row.Title = value.Title;
+            });
+            try
+            {
+                AutoBookDownload download = await window.CreateAutoBookPreparer()
+                    .DownloadAsync(row.Url, settings.DownloadDelay, status, cancellationToken);
+                await window.SettleAsync(() =>
                 {
-                    row.Stage = value.Stage;
-                    row.Detail = value.Detail;
-                    if (value.Title is not null) row.Title = value.Title;
+                    row.Title = download.Title;
+                    row.Stage = "Đã tải, chờ Codex";
+                    row.Detail = "";
                 });
-                try
-                {
-                    AutoBookDownload download = await preparer.DownloadAsync(row.Url, settings.DownloadDelay, status, cancellationToken);
-                    // Progress reports are posted: set the waiting state after the last one has landed.
-                    await Dispatcher.InvokeAsync(() =>
-                    {
-                        row.Title = download.Title;
-                        row.Stage = "Đã tải, chờ Codex";
-                        row.Detail = "";
-                    }, System.Windows.Threading.DispatcherPriority.ContextIdle);
-                    downloaded[index].SetResult(download);
-                }
-                catch (AutoBookPausedException paused)
+                return download;
+            }
+            catch (AutoBookPausedException paused)
+            {
+                await window.SettleAsync(() =>
                 {
                     row.Title = paused.Title;
                     row.Stage = $"⏸ Tạm dừng ({paused.Downloaded}/{paused.Total})";
                     row.Detail = paused.Message;
-                    downloaded[index].SetResult(null);
-                }
-                catch (Exception ex)
-                {
-                    row.Stage = ex is OperationCanceledException ? "Đã dừng" : "Lỗi";
-                    if (ex is not OperationCanceledException) row.Detail = ex.Message;
-                    downloaded[index].SetResult(null);
-                }
+                });
+                return null;
             }
         }
-        async Task PrepareAllAsync()
+
+        public async Task<string?> PrepareAsync(AutoBookRow row, AutoBookDownload download, AutoTranslateSettings settings,
+            CancellationToken cancellationToken)
         {
-            for (int index = 0; index < rows.Count; index++)
+            try { return await window.PrepareAutoBookAsync(window.CreateAutoBookPreparer(), download, row, settings, cancellationToken); }
+            catch (ContentStopException stop)
             {
-                if (await downloaded[index].Task is not { } download) { prepared[index].SetResult(null); continue; }
-                if (cancellationToken.IsCancellationRequested) { prepared[index].SetResult(null); rows[index].Stage = "Đã dừng"; continue; }
-                try { prepared[index].SetResult(await PrepareAutoBookAsync(preparer, download, rows[index], settings, cancellationToken)); }
-                catch (ContentStopException stop)
+                // Stopped for good: retrying would only stop again.
+                row.Finished = true;
+                await window.SettleAsync(() =>
                 {
-                    rows[index].Stage = "⛔ Đã dừng";
-                    rows[index].Detail = stop.Message;
-                    prepared[index].SetResult(null);
-                    ShowContentReport(rows[index], stop.Report, stopped: true);
-                }
-                catch (Exception ex)
-                {
-                    rows[index].Stage = ex is OperationCanceledException ? "Đã dừng" : "Lỗi";
-                    if (ex is not OperationCanceledException) rows[index].Detail = ex.Message;
-                    prepared[index].SetResult(null);
-                }
+                    row.Stage = "⛔ Đã dừng";
+                    row.Detail = stop.Message;
+                });
+                window.ShowContentReport(row, stop.Report, stopped: true);
+                return null;
             }
         }
-        Task downloading = DownloadAllAsync();
-        Task preparing = PrepareAllAsync();
-        for (int index = 0; index < rows.Count; index++)
+
+        public async Task<bool> TranslateAsync(AutoBookRow row, string manifestPath, CancellationToken cancellationToken)
         {
-            if (await prepared[index].Task is not string manifest) continue;
-            if (settings.PrepareOnly) continue;
-            if (cancellationToken.IsCancellationRequested) { rows[index].Stage = "Đã chuẩn bị, chưa dịch"; continue; }
-            try { await TranslateAutoBookAsync(rows[index], manifest, cancellationToken); }
+            try
+            {
+                await window.TranslateAutoBookAsync(row, manifestPath, cancellationToken);
+                return true;
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                rows[index].Stage = "Lỗi dịch";
-                rows[index].Detail = ex.Message;
+                row.Stage = "Lỗi dịch";
+                row.Detail = ex.Message;
+                return false;
             }
-            catch (OperationCanceledException) { rows[index].Stage = "Đã tạm dừng"; }
         }
-        await Task.WhenAll(downloading, preparing);
     }
+
+    /// <summary>Progress reports are posted: applies the final state of a stage after the last report has landed.</summary>
+    private Task SettleAsync(Action apply) =>
+        Dispatcher.InvokeAsync(apply, System.Windows.Threading.DispatcherPriority.ContextIdle).Task;
 
     private AutoBookPreparer CreateAutoBookPreparer() => new(_projectRepository, WebNovelImporterFactory, CodexSurveyRunnerFactory,
         new BulkImportChapterDefaults(ReadSegmenterOptions(), ReadModelOptions(), _presetManager.Selected))

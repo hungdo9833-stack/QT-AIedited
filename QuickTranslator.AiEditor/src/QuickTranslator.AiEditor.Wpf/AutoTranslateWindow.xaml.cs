@@ -2,76 +2,112 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
-using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using QuickTranslator.AiEditor.Core.AutoTranslate;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
-/// <summary>One book in an automatic run: download → new project → Codex survey → translate.</summary>
-public sealed class AutoBookRow(Uri url) : INotifyPropertyChanged
-{
-    private string _title = url.ToString(), _stage = "Chờ", _detail = "";
-    public Uri Url { get; } = url;
-    public string Title { get => _title; set => Set(ref _title, value); }
-    public string Stage { get => _stage; set => Set(ref _stage, value); }
-    public string Detail { get => _detail; set => Set(ref _detail, value); }
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    private void Set(ref string field, string value, [CallerMemberName] string? name = null)
-    {
-        if (field == value) return;
-        field = value;
-        PropertyChanged?.Invoke(this, new(name));
-    }
-}
-
 public sealed record AutoTranslateSettings(CodexSurveyOptions Codex, TimeSpan DownloadDelay, bool PrepareOnly = false);
 
 public partial class AutoTranslateWindow : Window
 {
-    private readonly Func<IReadOnlyList<AutoBookRow>, AutoTranslateSettings, CancellationToken, Task> _run;
+    private readonly IAutoBookStages _stages;
     private readonly ObservableCollection<AutoBookRow> _rows = [];
-    private CancellationTokenSource? _cancellation;
+    private AutoBookPipeline? _pipeline;
 
-    internal AutoTranslateWindow(Func<IReadOnlyList<AutoBookRow>, AutoTranslateSettings, CancellationToken, Task> run)
+    internal AutoTranslateWindow(IAutoBookStages stages)
     {
         InitializeComponent();
-        _run = run;
+        _stages = stages;
         BookGrid.ItemsSource = _rows;
     }
 
-    internal bool IsRunning => _cancellation is not null;
+    internal bool IsRunning => _pipeline is not null;
+    internal IReadOnlyList<AutoBookRow> Rows => _rows;
 
-    private async void OnStart(object sender, RoutedEventArgs e)
+    /// <summary>"Bắt đầu", or "Thêm vào hàng chờ" while running: new links join the run; a link already listed is retried.</summary>
+    private void OnStart(object sender, RoutedEventArgs e)
     {
-        if (IsRunning) return;
         try
         {
             IReadOnlyList<Uri> links = ParseLinks(LinksInput.Text);
-            AutoTranslateSettings settings = ReadSettings();
-            _rows.Clear();
-            foreach (Uri link in links) _rows.Add(new(link));
-            _cancellation = new CancellationTokenSource();
-            SetRunning(true);
-            StatusText.Text = $"Đang xử lý {links.Count} truyện…";
-            await _run(_rows.ToArray(), settings, _cancellation.Token);
-            StatusText.Text = _cancellation.IsCancellationRequested ? "Đã dừng." : "Đã xử lý xong danh sách.";
+            foreach (Uri link in links)
+            {
+                AutoBookRow row = _rows.FirstOrDefault(existing => existing.Url == link) ?? AddRow(link);
+                Enqueue(row);
+            }
+            LinksInput.Clear();
         }
-        catch (OperationCanceledException) { StatusText.Text = "Đã dừng."; }
+        catch (InvalidOperationException ex) { StatusText.Text = ex.Message; }
+    }
+
+    private void OnRetryRow(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is AutoBookRow row && row.CanRetry) Enqueue(row);
+    }
+
+    private void OnRemoveRow(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not AutoBookRow row) return;
+        AutoBookPipeline.Remove(row);
+        _rows.Remove(row);
+        UpdateStatus();
+    }
+
+    private AutoBookRow AddRow(Uri link)
+    {
+        var row = new AutoBookRow(link);
+        // A book leaving the run flips CanRetry just before the run's count drops: refresh once both have happened.
+        row.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AutoBookRow.CanRetry)) Dispatcher.BeginInvoke(UpdateStatus);
+        };
+        _rows.Add(row);
+        return row;
+    }
+
+    internal void Enqueue(AutoBookRow row)
+    {
+        if (_pipeline?.TryEnqueue(row) != true)
+        {
+            AutoTranslateSettings settings;
+            try { settings = ReadSettings(); }
+            catch (InvalidOperationException ex) { StatusText.Text = ex.Message; return; }
+            var pipeline = new AutoBookPipeline(_stages, settings);
+            pipeline.TryEnqueue(row);
+            _ = RunAsync(pipeline);
+        }
+        UpdateStatus();
+    }
+
+    private async Task RunAsync(AutoBookPipeline pipeline)
+    {
+        _pipeline = pipeline;
+        SetRunning(true);
+        try { await pipeline.RunAsync(); }
         catch (Exception ex) { StatusText.Text = "Lỗi: " + ex.Message; }
         finally
         {
-            _cancellation?.Dispose();
-            _cancellation = null;
-            SetRunning(false);
+            if (ReferenceEquals(_pipeline, pipeline)) _pipeline = null;
+            SetRunning(IsRunning);
+            UpdateStatus();
         }
+    }
+
+    private void UpdateStatus()
+    {
+        int active = _pipeline?.Active ?? 0, waiting = _rows.Count(row => row.CanRetry);
+        StatusText.Text = active > 0
+            ? $"Đang xử lý {active} truyện" + (waiting > 0 ? $"; {waiting} truyện chờ Thử lại." : ". Có thể dán thêm link vào hàng chờ.")
+            : _rows.Count == 0 ? "Dán link rồi bấm Bắt đầu."
+            : waiting > 0 ? $"Đã xử lý xong hàng chờ; {waiting} truyện đang dừng, bấm Thử lại ở từng truyện khi muốn chạy tiếp."
+            : "Đã xử lý xong hàng chờ.";
     }
 
     private void OnStop(object sender, RoutedEventArgs e)
     {
-        _cancellation?.Cancel();
+        _pipeline?.Stop();
         StopButton.IsEnabled = false;
         StatusText.Text = "Đang dừng sau bước hiện tại (hàng đợi dịch được tạm dừng an toàn)…";
     }
@@ -85,10 +121,12 @@ public partial class AutoTranslateWindow : Window
         StatusText.Text = "Hãy bấm Dừng và chờ dừng hẳn trước khi đóng.";
     }
 
+    /// <summary>Links can be added any time; the settings belong to the run and are fixed while it lasts.</summary>
     private void SetRunning(bool running)
     {
-        StartButton.IsEnabled = LinksInput.IsEnabled = ModelInput.IsEnabled = EffortInput.IsEnabled =
-            WorkspaceInput.IsEnabled = DelayInput.IsEnabled = PrepareOnlyCheck.IsEnabled = !running;
+        ModelInput.IsEnabled = EffortInput.IsEnabled = WorkspaceInput.IsEnabled = DelayInput.IsEnabled =
+            PrepareOnlyCheck.IsEnabled = !running;
+        StartButton.Content = running ? "Thêm vào hàng chờ" : "Bắt đầu";
         StopButton.IsEnabled = running;
     }
 

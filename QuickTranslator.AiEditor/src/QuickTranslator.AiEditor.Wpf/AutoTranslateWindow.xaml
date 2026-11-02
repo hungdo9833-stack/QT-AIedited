@@ -12,7 +12,7 @@
   <Border Style="{StaticResource Card}">
    <StackPanel>
     <TextBlock Text="Tự động dịch từ link" Style="{StaticResource WindowTitle}"/>
-    <TextBlock Text="Mỗi dòng một link mục lục truyện. Mỗi truyện được tải về, tạo dự án mới, Codex khảo sát nhân vật và từ điển, rồi dịch toàn bộ bằng backend đang chọn trong QT Studio." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+    <TextBlock Text="Mỗi dòng một link mục lục truyện. Mỗi truyện được tải về, tạo dự án mới, Codex khảo sát nhân vật và từ điển, rồi dịch toàn bộ bằng backend đang chọn trong QT Studio. Khi đang chạy vẫn dán thêm link được; truyện bị dừng thì bấm Thử lại ở dòng của nó." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,6"/>
     <TextBox x:Name="LinksInput" AcceptsReturn="True" TextWrapping="NoWrap" Height="110" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Danh sách link truyện, mỗi dòng một link"/>
     <WrapPanel Margin="0,6,0,0">
      <TextBlock Text="Model Codex" VerticalAlignment="Center" Margin="4"/>
@@ -39,6 +39,18 @@
      <DataGridTextColumn Header="Chi tiết" Binding="{Binding Detail}" Width="3*">
       <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style></DataGridTextColumn.ElementStyle>
      </DataGridTextColumn>
+     <DataGridTemplateColumn Header="" Width="Auto">
+      <DataGridTemplateColumn.CellTemplate>
+       <DataTemplate>
+        <StackPanel Orientation="Horizontal">
+         <Button Content="Thử lại" Click="OnRetryRow" IsEnabled="{Binding CanRetry}" Padding="8,2" Margin="2"
+                 ToolTip="Chạy tiếp truyện này từ bước đã dừng (tải tiếp, khảo sát hoặc dịch)" AutomationProperties.Name="Thử lại truyện này"/>
+         <Button Content="Bỏ" Click="OnRemoveRow" Padding="8,2" Margin="2"
+                 ToolTip="Bỏ truyện này khỏi hàng chờ (đang dịch thì hàng đợi được tạm dừng)" AutomationProperties.Name="Bỏ truyện này khỏi hàng chờ"/>
+        </StackPanel>
+       </DataTemplate>
+      </DataGridTemplateColumn.CellTemplate>
+     </DataGridTemplateColumn>
     </DataGrid.Columns>
    </DataGrid>
   </Border>
