@@ -13,6 +13,8 @@ public sealed record AutoBookPrepared(ProjectSession Session, string Title, int 
     CodexSurveyImportResult Survey, string Summary)
 {
     public string ManifestPath => Session.ManifestPath;
+    /// <summary>Set when the site walled off later chapters: which ones are missing and why.</summary>
+    public string? MissingNote { get; init; }
 }
 
 /// <summary>
@@ -130,7 +132,7 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
             $"{report.ImportedCount:N0} chương, {titleNote}, {survey.Characters.Profiles.Count} nhân vật, " +
             $"{survey.Characters.Profiles.Sum(p => p.Relationships.Count)} quan hệ, {survey.Terms.Count} thuật ngữ" +
             (survey.Warnings.Count > 0 ? $"; {survey.Warnings.Count} ghi chú: {survey.Warnings[0]}" : "");
-        return new(session, title, report.ImportedCount, survey, summary);
+        return new(session, title, report.ImportedCount, survey, summary) { MissingNote = missingNote };
     }
 
     /// <summary>Keeps the content-safety findings with the project (Settings/content-flags.json) for later review.</summary>

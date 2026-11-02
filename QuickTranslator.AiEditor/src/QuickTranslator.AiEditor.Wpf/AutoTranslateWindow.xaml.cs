@@ -17,6 +17,8 @@ public sealed class AutoBookRow(Uri url) : INotifyPropertyChanged
     public string Title { get => _title; set => Set(ref _title, value); }
     public string Stage { get => _stage; set => Set(ref _stage, value); }
     public string Detail { get => _detail; set => Set(ref _detail, value); }
+    /// <summary>Chapters the site walled off; kept so the finished row still says the book is incomplete.</summary>
+    public string? MissingNote { get; set; }
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void Set(ref string field, string value, [CallerMemberName] string? name = null)
