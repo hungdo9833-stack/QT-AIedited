@@ -135,6 +135,24 @@ public sealed class CharacterConsistencyLockTests
     }
 
     [Fact]
+    public async Task TitleFormAliasKeepsItsOwnGlossaryRenderingWhileTheNameIsNotRepeated()
+    {
+        // 覃太太 identifies the wife (alias) but reads "Đàm phu nhân", not her name: the glossary must still carry it.
+        ChapterDocument chapter = TranslationService.CreateChapter("Thử", "覃太太笑了，蔓露点头。");
+        chapter.ConfirmedTerms = [new("覃太太", "Đàm phu nhân"), new("蔓露", "Mạn Lộ")];
+        CharacterProfile wife = Profile("蔓露", "Mạn Lộ", "cô");
+        wife.Aliases.Add("覃太太");
+        var client = new FakeClient();
+        var service = new TranslationService(chapter, client, new MemoryStore());
+        await service.ConfigureCharacterProjectAsync(Project(wife));
+
+        TranslationAttempt attempt = await service.TranslateAsync(chapter.Segments[0].Id);
+
+        Assert.Contains("覃太太 = Đàm phu nhân", attempt.Prompt);
+        Assert.Equal(1, Count(attempt.Prompt, "蔓露 = Mạn Lộ"));
+    }
+
+    [Fact]
     public async Task TranslationUsesOneProviderRequestAndStoresExactConsistencyPrompt()
     {
         ChapterDocument chapter = TranslationService.CreateChapter("Thử", "林风推门而入。");

@@ -122,6 +122,18 @@ public sealed class CodexSurveyTests
     }
 
     [Fact]
+    public void Convert_KeepsTitleFormsAndSurnamesButDropsTermsThatWouldLeaveChinese()
+    {
+        CodexSurveyImportResult result = CodexSurveyImport.Convert(Characters,
+            """[{"chinese":"覃太太","vietnamese":"Đàm phu nhân"},{"chinese":"覃","vietnamese":"Đàm"},""" +
+            """{"chinese":"覃先生","vietnamese":"Đàm 先生"},{"chinese":"Mr Tan","vietnamese":"Đàm tiên sinh"}]""",
+            Guid.NewGuid(), "x");
+
+        Assert.Equal([new ConfirmedTerm("覃太太", "Đàm phu nhân"), new ConfirmedTerm("覃", "Đàm")], result.Terms);
+        Assert.Equal(2, result.Warnings.Count(warning => warning.StartsWith("Bỏ mục từ điển", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void Convert_RejectsFilesThatAreNotJson()
     {
         Assert.Throws<InvalidDataException>(() => CodexSurveyImport.Convert("{ not json", "[]", Guid.NewGuid(), "x"));

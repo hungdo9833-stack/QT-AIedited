@@ -171,6 +171,9 @@ public static class CodexSurveyImport
         {
             string chinese = entry?.Chinese?.Trim() ?? "", vietnamese = entry?.Vietnamese?.Trim() ?? "";
             if (chinese.Length == 0 || vietnamese.Length == 0 || !seen.Add(chinese)) continue;
+            // Terms also drive the post-translation cleanup: a rule must replace Chinese with Vietnamese only.
+            if (!chinese.Any(IsHan) || vietnamese.Any(IsHan))
+            { warnings.Add($"Bỏ mục từ điển “{chinese} = {vietnamese}”: cần chữ Hán bên trái và chỉ tiếng Việt bên phải."); continue; }
             if (terms.Count >= MaxTerms) { warnings.Add($"Từ điển quá {MaxTerms:N0} mục; phần còn lại bị bỏ qua."); break; }
             terms.Add(new(chinese, vietnamese));
         }
@@ -245,6 +248,8 @@ public static class CodexSurveyImport
         }
         return result;
     }
+
+    private static bool IsHan(char c) => c is >= '㐀' and <= '鿿' or >= '豈' and <= '﫿';
 
     private static string Clip(string value, int max) => value.Length <= max ? value : value[..max];
 }

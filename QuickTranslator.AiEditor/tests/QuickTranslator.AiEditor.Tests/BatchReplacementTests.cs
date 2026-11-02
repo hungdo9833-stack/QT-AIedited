@@ -216,6 +216,20 @@ public sealed class BatchReplacementTests : IDisposable
     }
 
     [Fact]
+    public async Task AutomaticCleanerSpacesALeftoverSurnameGluedToVietnamese()
+    {
+        var chapter = TranslationService.CreateChapter("Họ còn sót", "覃太太来了。");
+        chapter.ConfirmedTerms = [new("覃", "Đàm")];
+        chapter.TextCleaner.AutoApplyConfirmedMappings = true;
+        var client = new FakeClient { Respond = (_, _) => Task.FromResult(FakeClient.Completion("Chào bà覃, 覃tổng đến rồi. (覃)")) };
+        var service = new TranslationService(chapter, client, new MemoryStore());
+
+        await service.TranslateAsync(chapter.Segments[0].Id);
+
+        Assert.Equal("Chào bà Đàm, Đàm tổng đến rồi. (Đàm)", service.GetSnapshot().Segments[0].EditableText);
+    }
+
+    [Fact]
     public async Task AutomaticCleanerMarksUnknownChineseForInspectionAndDoesNotOverwriteManualDraft()
     {
         var chapter = TranslationService.CreateChapter("Còn sót", "王秀兰来了。");

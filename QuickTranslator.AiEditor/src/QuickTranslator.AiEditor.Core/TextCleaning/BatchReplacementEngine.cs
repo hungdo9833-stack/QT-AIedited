@@ -190,8 +190,24 @@ public sealed class BatchReplacementEngine
         temporaryChapter.Segments = [segment];
         var engine = new BatchReplacementEngine();
         var preview = engine.Preview([temporaryChapter], rules.Where(x => x.Confirmed),
-            BatchReplacementScope.CurrentChapter).Where(x => !x.Conflict && x.Replacement is not null).ToArray();
+            BatchReplacementScope.CurrentChapter).Where(x => !x.Conflict && x.Replacement is not null)
+            .Select(item => item with { Replacement = Spaced(text, item) }).ToArray();
         return (Apply(text, preview), preview.Select(ToChange).ToArray());
+    }
+
+    /// <summary>
+    /// Chinese has no spaces, so a leftover name glued to Vietnamese ("bà覃") would become "bàĐàm". A Vietnamese replacement
+    /// gets a space on each side that touches a Latin letter or digit.
+    /// </summary>
+    private static string Spaced(string text, BatchReplacementPreviewItem item)
+    {
+        static bool Word(char c) => char.IsLetterOrDigit(c) && c < '⺀';
+        string replacement = item.Replacement!;
+        if (replacement.Length == 0 || !Word(replacement[0]) && !Word(replacement[^1])) return replacement;
+        int end = item.StartUtf16 + item.LengthUtf16;
+        if (item.StartUtf16 > 0 && Word(text[item.StartUtf16 - 1]) && Word(replacement[0])) replacement = " " + replacement;
+        if (end < text.Length && Word(text[end]) && Word(replacement[^1])) replacement += " ";
+        return replacement;
     }
 
     private static void FindMatches(ChapterDocument chapter, TranslationSegment segment,

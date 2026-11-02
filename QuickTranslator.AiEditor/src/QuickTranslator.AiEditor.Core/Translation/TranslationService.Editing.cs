@@ -78,8 +78,10 @@ public sealed partial class TranslationService
             .Select(reference => reference.CharacterId!.Value).Distinct().ToArray();
         CharacterConsistencySelection consistency = _characterConsistency.Select(chapter.CharacterProject, segment.SourceText,
             chapter.ChapterNumber, SceneText(chapter, segment), pronounReferencedIds);
+        // A term already rendered by the character block is redundant only when it spells the character's name. A title form
+        // that is also an alias (覃太太 for the wife) keeps its own rendering (Đàm phu nhân) in the glossary.
         var confirmed = chapter.ConfirmedTerms.Where(t => segment.SourceText.Contains(t.Chinese, StringComparison.Ordinal) &&
-                !consistency.CoveredChineseTerms.Contains(t.Chinese))
+                !(consistency.CoveredChineseTerms.Contains(t.Chinese) && SpellsCharacterName(chapter.CharacterProject, t)))
             .Select(t => new GlossaryEntry(t.Chinese, t.Vietnamese)).ToArray();
         // Explicitly confirmed spellings override optional provider entries. References stay short.
         var glossary = confirmed.Concat(external).DistinctBy(t => t.Chinese).Take(Math.Max(64, confirmed.Length)).ToArray();
@@ -111,6 +113,11 @@ public sealed partial class TranslationService
             new[] { consistency.PromptBlock, dialogueMap }.Where(x => !string.IsNullOrWhiteSpace(x)));
         return BuildWithinTokenBudget(segment.SourceText, glossary, contextBlocks, preset, characters, options);
     }
+
+    private static bool SpellsCharacterName(CharacterProject? project, ConfirmedTerm term) =>
+        project?.Profiles.Any(profile =>
+            string.Equals(profile.VietnameseName.Trim(), term.Vietnamese.Trim(), StringComparison.OrdinalIgnoreCase) &&
+            (profile.ChineseName == term.Chinese || profile.Aliases.Contains(term.Chinese, StringComparer.Ordinal))) == true;
 
     private string BuildWithinTokenBudget(string source, IReadOnlyList<GlossaryEntry> glossary,
         IReadOnlyList<string> contextBlocks, PromptPreset preset, string characterConsistency, ModelOptions options)
