@@ -1081,7 +1081,7 @@ public sealed partial class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
-    public async Task Changed_ssh_backend_identity_blocks_old_parallel_plan_before_any_request()
+    public async Task Changed_ssh_backend_identity_moves_plan_to_the_new_machine()
     {
         await WithProjectAsync(1, async context =>
         {
@@ -1097,11 +1097,11 @@ public sealed partial class ProjectTranslationCoordinatorTests
             var starter = new ProjectTranslationCoordinator(context.Session, context.Repository, changed,
                 context.LoadEnvironment);
 
-            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => starter.StartAsync(plan));
+            await starter.StartAsync(plan);
 
-            Assert.Contains("đã đổi", error.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(0, local.Calls + remote.Calls);
-            Assert.Null(starter.CurrentJob);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, starter.CurrentJob!.Status);
+            Assert.Equal("SHA256:different-host", starter.CurrentJob.Workers
+                .Single(worker => worker.WorkerId == original[1].WorkerId).BackendIdentity);
         });
     }
 

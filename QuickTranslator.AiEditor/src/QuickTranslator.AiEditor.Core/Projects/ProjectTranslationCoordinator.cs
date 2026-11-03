@@ -1253,11 +1253,10 @@ public sealed class ProjectTranslationCoordinator
             ProjectTranslationWorkerState? previous = unused.FirstOrDefault(value => value.WorkerId == definition.WorkerId)
                 ?? unused.FirstOrDefault(value => value.ProfileId == definition.Backend.ProfileId)
                 ?? unused.FirstOrDefault(value => value.Backend.Kind == definition.Backend.Kind);
+            // A worker whose machine changed (same profile, new host or HostKey) carries on with the new identity:
+            // launching with the current configuration is the user's explicit choice.
             if (previous is not null)
             {
-                if (previous.ProfileId == definition.Backend.ProfileId && previous.BackendIdentity.Length > 0 &&
-                    !string.Equals(previous.BackendIdentity, definition.BackendIdentity, StringComparison.Ordinal))
-                    throw new InvalidOperationException($"Danh tính kết nối của “{previous.Name}” đã đổi; hãy xác nhận HostKey trước khi gửi nguyên văn.");
                 unused.Remove(previous);
                 remap[previous.WorkerId] = definition.WorkerId;
             }

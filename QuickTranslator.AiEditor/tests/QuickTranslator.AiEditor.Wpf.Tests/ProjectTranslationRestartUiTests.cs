@@ -74,16 +74,18 @@ public sealed class ProjectTranslationRestartUiTests
         });
 
     [Fact]
-    public Task Changed_ssh_fingerprint_blocks_before_connection_without_swapping_worker_or_losing_progress() =>
+    public Task Changed_rental_machine_moves_queue_to_new_identity_and_keeps_progress() =>
         StaHost.Run(async () =>
         {
             RestartScenario scenario = await CreateScenarioAsync();
             GpuBackendManager backends = await LoadBackendsAsync(scenario.Root);
             GpuBackendProfile changed = backends.GetProfile(scenario.RemoteProfileId);
-            changed.Ssh!.HostKeyFingerprint = Fingerprint('B');
+            changed.Ssh!.Host = "new-rental.example.test";
+            changed.Ssh.HostKeyFingerprint = Fingerprint('B');
             await backends.SaveProfileAsync(changed, activate: false);
             var ssh = new RecordingSshService();
-            await using var connections = new GpuConnectionManager(ssh, (_, _) => new BackendClient("unused"),
+            var remoteClient = new BackendClient("remote on new machine");
+            await using var connections = new GpuConnectionManager(ssh, (_, _) => remoteClient,
                 healthInterval: TimeSpan.FromHours(1));
             using var fixture = new WorkspaceFixture(scenario.Root, backends, connections);
             await fixture.OpenProjectAsync();
@@ -91,13 +93,18 @@ public sealed class ProjectTranslationRestartUiTests
             ProjectTranslationCoordinator loaded = await fixture.TaskCall<ProjectTranslationCoordinator>(
                 "EnsureProjectTranslationCoordinatorAsync");
 
-            InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                fixture.TaskCall<ProjectTranslationCoordinator>("RefreshProjectTranslationCoordinatorAsync", loaded));
+            ProjectTranslationCoordinator resumed = await fixture.TaskCall<ProjectTranslationCoordinator>(
+                "RefreshProjectTranslationCoordinatorAsync", loaded);
+            await resumed.ResumeWithCurrentConfigurationAsync();
 
-            Assert.Contains("Danh tính SSH", error.Message, StringComparison.Ordinal);
-            Assert.Contains("đã đổi", error.Message, StringComparison.Ordinal);
-            Assert.Empty(ssh.Settings);
-            await AssertJobUnchangedAsync(fixture.Project, scenario);
+            Assert.Equal(Fingerprint('B'), Assert.Single(ssh.Settings).HostKeyFingerprint);
+            ProjectTranslationJob job = Assert.IsType<ProjectTranslationJob>(resumed.CurrentJob);
+            Assert.Equal(scenario.JobId, job.JobId);
+            Assert.Equal(ProjectTranslationJobStatus.Completed, job.Status);
+            Assert.All(job.Items, item => Assert.Equal(item.TotalSegments, item.CompletedSegments));
+            ProjectTranslationWorkerState remote = Assert.Single(job.Workers,
+                worker => worker.Backend.Kind == GpuBackendKind.Remote);
+            Assert.Equal(BackendIdentity(changed), remote.BackendIdentity);
         });
 
     private static async Task<RestartScenario> CreateScenarioAsync()

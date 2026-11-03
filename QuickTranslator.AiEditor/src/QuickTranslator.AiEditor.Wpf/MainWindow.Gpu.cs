@@ -66,16 +66,11 @@ public partial class MainWindow
     {
         await EnsureGpuBackendsLoadedAsync();
         Guid requested = profileId ?? GpuBackendProfile.DefaultLocalId;
+        // A project saved with a since-deleted profile (e.g. an old rental box) follows the active profile.
+        if (_gpuBackends.Catalog.Profiles.All(value => value.Id != requested))
+            requested = _gpuBackends.ActiveProfile.Id;
         _selectedGpuProfileId = requested;
-        GpuBackendProfile profile;
-        try { profile = _gpuBackends.GetProfile(requested); }
-        catch (InvalidOperationException)
-        {
-            _projectGpuProfileMissing = true;
-            RefreshGpuProfileList(requested);
-            UpdateGpuBackendStatus();
-            return;
-        }
+        GpuBackendProfile profile = _gpuBackends.GetProfile(requested);
         if (_gpuBackends.ActiveProfile.Id != profile.Id)
             await _gpuBackends.ActivateAsync(profile.Id);
         _projectGpuProfileMissing = false;
@@ -294,10 +289,15 @@ public partial class MainWindow
                 throw new InvalidOperationException("Chưa có Gemini API key cho nguồn dịch API.");
             return;
         }
-        if (_projectGpuProfileMissing)
-            throw new InvalidOperationException("Dự án đang dùng hồ sơ GPU không còn tồn tại. Hãy chọn và lưu lại nguồn dịch trong AI & hiệu năng.");
-        if (_projectSession is not null && _gpuBackends.ActiveProfile.Id != SelectedGpuProfileId)
-            throw new InvalidOperationException("Nguồn dịch đang chạy không khớp cấu hình dự án. Hãy chọn lại hồ sơ trước khi dịch.");
+        // The profile chosen for the project wins; a missing one falls back to the active profile.
+        if (_projectGpuProfileMissing || _gpuBackends.Catalog.Profiles.All(value => value.Id != SelectedGpuProfileId))
+        {
+            _selectedGpuProfileId = _gpuBackends.ActiveProfile.Id;
+            _projectGpuProfileMissing = false;
+            SelectGpuProfileInUi(_selectedGpuProfileId);
+        }
+        else if (_projectSession is not null && _gpuBackends.ActiveProfile.Id != SelectedGpuProfileId)
+            await _gpuBackends.ActivateAsync(SelectedGpuProfileId, cancellationToken);
         GpuBackendProfile profile = _gpuBackends.ActiveProfile;
         if (profile.Kind == GpuBackendKind.Local && _translationClient is GpuBackendManager)
         {

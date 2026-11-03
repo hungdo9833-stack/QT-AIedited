@@ -73,12 +73,12 @@ public partial class MainWindow
             ? selectedId : PromptPreset.Default.Id;
         presets.Select(presetId);
         ProjectResources resources = await new ProjectResourceStore(session).LoadAsync(cancellationToken);
-        GpuBackendProfile profile = _gpuBackends.GetProfile(translation.GpuProfileId);
-        // A persisted multi-worker queue pins each backend independently. The globally active
-        // editor profile is not required to match a particular worker after restart.
+        // A persisted multi-worker queue pins each backend independently. Otherwise (or when the project's saved
+        // profile was deleted) the queue follows the profile that is active now.
         bool pinnedWorkers = _projectTranslationCoordinator?.CurrentJob?.Workers.Count > 0;
-        if (!pinnedWorkers && _gpuBackends.ActiveProfile.Id != profile.Id)
-            throw new InvalidOperationException("Hồ sơ GPU của dự án chưa được kích hoạt; hãy mở AI & hiệu năng và chọn lại nguồn dịch.");
+        Guid projectProfileId = translation.GpuProfileId ?? GpuBackendProfile.DefaultLocalId;
+        GpuBackendProfile profile = pinnedWorkers && GpuProfileExists(projectProfileId)
+            ? _gpuBackends.GetProfile(projectProfileId) : _gpuBackends.ActiveProfile;
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         IBookKnowledgeContextProvider? knowledge = null;
         if (translation.BookKnowledgeContextEnabled)
@@ -108,14 +108,19 @@ public partial class MainWindow
             ProjectTranslationJob? recovered = initial.CurrentJob;
             ProjectTranslationJob? resumable = recovered?.Status is ProjectTranslationJobStatus.Completed or
                 ProjectTranslationJobStatus.CompletedWithErrors or ProjectTranslationJobStatus.Cancelled ? null : recovered;
+            bool staleWorkers = resumable is not null && StaleWorkerProfiles(resumable).Count > 0;
+            if (staleWorkers && !_gpuPreferences.ModeExplicitlySelected) KeepRecoveredModeForCurrentGpus(resumable!);
             await ApplyTranslationModeAsync(resumable);
             await EnsureGpuBackendReadyAsync();
             await SaveCurrentAsync();
             await SaveProjectAssetsAsync();
-            // Adding chapters needs no GPU connection. When the user picked a GPU mode, or a saved worker's profile is
-            // gone, build the workers from the current setup; Tiếp tục then moves the job onto them (asking if needed).
-            bool currentWorkers = _gpuPreferences.ModeExplicitlySelected ||
-                resumable is not null && MissingWorkerProfiles(resumable).Count > 0;
+            // When the user picked a GPU mode, or a saved worker's GPU was deleted or now points at another machine,
+            // build the workers from the current setup; Tiếp tục then moves the job onto them.
+            bool currentWorkers = _gpuPreferences.ModeExplicitlySelected || staleWorkers;
+            if (staleWorkers && _gpuPreferences.Source == TranslationSource.Gpu &&
+                _gpuPreferences.Mode is GpuTranslationMode.RemoteOnly or GpuTranslationMode.ParallelLocalRemote &&
+                CurrentRemoteProfileId() is Guid remoteId)
+                await EnsureRemoteConnectedAsync(_gpuBackends.GetProfile(remoteId));
             ProjectTranslationCoordinator coordinator = resumable?.Workers.Count > 0 || resumable is null
                 ? await RebuildParallelCoordinatorAsync(resumable, loadExisting: resumable is not null,
                     useCurrentWorkers: currentWorkers)
@@ -215,7 +220,7 @@ public partial class MainWindow
         }
         Guid profileId;
         if (recovered?.Workers.Count > 0 && !_gpuPreferences.ModeExplicitlySelected &&
-            MissingWorkerProfiles(recovered).Count == 0)
+            StaleWorkerProfiles(recovered).Count == 0)
         {
             profileId = recovered.Workers.FirstOrDefault(worker => worker.Backend.Kind == GpuBackendKind.Remote)?.ProfileId
                 ?? GpuBackendProfile.DefaultLocalId;
@@ -232,7 +237,7 @@ public partial class MainWindow
                 _gpuPreferences.RemoteProfileId = remote.ProfileId;
             profileId = _gpuPreferences.Mode == GpuTranslationMode.LocalOnly
                 ? GpuBackendProfile.DefaultLocalId
-                : _gpuPreferences.RemoteProfileId ?? _gpuBackends.ActiveProfile.Id;
+                : CurrentRemoteProfileId() ?? _gpuBackends.ActiveProfile.Id;
         }
         GpuBackendProfile profile = _gpuBackends.GetProfile(profileId);
         if (_gpuBackends.ActiveProfile.Id != profileId) await _gpuBackends.ActivateAsync(profileId);
@@ -266,7 +271,7 @@ public partial class MainWindow
         {
             foreach (ProjectTranslationWorkerState worker in recovered.Workers)
                 definitions.Add(CreateWorkerDefinition(worker.WorkerId, worker.Backend, worker.ModelOptions,
-                    worker.SegmentationOptions, worker.HourlyPrice, worker.BackendIdentity));
+                    worker.SegmentationOptions, worker.HourlyPrice));
         }
         else
         {
@@ -285,7 +290,7 @@ public partial class MainWindow
                 definitions.Add(ProjectTranslationProfileWorker(local));
             if (_gpuPreferences.Mode is GpuTranslationMode.RemoteOnly or GpuTranslationMode.ParallelLocalRemote)
             {
-                Guid remoteId = _gpuPreferences.RemoteProfileId
+                Guid remoteId = CurrentRemoteProfileId()
                     ?? throw new InvalidOperationException("Mở GPU Manager, kết nối và chọn một profile Remote trước khi dùng Remote/Parallel.");
                 definitions.Add(ProjectTranslationProfileWorker(_gpuBackends.GetProfile(remoteId)));
             }
@@ -313,12 +318,11 @@ public partial class MainWindow
     }
 
     private ProjectTranslationWorkerDefinition CreateWorkerDefinition(Guid workerId, GpuBackendSnapshot backend,
-        ModelOptions options, SegmenterOptions segmentation, decimal? hourlyPrice, string? expectedIdentity = null)
+        ModelOptions options, SegmenterOptions segmentation, decimal? hourlyPrice)
     {
         if (backend.ProfileId == GeminiTranslationProfileId)
         {
             const string identity = "gemini-api:flash-lite-pool-v1";
-            EnsureBackendIdentity(expectedIdentity, identity, backend.ProfileName);
             var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
             var client = new GeminiTranslationClient(http, GeminiApiKeyVault.ReadAll(), ownsHttpClient: true);
             client.RouteChanged += (_, _) => Dispatcher.BeginInvoke(UpdateGpuBackendStatus);
@@ -332,7 +336,6 @@ public partial class MainWindow
         if (backend.Kind == GpuBackendKind.Local)
         {
             string identity = "local:" + backend.ProfileId.ToString("N");
-            EnsureBackendIdentity(expectedIdentity, identity, backend.ProfileName);
             ILlmClient client;
             if (_translationClient is GpuBackendManager)
             {
@@ -351,16 +354,9 @@ public partial class MainWindow
             connection is null || !connection.IsConnected)
             throw new InvalidOperationException($"GPU Remote “{backend.ProfileName}” chưa có SSH tunnel. Mở GPU Manager và bấm Kết nối.");
         string remoteIdentity = SshBackendIdentity(connection.Profile);
-        EnsureBackendIdentity(expectedIdentity, remoteIdentity, backend.ProfileName);
         // Slots follow the connected profile: its client was built with the same number of parallel requests.
         int slots = connection.Profile.ParallelRequests;
         return new(workerId, backend, connection.Client, options with { }, segmentation with { }, hourlyPrice, remoteIdentity, slots);
-    }
-
-    private static void EnsureBackendIdentity(string? expected, string current, string name)
-    {
-        if (!string.IsNullOrEmpty(expected) && !string.Equals(expected, current, StringComparison.Ordinal))
-            throw new InvalidOperationException($"Danh tính SSH của “{name}” đã đổi sau khi tạo Queue Plan. Job bị chặn để tránh gửi nguyên văn sang máy khác.");
     }
 
     private static string SshBackendIdentity(GpuBackendProfile profile)
@@ -397,21 +393,13 @@ public partial class MainWindow
         // selected yet: preserve the workers saved with the job rather than defaulting
         // to Local-only and silently dropping the Remote worker.
         bool changedMode = _gpuPreferences.ModeExplicitlySelected;
-        if (!changedMode && MissingWorkerProfiles(recovered) is { Count: > 0 } missing)
+        if (!changedMode && StaleWorkerProfiles(recovered) is { Count: > 0 } stale)
         {
-            // The saved worker's profile was deleted (e.g. an old rental box). Its SSH identity cannot be
-            // checked any more, so moving the rest of the job to the current GPU setup needs the user's OK.
-            if (_gpuPreferences.RemoteProfileId is Guid stale && !GpuProfileExists(stale))
-                _gpuPreferences.RemoteProfileId = null;
-            string names = string.Join(", ", missing.Select(worker => $"“{worker.Name}”"));
-            MessageBoxResult answer = ThemedDialog.Show(this,
-                $"Hàng đợi này được tạo với GPU {names}, profile đó không còn trong danh sách (ví dụ máy thuê cũ đã bị xóa).\n\n" +
-                $"Chuyển phần còn lại sang cấu hình GPU hiện tại: {DescribeCurrentGpuSetup()}?\n\n" +
-                "• Có: tiếp tục dịch bằng cấu hình hiện tại; các chương đã dịch được giữ nguyên.\n" +
-                "• Không: giữ hàng đợi đang tạm dừng. Mở GPU để chọn chế độ dịch và card Remote, rồi bấm Tiếp tục.",
-                "GPU của hàng đợi không còn", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (answer != MessageBoxResult.Yes)
-                throw new InvalidOperationException("Hàng đợi vẫn tạm dừng. Chọn chế độ dịch và card Remote trong GPU, rồi bấm Tiếp tục.");
+            // The saved GPU was deleted or now points at another machine (e.g. a new rental box). Resume is the
+            // user's explicit action, so the rest of the job simply moves to the current GPU setup.
+            KeepRecoveredModeForCurrentGpus(recovered);
+            string names = string.Join(", ", stale.Select(worker => $"“{worker.Name}”"));
+            SetStatus($"GPU {names} của hàng đợi đã đổi; tiếp tục bằng {DescribeCurrentGpuSetup()}.");
             changedMode = true;
         }
         if (!changedMode)
@@ -421,44 +409,83 @@ public partial class MainWindow
                          .Where(value => value.Backend.Kind == GpuBackendKind.Remote)
                          .Where(value => value.ProfileId != GeminiTranslationProfileId)
                          .DistinctBy(value => value.ProfileId))
-            {
-                GpuBackendProfile remote = _gpuBackends.GetProfile(worker.ProfileId);
-                if (remote.Kind != GpuBackendKind.Remote || remote.Ssh is null ||
-                    !remote.RemoteDisclosureAccepted)
-                    throw new InvalidOperationException(
-                        $"GPU Remote “{worker.Name}” cần được xác nhận và kết nối lại trong AI & hiệu năng.");
-                // Refuse changed host/fingerprint BEFORE opening a remote connection.
-                EnsureBackendIdentity(worker.BackendIdentity, SshBackendIdentity(remote), remote.Name);
-                if (_gpuConnections.TryGetConnection(remote.Id, out GpuConnectionHandle? existing) &&
-                    existing is { IsConnected: true })
-                    continue;
-                GpuConnectionHandle connection;
-                try
-                {
-                    connection = await _gpuConnections.ConnectAsync(remote);
-                }
-                catch (SshHostKeyVerificationException)
-                {
-                    throw;
-                }
-                catch (Exception error) when (error is not OperationCanceledException)
-                {
-                    throw new InvalidOperationException(
-                        $"Không thể khôi phục GPU Remote “{remote.Name}”. Job vẫn được giữ nguyên để tiếp tục sau khi kết nối lại.",
-                        error);
-                }
-                await _gpuBackends.AttachRuntimeClientAsync(remote.Id, connection.Client);
-            }
+                await EnsureRemoteConnectedAsync(_gpuBackends.GetProfile(worker.ProfileId));
+        }
+        else if (_gpuPreferences.Source == TranslationSource.Gpu &&
+                 _gpuPreferences.Mode is GpuTranslationMode.RemoteOnly or GpuTranslationMode.ParallelLocalRemote &&
+                 CurrentRemoteProfileId() is Guid remoteId)
+        {
+            await ApplyTranslationModeAsync(null);
+            await EnsureRemoteConnectedAsync(_gpuBackends.GetProfile(remoteId));
         }
         return await RebuildParallelCoordinatorAsync(recovered, closeWindow: false, loadExisting: true,
             useCurrentWorkers: changedMode);
     }
 
+    private async Task EnsureRemoteConnectedAsync(GpuBackendProfile remote)
+    {
+        if (remote.Kind != GpuBackendKind.Remote || remote.Ssh is null || !remote.RemoteDisclosureAccepted)
+            throw new InvalidOperationException(
+                $"GPU Remote “{remote.Name}” cần được xác nhận và kết nối lại trong AI & hiệu năng.");
+        if (_gpuConnections.TryGetConnection(remote.Id, out GpuConnectionHandle? existing) &&
+            existing is { IsConnected: true })
+            return;
+        GpuConnectionHandle connection;
+        try
+        {
+            connection = await _gpuConnections.ConnectAsync(remote);
+        }
+        catch (SshHostKeyVerificationException)
+        {
+            throw;
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                $"Không thể khôi phục GPU Remote “{remote.Name}”. Job vẫn được giữ nguyên để tiếp tục sau khi kết nối lại.",
+                error);
+        }
+        await _gpuBackends.AttachRuntimeClientAsync(remote.Id, connection.Client);
+    }
+
+    /// <summary>
+    /// Before a stale job moves to the current GPUs on a fresh launch (no mode picked yet), keep the job's own shape:
+    /// a Remote job stays on Remote, using the current Remote card, instead of falling back to this machine's GPU.
+    /// </summary>
+    private void KeepRecoveredModeForCurrentGpus(ProjectTranslationJob recovered)
+    {
+        if (_gpuPreferences.RemoteProfileId is Guid saved && !GpuProfileExists(saved))
+            _gpuPreferences.RemoteProfileId = null;
+        if (recovered.Workers.Any(worker => worker.ProfileId == GeminiTranslationProfileId)) return;
+        bool hadRemote = recovered.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Remote);
+        bool hadLocal = recovered.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Local);
+        if (!hadRemote || CurrentRemoteProfileId() is not Guid remoteId) return;
+        _gpuPreferences.RemoteProfileId = remoteId;
+        _gpuPreferences.Mode = hadLocal ? GpuTranslationMode.ParallelLocalRemote : GpuTranslationMode.RemoteOnly;
+    }
+
+    /// <summary>The Remote card to use now: the chosen one, else the active Remote profile, else the first Remote profile.</summary>
+    private Guid? CurrentRemoteProfileId() =>
+        _gpuPreferences.RemoteProfileId is Guid chosen && GpuProfileExists(chosen) ? chosen
+        : _gpuBackends.ActiveProfile.Kind == GpuBackendKind.Remote ? _gpuBackends.ActiveProfile.Id
+        : _gpuBackends.Catalog.Profiles.FirstOrDefault(profile => profile.Kind == GpuBackendKind.Remote)?.Id;
+
     private bool GpuProfileExists(Guid profileId) => profileId == GeminiTranslationProfileId ||
         _gpuBackends.Catalog.Profiles.Any(profile => profile.Id == profileId);
 
-    private List<ProjectTranslationWorkerState> MissingWorkerProfiles(ProjectTranslationJob job) =>
-        job.Workers.Where(worker => !GpuProfileExists(worker.ProfileId)).DistinctBy(worker => worker.ProfileId).ToList();
+    /// <summary>Saved workers whose GPU profile was deleted, or whose Remote profile now points at another machine.</summary>
+    private List<ProjectTranslationWorkerState> StaleWorkerProfiles(ProjectTranslationJob job) =>
+        job.Workers.Where(worker => !GpuProfileExists(worker.ProfileId) || RemoteMachineChanged(worker))
+            .DistinctBy(worker => worker.ProfileId).ToList();
+
+    private bool RemoteMachineChanged(ProjectTranslationWorkerState worker)
+    {
+        if (worker.Backend.Kind != GpuBackendKind.Remote || worker.ProfileId == GeminiTranslationProfileId) return false;
+        GpuBackendProfile profile = _gpuBackends.GetProfile(worker.ProfileId);
+        return profile.Kind != GpuBackendKind.Remote || profile.Ssh is null ||
+            worker.BackendIdentity.Length > 0 &&
+            !string.Equals(worker.BackendIdentity, SshBackendIdentity(profile), StringComparison.Ordinal);
+    }
 
     private string DescribeCurrentGpuSetup()
     {
