@@ -236,7 +236,8 @@ public sealed class VanCacPublisherTests
         Assert.Throws<ArgumentException>(() => VanCacPublisherClient.ValidateChapter(1, " ", "B"));
         Assert.Throws<ArgumentException>(() => VanCacPublisherClient.ValidateChapter(1, new string('x', 201), "B"));
         Assert.Throws<ArgumentException>(() => VanCacPublisherClient.ValidateChapter(1, "A", "  "));
-        Assert.Throws<ArgumentException>(() => VanCacPublisherClient.ValidateChapter(1, "A", new string('x', 200_001)));
+        Assert.Throws<ArgumentException>(() => VanCacPublisherClient.ValidateChapter(1, "A", new string('x', 250_001)));
+        VanCacPublisherClient.ValidateChapter(1, "A", new string('x', 250_000));
     }
 
     [Theory]
