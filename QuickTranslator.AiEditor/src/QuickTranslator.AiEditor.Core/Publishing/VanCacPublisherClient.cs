@@ -48,7 +48,7 @@ public interface IVanCacChapterSink
 /// </summary>
 public sealed class VanCacPublisherClient : IVanCacChapterSink, IDisposable
 {
-    public const int MaxTitleLength = 200, MaxContentLength = 200_000;
+    public const int MaxTitleLength = 200, MaxContentLength = 250_000;
     private const int MaximumAttempts = 4;
     private static readonly Regex TokenPattern = new("^vcp_[a-f0-9]{64}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
