@@ -7,8 +7,22 @@ internal enum ProjectLibraryAction { Continue, Create, Locate, Remove, Delete, Q
 
 internal sealed record ProjectLibraryCard(Guid ProjectId, string Title, string Author, ProjectStatus? Status,
     string ManifestPath, string? CoverPath, int ChapterCount, int CompletedChapterCount, double Progress,
-    string? CurrentChapter, DateTimeOffset LastOpenedAt, bool Missing, string? Error)
+    string? CurrentChapter, DateTimeOffset LastOpenedAt, bool Missing, string? Error,
+    bool WebLinked = false, VanCacWebProgress? Web = null)
 {
+    /// <summary>The Sắc Viện line shows only for Projects linked to a novel on the website.</summary>
+    public bool HasWebStatus => WebLinked && !Missing;
+    public bool IsOnWeb => Web is { PublishedCount: > 0 };
+    public string WebLabel => Web switch
+    {
+        { PublishedCount: > 0 } web => $"Đã có trên web đến chương {web.PublishedThrough}",
+        { DraftCount: > 0 } web => $"Trên web: {web.DraftCount} chương nháp",
+        not null => "Trên web: chưa có chương",
+        null => "Đã liên kết Sắc Viện · chưa kiểm tra",
+    };
+    public string WebToolTip => Web is null
+        ? "Đăng nhập Sắc Viện rồi mở lại Thư viện để kiểm tra."
+        : $"Sắc Viện: {Web.PublishedCount} chương công khai, {Web.DraftCount} chương nháp · kiểm tra lúc {Web.CheckedAt.LocalDateTime:dd/MM HH:mm}";
     public double ProgressPercent => Math.Round(Progress * 100, 1);
     public string Metadata => Missing ? "Mất liên kết dự án" :
         $"{(string.IsNullOrWhiteSpace(Author) ? "Chưa rõ tác giả" : Author)} · {StatusLabel}";

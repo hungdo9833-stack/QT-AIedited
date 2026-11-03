@@ -100,12 +100,13 @@ public partial class ProjectLibraryView : UserControl
             CreateButton.Visibility = Visibility.Visible;
             CreateButton.Style = primary;
             ContinueButton.Visibility = Visibility.Collapsed;
-            ContinueButton.Style = null;
+            // ClearValue, not null: a local null Style also blocks the app's implicit Button style (system chrome, no glyph).
+            ContinueButton.ClearValue(StyleProperty);
         }
         else
         {
             CreateButton.Visibility = Visibility.Visible;
-            CreateButton.Style = null;
+            CreateButton.ClearValue(StyleProperty);
             ContinueButton.Visibility = Visibility.Visible;
             ContinueButton.Style = primary;
             ContinueButton.Content = _startScreenMode ? "Tiếp tục" : "Tiếp tục biên dịch";

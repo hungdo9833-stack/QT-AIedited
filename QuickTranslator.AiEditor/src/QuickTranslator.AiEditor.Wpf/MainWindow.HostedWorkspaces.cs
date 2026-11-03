@@ -199,6 +199,7 @@ public partial class MainWindow
         if (!visible)
         {
             StartScreenHost.Visibility = Visibility.Collapsed;
+            _startScreenWebRefresh?.Cancel();
             _startScreenView?.Detach();
             return;
         }
@@ -213,6 +214,7 @@ public partial class MainWindow
         else _startScreenView.SetProjects(cards, null);
         StartScreenHost.Visibility = Visibility.Visible;
         _startScreenView.Attach();
+        StartScreenWebRefresh(_startScreenView, cards);
     }
 
     private async void OnStartScreenActionRequested(object? sender, ProjectLibraryRequest request)

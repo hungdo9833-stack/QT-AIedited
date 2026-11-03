@@ -30,6 +30,17 @@ internal static class VanCacTokenVault
     internal static void Delete(IGeminiCredentialStore store) => store.Delete(Target);
 }
 
+/// <summary>How far a Project's novel is on Sắc Viện: the highest public chapter number and the counts by status.</summary>
+internal sealed record VanCacWebProgress(int PublishedThrough, int PublishedCount, int DraftCount, DateTimeOffset CheckedAt)
+{
+    public static VanCacWebProgress From(IReadOnlyList<VanCacRemoteChapter> chapters, DateTimeOffset checkedAt)
+    {
+        int[] published = chapters.Where(c => c.PublicationStatus == "published").Select(c => c.Number).ToArray();
+        return new(published.Length == 0 ? 0 : published.Max(), published.Length,
+            chapters.Count(c => c.PublicationStatus == "draft"), checkedAt);
+    }
+}
+
 /// <summary>
 /// Website address and the target novel per Project (by ProjectId). Stored in LocalAppData, not in the Project,
 /// so moving or sharing a Project never carries publishing configuration.
@@ -47,7 +58,17 @@ internal sealed class VanCacPublisherPreferences
     public List<string> Roles { get; set; } = [];
     public DateTimeOffset? ExpiresAt { get; set; }
     public Dictionary<Guid, string> NovelByProject { get; set; } = [];
+    /// <summary>Last chapter list Sắc Viện returned for each Project's linked novel (library cards show it offline).</summary>
+    public Dictionary<Guid, VanCacWebProgress> WebProgressByProject { get; set; } = [];
     public bool PublishImmediately { get; set; }
+
+    /// <summary>Remembers what the website holds for the Project linked to <paramref name="novelId"/>, if any.</summary>
+    public bool RecordWebProgress(string novelId, IReadOnlyList<VanCacRemoteChapter> chapters)
+    {
+        Guid[] projects = NovelByProject.Where(link => link.Value == novelId).Select(link => link.Key).ToArray();
+        foreach (Guid project in projects) WebProgressByProject[project] = VanCacWebProgress.From(chapters, DateTimeOffset.Now);
+        return projects.Length > 0;
+    }
 
     public string EnsureDeviceId()
     {

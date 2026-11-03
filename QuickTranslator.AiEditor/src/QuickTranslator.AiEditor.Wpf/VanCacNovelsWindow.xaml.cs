@@ -102,6 +102,11 @@ public partial class VanCacNovelsWindow : Window
         {
             using VanCacPublisherClient client = _account.CreateClient();
             IReadOnlyList<VanCacRemoteChapter> chapters = await client.ListChaptersAsync(row.Novel.Id, cancellation.Token);
+            if (_account.Preferences.RecordWebProgress(row.Novel.Id, chapters))
+            {
+                try { _account.SavePreferences(); }
+                catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { }
+            }
             if (_closed || cancellation.IsCancellationRequested || !ReferenceEquals(NovelsList.SelectedItem, row)) return;
             ChaptersList.ItemsSource = chapters.OrderBy(c => c.Number).Select(c => new ChapterRow(c)).ToArray();
             ChaptersStatusText.Text = chapters.Count == 0 ? "Truyện chưa có chương nào." : $"{chapters.Count:N0} chương.";

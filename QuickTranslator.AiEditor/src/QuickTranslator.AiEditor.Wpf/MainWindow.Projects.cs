@@ -508,6 +508,9 @@ public partial class MainWindow
             IReadOnlyList<ProjectLibraryCard> cards = await BuildProjectLibraryCardsAsync();
             var window = new ProjectLibraryWindow(cards, _projectSession?.Manifest.ProjectId) { Owner = this };
             ClampWindowToWorkArea(window, 1180, 760);
+            using var webRefresh = new CancellationTokenSource();
+            window.Closed += (_, _) => webRefresh.Cancel();
+            _ = RefreshLibraryWebStatusAsync(window.View, cards, _projectSession?.Manifest.ProjectId, webRefresh.Token);
             if (window.ShowDialog() != true || window.RequestedAction is not ProjectLibraryAction action) return;
             ProjectLibraryCard? selected = window.RequestedProject;
             if (await HandleProjectLibraryRequestAsync(new(action, selected))) return;
@@ -587,7 +590,7 @@ public partial class MainWindow
                 cards.Add(UnreadCard(recent, missing: false, error: "Không đọc được metadata: " + ex.Message));
             }
         }
-        return cards;
+        return WithWebStatus(cards);
     }
 
     private async void OnEditProjectProperties(object sender, RoutedEventArgs e)

@@ -13,7 +13,16 @@
     <Grid Grid.Column="1" Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <TextBlock Text="{Binding Title}" Style="{StaticResource SubtitleText}" TextWrapping="Wrap" MaxHeight="48"/><TextBlock Grid.Row="1" Text="{Binding Metadata}" Foreground="{DynamicResource MutedBrush}" Style="{StaticResource CaptionText}" Margin="0,4,0,8" TextTrimming="CharacterEllipsis"/>
      <ProgressBar Grid.Row="2" Height="6" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
-     <StackPanel Grid.Row="3" Margin="0,8,0,0"><TextBlock Text="{Binding ProgressLabel}"/><TextBlock Text="{Binding CurrentChapterLabel}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/><TextBlock Text="{Binding Warning}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/></StackPanel>
+     <StackPanel Grid.Row="3" Margin="0,8,0,0"><TextBlock Text="{Binding ProgressLabel}"/>
+      <StackPanel Orientation="Horizontal" Margin="0,4,0,0" ToolTip="{Binding WebToolTip}" AutomationProperties.Name="{Binding WebLabel}">
+       <StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasWebStatus}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style>
+       <TextBlock Text="&#xE73E;" FontSize="{StaticResource FontSize.Caption}" FontWeight="Bold" Margin="0,0,6,0">
+        <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource IconText}"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsOnWeb}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+       </TextBlock>
+       <TextBlock Text="{Binding WebLabel}" TextTrimming="CharacterEllipsis">
+        <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsOnWeb}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+       </TextBlock>
+      </StackPanel><TextBlock Text="{Binding CurrentChapterLabel}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/><TextBlock Text="{Binding Warning}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/></StackPanel>
      <TextBlock Grid.Row="4" Text="{Binding UpdatedLabel}" Foreground="{DynamicResource MutedBrush}" Style="{StaticResource CaptionText}"/>
     </Grid>
    </Grid></Border></DataTemplate></ListBox.ItemTemplate>

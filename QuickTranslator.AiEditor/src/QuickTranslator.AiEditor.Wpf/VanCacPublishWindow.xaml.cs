@@ -158,6 +158,7 @@ public partial class VanCacPublishWindow : Window
             _preferences.NovelByProject[_session.Manifest.ProjectId] = novel.Id;
             _account.SavePreferences();
             IReadOnlyList<VanCacRemoteChapter> remote = await client.ListChaptersAsync(novel.Id, _lifetime.Token);
+            if (_preferences.RecordWebProgress(novel.Id, remote)) _account.SavePreferences();
             if (!ReferenceEquals(NovelInput.SelectedItem, novel) || !ReferenceEquals(_client, client)) return;
             var onWeb = remote.Select(c => c.Number).ToHashSet();
             int[] local = (_inspection.ChapterNumbers ?? [])
@@ -246,6 +247,7 @@ public partial class VanCacPublishWindow : Window
                 ApiError(new VanCacApiException(401, ""));
                 ReportText.Text += "\n" + VanCacAccountManager.SessionExpiredMessage;
             }
+            else await RecordWebProgressAfterRunAsync(_client, novel);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -258,6 +260,19 @@ public partial class VanCacPublishWindow : Window
             _cancellation = null;
             SetBusy(false, null);
         }
+    }
+
+    // The library's "Đã có trên web đến chương xx" line follows what the website holds after this run.
+    private async Task RecordWebProgressAfterRunAsync(VanCacPublisherClient? client, VanCacNovel novel)
+    {
+        if (client is null) return;
+        try
+        {
+            IReadOnlyList<VanCacRemoteChapter> remote = await client.ListChaptersAsync(novel.Id, _lifetime.Token);
+            if (_preferences.RecordWebProgress(novel.Id, remote)) _account.SavePreferences();
+        }
+        catch (Exception ex) when (ex is VanCacApiException or OperationCanceledException or System.Net.Http.HttpRequestException
+            or System.IO.IOException or UnauthorizedAccessException) { }
     }
 
     private void ShowReport(VanCacPublishReport report, VanCacNovel novel, bool published)
