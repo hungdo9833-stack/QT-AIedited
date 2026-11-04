@@ -56,7 +56,7 @@ public partial class WebImportWindow : Window
         _analysis = analysis;
         KeepSiteOrderCheckBox.IsChecked = analysis.NumberingConflict;
         BookTitleText.Text = analysis.BookTitle ?? "Truyện chưa có tên";
-        ChapterCountText.Text = $"{analysis.Chapters.Count:N0} chương";
+        ChapterCountText.Text = $"{analysis.Chapters.Count:N0} {(analysis.ContinuousPages ? "trang" : "chương")}";
         DetectionSummaryText.Text = analysis.DetectionSummary;
         WarningsText.Text = string.Join(Environment.NewLine, analysis.Warnings);
         ChapterList.ItemsSource = analysis.Chapters.Select((chapter, index) => $"{index + 1} · {chapter.Title}").ToArray();

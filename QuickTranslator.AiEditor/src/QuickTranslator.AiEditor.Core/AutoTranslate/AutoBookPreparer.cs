@@ -103,7 +103,12 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
     {
         if (url.IsFile) return null;
         IWebNovelImporter importer = importerFactory(new WebImportOptions { DelayBetweenRequests = downloadDelay, CacheDirectory = PagesDirectory(url) });
-        try { return (await importer.AnalyzeAsync(url, cancellationToken).ConfigureAwait(false)).Chapters.Count; }
+        try
+        {
+            WebBookAnalysis analysis = await importer.AnalyzeAsync(url, cancellationToken).ConfigureAwait(false);
+            // A book split into pages (52shuku) lists pages, not chapters: their count cannot be compared with the project's.
+            return analysis.ContinuousPages ? null : analysis.Chapters.Count;
+        }
         catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
         finally { (importer as IDisposable)?.Dispose(); }
     }

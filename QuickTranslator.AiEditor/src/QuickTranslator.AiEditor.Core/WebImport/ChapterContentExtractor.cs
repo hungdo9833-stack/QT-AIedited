@@ -48,7 +48,8 @@ internal static class ChapterContentExtractor
                      Regex.IsMatch(e.GetAttribute("onclick") ?? "", "comment|review", RegexOptions.IgnoreCase)).ToArray())
             ignored.Remove();
 
-        var post = root.QuerySelector("div.content-section,.t_f,.post-body,.post-content");
+        // .book_con: the story block of 52shuku pages; on a short last page the site notices around it would outscore it.
+        var post = root.QuerySelector("div.content-section,.t_f,.post-body,.post-content,div.book_con");
         var candidates = root.QuerySelectorAll("article,main,section,div,td,pre,p").Prepend(root);
         var selected = post ?? candidates.OrderByDescending(Score).First();
         var signature = Signature(selected);
@@ -79,9 +80,19 @@ internal static class ChapterContentExtractor
                 corrected = true;
             }
         }
+        text = SiteCleanup(page.Url, text);
         BlockDetector.CheckBrowser(page, WebPage.CjkCount(text));
         return new(text, signature, differed, corrected);
     }
+
+    private const string ChineseText = @"\p{IsCJKUnifiedIdeographs}\p{IsCJKSymbolsandPunctuation}\p{IsHalfwidthandFullwidthForms}“”‘’…";
+
+    // Watermarks no generic rule can tell from the story. Seen live on 52shuku: a lone "t" dropped between two Chinese
+    // characters about once a page ("子t啊", "。t靠"); a real Latin letter there is upper case ("阿Q", "C位").
+    internal static string SiteCleanup(Uri url, string text) =>
+        Regex.IsMatch(url.IdnHost, @"(?:^|\.)52shuku\.", RegexOptions.IgnoreCase)
+            ? Regex.Replace(text, $"(?<=[{ChineseText}])t(?=[{ChineseText}])", "")
+            : text;
 
     // Serialize tag, stable id and sorted class tokens for both the block and its immediate parent.
     // Discard digit-bearing, UUID/hash-like and long opaque ids rather than learning per-page selectors.
@@ -121,8 +132,9 @@ internal static class ChapterContentExtractor
         return output.ToString();
     }
 
+    // A short line carrying a web address is a site notice ("记得收藏网址 https://…", "就来…书库呀~www.….net"), not story.
     internal static bool IsBoilerplate(string line) => Regex.IsMatch(line.Trim(),
-        @"^(?:(?:https?://|www\.)\S+|(?:上一[章页頁]|下一[章页頁]|下页|下頁|返回目录|返回目錄|章节目录|章節目錄|目录|目錄|最新网址|最新網址|手机阅读|手機閱讀|加入书签|加入書籤|收藏本书|收藏本書|请收藏本站|請收藏本站|本站地址|本章未完|未完待续|未完待續).{0,70})$", RegexOptions.IgnoreCase);
+        @"^(?:(?:https?://|www\.)\S+|.{0,80}(?:https?://|www\.)[a-z0-9-]+(?:\.[a-z0-9-]+)+\S*.{0,40}|(?:上一[章页頁]|下一[章页頁]|下页|下頁|返回目录|返回目錄|章节目录|章節目錄|目录|目錄|最新网址|最新網址|手机阅读|手機閱讀|加入书签|加入書籤|收藏本书|收藏本書|请收藏本站|請收藏本站|本站地址|本章未完|未完待续|未完待續).{0,70})$", RegexOptions.IgnoreCase);
 
     private static string Clean(string text) => WebPage.Normalize(string.Join("\n", WebPage.Normalize(text).Split('\n')
         .Select(l => l.Trim()).Where(l => l.Length > 0 && !IsBoilerplate(l))));

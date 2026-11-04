@@ -39,6 +39,28 @@ if (args.Contains("--analyze-only"))
     return 0;
 }
 
+// --download-only <out.txt> [--cache <folder>]: fetch every chapter and write the composed import text, without a project or
+// Codex, to check a new site's full book (chapter count, page joins, leftover site text) with Import.Probe.
+if (args.Contains("--download-only"))
+{
+    string output = Path.GetFullPath(Option("--download-only", "book.txt"));
+    string? cache = Option("--cache", "") is { Length: > 0 } c ? Path.GetFullPath(c) : null;
+    using var importer = new WebNovelImporter(new WebImportOptions { CacheDirectory = cache });
+    WebBookAnalysis analysis = await importer.AnalyzeAsync(url);
+    Console.WriteLine($"Title: {analysis.BookTitle}; links: {analysis.Chapters.Count}; pages: {analysis.ContinuousPages}; {analysis.DetectionSummary}");
+    foreach (string warning in analysis.Warnings) Console.WriteLine("  warning: " + warning);
+    var chapters = new List<WebChapterContent>();
+    await foreach (WebChapterContent chapter in importer.FetchChaptersAsync(analysis.Chapters))
+    {
+        chapters.Add(chapter);
+        if (chapters.Count % 20 == 0) Console.WriteLine($"  {chapters.Count}/{analysis.Chapters.Count}");
+    }
+    string text = importer.ComposeImportText(chapters, keepSiteOrder: analysis.NumberingConflict);
+    await File.WriteAllTextAsync(output, text);
+    Console.WriteLine($"Wrote {text.Length:N0} chars to {output}");
+    return 0;
+}
+
 // --reapply <codex-folder> <project.qtproj>: convert an earlier Codex result again with the current rules (no Codex call)
 // and replace the project's characters and glossary. The previous resources file is kept next to it as a backup.
 if (args[0] == "--reapply")
