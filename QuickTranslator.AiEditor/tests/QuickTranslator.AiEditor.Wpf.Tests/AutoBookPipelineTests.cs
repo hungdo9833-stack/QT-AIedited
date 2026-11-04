@@ -26,14 +26,39 @@ public sealed class AutoBookPipelineTests
         stages.SurveyGate["a"].SetResult();
         await run.WaitAsync(TimeSpan.FromSeconds(10));
 
-        // Each book goes through its stages in order; b's survey waits for a's (one Codex run at a time).
+        // Each book goes through its stages in order.
         Assert.Equal(["find:a", "download:a", "survey:a", "translate:a"], stages.Log.Where(x => x.EndsWith(":a")));
         Assert.Equal(["find:b", "download:b", "survey:b", "translate:b"], stages.Log.Where(x => x.EndsWith(":b")));
         string[] log = [.. stages.Log];
         Assert.True(Array.IndexOf(log, "download:b") < Array.IndexOf(log, "translate:a"));
-        Assert.True(Array.IndexOf(log, "survey:a") < Array.IndexOf(log, "survey:b"));
         Assert.True(a.Finished && b.Finished);
         Assert.False(a.CanRetry || b.CanRetry);
+    }
+
+    [Fact]
+    public async Task Up_to_three_codex_surveys_run_at_once()
+    {
+        var stages = new FakeStages();
+        string[] names = ["a", "b", "c", "d"];
+        foreach (string name in names) stages.SurveyGate[name] = new();
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow[] rows = [.. names.Select(Row)];
+        foreach (AutoBookRow row in rows) pipeline.TryEnqueue(row);
+        Task run = pipeline.RunAsync();
+
+        // a, b and c survey side by side while a is still running; d waits for a free Codex slot.
+        await stages.WaitForAsync("survey:a");
+        await stages.WaitForAsync("survey:b");
+        await stages.WaitForAsync("survey:c");
+        await stages.WaitForAsync("download:d");
+        await Task.Delay(100);
+        Assert.DoesNotContain("survey:d", stages.Log);
+
+        stages.SurveyGate["b"].SetResult();
+        await stages.WaitForAsync("survey:d");
+        foreach (string name in names) stages.SurveyGate[name].TrySetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.All(rows, row => Assert.True(row.Finished));
     }
 
     [Fact]
@@ -107,12 +132,14 @@ public sealed class AutoBookPipelineTests
     {
         var stages = new FakeStages();
         stages.SurveyGate["a"] = new();
+        stages.SurveyGate["b"] = new();
         var pipeline = new AutoBookPipeline(stages, Settings);
         AutoBookRow a = Row("a"), b = Row("b");
         pipeline.TryEnqueue(a);
         pipeline.TryEnqueue(b);
         Task run = pipeline.RunAsync();
         await stages.WaitForAsync("survey:a");
+        await stages.WaitForAsync("survey:b");
 
         pipeline.Stop();
         await run.WaitAsync(TimeSpan.FromSeconds(10));

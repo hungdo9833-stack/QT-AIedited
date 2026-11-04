@@ -60,11 +60,15 @@ internal interface IAutoBookStages
 }
 
 /// <summary>
-/// Downloading, the Codex survey and translation run side by side, each one book at a time, so the next book downloads
-/// while Codex surveys this one. Books can be added or retried while it runs; it ends once no book is left in it.
+/// Downloading, the Codex survey and translation run side by side, so the next book downloads while Codex surveys this one.
+/// Downloads and translation take one book at a time; up to <see cref="SurveyWorkers"/> Codex surveys run at once, since
+/// a survey takes minutes and only waits on Codex. Books can be added or retried while it runs; it ends once no book is left in it.
 /// </summary>
 internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSettings settings)
 {
+    /// <summary>Codex surveys running at once (each its own Codex process and work folder; all share the workspace quota).</summary>
+    public const int SurveyWorkers = 3;
+
     // Local TXT books are read on their own line: a web book downloading for an hour must not hold them back.
     private readonly Channel<AutoBookRow> _downloads = Channel.CreateUnbounded<AutoBookRow>(), _files = Channel.CreateUnbounded<AutoBookRow>(),
         _surveys = Channel.CreateUnbounded<AutoBookRow>(), _translations = Channel.CreateUnbounded<AutoBookRow>();
@@ -117,9 +121,9 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
     {
         try
         {
-            await Task.WhenAll(RunStageAsync(_downloads, DownloadAsync), RunStageAsync(_files, DownloadAsync),
-                RunStageAsync(_surveys, SurveyAsync),
-                RunStageAsync(_translations, TranslateAsync));
+            await Task.WhenAll([RunStageAsync(_downloads, DownloadAsync), RunStageAsync(_files, DownloadAsync),
+                .. Enumerable.Range(0, SurveyWorkers).Select(_ => RunStageAsync(_surveys, SurveyAsync)),
+                RunStageAsync(_translations, TranslateAsync)]);
         }
         finally { _stop.Dispose(); }
     }
