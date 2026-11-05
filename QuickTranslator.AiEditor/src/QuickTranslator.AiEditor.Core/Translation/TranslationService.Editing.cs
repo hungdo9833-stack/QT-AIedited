@@ -93,12 +93,12 @@ public sealed partial class TranslationService
         {
             string previousText = previous.Status == SegmentStatus.Approved && previous.Approvals.Count > 0
                 ? previous.Approvals[^1].Text : previous.EditableText;
-            previousText = SegmentBoundaryContext.TranslatedTail(previousText);
+            previousText = OneLineForInstTrans(SegmentBoundaryContext.TranslatedTail(previousText), preset);
             string source = previous.Status == SegmentStatus.Approved ? "human-approved" :
                 previous.UserDraft is not null ? "user draft, not approved" : "AI draft, not approved";
             contextBlocks.Add($"Previous {source} excerpt (reference only; never overwrite user text): {previousText}");
         }
-        string precedingSource = SegmentBoundaryContext.PrecedingSource(chapter, segment);
+        string precedingSource = OneLineForInstTrans(SegmentBoundaryContext.PrecedingSource(chapter, segment), preset);
         if (precedingSource.Length > 0)
             contextBlocks.Add($"Preceding source (reference only, do not translate): {precedingSource}");
         if (SegmentBoundaryContext.OpensWithQuote(segment.SourceText))
@@ -113,6 +113,12 @@ public sealed partial class TranslationService
             new[] { consistency.PromptBlock, dialogueMap }.Where(x => !string.IsNullOrWhiteSpace(x)));
         return BuildWithinTokenBudget(segment.SourceText, glossary, contextBlocks, preset, characters, options);
     }
+
+    // instTrans prompts turn each context line into one numbered constraint, so an excerpt must not span lines there.
+    private static string OneLineForInstTrans(string excerpt, PromptPreset preset) =>
+        TranslationPromptBuilder.IsInstTrans(preset.Template)
+            ? string.Join(" ", excerpt.Split(['\r', '\n', (char)0x2028, (char)0x2029], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            : excerpt;
 
     private static bool SpellsCharacterName(CharacterProject? project, ConfirmedTerm term) =>
         project?.Profiles.Any(profile =>

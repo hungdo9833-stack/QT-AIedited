@@ -69,12 +69,9 @@ public sealed class SegmentBoundaryContextTests
 
         string prompt = service.PreviewPrompt(chapter.Segments[1].Id, PromptPreset.Default);
 
-        Assert.Contains("Previous user draft, not approved excerpt", prompt, StringComparison.Ordinal);
-        Assert.Contains("… Trương Tam nói với Lý Tứ", prompt, StringComparison.Ordinal);
-        Assert.Contains("Preceding source (reference only, do not translate):", prompt, StringComparison.Ordinal);
-        Assert.Contains("张三对李四说道", prompt, StringComparison.Ordinal);
-        Assert.Contains("The passage opens mid-conversation", prompt, StringComparison.Ordinal);
-        Assert.Contains("same speaker/listener pronouns and forms of address", prompt, StringComparison.Ordinal);
+        Assert.Contains("【参考】上文已有译文（仅用于保持称呼和用词一致，不要输出）：… Trương Tam nói với Lý Tứ", prompt, StringComparison.Ordinal);
+        Assert.Contains("【参考】上文原文（仅用于理解语境，不要翻译，不要输出）：张三对李四说道", prompt, StringComparison.Ordinal);
+        Assert.Contains("【注意】本段开头的对话承接上文，说话人与听话人的自称和称呼与上文保持一致", prompt, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -153,13 +153,13 @@ public sealed class TranslationAnalysisCacheTests(ITestOutputHelper output)
         var service = new TranslationService(chapter, new FakeClient(), new MemoryStore());
         var segmentId = chapter.Segments[1].Id;
         string before = service.PreviewPrompt(segmentId, chapter.SelectedPreset);
-        Assert.Contains("narrative pronoun = ông (LOCKED)", before);
+        Assert.Contains("叙述中用“ông”指代此人", before);
 
         var project = service.GetSnapshot().CharacterProject;
         project.Profiles[0].PrimaryNarrativePronoun = "hắn";
         await service.ConfigureCharacterProjectAsync(project);
         string after = service.PreviewPrompt(segmentId, chapter.SelectedPreset);
-        Assert.Contains("narrative pronoun = hắn (LOCKED)", after);
+        Assert.Contains("叙述中用“hắn”指代此人", after);
         Assert.NotEqual(before, after);
         Assert.Equal(2, service.ChapterAnalyses.AnalysisCount);
 
@@ -188,7 +188,7 @@ public sealed class TranslationAnalysisCacheTests(ITestOutputHelper output)
         service.UseProjectResources(resources);
         var segmentId = chapter.Segments[1].Id;
         service.UpdateDraft(segmentId, "Anh đóng cửa.");
-        Assert.Contains("narrative pronoun = ông (LOCKED)", service.PreviewPrompt(segmentId, chapter.SelectedPreset));
+        Assert.Contains("叙述中用“ông”指代此人", service.PreviewPrompt(segmentId, chapter.SelectedPreset));
         Assert.Contains(service.ScanPronouns().Items, i => i.Kind == PronounSuggestionKind.Protected);
         Assert.Equal(1, service.ChapterAnalyses.AnalysisCount);
 

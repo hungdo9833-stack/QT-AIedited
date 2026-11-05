@@ -75,7 +75,7 @@ public sealed class PromptPresetTests
         await service.ApproveAsync(chapter.Segments[0].Id);
         await service.ConfigureAsync(new(), PromptPreset.Default, [new("张三", "Trương Tam")], "Xưng hô: ta — ngươi.");
         string prompt = service.PreviewPrompt(chapter.Segments[1].Id, PromptPreset.Default);
-        Assert.Contains("张三 = Trương Tam", prompt);
+        Assert.Contains("张三→Trương Tam", prompt);
         Assert.Contains("ta — ngươi", prompt);
         Assert.Contains("lời xưng hô đã duyệt", prompt);
         Assert.DoesNotContain("王五", prompt);

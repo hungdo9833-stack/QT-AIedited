@@ -28,7 +28,7 @@ public sealed class EmptyContextMemory : IContextMemory
 
 public sealed partial class TranslationPromptBuilder
 {
-    public const string Version = "translategemma-zh-vi-v3-character-notes-in-context";
+    public const string Version = "index-insttrans-zh-vi-v1";
     internal const string CharacterNotesHeader =
         "Character notes (reference only: never translate, repeat or output these notes; use them only to choose names and forms of address):";
 
@@ -42,6 +42,8 @@ public sealed partial class TranslationPromptBuilder
         PromptPreset preset, string characterConsistency)
     {
         preset.Validate();
+        if (IsInstTrans(preset.Template))
+            return BuildInstTrans(preset.Template, sourceText, glossary, contextNotes, characterConsistency);
         var prompt = new StringBuilder();
         // A single user message leaves model-specific chat template rendering to llama-server (--jinja).
         if (glossary.Count > 0)

@@ -148,9 +148,9 @@ public sealed class CharacterConsistencyLockTests
 
         TranslationAttempt attempt = await service.TranslateAsync(chapter.Segments[0].Id);
 
-        Assert.Contains("覃太太 = Đàm phu nhân", attempt.Prompt);
-        Assert.Equal(1, Count(attempt.Prompt, "蔓露 = Mạn Lộ"));
-        Assert.Contains("never turn them into bà/ông", attempt.Prompt);
+        Assert.Contains("覃太太→Đàm phu nhân", attempt.Prompt);
+        Assert.Equal(1, Count(attempt.Prompt, "蔓露 译为 Mạn Lộ") + Count(attempt.Prompt, "蔓露→Mạn Lộ"));
+        Assert.Contains("不要改成 bà/ông", attempt.Prompt);
     }
 
     [Theory]
@@ -161,7 +161,7 @@ public sealed class CharacterConsistencyLockTests
     public void TitleRuleAppearsOnlyWhenTheGlossaryHasHanVietTitles(string vietnamese, bool expected)
     {
         string prompt = new TranslationPromptBuilder().Build("原文。", [new GlossaryEntry("某某", vietnamese)], "");
-        Assert.Equal(expected, prompt.Contains("never turn them into bà/ông", StringComparison.Ordinal));
+        Assert.Equal(expected, prompt.Contains("不要改成 bà/ông", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -173,9 +173,9 @@ public sealed class CharacterConsistencyLockTests
         await service.ConfigureCharacterProjectAsync(Project(Profile("林风", "Lâm Phong", "hắn")));
         TranslationAttempt attempt = await service.TranslateAsync(chapter.Segments[0].Id);
         Assert.Equal(1, client.Calls);
-        Assert.Contains("CHARACTER CONSISTENCY", attempt.Prompt);
+        Assert.Contains("人物 林风 译为 Lâm Phong", attempt.Prompt);
         Assert.Equal(attempt.Prompt, client.Prompts.Single());
-        Assert.DoesNotContain("Reference glossary", attempt.Prompt);
+        Assert.DoesNotContain("专名/术语对照", attempt.Prompt);
     }
 
     [Fact]

@@ -41,9 +41,8 @@ public sealed class TranslationQualityTests
         string source = "  「你好！」\r\n再见。 ";
         var prompt = new TranslationPromptBuilder().Build(source,
             [new GlossaryEntry("李明", "Lý Minh")], "Xưng hô: ta — ngươi.");
-        Assert.Contains("Chinese (zh)", prompt);
-        Assert.Contains("Vietnamese (vi)", prompt);
-        Assert.Contains("<source_text>" + Environment.NewLine + source + Environment.NewLine + "</source_text>", prompt);
+        Assert.StartsWith("请将以下中文小说翻译成越南语", prompt);
+        Assert.Contains("【源文】" + Environment.NewLine + source + Environment.NewLine, prompt);
         Assert.Contains("李明", prompt);
         Assert.Contains("Lý Minh", prompt);
         Assert.Contains("ta — ngươi", prompt);

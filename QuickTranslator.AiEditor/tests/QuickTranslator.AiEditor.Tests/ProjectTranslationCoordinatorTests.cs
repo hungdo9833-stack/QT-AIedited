@@ -628,8 +628,7 @@ public sealed partial class ProjectTranslationCoordinatorTests
 
             Assert.Equal(1, client.Calls);
             Assert.Single(client.Prompts);
-            Assert.Contains("CHARACTER CONSISTENCY", client.Prompts[0]);
-            Assert.Contains("天地 = Thiên Địa", client.Prompts[0]);
+            Assert.Contains("【硬性要求】人物 天地 译为 Thiên Địa；叙述中用“hắn”指代此人", client.Prompts[0]);
         });
     }
 

@@ -11,6 +11,7 @@ string? projectPath = null;
 string? outputPath = null;
 int? requestedChapter = null;
 int maximumSegments = 30;
+bool useDefaultPreset = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -27,6 +28,10 @@ for (int i = 0; i < args.Length; i++)
             break;
         case "--max-segments" when i + 1 < args.Length && int.TryParse(args[++i], out int maximum) && maximum > 0:
             maximumSegments = maximum;
+            break;
+        case "--default-preset":
+            // Ignore the preset saved in the chapter and use the built-in one, to preview a new default template.
+            useDefaultPreset = true;
             break;
         default:
             return BadArguments();
@@ -134,6 +139,7 @@ try
     }
 
     ChapterDocument baseline = selected.Chapter;
+    if (useDefaultPreset) baseline.SelectedPreset = PromptPreset.Default;
     TranslationSegment[] orderedSegments = baseline.Segments.OrderBy(x => x.Order).ToArray();
     TranslationSegment[] allQuoteSegments = orderedSegments.Where(x => OpensWithQuote(x.SourceText)).ToArray();
     TranslationSegment[] targets = allQuoteSegments.Take(maximumSegments).ToArray();
@@ -244,7 +250,7 @@ finally
 static int BadArguments(string? message = null)
 {
     if (message is not null) Console.Error.WriteLine("ERROR: " + message);
-    Console.Error.WriteLine("Usage: --project <path\\Name.qtproj> --out <folder> [--chapter <number>] [--max-segments 30]");
+    Console.Error.WriteLine("Usage: --project <path\\Name.qtproj> --out <folder> [--chapter <number>] [--max-segments 30] [--default-preset]");
     return 2;
 }
 

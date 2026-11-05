@@ -10,17 +10,21 @@ public sealed record PromptPreset
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
     public int Revision { get; init; } = 1;
     public string Template { get; init; } = DefaultTemplate;
+    // Index-Translate's own instTrans format (see TranslationPromptBuilder.InstTrans). Lines starting with
+    // 【硬性要求】/【注意】/【参考】 under 【约束要求】 are numbered by the builder, so presets can add their own.
     public const string DefaultTemplate = """
-        You are a professional Chinese (zh) to Vietnamese (vi) translator.
-        Accurately convey the meaning and nuances of this novel excerpt in natural Vietnamese.
-        Preserve names, paragraph breaks, dialogue, tone and punctuation. Do not omit, summarize or invent content.
-        Produce only the Vietnamese translation, without explanations, commentary or Markdown fences.
+        请将以下中文小说翻译成越南语，并且严格遵循所有约束要求。
+
+        【源文】
+        {{source_text}}
+
+        【约束要求】
         {{glossary}}
         {{context}}
-        Please translate the following Chinese text into Vietnamese:
-        <source_text>
-        {{source_text}}
-        </source_text>
+        【硬性要求】逐句完整翻译，保留原文的段落与对话格式，不要省略、概括或添加内容
+        【注意】译文使用自然流畅的越南语文学语言，保留原文的语气与情感
+
+        只输出译文，不要有任何额外说明。
         """;
     public static PromptPreset Default => new()
     {
