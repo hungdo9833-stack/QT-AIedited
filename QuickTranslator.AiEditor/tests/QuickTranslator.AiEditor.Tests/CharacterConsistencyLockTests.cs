@@ -27,11 +27,39 @@ public sealed class CharacterConsistencyLockTests
     }
 
     [Fact]
-    public void LockOff_LeavesPromptUnchanged()
+    public void LockOff_still_tells_the_model_the_character_but_never_as_locked()
     {
         CharacterProject project = Project(Profile("林风", "Lâm Phong", "hắn"));
         project.ConsistencyLockEnabled = false;
-        Assert.Equal("", new CharacterConsistencyRuleSelector().Select(project, "林风走了。 ").PromptBlock);
+        string block = new CharacterConsistencyRuleSelector().Select(project, "林风走了。 ").PromptBlock;
+        Assert.Contains("林风 = Lâm Phong; narrative pronoun = hắn", block);
+        Assert.DoesNotContain("LOCKED", block);
+    }
+
+    [Fact]
+    public void An_unlocked_survey_pronoun_reaches_the_prompt_with_the_gender()
+    {
+        CharacterProfile woman = Profile("霍明书", "Hoắc Minh Thư", "nàng");
+        woman.NarrativePronounLocked = false;
+        woman.Gender = CharacterGender.Female;
+        string block = new CharacterConsistencyRuleSelector().Select(Project(woman), "霍明书笑了。").PromptBlock;
+        Assert.Contains("霍明书 = Hoắc Minh Thư; gender = female; narrative pronoun = nàng", block);
+        Assert.DoesNotContain("LOCKED", block);
+
+        string prompt = new TranslationPromptBuilder().Build("霍明书笑了。", [], "", PromptPreset.Default, block);
+        Assert.Contains("人物 霍明书（女性） 译为 Hoắc Minh Thư", prompt);
+        Assert.Contains("叙述中指代Hoắc Minh Thư时用“nàng”", prompt);
+    }
+
+    [Fact]
+    public void Source_pronouns_stored_as_addressing_never_reach_the_prompt()
+    {
+        CharacterProfile lam = Profile("林风", "Lâm Phong", "hắn");
+        CharacterProfile to = Profile("苏婉", "Tô Uyển", "nàng");
+        lam.Relationships.Add(Relation(lam, to, "我", "你"));
+        string block = new CharacterConsistencyRuleSelector().Select(Project(lam, to), "林风对苏婉说：“走吧。”").PromptBlock;
+        Assert.DoesNotContain("DIALOGUE", block);
+        Assert.DoesNotContain("我", block);
     }
 
     [Fact]

@@ -25,6 +25,12 @@ internal static class HeadingText
     public static string NormalizeOuter(string line)
     {
         string value = line.Trim().Trim(Invisible).Trim();
+        // Jinjiang-style TXT exports mark each heading with a symbol: "☆、第一章", "★第3章 标题".
+        int symbols = 0;
+        while (symbols < value.Length && value[symbols] is '☆' or '★' or '◆' or '◇' or '●' or '○' or '■' or '□' or '※' or '◎')
+            symbols++;
+        if (symbols > 0 && symbols < value.Length)
+            value = value[symbols..].TrimStart('、', '，', ',', ' ', '\t', '　', '.', '．', ':', '：');
         if (value.Length >= 2 && ((value[0] == '【' && value[^1] == '】') || (value[0] == '[' && value[^1] == ']') ||
             (value[0] == '〖' && value[^1] == '〗'))) value = value[1..^1].Trim();
         else if (value.Length >= 3 && value[0] is '【' or '[' or '〖')

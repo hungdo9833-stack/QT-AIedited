@@ -54,7 +54,7 @@ public sealed class ProjectTranslationJob
         if (!string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))
             throw new InvalidDataException("Model trong backend snapshot không khớp Queue Plan.");
         PromptPreset.Validate();
-        if (Workers is null || Workers.Count > 2 || Workers.Any(worker => worker is null) ||
+        if (Workers is null || Workers.Count > ProjectTranslationCoordinator.MaximumWorkers || Workers.Any(worker => worker is null) ||
             Workers.Select(worker => worker.WorkerId).Distinct().Count() != Workers.Count)
             throw new InvalidDataException("Danh sách worker của translation job không hợp lệ.");
         foreach (ProjectTranslationWorkerState worker in Workers) worker.Validate();
@@ -96,6 +96,9 @@ public sealed class ProjectTranslationItem
     public bool WorkerMetricsRecorded { get; set; }
     /// <summary>The user chose to translate this chapter again from scratch (segments they edited or approved stay).</summary>
     public bool RetranslateAll { get; set; }
+    /// <summary>With RetranslateAll: the user confirmed that segments they edited or approved are translated again too.
+    /// Their old text stays in the chapter's segmentation history.</summary>
+    public bool OverrideUserEdits { get; set; }
     public DateTimeOffset? WorkerMetricsStartedAt { get; set; }
     public List<Guid>? RecordedWorkerAttemptIds { get; set; }
     public List<Guid>? RecordedWorkerSegmentIds { get; set; }
@@ -163,7 +166,7 @@ public sealed class ProjectTranslationWorkerState
         if (WorkerId == Guid.Empty || ProfileId == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 100 ||
             Backend is null || ModelOptions is null || SegmentationOptions is null ||
             BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl) ||
-            !Enum.IsDefined(Status) || RunningChapterIds is null || Slots is < 1 or > 8 ||
+            !Enum.IsDefined(Status) || RunningChapterIds is null || Slots is < 1 or > LlamaServerLaunch.MaximumSlots ||
             RunningChapterIds.Count > Slots ||
             RunningChapterIds.Any(id => id == Guid.Empty) || RunningChapterIds.Distinct().Count() != RunningChapterIds.Count ||
             RunningChapterIds.Count > 0 && CurrentChapterId is Guid current && !RunningChapterIds.Contains(current) ||
@@ -222,7 +225,7 @@ public sealed record ProjectTranslationWorkerDefinition(Guid WorkerId, GpuBacken
     {
         if (WorkerId == Guid.Empty || Backend is null || Client is null || ModelOptions is null || SegmentationOptions is null ||
             HourlyPrice is < 0 or > 1_000_000 || BackendIdentity.Length > 256 || BackendIdentity.Any(char.IsControl) ||
-            Slots is < 1 or > 8)
+            Slots is < 1 or > LlamaServerLaunch.MaximumSlots)
             throw new InvalidDataException("Cấu hình worker translation không hợp lệ.");
         Backend.Validate(); ModelOptions.Validate(); SegmentationOptions.Validate();
         if (!string.Equals(Backend.Model, ModelOptions.Model, StringComparison.Ordinal))

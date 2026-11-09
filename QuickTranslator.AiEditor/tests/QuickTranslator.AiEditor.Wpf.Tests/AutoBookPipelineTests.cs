@@ -257,6 +257,161 @@ public sealed class AutoBookPipelineTests
         finally { Directory.Delete(folder, recursive: true); }
     }
 
+    [Fact]
+    public async Task Books_on_lanes_without_a_shared_gpu_translate_at_the_same_time()
+    {
+        var stages = new FakeStages();
+        foreach (string name in new[] { "a", "b", "c" }) stages.TranslateGate[name] = new();
+        stages.Lanes["gemini"] = ["gemini"];
+        stages.Lanes["remote-a"] = ["a3090"];
+        stages.Lanes["all-gpu"] = ["local", "a3090"];
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow a = Row("a"), b = Row("b"), c = Row("c");
+        a.LaneId = "gemini";
+        b.LaneId = "remote-a";
+        c.LaneId = "all-gpu"; // shares the 3090 with b: waits for it
+        stages.SurveyGate["c"] = new(); // c reaches translation only after b holds the 3090
+        foreach (AutoBookRow row in new[] { a, b, c }) pipeline.TryEnqueue(row);
+        Task run = pipeline.RunAsync();
+
+        await stages.WaitForAsync("translate:a");
+        await stages.WaitForAsync("translate:b");
+        stages.SurveyGate["c"].SetResult();
+        await Task.Delay(200);
+        Assert.DoesNotContain("translate:c", stages.Log);
+        Assert.Equal("Chờ worker rảnh", c.Stage);
+
+        stages.TranslateGate["a"].SetResult(); // the Gemini book finishing frees nothing c needs
+        await Task.Delay(100);
+        Assert.DoesNotContain("translate:c", stages.Log);
+        stages.TranslateGate["b"].SetResult();
+        await stages.WaitForAsync("translate:c");
+        stages.TranslateGate["c"].SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(a.Finished && b.Finished && c.Finished);
+    }
+
+    [Fact]
+    public async Task A_book_free_to_start_passes_one_waiting_for_its_lane()
+    {
+        var stages = new FakeStages();
+        stages.TranslateGate["a"] = new();
+        stages.TranslateGate["b"] = new();
+        stages.Lanes["x"] = ["gpu1"];
+        stages.Lanes["y"] = ["gpu2"];
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow a = Row("a"), b = Row("b"), c = Row("c");
+        a.LaneId = b.LaneId = "x";
+        c.LaneId = "y";
+        foreach (AutoBookRow row in new[] { a, b, c }) pipeline.TryEnqueue(row);
+        Task run = pipeline.RunAsync();
+
+        // Surveys finish in any order: whichever of a and b reaches lane x first holds it; c starts on lane y anyway.
+        await stages.WaitForAsync("translate:c");
+        await Task.Delay(100);
+        Assert.Single(stages.Log, entry => entry is "translate:a" or "translate:b");
+        stages.TranslateGate["a"].SetResult();
+        stages.TranslateGate["b"].SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(a.Finished && b.Finished && c.Finished);
+    }
+
+    [Fact]
+    public async Task Removing_a_book_that_waits_for_its_lane_ends_the_run()
+    {
+        var stages = new FakeStages();
+        stages.TranslateGate["a"] = new();
+        stages.TranslateGate["b"] = new();
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow a = Row("a"), b = Row("b");
+        pipeline.TryEnqueue(a);
+        pipeline.TryEnqueue(b);
+        Task run = pipeline.RunAsync();
+        // Whichever book reaches the shared lane first translates; the other waits for it.
+        AutoBookRow? waiting = null;
+        for (int i = 0; i < 500 && waiting is null; i++)
+        {
+            waiting = new[] { a, b }.FirstOrDefault(row => row.Stage == "Chờ worker rảnh");
+            if (waiting is null) await Task.Delay(10);
+        }
+        Assert.NotNull(waiting);
+        AutoBookRow translating = waiting == a ? b : a;
+
+        AutoBookPipeline.Remove(waiting);
+        await Task.Delay(100);
+        stages.TranslateGate["a"].SetResult();
+        stages.TranslateGate["b"].SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.DoesNotContain("translate:" + waiting.Url.AbsolutePath.Trim('/'), stages.Log);
+        Assert.True(translating.Finished);
+    }
+
+    [Fact]
+    public async Task Moving_a_waiting_book_to_a_free_lane_starts_it_at_once()
+    {
+        var stages = new FakeStages();
+        stages.TranslateGate["a"] = new();
+        stages.TranslateGate["b"] = new();
+        stages.Lanes["gemini"] = ["gemini"];
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow a = Row("a"), b = Row("b");
+        pipeline.TryEnqueue(a);
+        pipeline.TryEnqueue(b);
+        Task run = pipeline.RunAsync();
+        AutoBookRow? waiting = null;
+        for (int i = 0; i < 500 && waiting is null; i++)
+        {
+            waiting = new[] { a, b }.FirstOrDefault(row => row.Stage == "Chờ worker rảnh");
+            if (waiting is null) await Task.Delay(10);
+        }
+        Assert.NotNull(waiting);
+
+        waiting.LaneId = "gemini"; // the first book still holds the shared lane
+        await stages.WaitForAsync("translate:" + waiting.Url.AbsolutePath.Trim('/'));
+        stages.TranslateGate["a"].SetResult();
+        stages.TranslateGate["b"].SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(a.Finished && b.Finished);
+    }
+
+    [Fact]
+    public async Task Moving_a_translating_book_pauses_it_frees_its_lane_and_resumes_on_the_new_one()
+    {
+        var stages = new FakeStages();
+        stages.TranslateGate["a"] = new();
+        stages.TranslateGate["b"] = new();
+        stages.Lanes["gemini"] = ["gemini"];
+        var pipeline = new AutoBookPipeline(stages, Settings);
+        AutoBookRow a = Row("a"), b = Row("b");
+        pipeline.TryEnqueue(a);
+        Task run = pipeline.RunAsync();
+        await stages.WaitForAsync("translate:a"); // a holds the shared lane
+        pipeline.TryEnqueue(b);
+        for (int i = 0; i < 500 && b.Stage != "Chờ worker rảnh"; i++) await Task.Delay(10);
+        Assert.Equal("Chờ worker rảnh", b.Stage);
+
+        a.LaneId = "gemini";
+        await stages.WaitForAsync("translate:b"); // the lane a left goes to b
+        for (int i = 0; i < 500 && stages.Log.Count(entry => entry == "translate:a") < 2; i++) await Task.Delay(10);
+        Assert.Equal(2, stages.Log.Count(entry => entry == "translate:a")); // a resumed on Gemini
+        stages.TranslateGate["a"].SetResult();
+        stages.TranslateGate["b"].SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(a.Finished && b.Finished);
+    }
+
+    [Fact]
+    public void Refreshing_the_lane_list_keeps_each_option_object_by_id()
+    {
+        var remote = new TranslationLaneOption("remote:1", "Remote: 3090");
+        var lanes = new System.Collections.ObjectModel.ObservableCollection<TranslationLaneOption>
+            { new("app", "Theo QT Studio"), remote, new("remote:2", "Remote: cũ") };
+        TranslationLanes.Synchronize(lanes, [new("app", "Theo QT Studio (Gemini)"), new("gemini", "Gemini"), new("remote:1", "Remote: 3090 Montréal")]);
+        Assert.Equal(["app", "gemini", "remote:1"], lanes.Select(lane => lane.Id));
+        Assert.Same(remote, lanes[2]);
+        Assert.Equal("Remote: 3090 Montréal", remote.Label);
+    }
+
     private static AutoBookRow Row(string name) => new(new Uri("https://example.com/" + name));
 
     private sealed class FakeStages : IAutoBookStages
@@ -269,6 +424,12 @@ public sealed class AutoBookPipelineTests
         public ConcurrentDictionary<string, int> ThrottleTimes { get; } = new();
         public TimeSpan ThrottleWait { get; init; } = TimeSpan.FromMilliseconds(20);
         public ConcurrentDictionary<string, AutoBookExisting> Existing { get; } = new();
+        public ConcurrentDictionary<string, TaskCompletionSource> TranslateGate { get; } = new();
+        /// <summary>Resources of each lane id; a lane not listed holds the single shared "main" lane (one book at a time).</summary>
+        public ConcurrentDictionary<string, string[]> Lanes { get; } = new();
+
+        public IReadOnlySet<string> TranslationResources(AutoBookRow row) =>
+            (Lanes.TryGetValue(row.LaneId, out string[]? resources) ? resources : ["main"]).ToHashSet();
 
         public Task<AutoBookExisting?> FindExistingAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken)
         {
@@ -305,6 +466,7 @@ public sealed class AutoBookPipelineTests
         {
             string name = Name(row);
             Log.Enqueue("translate:" + name);
+            if (TranslateGate.TryGetValue(name, out var gate)) await gate.Task.WaitAsync(cancellationToken);
             await Task.Yield();
             if (!FailTranslate.Contains(name)) return true;
             row.Stage = "Lỗi dịch";

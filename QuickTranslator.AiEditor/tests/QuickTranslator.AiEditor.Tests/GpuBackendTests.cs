@@ -55,7 +55,9 @@ public sealed class GpuBackendTests : IDisposable
         Assert.Equal(4, profile.Clone().ParallelRequests);
         profile.ParallelRequests = 0;
         Assert.Throws<InvalidDataException>(profile.Validate);
-        profile.ParallelRequests = 9;
+        profile.ParallelRequests = 16;
+        profile.Validate();
+        profile.ParallelRequests = 17;
         Assert.Throws<InvalidDataException>(profile.Validate);
     }
 

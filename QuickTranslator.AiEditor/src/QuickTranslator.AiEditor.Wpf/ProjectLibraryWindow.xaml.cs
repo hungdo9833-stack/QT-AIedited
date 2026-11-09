@@ -13,7 +13,8 @@ internal sealed record ProjectLibraryCard(Guid ProjectId, string Title, string A
     /// <summary>The Sắc Viện line shows only for Projects linked to a novel on the website.</summary>
     public bool HasWebStatus => WebLinked && !Missing;
     public bool IsOnWeb => Web is { PublishedCount: > 0 };
-    public string WebLabel => Web switch
+    public string WebLabel => WebLabelFor(Web);
+    internal static string WebLabelFor(VanCacWebProgress? progress) => progress switch
     {
         { PublishedCount: > 0 } web => $"Đã có trên web đến chương {web.PublishedThrough}",
         { DraftCount: > 0 } web => $"Trên web: {web.DraftCount} chương nháp",

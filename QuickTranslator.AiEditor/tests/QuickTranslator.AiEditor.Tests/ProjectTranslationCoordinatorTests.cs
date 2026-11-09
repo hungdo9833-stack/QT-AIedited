@@ -841,6 +841,86 @@ public sealed partial class ProjectTranslationCoordinatorTests
     }
 
     [Fact]
+    public async Task A_segment_that_failed_in_an_earlier_run_does_not_take_a_healthy_remote_gpu_offline()
+    {
+        await WithProjectAsync(4, async context =>
+        {
+            ProjectResegmentationPreview preview = await context.Repository.PreviewResegmentationAsync(
+                context.Session, [context.ChapterIds[0]], new SegmenterOptions
+                {
+                    MinimumHanCharacters = 1, TargetHanCharacters = 5, MaximumHanCharacters = 8
+                });
+            await context.Repository.ResegmentChaptersAsync(context.Session, preview, confirmed: true);
+            // Chapter 1's first segment failed while the GPU was down in an earlier run; its other segments are missing.
+            ChapterDocument chapter = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[0])).Chapter;
+            Assert.True(chapter.Segments.Count > 1);
+            chapter.Segments[0].Status = SegmentStatus.Error;
+            chapter.Segments[0].Attempts.Add(new TranslationAttempt
+            {
+                StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5), FinishedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+                Outcome = AttemptOutcome.Failed, ModelOptions = context.Environment.ModelOptions with { },
+                PromptVersion = "p0-synthetic", Prompt = "synthetic", Error = "Không kết nối được llama-server."
+            });
+            await context.Repository.UpdateChapterAsync(context.Session, chapter);
+            var remote = new ParallelFakeClient("remote", new(), 5);
+            ModelOptions options = context.Environment.ModelOptions;
+            ProjectTranslationWorkerDefinition[] workers =
+            [
+                new ProjectTranslationWorkerDefinition(Guid.NewGuid(), new GpuBackendSnapshot(Guid.NewGuid(), GpuBackendKind.Remote,
+                    "RTX 5060 Ti", "http://127.0.0.1:43119/api/chat", options.Model), remote, options with { }) with { Slots = 2 }
+            ];
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
+                context.LoadEnvironment);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            ProjectTranslationJob job = coordinator.CurrentJob!;
+            Assert.Equal(ProjectTranslationJobStatus.CompletedWithErrors, job.Status);
+            Assert.NotEqual(ProjectTranslationWorkerStatus.Offline, Assert.Single(job.Workers).Status);
+            Assert.All(job.Items.Skip(1), item => Assert.Equal(ProjectTranslationItemStatus.Completed, item.Status));
+
+            // The failed segment is sent once more and the book ends clean.
+            Assert.True(await coordinator.RetryErrorSegmentsAsync());
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            ChapterDocument retried = (await context.Repository.LoadChapterAsync(context.Session, context.ChapterIds[0])).Chapter;
+            Assert.All(retried.Segments, segment => Assert.True(segment.HasCompletedTranslation));
+            Assert.False(await coordinator.RetryErrorSegmentsAsync());
+        });
+    }
+
+    [Fact]
+    public async Task Three_gpus_share_one_book_each_chapter_translated_once()
+    {
+        await WithProjectAsync(9, async context =>
+        {
+            var concurrency = new ParallelConcurrency();
+            var local = new ParallelFakeClient("local", concurrency, 30);
+            var remoteA = new ParallelFakeClient("remote-a", concurrency, 30);
+            var remoteB = new ParallelFakeClient("remote-b", concurrency, 30);
+            ProjectTranslationWorkerDefinition[] two = Workers(context, local, remoteA);
+            ModelOptions options = context.Environment.ModelOptions;
+            ProjectTranslationWorkerDefinition[] workers =
+            [
+                .. two,
+                new(Guid.NewGuid(), new GpuBackendSnapshot(Guid.NewGuid(), GpuBackendKind.Remote,
+                    "RTX 3090 Montréal", "http://127.0.0.1:43118/api/chat", options.Model), remoteB, options with { }, 0.30m)
+            ];
+            var coordinator = new ProjectTranslationCoordinator(context.Session, context.Repository, workers,
+                context.LoadEnvironment);
+
+            await coordinator.StartAsync(await coordinator.PlanAsync(context.ChapterIds));
+
+            Assert.Equal(ProjectTranslationJobStatus.Completed, coordinator.CurrentJob!.Status);
+            Assert.Equal(3, coordinator.CurrentJob.Workers.Count);
+            Assert.Equal(3, concurrency.Maximum);
+            Assert.Equal(9, local.Calls + remoteA.Calls + remoteB.Calls);
+            Assert.True(local.Calls > 0 && remoteA.Calls > 0 && remoteB.Calls > 0);
+            foreach (Guid id in context.ChapterIds)
+                Assert.Single((await context.Repository.LoadChapterAsync(context.Session, id)).Chapter.Segments[0].Attempts);
+        });
+    }
+
+    [Fact]
     public async Task Parallel_workers_finish_current_snapshots_then_use_new_glossary_without_double_claim()
     {
         await WithProjectAsync(8, async context =>

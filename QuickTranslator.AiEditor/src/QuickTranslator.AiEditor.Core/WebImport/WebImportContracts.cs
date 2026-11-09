@@ -19,7 +19,14 @@ public sealed record WebBookAnalysis(
     string DetectionSummary,
     IReadOnlyList<string> Warnings,
     bool NumberingConflict = false,
-    WebSampleCheck? SampleCheck = null);
+    WebSampleCheck? SampleCheck = null)
+{
+    /// <summary>
+    /// The links are numbered pages of one continuous text (第1页, 第2页…), not chapters: the page count says nothing about
+    /// the chapter count, and the chapters come from the 第N章 headings inside the joined text.
+    /// </summary>
+    public bool ContinuousPages { get; init; }
+}
 
 public enum WebSampleCheckReason
 {

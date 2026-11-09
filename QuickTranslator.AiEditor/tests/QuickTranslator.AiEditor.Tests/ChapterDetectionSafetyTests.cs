@@ -51,6 +51,16 @@ public sealed class ChapterDetectionSafetyTests
     }
 
     [Fact]
+    public void Jinjiang_star_prefixed_headings_are_chapters()
+    {
+        const string source = "文案\n简介。\n☆、第一章 （修）\n甲。\n☆、第2章 初遇\n乙。\n★第三章\n丙。";
+        ImmutableImportPlan plan = new ChapterDetector().Detect(source);
+        plan.ValidateExactCoverage();
+        Assert.Equal(source, plan.ReconstructSource());
+        Assert.Equal(new[] { 1, 2, 3 }, plan.Candidates.Select(x => x.Number).OfType<int>());
+    }
+
+    [Fact]
     public void Empty_source_has_valid_empty_plan()
     {
         ImmutableImportPlan plan = new ChapterDetector().Detect("");

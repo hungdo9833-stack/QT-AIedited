@@ -197,6 +197,7 @@ public sealed class ProjectTranslationJobStore(ProjectSession session)
         Error = item.Error,
         WorkerMetricsRecorded = item.WorkerMetricsRecorded,
         RetranslateAll = item.RetranslateAll,
+        OverrideUserEdits = item.OverrideUserEdits,
         WorkerMetricsStartedAt = item.WorkerMetricsStartedAt,
         RecordedWorkerAttemptIds = item.RecordedWorkerAttemptIds is null ? null : [.. item.RecordedWorkerAttemptIds],
         RecordedWorkerSegmentIds = item.RecordedWorkerSegmentIds is null ? null : [.. item.RecordedWorkerSegmentIds],

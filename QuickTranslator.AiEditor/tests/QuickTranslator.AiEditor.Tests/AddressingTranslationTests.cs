@@ -53,8 +53,8 @@ public sealed class AddressingTranslationTests : IDisposable
         brother.NarrativePhases = [new(1, 3, "cậu", ""), new(4, null, "hắn", "hắn ta")];
         project.Validate();
         var selector = new CharacterConsistencyRuleSelector();
-        Assert.Contains("Lâm Thanh; narrative pronoun = cậu (LOCKED)", selector.Select(project, "林青走了。", 2).PromptBlock);
-        Assert.Contains("Lâm Thanh; narrative pronoun = hắn (LOCKED)", selector.Select(project, "林青走了。", 8).PromptBlock);
+        Assert.Matches(@"Lâm Thanh;( gender = \w+;)? narrative pronoun = cậu \(LOCKED\)", selector.Select(project, "林青走了。", 2).PromptBlock);
+        Assert.Matches(@"Lâm Thanh;( gender = \w+;)? narrative pronoun = hắn \(LOCKED\)", selector.Select(project, "林青走了。", 8).PromptBlock);
     }
 
     [Fact]

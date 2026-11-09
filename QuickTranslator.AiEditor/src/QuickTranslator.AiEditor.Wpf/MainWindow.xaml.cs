@@ -729,6 +729,7 @@ public partial class MainWindow : Window
                 SetStatus("Đang dừng request AI và lưu trạng thái tối thiểu trước khi đóng…");
                 await _projectTranslationCoordinator.StopAsync();
             }
+            await StopBackgroundTranslationsAsync();
             if (_activeRequest is not null)
             {
                 if (_queue?.IsRunning == true) await _queue.CancelAsync();

@@ -14,13 +14,45 @@ public partial class AutoTranslateWindow : Window
 {
     private readonly IAutoBookStages _stages;
     private readonly ObservableCollection<AutoBookRow> _rows = [];
+    private readonly Func<IReadOnlyList<WorkerChoice>>? _workerChoices;
     private AutoBookPipeline? _pipeline;
+    /// <summary>Holds the workers given to links added from now on (the "Worker cho link mới" chips).</summary>
+    private readonly AutoBookRow _defaultWorkers = new(new Uri("about:default-workers"));
 
-    internal AutoTranslateWindow(IAutoBookStages stages)
+    internal AutoTranslateWindow(IAutoBookStages stages, Func<IReadOnlyList<WorkerChoice>>? workerChoices = null)
     {
         InitializeComponent();
         _stages = stages;
+        _workerChoices = workerChoices;
         BookGrid.ItemsSource = _rows;
+        DefaultWorkersEditor.Content = _defaultWorkers;
+    }
+
+    private IReadOnlyList<WorkerChoice> WorkerChoices()
+    {
+        try { return _workerChoices?.Invoke() ?? []; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.IO.IOException) { return []; }
+    }
+
+    /// <summary>"+ Worker": shows every worker and adds the chosen one to the book (or to the defaults for new links).</summary>
+    private void OnAddWorker(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not AutoBookRow row) return;
+        string title = ReferenceEquals(row, _defaultWorkers) ? "Link mới thêm vào" : row.Title;
+        var picker = new WorkerPickerWindow(title, WorkerChoices(), row.Workers.Select(worker => worker.Id).ToHashSet()) { Owner = this };
+        if (picker.ShowDialog() != true || picker.Chosen is not { } chosen) return;
+        if (row.Workers.Count >= Core.Projects.ProjectTranslationCoordinator.MaximumWorkers)
+        {
+            StatusText.Text = $"Một truyện dùng tối đa {Core.Projects.ProjectTranslationCoordinator.MaximumWorkers} worker.";
+            return;
+        }
+        row.SetWorkers([.. row.Workers.Options(), new TranslationLaneOption(chosen.Id, chosen.Name)]);
+    }
+
+    private void OnRemoveWorker(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: BookWorker worker, Tag: AutoBookRow row }) return;
+        row.SetWorkers(row.Workers.Options().Where(option => option.Id != worker.Id));
     }
 
     internal bool IsRunning => _pipeline is not null;
@@ -92,6 +124,7 @@ public partial class AutoTranslateWindow : Window
     private AutoBookRow AddRow(Uri link)
     {
         var row = new AutoBookRow(link);
+        row.SetWorkers(_defaultWorkers.Workers.Options());
         if (link.IsFile) row.Title = Path.GetFileNameWithoutExtension(link.LocalPath);
         // A book leaving the run flips CanRetry just before the run's count drops: refresh once both have happened.
         row.PropertyChanged += (_, e) =>

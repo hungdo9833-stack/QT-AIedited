@@ -39,6 +39,7 @@ public sealed class LlamaServerContractTests
         Assert.Equal("4", args[args.ToList().IndexOf("-np") + 1]);
         Assert.Equal("127.0.0.1", args[args.ToList().IndexOf("--host") + 1]);
         Assert.Contains("--no-mmproj", args);
-        Assert.Throws<ArgumentOutOfRangeException>(() => (launch with { Slots = 9 }).Arguments());
+        Assert.Equal("1024", args[args.ToList().IndexOf("--cache-ram") + 1]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => (launch with { Slots = 17 }).Arguments());
     }
 }

@@ -93,7 +93,10 @@ public static class DialogueMapBuilder
             var rule = listener is null ? null : RuleFor(speaker, listener.Id, chapter.ChapterNumber);
             string who = listener is null ? $"{speaker.VietnameseName} → (listener unclear)"
                 : $"{speaker.VietnameseName} → {listener.VietnameseName}{(likely ? " (likely)" : "")}";
-            string terms = rule is null ? "" : $" (self={rule.SelfReference.Trim()}; address={rule.AddresseeReference.Trim()})";
+            // Source pronouns (我/你) stored as a rule say nothing about the Vietnamese pair: keep only who speaks to whom.
+            string terms = rule is null || !CharacterConsistencyRuleSelector.IsVietnameseTerm(rule.SelfReference) ||
+                           !CharacterConsistencyRuleSelector.IsVietnameseTerm(rule.AddresseeReference)
+                ? "" : $" (self={rule.SelfReference.Trim()}; address={rule.AddresseeReference.Trim()})";
             if (count == 0) builder.AppendLine("DIALOGUE MAP (quotes of this passage in order; speaker → listener):");
             builder.AppendLine($"- “{Snippet(line.Quote)}”: {who}{terms}");
             if (++count >= MaximumLines) break;

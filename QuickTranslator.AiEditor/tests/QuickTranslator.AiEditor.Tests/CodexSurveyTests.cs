@@ -54,6 +54,30 @@ public sealed class CodexSurveyTests
     }
 
     [Fact]
+    public void Source_pronouns_given_as_addressing_are_dropped_with_a_warning()
+    {
+        const string chinesePronouns = """
+            {
+              "setting": "Historical",
+              "characters": [
+                { "chineseName": "霍明书", "vietnameseName": "Hoắc Minh Thư", "gender": "Female" },
+                { "chineseName": "颜知宁", "vietnameseName": "Nhan Tri Ninh", "gender": "Female" }
+              ],
+              "relationships": [
+                { "speaker": "霍明书", "listener": "颜知宁", "relationship": "Vợ - vợ", "selfReference": "我", "addresseeReference": "你" }
+              ]
+            }
+            """;
+        CodexSurveyImportResult result = CodexSurveyImport.Convert(chinesePronouns, "[]", Guid.NewGuid(), "Thử");
+        CharacterRelationship relation = Assert.Single(result.Characters.Profiles[0].Relationships);
+        Assert.Equal("Vợ - vợ", relation.Relationship);
+        Assert.Equal("", relation.SelfReference);
+        Assert.False(relation.Enabled);
+        Assert.Contains(result.Warnings, warning => warning.Contains("我/你"));
+        Assert.Contains("TUYỆT ĐỐI không ghi chữ Hán", CodexSurveyPrompt.Survey("x"));
+    }
+
+    [Fact]
     public void Convert_ModernBookNeverNarratesWithArchaicPronouns()
     {
         const string modern = """

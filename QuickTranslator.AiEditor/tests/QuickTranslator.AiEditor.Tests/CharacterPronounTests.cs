@@ -211,7 +211,8 @@ public sealed class CharacterPronounTests
         Assert.Contains(snapshot.ConfirmedTerms, t => t.Chinese == "王秀兰" && t.Vietnamese == "Vương Tú Lan");
         Assert.DoesNotContain(snapshot.ConfirmedTerms, t => t.Vietnamese == "Lâm Triết");
         await service.TranslateAsync(chapter.Segments[0].Id);
-        Assert.Contains("王秀兰→Vương Tú Lan", client.Prompts[0]);
+        // The name reaches the prompt as a glossary entry or, now that her gender is known, as her character line.
+        Assert.Matches("王秀兰(→|（女性） 译为 )Vương Tú Lan", client.Prompts[0]);
     }
 
     [Fact]

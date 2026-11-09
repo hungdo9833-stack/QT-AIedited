@@ -202,6 +202,74 @@ public sealed class WorkerSegmentationPreflightTests : IDisposable
     }
 
     [Fact]
+    public async Task Whole_chapter_worker_keeps_a_user_edited_segment_and_translates_the_rest_around_it()
+    {
+        (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =
+            await CreateProjectAsync(1);
+        var small = new ProjectTranslationWorkerDefinition(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault("local-model"),
+            new CapturingClient(), Model("local-model", 4096, 1024, 0.1, 300), Segmentation(80, 120, 160));
+        var first = new ProjectTranslationCoordinator(session, _repository, [small], load);
+        await first.StartAsync(await first.PlanAsync(ids));
+        ChapterDocument translated = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        Assert.True(translated.Segments.Count > 2);
+        TranslationSegment edited = translated.Segments[1];
+        edited.UserDraft = "Câu người dùng sửa";
+        edited.DraftRevision = 1;
+        await _repository.UpdateChapterAsync(session, translated);
+
+        var client = new CapturingClient();
+        var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault("local-model"),
+            client, Model("local-model", 4096, 1024, 0.1, 300), new SegmenterOptions { WholeChapter = true });
+        var coordinator = new ProjectTranslationCoordinator(session, _repository, [worker], load);
+        await coordinator.StartAsync(await coordinator.PlanAsync(ids, retranslateAll: new HashSet<Guid>(ids)));
+
+        Assert.Equal(ProjectTranslationItemStatus.Completed, coordinator.CurrentJob!.Items[0].Status);
+        ChapterDocument after = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        Assert.Equal(3, after.Segments.Count); // before the edit · the edit · after it
+        Assert.Equal("Câu người dùng sửa", after.Segments.Single(segment => segment.Id == edited.Id).UserDraft);
+        Assert.Equal(2, client.Options.Count);
+    }
+
+    [Fact]
+    public async Task Confirmed_override_retranslates_edited_and_approved_segments_and_keeps_them_in_history()
+    {
+        (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =
+            await CreateProjectAsync(1);
+        var small = new ProjectTranslationWorkerDefinition(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault("local-model"),
+            new CapturingClient(), Model("local-model", 4096, 1024, 0.1, 300), Segmentation(80, 120, 160));
+        var first = new ProjectTranslationCoordinator(session, _repository, [small], load);
+        await first.StartAsync(await first.PlanAsync(ids));
+        ChapterDocument translated = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        TranslationSegment edited = translated.Segments[0];
+        edited.UserDraft = "Câu người dùng sửa";
+        edited.DraftRevision = 1;
+        TranslationSegment approved = translated.Segments[^1];
+        approved.UserDraft = "Câu đã duyệt";
+        approved.DraftRevision = 1;
+        approved.Status = SegmentStatus.Approved;
+        approved.Approvals.Add(new ApprovalRecord { ApprovedAt = DateTimeOffset.UtcNow, DraftRevision = 1, Text = approved.UserDraft });
+        await _repository.UpdateChapterAsync(session, translated);
+
+        var client = new CapturingClient();
+        var worker = new ProjectTranslationWorkerDefinition(Guid.NewGuid(), GpuBackendSnapshot.LocalDefault("local-model"),
+            client, Model("local-model", 4096, 1024, 0.1, 300), new SegmenterOptions { WholeChapter = true });
+        var coordinator = new ProjectTranslationCoordinator(session, _repository, [worker], load);
+        await coordinator.StartAsync(await coordinator.PlanAsync(ids, retranslateAll: new HashSet<Guid>(ids),
+            overrideUserEdits: true));
+
+        Assert.Equal(ProjectTranslationItemStatus.Completed, coordinator.CurrentJob!.Items[0].Status);
+        ChapterDocument after = (await _repository.LoadChapterAsync(session, ids[0])).Chapter;
+        TranslationSegment whole = Assert.Single(after.Segments);
+        Assert.Null(whole.UserDraft);
+        Assert.Empty(whole.Approvals);
+        Assert.True(whole.HasCompletedTranslation);
+        Assert.Single(client.Options);
+        SegmentationChange history = after.SegmentationHistory[^1];
+        Assert.Contains(history.PreviousSegments, segment => segment.UserDraft == "Câu người dùng sửa");
+        Assert.Contains(history.PreviousSegments, segment => segment.Approvals.Count == 1);
+    }
+
+    [Fact]
     public async Task Running_checkpoint_left_by_a_power_loss_does_not_block_the_worker_preflight()
     {
         (ProjectSession session, Guid[] ids, Func<CancellationToken, Task<ProjectTranslationEnvironment>> load) =

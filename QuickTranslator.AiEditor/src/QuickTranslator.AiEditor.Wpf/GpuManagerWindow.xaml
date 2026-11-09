@@ -38,8 +38,13 @@
      <TextBlock Text="Chọn API hoặc GPU. Các thiết lập không liên quan sẽ được ẩn để tránh nhầm cấu hình." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,8"/>
      <WrapPanel>
       <RadioButton x:Name="ApiSourceInput" GroupName="TranslationSource" Content="API · Gemini" Style="{StaticResource ModeButton}" Checked="OnTranslationSourceChanged" AutomationProperties.Name="Dùng API Gemini để dịch"/>
+      <RadioButton x:Name="CodexSourceInput" GroupName="TranslationSource" Content="Codex (ChatGPT)" Style="{StaticResource ModeButton}" Checked="OnTranslationSourceChanged" AutomationProperties.Name="Dùng Codex của gói ChatGPT để dịch"/>
       <RadioButton x:Name="GpuSourceInput" GroupName="TranslationSource" Content="GPU" Style="{StaticResource ModeButton}" Checked="OnTranslationSourceChanged" AutomationProperties.Name="Dùng GPU để dịch"/>
      </WrapPanel>
+     <StackPanel x:Name="CodexTranslationPanel" Visibility="Collapsed" Margin="0,12,0,0">
+      <TextBlock Text="Codex (ChatGPT)" Style="{StaticResource SubtitleText}"/>
+      <TextBlock x:Name="CodexTranslationDescription" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+     </StackPanel>
      <Grid x:Name="ApiTranslationPanel" Visibility="Collapsed" Margin="0,12,0,0">
       <StackPanel>
        <TextBlock Text="Gemini Flash-Lite" Style="{StaticResource SubtitleText}"/>
@@ -47,7 +52,8 @@
        <ItemsControl x:Name="GeminiKeyList" AutomationProperties.Name="Danh sách Gemini API key đã lưu">
         <ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,2">
          <Button DockPanel.Dock="Right" Content="Xóa" Tag="{Binding Index}" Click="OnRemoveGeminiKey" AutomationProperties.Name="Xóa Gemini API key"/>
-         <TextBlock Text="{Binding Masked}" VerticalAlignment="Center" FontFamily="Consolas"/>
+         <TextBlock DockPanel.Dock="Left" Text="{Binding Masked}" VerticalAlignment="Center" FontFamily="Consolas" MinWidth="110"/>
+         <TextBox Text="{Binding Name, Mode=OneTime}" Tag="{Binding Fingerprint}" Margin="8,0" MaxLength="40" LostKeyboardFocus="OnGeminiKeyNameCommitted" KeyDown="OnGeminiKeyNameKeyDown" ToolTip="Tên hiện ở worker khi điều phối (để trống = Key N). Enter để lưu." AutomationProperties.Name="Tên Gemini API key"/>
         </DockPanel></DataTemplate></ItemsControl.ItemTemplate>
        </ItemsControl>
        <TextBlock Text="Thêm API key (mỗi dòng một key)" Style="{StaticResource FieldLabel}"/>
@@ -69,7 +75,7 @@
       <StackPanel Grid.Column="1"><TextBlock x:Name="ModelLabel" Text="Model llama-server" Style="{StaticResource FieldLabel}"/><DockPanel><Button x:Name="ChooseGgufButton" DockPanel.Dock="Right" Content="Chọn file .gguf…" Click="OnChooseGguf" Visibility="Collapsed"/><TextBox x:Name="ModelInput" Text="IndexTeam/Index-Translate-9B-GGUF:Q4_K_M"/></DockPanel></StackPanel>
      </Grid>
      <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
-      <StackPanel Grid.Column="1"><TextBlock Text="Số request song song" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ParallelRequestsInput" Text="4" ToolTip="Từ 1 đến 8"/></StackPanel>
+      <StackPanel Grid.Column="1"><TextBlock Text="Số request song song" Style="{StaticResource FieldLabel}"/><TextBox x:Name="ParallelRequestsInput" Text="4" ToolTip="Từ 1 đến 16"/></StackPanel>
      </Grid>
       <Expander x:Name="AdvancedRuntimeExpander" Header="Thiết lập nâng cao · context, đầu ra và cỡ đoạn" IsExpanded="False" Margin="0,8,0,0" Foreground="{DynamicResource MutedBrush}">
        <StackPanel>

@@ -14,7 +14,11 @@ internal static class ChapterListDetector
             // A "开始阅读" button and the real "第1回 …" entry share one URL: keep the first position but the title that
             // reads like a chapter, or chapter 1 is imported under the button's text and loses its heading.
             .GroupBy(a => a.Url)
-            .Select(g => g.First() with { Title = g.OrderByDescending(a => HasChapterNumber(a.Title)).First().Title })
+            // A numbered page entry ("第1页", seen live on 52shuku) beats the button too, or page 1 drops out of the list.
+            .Select(g => g.First() with
+            {
+                Title = g.OrderByDescending(a => HasChapterNumber(a.Title)).ThenByDescending(LooksLikeChapter).First().Title
+            })
             .ToList();
 
         if (IsThread(page.Url))
@@ -128,6 +132,13 @@ internal static class ChapterListDetector
         var counter = Regex.Match(title, @"^第\s*\d+\s*[章回节節]\s*(?=第\s*[\d〇零一二三四五六七八九十百千万兩两]+\s*[章回节節])");
         return counter.Success ? title[counter.Length..].Trim() : title;
     }
+
+    /// <summary>
+    /// The list holds numbered pages of one continuous text ("第1页", "第2页"…, seen live on 52shuku): chapters run across
+    /// page breaks and their 第N章 headings are inside the text, so the pages must be joined, not imported one per chapter.
+    /// </summary>
+    internal static bool IsPageList(IReadOnlyCollection<WebChapterLink> links) => links.Count > 0 &&
+        links.Count(l => Regex.IsMatch(l.Title.Trim(), @"^第\s*[0-9０-９]+\s*[页頁]$")) >= links.Count * 0.9;
 
     internal static bool HasChapterNumber(string title) =>
         ChapterNumber(title) is not null;

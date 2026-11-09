@@ -61,6 +61,11 @@ public static class CodexSurveyPrompt
           avoidPronouns: các đại từ sai cần tránh cho nhân vật đó.
         - relationships: mỗi dòng là một chiều nói (speaker nói với listener), dùng chineseName để chỉ nhân vật.
           Ghi cho các cặp có hội thoại thực sự; nếu hai chiều xưng hô khác nhau thì ghi cả hai chiều.
+          selfReference/addresseeReference là từ xưng hô TIẾNG VIỆT dùng trong bản dịch (ta/ngươi, ta/nàng, thần/bệ hạ,
+          chị/em, anh/em, tôi/cậu, con/mẹ...), chọn theo bối cảnh, tuổi, vai vế và mức thân mật của cặp đó.
+          TUYỆT ĐỐI không ghi chữ Hán (我, 你, 您, 本宫...) vào hai trường này.
+        - gender: ghi Male/Female khi truyện cho biết, kể cả khi nguyên văn ít dùng 他/她; truyện bách hợp/đam mỹ thì
+          kiểm tra kỹ giới tính của cả hai nhân vật chính.
 
         2) glossary.json
         [ { "chinese": "青云宗", "vietnamese": "Thanh Vân Tông" } ]

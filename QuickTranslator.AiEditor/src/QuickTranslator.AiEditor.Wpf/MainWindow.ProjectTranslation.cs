@@ -1,4 +1,6 @@
+using System.IO;
 using System.Windows;
+using QuickTranslator.AiEditor.Core.AutoTranslate;
 using QuickTranslator.AiEditor.Core.Models;
 using QuickTranslator.AiEditor.Core.Persistence;
 using QuickTranslator.AiEditor.Core.Projects;
@@ -14,6 +16,13 @@ public partial class MainWindow
     private Task<ProjectTranslationJob?>? _projectTranslationLoadTask;
     private readonly List<IDisposable> _projectTranslationOwnedClients = [];
     private static readonly Guid GeminiTranslationProfileId = new("a6194896-3e9e-4f68-8725-74a9fe9bbd6c");
+    /// <summary>The Codex (ChatGPT) translation worker: one per app, using the auto-translate window's Codex workspace and model.</summary>
+    private static readonly Guid CodexTranslationProfileId = new("5c0d3c1a-7f2e-4b8e-9a61-0c0de7ea4a11");
+    /// <summary>Chapters a book translates with Codex at once (each is its own codex exec).</summary>
+    private const int CodexTranslationSlots = 3;
+    /// <summary>Workspace and model for Codex translation: the last ones the auto-translate window used, at low effort
+    /// (translating needs no long reasoning, and every token counts against the plan's 5-hour window).</summary>
+    private CodexSurveyOptions _codexTranslationOptions = new() { Effort = "low", Timeout = TimeSpan.FromMinutes(20) };
     private GeminiTranslationClient? _activeGeminiTranslationClient;
 
     internal static ModelOptions GeminiTranslationModelOptions() => new()
@@ -87,6 +96,24 @@ public partial class MainWindow
             BackendSnapshot(profile, runtime.ModelOptions.Model), knowledge);
     }
 
+    /// <summary>
+    /// The environment of a book translating in the background on its own lane: the project's prompt preset, resources and
+    /// knowledge as usual, with the model and backend of the lane's first worker instead of the window's active GPU.
+    /// </summary>
+    private async Task<ProjectTranslationEnvironment> LoadLaneTranslationEnvironmentAsync(ProjectSession session,
+        ProjectTranslationWorkerDefinition first, CancellationToken cancellationToken)
+    {
+        ProjectTranslationSettings translation = await new ProjectSettingsStore(session).LoadTranslationAsync(cancellationToken);
+        var presets = new PromptPresetManager(await _presetStore.LoadAsync(cancellationToken));
+        presets.Select(translation.SelectedPromptPresetId is Guid selectedId && presets.Presets.Any(p => p.Id == selectedId)
+            ? selectedId : PromptPreset.Default.Id);
+        ProjectResources resources = await new ProjectResourceStore(session).LoadAsync(cancellationToken);
+        IBookKnowledgeContextProvider? knowledge = translation.BookKnowledgeContextEnabled
+            ? new BookKnowledgeContextProvider(await new BookIntelligenceStore(session).LoadAsync(cancellationToken), resources)
+            : null;
+        return new(first.ModelOptions with { }, presets.Selected, resources, first.Backend with { }, knowledge);
+    }
+
     private Task OpenProjectTranslationQueueAsync(IReadOnlyList<Guid> chapterIds) =>
         OpenProjectTranslationQueueCoreAsync(chapterIds, askRetranslation: true);
 
@@ -133,7 +160,9 @@ public partial class MainWindow
                 return;
             }
             if ((askRetranslation ? AskRetranslation(chapterIds) : new HashSet<Guid>()) is not { } retranslate) return;
-            ProjectTranslationJob plan = await coordinator.PlanAsync(chapterIds, retranslateAll: retranslate);
+            // "Có" retranslates everything chosen, the user's edited and approved segments included.
+            ProjectTranslationJob plan = await coordinator.PlanAsync(chapterIds, retranslateAll: retranslate,
+                overrideUserEdits: retranslate.Count > 0);
             // Only detach the open chapter if it is part of the planned queue items.
             if (_service?.GetSnapshot().Id is Guid openId && chapterIds.Contains(openId))
             {
@@ -166,7 +195,8 @@ public partial class MainWindow
             return;
         }
         if ((askRetranslation ? AskRetranslation(candidates) : new HashSet<Guid>()) is not { } retranslate) return;
-        ProjectTranslationAppendResult result = await coordinator.AppendAsync(candidates, retranslate);
+        ProjectTranslationAppendResult result = await coordinator.AppendAsync(candidates, retranslate,
+            overrideUserEdits: retranslate.Count > 0);
         HostProjectTranslationView(coordinator, null);
         SetStatus(result.Added == 0 && result.Reopened == 0
             ? "Không có chương mới để thêm: các chương đã chọn đã được dịch trong hàng đợi này."
@@ -193,8 +223,9 @@ public partial class MainWindow
               string.Join(", ", translated.Take(5).Select(entry => entry.Number)) + (translated.Length > 5 ? "…" : "");
         MessageBoxResult answer = ThemedDialog.Show(this,
             $"{names} đã có bản dịch.\n\nDịch lại toàn bộ?\n\n" +
-            "• Có: dịch lại mọi đoạn bằng AI. Đoạn bạn đã sửa tay hoặc đã duyệt vẫn được giữ nguyên; bản dịch AI cũ còn trong lịch sử.\n" +
-            "• Không: chỉ dịch các đoạn còn thiếu; chương đã dịch đủ sẽ được bỏ qua.\n" +
+            "• Có: dịch lại TẤT CẢ các đoạn đã chọn bằng AI, kể cả đoạn bạn đã sửa tay hoặc đã duyệt. " +
+            "Bản cũ (cả bản sửa và bản duyệt) vẫn còn trong lịch sử chia đoạn của chương.\n" +
+            "• Không: chỉ dịch các đoạn còn thiếu; đoạn đã sửa/duyệt giữ nguyên, chương đã dịch đủ sẽ được bỏ qua.\n" +
             "• Hủy: không tạo hàng đợi.",
             "Chương đã có bản dịch", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
         return answer switch
@@ -207,9 +238,19 @@ public partial class MainWindow
 
     private async Task ApplyTranslationModeAsync(ProjectTranslationJob? recovered)
     {
-        if (recovered?.Workers.Any(worker => worker.ProfileId == GeminiTranslationProfileId) == true &&
+        if (recovered?.Workers.Any(worker => IsGeminiProfile(worker.ProfileId)) == true &&
             !_gpuPreferences.ModeExplicitlySelected)
+        {
             _gpuPreferences.Source = TranslationSource.Api;
+            _gpuPreferences.ApiProvider = recovered.Workers.Any(worker => worker.ProfileId == CodexTranslationProfileId)
+                ? ApiTranslationProvider.Codex : ApiTranslationProvider.Gemini;
+        }
+        if (_gpuPreferences.UsesCodex)
+        {
+            EnsureCodexSignedIn();
+            UpdateGpuBackendStatus();
+            return;
+        }
         if (_gpuPreferences.Source == TranslationSource.Api)
         {
             if (GeminiApiKeyVault.ReadAll().Count == 0)
@@ -276,7 +317,9 @@ public partial class MainWindow
         else
         {
             GpuBackendProfile local = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
-            if (_gpuPreferences.Source == TranslationSource.Api)
+            if (_gpuPreferences.UsesCodex)
+                definitions.Add(CodexWorkerDefinition(CodexTranslationProfileId));
+            else if (_gpuPreferences.Source == TranslationSource.Api)
             {
                 ModelOptions options = GeminiTranslationModelOptions();
                 // Cloud API behaves like a remote worker for coordinator fault semantics: one terminal
@@ -309,29 +352,116 @@ public partial class MainWindow
     }
 
     // A fresh worker for a GPU profile, using the profile's runtime settings (or its model's defaults).
-    private ProjectTranslationWorkerDefinition ProjectTranslationProfileWorker(GpuBackendProfile profile)
+    private ProjectTranslationWorkerDefinition ProjectTranslationProfileWorker(GpuBackendProfile profile,
+        List<IDisposable>? ownedClients = null)
     {
         AiRuntimeProfile runtime = profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model);
         return CreateWorkerDefinition(StableWorkerId(profile.Id),
             BackendSnapshot(profile, runtime.ModelOptions.Model), runtime.ModelOptions,
-            runtime.SegmentationOptions, profile.HourlyPrice);
+            runtime.SegmentationOptions, profile.HourlyPrice, ownedClients);
     }
 
-    private ProjectTranslationWorkerDefinition CreateWorkerDefinition(Guid workerId, GpuBackendSnapshot backend,
-        ModelOptions options, SegmenterOptions segmentation, decimal? hourlyPrice)
+    /// <summary>One saved Gemini key as a worker: only that key, 3.5 Flash-Lite then 3.1 when its daily quota is used.</summary>
+    private ProjectTranslationWorkerDefinition GeminiKeyWorkerDefinition(GeminiKeyWorker key, List<IDisposable> ownedClients)
     {
+        var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        var client = new GeminiTranslationClient(http, [key.Key], ownsHttpClient: true);
+        ownedClients.Add(client);
+        ModelOptions options = GeminiTranslationModelOptions();
+        var backend = new GpuBackendSnapshot(key.ProfileId, GpuBackendKind.Remote, "Gemini · " + key.Name,
+            "https://generativelanguage.googleapis.com", options.Model);
+        return new(key.ProfileId, backend, WithHanRepair(client, ownedClients), options, GeminiTranslationSegmentationOptions(), null,
+            "gemini-api:key:" + key.Fingerprint, 1);
+    }
+
+    /// <summary>Gemini leaves a little Chinese now and then: fix only those spots (names in Hán-Việt, the paragraph again
+    /// on this machine's GPU when it runs) instead of sending the chapter again.</summary>
+    private HanResidueRepairClient WithHanRepair(ILlmClient translator, List<IDisposable> ownedClients, bool gpu = false)
+    {
+        var gate = new object();
+        LlamaServerClient? local = null;
+        Uri? localEndpoint = null;
+        HanRepairTranslator? Local()
+        {
+            if (_translationClient is not GpuBackendManager || _localLlama.Endpoint is not { } endpoint) return null;
+            GpuBackendProfile profile = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
+            lock (gate)
+            {
+                if (local is null || localEndpoint != endpoint)
+                {
+                    local = new LlamaServerClient(new HttpClient(), endpoint, profile.ParallelRequests, ownsHttpClient: true);
+                    localEndpoint = endpoint;
+                    lock (ownedClients) ownedClients.Add(local);
+                }
+                return new(local, (profile.Runtime ?? AiRuntimeProfile.CreateDefault(profile.Model)).ModelOptions);
+            }
+        }
+        // A GPU worker repairs on itself (the paragraph goes back to the same server), so no local translator is borrowed.
+        return new HanResidueRepairClient(translator, gpu ? () => null : Local, DictionaryHanViet, askForNoHan: !gpu,
+            vietPhrase: DictionaryVietPhrase);
+    }
+
+    private async Task<string> DictionaryHanViet(string text, CancellationToken cancellationToken) =>
+        _traditionalService.CurrentSnapshot is null ? ""
+            : (await _traditionalService.TranslateAsync(text, cancellationToken: cancellationToken)).HanVietText;
+
+    private async Task<string> DictionaryVietPhrase(string text, CancellationToken cancellationToken) =>
+        _traditionalService.CurrentSnapshot is null ? ""
+            : (await _traditionalService.TranslateAsync(text, cancellationToken: cancellationToken)).VietPhraseText;
+
+    /// <param name="ownedClients">Where the clients this worker creates are kept for disposal: the open project's queue
+    /// by default; a background lane passes its own list so rebuilding the window's queue never closes them.</param>
+    /// <summary>A Codex (ChatGPT) worker on the workspace and model last used by the auto-translate window.</summary>
+    private ProjectTranslationWorkerDefinition CodexWorkerDefinition(Guid workerId, List<IDisposable>? ownedClients = null)
+    {
+        CodexSurveyOptions codex = _codexTranslationOptions;
+        EnsureCodexSignedIn();
+        var backend = new GpuBackendSnapshot(CodexTranslationProfileId, GpuBackendKind.Remote, "Codex · " + codex.Model,
+            "https://chatgpt.com", "codex:" + codex.Model);
+        return CreateWorkerDefinition(workerId, backend, GeminiTranslationModelOptions(),
+            GeminiTranslationSegmentationOptions(), null, ownedClients);
+    }
+
+    private void EnsureCodexSignedIn()
+    {
+        string home = _codexTranslationOptions.CodexHome;
+        if (!File.Exists(Path.Combine(home, "auth.json")))
+            throw new InvalidOperationException($"Codex chưa đăng nhập trong {home}. Hãy đăng nhập Codex ở terminal trước.");
+    }
+
+    private string CodexSourceLabel => "Codex · " + _codexTranslationOptions.Model + " · " +
+        Path.GetFileName(_codexTranslationOptions.CodexHome).Replace(".codex-", "", StringComparison.Ordinal);
+
+    private ProjectTranslationWorkerDefinition CreateWorkerDefinition(Guid workerId, GpuBackendSnapshot backend,
+        ModelOptions options, SegmenterOptions segmentation, decimal? hourlyPrice, List<IDisposable>? ownedClients = null)
+    {
+        bool windowQueue = ownedClients is null;
+        ownedClients ??= _projectTranslationOwnedClients;
+        if (backend.ProfileId == CodexTranslationProfileId)
+        {
+            CodexSurveyOptions codex = _codexTranslationOptions;
+            var client = new CodexTranslationClient(codex);
+            ModelOptions codexOptions = GeminiTranslationModelOptions() with { Model = "codex:" + codex.Model };
+            GpuBackendSnapshot codexBackend = backend with { Model = codexOptions.Model };
+            return new(workerId, codexBackend, WithHanRepair(client, ownedClients), codexOptions,
+                GeminiTranslationSegmentationOptions(), hourlyPrice,
+                "codex:" + Path.GetFileName(codex.CodexHome) + ":" + codex.Model, CodexTranslationSlots);
+        }
         if (backend.ProfileId == GeminiTranslationProfileId)
         {
             const string identity = "gemini-api:flash-lite-pool-v1";
             var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
             var client = new GeminiTranslationClient(http, GeminiApiKeyVault.ReadAll(), ownsHttpClient: true);
-            client.RouteChanged += (_, _) => Dispatcher.BeginInvoke(UpdateGpuBackendStatus);
-            _activeGeminiTranslationClient = client;
-            _projectTranslationOwnedClients.Add(client);
+            if (windowQueue)
+            {
+                client.RouteChanged += (_, _) => Dispatcher.BeginInvoke(UpdateGpuBackendStatus);
+                _activeGeminiTranslationClient = client;
+            }
+            ownedClients.Add(client);
             ModelOptions geminiOptions = GeminiTranslationModelOptions();
             SegmenterOptions wholeChapter = GeminiTranslationSegmentationOptions();
             GpuBackendSnapshot geminiBackend = backend with { Model = geminiOptions.Model };
-            return new(workerId, geminiBackend, client, geminiOptions, wholeChapter, hourlyPrice, identity, 1);
+            return new(workerId, geminiBackend, WithHanRepair(client, ownedClients), geminiOptions, wholeChapter, hourlyPrice, identity, 1);
         }
         if (backend.Kind == GpuBackendKind.Local)
         {
@@ -342,8 +472,8 @@ public partial class MainWindow
                 Uri endpoint = _localLlama.Endpoint ?? throw new InvalidOperationException("llama-server Local chưa chạy.");
                 ILlmBackendClient localClient = new LlamaServerClient(new HttpClient(), endpoint,
                     _gpuBackends.GetProfile(backend.ProfileId).ParallelRequests, ownsHttpClient: true);
-                _projectTranslationOwnedClients.Add(localClient);
-                client = localClient;
+                ownedClients.Add(localClient);
+                client = WithHanRepair(localClient, ownedClients, gpu: true);
             }
             else client = _translationClient; // Deterministic injected provider used by integration tests.
             int localSlots = _translationClient is GpuBackendManager
@@ -356,7 +486,8 @@ public partial class MainWindow
         string remoteIdentity = SshBackendIdentity(connection.Profile);
         // Slots follow the connected profile: its client was built with the same number of parallel requests.
         int slots = connection.Profile.ParallelRequests;
-        return new(workerId, backend, connection.Client, options with { }, segmentation with { }, hourlyPrice, remoteIdentity, slots);
+        // The connection's client is shared and owned by the connection: the wrapper is never disposed by the queue.
+        return new(workerId, backend, WithHanRepair(connection.Client, ownedClients, gpu: true), options with { }, segmentation with { }, hourlyPrice, remoteIdentity, slots);
     }
 
     private static string SshBackendIdentity(GpuBackendProfile profile)
@@ -407,7 +538,7 @@ public partial class MainWindow
             await ApplyTranslationModeAsync(recovered);
             foreach (ProjectTranslationWorkerState worker in recovered.Workers
                          .Where(value => value.Backend.Kind == GpuBackendKind.Remote)
-                         .Where(value => value.ProfileId != GeminiTranslationProfileId)
+                         .Where(value => !IsGeminiProfile(value.ProfileId))
                          .DistinctBy(value => value.ProfileId))
                 await EnsureRemoteConnectedAsync(_gpuBackends.GetProfile(worker.ProfileId));
         }
@@ -456,7 +587,7 @@ public partial class MainWindow
     {
         if (_gpuPreferences.RemoteProfileId is Guid saved && !GpuProfileExists(saved))
             _gpuPreferences.RemoteProfileId = null;
-        if (recovered.Workers.Any(worker => worker.ProfileId == GeminiTranslationProfileId)) return;
+        if (recovered.Workers.Any(worker => IsGeminiProfile(worker.ProfileId))) return;
         bool hadRemote = recovered.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Remote);
         bool hadLocal = recovered.Workers.Any(worker => worker.Backend.Kind == GpuBackendKind.Local);
         if (!hadRemote || CurrentRemoteProfileId() is not Guid remoteId) return;
@@ -470,7 +601,7 @@ public partial class MainWindow
         : _gpuBackends.ActiveProfile.Kind == GpuBackendKind.Remote ? _gpuBackends.ActiveProfile.Id
         : _gpuBackends.Catalog.Profiles.FirstOrDefault(profile => profile.Kind == GpuBackendKind.Remote)?.Id;
 
-    private bool GpuProfileExists(Guid profileId) => profileId == GeminiTranslationProfileId ||
+    private bool GpuProfileExists(Guid profileId) => IsGeminiProfile(profileId) ||
         _gpuBackends.Catalog.Profiles.Any(profile => profile.Id == profileId);
 
     /// <summary>Saved workers whose GPU profile was deleted, or whose Remote profile now points at another machine.</summary>
@@ -480,7 +611,7 @@ public partial class MainWindow
 
     private bool RemoteMachineChanged(ProjectTranslationWorkerState worker)
     {
-        if (worker.Backend.Kind != GpuBackendKind.Remote || worker.ProfileId == GeminiTranslationProfileId) return false;
+        if (worker.Backend.Kind != GpuBackendKind.Remote || IsGeminiProfile(worker.ProfileId)) return false;
         GpuBackendProfile profile = _gpuBackends.GetProfile(worker.ProfileId);
         return profile.Kind != GpuBackendKind.Remote || profile.Ssh is null ||
             worker.BackendIdentity.Length > 0 &&
@@ -489,6 +620,7 @@ public partial class MainWindow
 
     private string DescribeCurrentGpuSetup()
     {
+        if (_gpuPreferences.UsesCodex) return CodexSourceLabel;
         if (_gpuPreferences.Source == TranslationSource.Api)
         {
             int count = GeminiApiKeyVault.ReadAll().Count;

@@ -38,17 +38,22 @@ public sealed class WebNovelImporter : IWebNovelImporter, IDisposable
             BlockDetector.CheckBrowser(page, WebPage.CjkCount(ChapterContentExtractor.Extract(page)));
             throw BlockDetector.Block(page.Url, WebImportBlockReason.NoChapterList);
         }
+        bool pages = ChapterListDetector.IsPageList(chapters);
         var numbers = chapters.Select(c => ChapterListDetector.ChapterNumber(c.Title)).OfType<long>().ToArray();
-        bool numberingConflict = numbers.Distinct().Count() != numbers.Length || numbers.Zip(numbers.Skip(1)).Any(p => p.First > p.Second);
+        bool numberingConflict = !pages &&
+            (numbers.Distinct().Count() != numbers.Length || numbers.Zip(numbers.Skip(1)).Any(p => p.First > p.Second));
         var warnings = new List<string>();
         if (numberingConflict)
             warnings.Add("Mục lục có chương ngoại truyện/số chương trùng hoặc lệch thứ tự; nên bật “Giữ đúng thứ tự mục lục”.");
         var sampleCheck = await CheckSamplesAsync(chapters, warnings, cancellationToken).ConfigureAwait(false);
         if (sampleCheck.Signature is string signature)
             chapters = chapters.Select(c => c with { ExpectedBlockSignature = signature }).ToArray();
+        string summary = pages
+            ? $"Tìm thấy {chapters.Count} trang nối tiếp nhau; chương được tách theo tiêu đề 第N章 trong nội dung"
+            : $"Tìm thấy {chapters.Count} chương theo cấu trúc liên kết";
         return new(url, title ?? ChapterListDetector.Title(page), chapters,
-            $"Tìm thấy {chapters.Count} chương theo cấu trúc liên kết" + (followed ? " trong trang mục lục." : "."),
-            warnings, numberingConflict, sampleCheck);
+            summary + (followed ? " trong trang mục lục." : "."),
+            warnings, numberingConflict, sampleCheck) { ContinuousPages = pages };
     }
 
     private async Task<WebSampleCheck> CheckSamplesAsync(IReadOnlyList<WebChapterLink> chapters,
@@ -151,6 +156,10 @@ public sealed class WebNovelImporter : IWebNovelImporter, IDisposable
     public string ComposeImportText(IReadOnlyList<WebChapterContent> chapters, bool keepSiteOrder = false)
     {
         var texts = ChapterContentExtractor.RemoveRepeatedBoilerplate(chapters.Select(c => WebPage.Normalize(c.Text)).ToArray());
+        // Pages of one continuous text carry their own 第N章 headings, often mid-page: a "第2页" heading would cut a
+        // chapter in two, and site-order renumbering would count pages, not chapters.
+        if (ChapterListDetector.IsPageList(chapters.Select(c => c.Link).ToArray()))
+            return string.Join("\n", texts.Where(t => t.Length > 0));
         return string.Join("\n\n", chapters.Select((chapter, i) =>
             keepSiteOrder ? SiteOrderText(chapter.Link, texts[i]) :
             IsHeading(texts[i]) ? texts[i] : Heading(chapter.Link) + (texts[i].Length > 0 ? "\n" + texts[i] : "")));

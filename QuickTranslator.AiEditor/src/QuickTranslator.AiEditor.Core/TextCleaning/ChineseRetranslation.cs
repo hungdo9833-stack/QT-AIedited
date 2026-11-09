@@ -1,4 +1,5 @@
 using QuickTranslator.AiEditor.Core.Models;
+using QuickTranslator.AiEditor.Core.Translation;
 
 namespace QuickTranslator.AiEditor.Core.TextCleaning;
 
@@ -49,14 +50,17 @@ public static class ChineseRetranslationPreviewBuilder
     }
 
     public static BatchReplacementPreviewItem Build(ChapterDocument chapter, ChineseTextOccurrence occurrence,
-        ChineseRetranslationMode mode, ChineseRetranslationMethod method, string translatedText)
+        ChineseRetranslationMode mode, ChineseRetranslationMethod method, string translatedText, bool cantonese = false)
     {
         ArgumentNullException.ThrowIfNull(chapter);
         ArgumentNullException.ThrowIfNull(occurrence);
         if (!Enum.IsDefined(mode) || !Enum.IsDefined(method))
             throw new ArgumentOutOfRangeException(nameof(mode));
         string replacement = translatedText?.Trim() ?? "";
-        if (replacement.Length == 0)
+        // A Cantonese sentence particle (㗎, 喇…) is simply removed from the translated sentence.
+        bool removal = replacement.Length == 0 && mode == ChineseRetranslationMode.ResidualHanOnly &&
+                       CantoneseReadings.TryRead(occurrence.Text, out string particle) && particle.Length == 0;
+        if (replacement.Length == 0 && !removal)
             throw new InvalidDataException("Kết quả dịch lại đang trống; chưa tạo preview.");
         if (replacement.Length > 1_000_000)
             throw new InvalidDataException("Kết quả dịch lại vượt giới hạn an toàn.");
@@ -74,9 +78,10 @@ public static class ChineseRetranslationPreviewBuilder
         int length = mode == ChineseRetranslationMode.EntireSegment ? before.Length : occurrence.LengthUtf16;
         string original = before.Substring(start, length);
         if (string.Equals(original, replacement, StringComparison.Ordinal))
-            throw new InvalidDataException("Kết quả dịch lại không làm thay đổi nội dung; chưa tạo preview.");
+            throw new InvalidDataException($"Bỏ qua “{occurrence.Text}”: không phương pháp nào hiểu cụm này " +
+                "(thường là chữ hiếm hoặc tiếng địa phương). Hãy thêm quy tắc “Trung => Việt” ở ô Nhiều quy tắc.");
         string after = string.Concat(before.AsSpan(0, start), replacement, before.AsSpan(start + length));
-        string source = method switch
+        string source = cantonese ? "Nghĩa tiếng Quảng Đông" : method switch
         {
             ChineseRetranslationMethod.LlamaServer => "Dịch lại bằng llama-server",
             ChineseRetranslationMethod.VietPhrase => "Dịch lại bằng VietPhrase",
@@ -102,6 +107,37 @@ public static class ChineseRetranslationPreviewBuilder
                 ? Excerpt(before) : ChineseTextScanner.SentenceAround(before, start, length),
             AfterSentence = mode == ChineseRetranslationMode.EntireSegment
                 ? Excerpt(after) : ChineseTextScanner.SentenceAround(after, start, replacement.Length),
+            AnalysedText = before,
+            DraftRevision = segment.DraftRevision,
+            ApprovalVersion = segment.Approvals.Count,
+            LastApprovalId = segment.Approvals.LastOrDefault()?.Id,
+            SegmentStatus = segment.Status,
+            Protected = segment.IsProtectedFromAutomaticTranslation,
+            Conflict = false
+        };
+    }
+
+    /// <summary>A preview item replacing a segment's whole current text, checked against its current state.</summary>
+    public static BatchReplacementPreviewItem WholeSegment(ChapterDocument chapter, TranslationSegment segment,
+        string replacement, string sourceLabel)
+    {
+        string before = segment.EditableText;
+        return new BatchReplacementPreviewItem
+        {
+            ChapterId = chapter.Id,
+            CharacterProjectId = chapter.CharacterProject.Id,
+            ChapterTitle = chapter.Title,
+            SegmentId = segment.Id,
+            SegmentOrder = segment.Order,
+            StartUtf16 = 0,
+            LengthUtf16 = before.Length,
+            Original = before,
+            Replacement = replacement,
+            Source = ReplacementRuleSource.Manual,
+            RuleConfirmed = true,
+            SourceLabel = sourceLabel,
+            BeforeSentence = Excerpt(before),
+            AfterSentence = Excerpt(replacement),
             AnalysedText = before,
             DraftRevision = segment.DraftRevision,
             ApprovalVersion = segment.Approvals.Count,

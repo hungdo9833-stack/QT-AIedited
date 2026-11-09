@@ -11,6 +11,8 @@ namespace QuickTranslator.AiEditor.Core.Projects;
 
 public sealed class ProjectTranslationCoordinator
 {
+    /// <summary>Workers (GPUs or API pools) translating one project's chapters side by side.</summary>
+    public const int MaximumWorkers = 8;
     private static readonly ConcurrentDictionary<Guid, Guid> ActiveProjects = new();
     private readonly ProjectSession _session;
     private readonly ProjectRepository _repository;
@@ -52,8 +54,8 @@ public sealed class ProjectTranslationCoordinator
         _session = session ?? throw new ArgumentNullException(nameof(session));
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         ArgumentNullException.ThrowIfNull(workers);
-        if (workers.Count is < 1 or > 2 || workers.Select(worker => worker.WorkerId).Distinct().Count() != workers.Count)
-            throw new ArgumentException("M6.6 hỗ trợ một hoặc hai worker duy nhất.", nameof(workers));
+        if (workers.Count is < 1 or > MaximumWorkers || workers.Select(worker => worker.WorkerId).Distinct().Count() != workers.Count)
+            throw new ArgumentException($"Hàng đợi dịch nhận từ 1 đến {MaximumWorkers} worker khác nhau.", nameof(workers));
         foreach (ProjectTranslationWorkerDefinition worker in workers) worker.Validate();
         _workerDefinitions = workers.ToArray();
         _client = workers[0].Client;
@@ -88,8 +90,11 @@ public sealed class ProjectTranslationCoordinator
 
     /// <param name="retranslateAll">Chapters to translate again from scratch (QueueMode.AllSegments); segments the user
     /// edited or approved stay protected. Other chapters only get their missing segments.</param>
+    /// <param name="overrideUserEdits">The user confirmed that the retranslated chapters' edited and approved segments are
+    /// translated again too.</param>
     public async Task<ProjectTranslationJob> PlanAsync(IEnumerable<Guid> chapterIds,
-        CancellationToken cancellationToken = default, IReadOnlySet<Guid>? retranslateAll = null)
+        CancellationToken cancellationToken = default, IReadOnlySet<Guid>? retranslateAll = null,
+        bool overrideUserEdits = false)
     {
         Guid[] selected = chapterIds.Distinct().ToArray();
         if (selected.Length == 0) throw new ArgumentException("Hãy chọn ít nhất một chapter.", nameof(chapterIds));
@@ -101,7 +106,7 @@ public sealed class ProjectTranslationCoordinator
         var items = new List<ProjectTranslationItem>(entries.Length);
         for (int index = 0; index < entries.Length; index++)
             items.Add(await CreateItemAsync(entries[index], index + 1, retranslateAll?.Contains(entries[index].ChapterId) == true,
-                cancellationToken).ConfigureAwait(false));
+                overrideUserEdits, cancellationToken).ConfigureAwait(false));
         DateTimeOffset now = DateTimeOffset.UtcNow;
         var job = new ProjectTranslationJob
         {
@@ -130,7 +135,7 @@ public sealed class ProjectTranslationCoordinator
     }
 
     private async Task<ProjectTranslationItem> CreateItemAsync(ProjectChapterEntry entry, int order, bool retranslate,
-        CancellationToken cancellationToken)
+        bool overrideUserEdits, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ChapterDocument chapter = (await _repository.LoadChapterAsync(_session, entry.ChapterId, cancellationToken)
@@ -148,7 +153,8 @@ public sealed class ProjectTranslationCoordinator
             ErrorSegments = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error),
             SourceHanCharacters = chapter.Segments.Sum(segment => CountHan(segment.SourceText)),
             CompletedHanCharacters = CompletedHanCharacters(chapter),
-            RetranslateAll = retranslate
+            RetranslateAll = retranslate,
+            OverrideUserEdits = retranslate && overrideUserEdits
         };
         if (retranslate) item.CompletedSegments = CompletedSegmentsFor(chapter, item);
         item.RecordEligibilityDiagnostic(TranslationEligibilityDiagnostics.Analyze(chapter,
@@ -162,7 +168,8 @@ public sealed class ProjectTranslationCoordinator
     /// Pending; if it has not started yet it only takes the retranslation choice. Resume then continues as usual.
     /// </summary>
     public async Task<ProjectTranslationAppendResult> AppendAsync(IEnumerable<Guid> chapterIds,
-        IReadOnlySet<Guid>? retranslateAll = null, CancellationToken cancellationToken = default)
+        IReadOnlySet<Guid>? retranslateAll = null, CancellationToken cancellationToken = default,
+        bool overrideUserEdits = false)
     {
         if (IsRunning) throw new InvalidOperationException("Hãy tạm dừng hàng đợi trước khi thêm chương.");
         ProjectTranslationJob current = CurrentJob ?? await LoadAsync(cancellationToken).ConfigureAwait(false)
@@ -179,7 +186,7 @@ public sealed class ProjectTranslationCoordinator
         var added = new List<ProjectTranslationItem>(entries.Length);
         foreach (ProjectChapterEntry entry in entries)
             added.Add(await CreateItemAsync(entry, ++order, retranslateAll?.Contains(entry.ChapterId) == true,
-                cancellationToken).ConfigureAwait(false));
+                overrideUserEdits, cancellationToken).ConfigureAwait(false));
         int reopened = 0;
         await PersistAsync(job =>
         {
@@ -197,11 +204,16 @@ public sealed class ProjectTranslationCoordinator
                     item.Error = null; item.FinishedAt = null; item.ChapterQueueRunId = null; item.AssignedWorkerId = null;
                     PrepareItemMetricsForRetry(item);
                     item.RetranslateAll = true;
+                    item.OverrideUserEdits = overrideUserEdits;
                     // Count progress from the new run; preflight recounts kept user segments once the chapter starts.
                     item.StartedAt = null; item.CompletedSegments = 0;
                     reopened++;
                 }
-                else if (item.ChapterQueueRunId is null) item.RetranslateAll = true; // Not started yet: retranslate when it starts.
+                else if (item.ChapterQueueRunId is null) // Not started yet: retranslate when it starts.
+                {
+                    item.RetranslateAll = true;
+                    item.OverrideUserEdits = overrideUserEdits;
+                }
             }
             job.Items.AddRange(added);
         }, cancellationToken).ConfigureAwait(false);
@@ -286,6 +298,38 @@ public sealed class ProjectTranslationCoordinator
             value.LastError = null;
         }, cancellationToken).ConfigureAwait(false);
         await LaunchAsync(CurrentJob!, isNew: false, retryFailed: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Chapters of a finished job that still hold failed segments (failed, or left for review after a GPU dropped) send
+    /// those segments again. True when there was something to retry; the run is awaited like <see cref="RetryFailedAsync"/>.
+    /// </summary>
+    public async Task<bool> RetryErrorSegmentsAsync(CancellationToken cancellationToken = default)
+    {
+        ProjectTranslationJob job = CurrentJob ?? await LoadAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Project chưa có translation job.");
+        if (IsRunning) throw new InvalidOperationException("Hãy Pause translation job trước khi Retry.");
+        if (job.Status is not (ProjectTranslationJobStatus.Completed or ProjectTranslationJobStatus.CompletedWithErrors))
+            throw new InvalidOperationException("Chỉ dịch lại đoạn lỗi khi hàng đợi đã kết thúc.");
+        bool Retryable(ProjectTranslationItem item) => item.ErrorSegments > 0 && item.StartedAt is not null &&
+            item.Status is ProjectTranslationItemStatus.Failed or ProjectTranslationItemStatus.NeedsReview;
+        if (!job.Items.Any(Retryable)) return false;
+        await PersistAsync(value =>
+        {
+            foreach (ProjectTranslationItem item in value.Items.Where(Retryable))
+            {
+                item.Status = ProjectTranslationItemStatus.Pending;
+                item.Disposition = ProjectTranslationItemDisposition.None;
+                item.Error = null;
+                item.FinishedAt = null;
+                PrepareItemMetricsForRetry(item);
+            }
+            value.Status = ProjectTranslationJobStatus.Ready;
+            value.LastError = null;
+        }, cancellationToken).ConfigureAwait(false);
+        await LaunchAsync(CurrentJob!, isNew: false, retryFailed: true, cancellationToken,
+            acceptChangedBackendOrWorkers: true).ConfigureAwait(false);
+        return true;
     }
 
     public async Task<ProjectTranslationJob> ReplanUnfinishedAsync(CancellationToken cancellationToken = default)
@@ -980,6 +1024,8 @@ public sealed class ProjectTranslationCoordinator
             return;
         }
 
+        // Segments that already failed in an earlier run (say while the GPU was down) say nothing about this run's GPU.
+        int errorSegmentsBefore = chapter.Segments.Count(segment => segment.Status == SegmentStatus.Error);
         var service = new TranslationService(chapter, workerDefinition?.Client ?? _client,
             new TranslationChapterStore(_session, _repository, chapter));
         service.UseProjectResources(environment.Resources);
@@ -1065,7 +1111,11 @@ public sealed class ProjectTranslationCoordinator
                 return;
             }
             bool failed = status is QueueStatus.CompletedWithErrors or QueueStatus.Faulted;
-            bool uncertainRemote = failed && workerDefinition?.Backend.Kind == GpuBackendKind.Remote;
+            // Only a failure of this run makes the Remote result uncertain and takes the worker offline. A chapter that
+            // only kept errors from an earlier run would otherwise cancel every request on a healthy GPU each time it ends.
+            bool uncertainRemote = failed && workerDefinition?.Backend.Kind == GpuBackendKind.Remote &&
+                (status == QueueStatus.Faulted ||
+                 after.Segments.Count(segment => segment.Status == SegmentStatus.Error) > errorSegmentsBefore);
             await PersistProgressAsync(job =>
             {
                 UpdateItem(job, chapterId, after, uncertainRemote ? ProjectTranslationItemStatus.NeedsReview :
@@ -1622,7 +1672,7 @@ public sealed class ProjectTranslationCoordinator
     /// </summary>
     internal static int CompletedSegmentsFor(ChapterDocument chapter, ProjectTranslationItem item) => !item.RetranslateAll
         ? CompletedSegments(chapter)
-        : chapter.Segments.Count(segment => segment.Status == SegmentStatus.Approved || segment.UserDraft is not null ||
+        : chapter.Segments.Count(segment => !item.OverrideUserEdits && (segment.Status == SegmentStatus.Approved || segment.UserDraft is not null) ||
             item.StartedAt is DateTimeOffset started && segment.HasCompletedTranslation && segment.Attempts.Any(attempt =>
                 attempt.Outcome == AttemptOutcome.Completed && attempt.StartedAt >= started));
 

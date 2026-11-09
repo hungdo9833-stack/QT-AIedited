@@ -39,18 +39,42 @@ public sealed partial class ProjectRepository
 
             // Retranslating from scratch, or moving an unfinished chapter to a whole-chapter worker: earlier AI
             // translations do not pin the old boundaries. Replaced segments remain available in segmentation history.
-            // Human work cannot be merged safely into a single translated chapter, so fail closed rather than lose it.
-            if (segmentation.WholeChapter && current.Segments.Count > 1 &&
+            // Segments the user drafted, edited or approved keep their boundaries and text; a whole-chapter worker then
+            // sends each stretch between them as one request instead of the whole chapter. When the user confirmed
+            // retranslating those too, they are released first and the chapter as it was goes into segmentation history.
+            ChapterDocument? beforeRelease = null;
+            if (expectedItem.RetranslateAll && expectedItem.OverrideUserEdits &&
                 current.Segments.Any(ResegmentationPlanner.HasUserData))
-                throw new InvalidOperationException(
-                    "Chương chưa hoàn tất có bản sửa hoặc bản duyệt của người dùng trong các segment cũ. " +
-                    "Gemini không tự gộp lại vì có thể làm mất bản sửa; hãy hoàn tất chương hoặc xử lý các bản sửa trước.");
+            {
+                beforeRelease = DocumentJson.Clone(current);
+                foreach (TranslationSegment segment in current.Segments) ReleaseUserData(segment);
+            }
             bool releaseAi = expectedItem.RetranslateAll || segmentation.WholeChapter;
             ResegmentationPreview preview = ResegmentationPlanner.Preview(current, segmentation,
                 allowRecoverableCheckpoint: true, releaseAiTranslations: releaseAi);
             ChapterDocument candidate = ResegmentationPlanner.Apply(current, preview,
                 confirmed: preview.ProtectedSegmentCount > 0, DateTimeOffset.UtcNow,
                 allowRecoverableCheckpoint: true, releaseAiTranslations: releaseAi);
+            if (beforeRelease is not null)
+            {
+                const string description = "Dịch lại cả đoạn đã sửa/duyệt";
+                if (preview.BoundariesChanged)
+                {
+                    SegmentationChange last =candidate.SegmentationHistory[^1];
+                    last.PreviousSegments = beforeRelease.Segments;
+                    last.Description = description + ": " + last.Description;
+                }
+                else
+                    candidate.SegmentationHistory.Add(new()
+                    {
+                        ChangedAt = DateTimeOffset.UtcNow,
+                        Description = description,
+                        PreviousSegments = beforeRelease.Segments,
+                        ReplacementIds = candidate.Segments.Select(segment => segment.Id).ToList(),
+                        PreviousQueue = beforeRelease.Queue
+                    });
+                DocumentJson.Validate(candidate);
+            }
             ProjectTranslationJob proposed = ProjectTranslationJobStore.Clone(expectedJob);
             ProjectTranslationItem item = proposed.Items.Single(value => value.ChapterId == chapterId);
             item.SourceFingerprint = ProjectTranslationFingerprints.Source(candidate);
@@ -78,5 +102,21 @@ public sealed partial class ProjectRepository
             return new(candidate, proposed, preview);
         }
         finally { session.OperationGate.Release(); }
+    }
+
+    /// <summary>Makes a segment the user drafted, edited or approved eligible for automatic translation again.</summary>
+    private static void ReleaseUserData(TranslationSegment segment)
+    {
+        segment.UserDraft = null;
+        segment.DraftSourceAttemptId = null;
+        segment.DraftRevision = 0;
+        segment.Approvals = [];
+        segment.DraftHistory = [];
+        segment.PreservedText = null;
+        segment.ProtectedByPreviousEdit = false;
+        segment.NormalizedText = null;
+        segment.NormalizationHistory = [];
+        if (segment.Status == SegmentStatus.Approved)
+            segment.Status = segment.HasCompletedTranslation ? SegmentStatus.AwaitingReview : SegmentStatus.Untranslated;
     }
 }

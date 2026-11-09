@@ -93,6 +93,40 @@ public sealed class ChineseRetranslationTests
             ChineseRetranslationMode.ResidualHanOnly, ChineseRetranslationMethod.LlamaServer, "老公"));
     }
 
+    [Fact]
+    public void A_Cantonese_particle_is_removed_and_a_Cantonese_word_gets_its_meaning()
+    {
+        ChapterDocument chapter = Chapter("Leung: 【瞓 rồi】 Ta ồ nhất định được㗎, tiểu thư.");
+        ChineseTextOccurrence[] occurrences = Scan(chapter).ToArray();
+        ChineseTextOccurrence particle = occurrences.Single(item => item.Text == "㗎");
+        ChineseTextOccurrence sleep = occurrences.Single(item => item.Text == "瞓");
+        Assert.True(CantoneseReadings.TryRead("瞓", out string meaning));
+
+        BatchReplacementPreviewItem removed = ChineseRetranslationPreviewBuilder.Build(chapter, particle,
+            ChineseRetranslationMode.ResidualHanOnly, ChineseRetranslationMethod.LlamaServer, "", cantonese: true);
+        BatchReplacementPreviewItem replaced = ChineseRetranslationPreviewBuilder.Build(chapter, sleep,
+            ChineseRetranslationMode.ResidualHanOnly, ChineseRetranslationMethod.LlamaServer, meaning, cantonese: true);
+
+        Assert.Equal("Leung: 【ngủ rồi】 Ta ồ nhất định được, tiểu thư.",
+            BatchReplacementEngine.Apply(chapter.Segments[0].EditableText, [replaced, removed]));
+        Assert.StartsWith("Nghĩa tiếng Quảng Đông", replaced.SourceLabel);
+    }
+
+    [Theory]
+    [InlineData("瞓", true, "ngủ")]
+    [InlineData("佢哋", true, "bọn họ")]
+    [InlineData("唔該晒", false, "")] // 晒 is not listed: the run is not read
+    [InlineData("老公", false, "")]
+    public void Cantonese_runs_are_read_only_when_every_word_is_known(string run, bool known, string reading)
+    {
+        Assert.Equal(known, CantoneseReadings.TryRead(run, out string actual));
+        if (known) Assert.Equal(reading, actual);
+    }
+
+    [Fact]
+    public void Cantonese_words_inside_a_translation_are_replaced() =>
+        Assert.Equal("Dùng a di dỗ ngươi ngủ nha", CantoneseReadings.Replace("Dùng a di氹 ngươi瞓 nha"));
+
     private static ChapterDocument Chapter(string draft)
     {
         ChapterDocument chapter = TranslationService.CreateChapter("Test", "老公说了一句话。",

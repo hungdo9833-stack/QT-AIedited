@@ -7,13 +7,41 @@
         AllowDrop="True" PreviewDragOver="OnDragOver" PreviewDrop="OnDropFiles" ResizeMode="CanResize">
  <Window.Resources>
   <Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{DynamicResource PanelBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="{StaticResource Radius.Overlay}"/><Setter Property="Padding" Value="12"/></Style>
+  <BooleanToVisibilityConverter x:Key="VisibleWhen"/>
+  <!-- A book's workers as chips ("Worker 1 · Remote: 3090 ✕") and a "+ Worker" button; the DataContext is an AutoBookRow. -->
+  <DataTemplate x:Key="WorkerChips">
+   <WrapPanel VerticalAlignment="Center">
+    <TextBlock Text="Theo QT Studio" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="2,2,6,2"
+               Visibility="{Binding FollowsApp, Converter={StaticResource VisibleWhen}}"
+               ToolTip="Chưa chọn worker: dùng nguồn dịch và chế độ GPU đang chọn trong QT Studio."/>
+    <ItemsControl ItemsSource="{Binding Workers}" Focusable="False">
+     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+     <ItemsControl.ItemTemplate>
+      <DataTemplate>
+       <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+               CornerRadius="{StaticResource Radius.Overlay}" Padding="8,1,2,1" Margin="2">
+        <StackPanel Orientation="Horizontal">
+         <TextBlock Text="{Binding Label}" VerticalAlignment="Center"/>
+         <Button Content="✕" Click="OnRemoveWorker" Padding="5,0" Margin="4,0,0,0" BorderThickness="0" Background="Transparent"
+                 Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                 ToolTip="Bỏ worker này" AutomationProperties.Name="{Binding Label, StringFormat=Bỏ {0}}"/>
+        </StackPanel>
+       </Border>
+      </DataTemplate>
+     </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <Button Content="+ Worker" Click="OnAddWorker" Padding="8,1" Margin="2"
+            ToolTip="Thêm GPU máy này, một GPU Remote hoặc Gemini. Nhiều worker cùng chia chương của truyện."
+            AutomationProperties.Name="Thêm worker"/>
+   </WrapPanel>
+  </DataTemplate>
  </Window.Resources>
  <Grid Margin="{StaticResource Inset.Window}">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
   <Border Style="{StaticResource Card}">
    <StackPanel>
     <TextBlock Text="Tự động dịch từ link" Style="{StaticResource WindowTitle}"/>
-    <TextBlock Style="{StaticResource WindowSubtitle}" Text="Mỗi dòng một link mục lục truyện. Mỗi truyện được tải về, tạo dự án mới, Codex khảo sát nhân vật và từ điển, rồi dịch toàn bộ bằng backend đang chọn trong QT Studio. Khi đang chạy vẫn dán thêm link được; truyện bị dừng thì bấm Thử lại ở dòng của nó. File TXT: bấm Thêm file TXT, kéo thả vào cửa sổ hoặc dán đường dẫn file." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+    <TextBlock Style="{StaticResource WindowSubtitle}" Text="Mỗi dòng một link mục lục truyện. Mỗi truyện được tải về, tạo dự án mới, Codex khảo sát nhân vật và từ điển, rồi dịch nền toàn bộ bằng các worker của nó (bấm + Worker để chọn GPU máy này, GPU Remote hoặc Gemini; nhiều worker cùng chia chương). Các truyện không dùng chung worker nào dịch cùng lúc; truyện dùng chung worker thì chờ tới lượt. Khi đang chạy vẫn dán thêm link được; truyện bị dừng thì bấm Thử lại ở dòng của nó. File TXT: bấm Thêm file TXT, kéo thả vào cửa sổ hoặc dán đường dẫn file." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
     <TextBox x:Name="LinksInput" AcceptsReturn="True" TextWrapping="NoWrap" Height="110" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Danh sách link truyện, mỗi dòng một link"/>
     <WrapPanel Margin="0,8,0,0">
      <TextBlock Text="Model Codex" VerticalAlignment="Center" Margin="4"/>
@@ -31,6 +59,9 @@
      <Button Content="Thêm file TXT…" Click="OnAddTxtFiles" Margin="12,4,4,4" Padding="10,2"
              ToolTip="Chọn một hoặc nhiều file TXT truyện tiếng Trung (hoặc kéo thả file vào cửa sổ). Truyện từ file bỏ qua bước tải."
              AutomationProperties.Name="Thêm file TXT vào hàng chờ"/>
+     <TextBlock Text="Worker cho link mới" VerticalAlignment="Center" Margin="12,4,4,4"
+                ToolTip="Các truyện thêm vào từ giờ nhận những worker này; đổi worker của từng truyện ở cột Worker dịch."/>
+     <ContentControl x:Name="DefaultWorkersEditor" ContentTemplate="{StaticResource WorkerChips}" Focusable="False" VerticalAlignment="Center"/>
      <CheckBox x:Name="PrepareOnlyCheck" Content="Chỉ chuẩn bị (tải + khảo sát), chưa dịch" VerticalAlignment="Center" Margin="12,4,4,4"/>
     </WrapPanel>
    </StackPanel>
@@ -39,6 +70,7 @@
    <DataGrid x:Name="BookGrid" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column" CanUserAddRows="False" AutomationProperties.Name="Tiến độ từng truyện">
     <DataGrid.Columns>
      <DataGridTextColumn Header="Truyện" Binding="{Binding Title}" Width="2*"/>
+     <DataGridTemplateColumn Header="Worker dịch" Width="2*" MinWidth="200" DisplayIndex="2" CellTemplate="{StaticResource WorkerChips}"/>
      <DataGridTextColumn Header="Bước" Binding="{Binding Stage}" Width="*"/>
      <DataGridTextColumn Header="Chi tiết" Binding="{Binding Detail}" Width="3*">
       <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/></Style></DataGridTextColumn.ElementStyle>

@@ -312,6 +312,11 @@ public partial class MainWindow
                 throw new InvalidOperationException("Nội dung chữ Hán đã đổi sau lần quét; hãy quét lại.");
             string source = choice.Mode == ChineseRetranslationMode.EntireSegment
                 ? segment.SourceText : occurrence.Text;
+            // Cantonese words: no model or dictionary knows them, so their meaning is used directly.
+            if (choice.Mode == ChineseRetranslationMode.ResidualHanOnly &&
+                CantoneseReadings.TryRead(occurrence.Text, out string cantonese))
+                return ChineseRetranslationPreviewBuilder.Build(chapter, occurrence, choice.Mode, choice.Method,
+                    cantonese, cantonese: true);
             string translated;
             if (choice.Method == ChineseRetranslationMethod.LlamaServer)
             {
@@ -332,6 +337,7 @@ public partial class MainWindow
                 translated = choice.Method == ChineseRetranslationMethod.VietPhrase
                     ? result.VietPhraseText : result.HanVietText;
             }
+            if (HanResidueRepairClient.HasHan(translated)) translated = CantoneseReadings.Replace(translated);
             return ChineseRetranslationPreviewBuilder.Build(chapter, occurrence, choice.Mode, choice.Method, translated);
         }
 

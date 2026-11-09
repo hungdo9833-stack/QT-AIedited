@@ -54,7 +54,7 @@ public sealed partial record GgufModelReference
 /// </summary>
 public sealed record LlamaServerLaunch(GgufModelReference Model, int Port, int Slots, int ContextPerSlot)
 {
-    public const int MaximumSlots = 8;
+    public const int MaximumSlots = 16;
 
     public void Validate()
     {
@@ -72,8 +72,14 @@ public sealed record LlamaServerLaunch(GgufModelReference Model, int Port, int S
             "-ngl", "99", "-c", (ContextPerSlot * Slots).ToString(System.Globalization.CultureInfo.InvariantCulture),
             "-np", Slots.ToString(System.Globalization.CultureInfo.InvariantCulture), "--jinja",
             // Text translation only: skip the vision projector some GGUF repos ship (its download and its VRAM).
-            "--no-mmproj"];
+            "--no-mmproj",
+            // The host-RAM prompt cache defaults to 8 GiB. Every segment is a new chapter, so it rarely hits, and a full
+            // cache plus the mapped GGUF filled a 32 GB PC. Prompts re-evaluate in about a second, so keep it small.
+            "--cache-ram", CacheRamMiB.ToString(System.Globalization.CultureInfo.InvariantCulture)];
     }
+
+    /// <summary>Cap on llama-server's prompt cache in system RAM (llama.cpp default 8192 MiB).</summary>
+    public const int CacheRamMiB = 1024;
 }
 
 /// <summary>The llama.cpp Windows CUDA build QT Studio runs and ships to rented GPUs (pinned, tested release).</summary>

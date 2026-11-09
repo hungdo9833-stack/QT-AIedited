@@ -47,7 +47,8 @@ public partial class GpuManagerWindow : Window
         MainWindow.ClampWindowToWorkArea(this, 1180, 820);
         _loadingMode = true;
         TranslationModeInput.SelectedIndex = (int)_preferences.Mode;
-        ApiSourceInput.IsChecked = _preferences.Source == TranslationSource.Api;
+        ApiSourceInput.IsChecked = _preferences.Source == TranslationSource.Api && !_preferences.UsesCodex;
+        CodexSourceInput.IsChecked = _preferences.UsesCodex;
         GpuSourceInput.IsChecked = _preferences.Source == TranslationSource.Gpu;
         _loadingMode = false;
         GeminiKeyList.ItemsSource = _geminiKeys;
@@ -84,8 +85,11 @@ public partial class GpuManagerWindow : Window
 
     private void OnTranslationSourceChanged(object sender, RoutedEventArgs e)
     {
-        if (ApiSourceInput is null || GpuSourceInput is null) return;
-        _preferences.Source = ApiSourceInput.IsChecked == true ? TranslationSource.Api : TranslationSource.Gpu;
+        if (ApiSourceInput is null || GpuSourceInput is null || CodexSourceInput is null) return;
+        bool codex = CodexSourceInput.IsChecked == true;
+        _preferences.Source = ApiSourceInput.IsChecked == true || codex ? TranslationSource.Api : TranslationSource.Gpu;
+        if (_preferences.Source == TranslationSource.Api)
+            _preferences.ApiProvider = codex ? ApiTranslationProvider.Codex : ApiTranslationProvider.Gemini;
         if (!_loadingMode)
         {
             _preferences.ModeExplicitlySelected = true;
@@ -94,18 +98,27 @@ public partial class GpuManagerWindow : Window
         ApplyTranslationSourceUi();
     }
 
+    /// <summary>Shown under the Codex source; workspace and model follow the auto-translate window.</summary>
+    internal static string CodexSourceDescription { get; set; } =
+        "Mỗi request dịch trọn một chương qua Codex CLI, 3 chương cùng lúc, thinking thấp. Workspace và model theo ô " +
+        "\"Model Codex\"/\"Workspace\" của cửa sổ Tự động dịch (mặc định business · gpt-6-luna). Cần đăng nhập Codex ở terminal trước.";
+
     private void ApplyTranslationSourceUi()
     {
         if (ApiTranslationPanel is null) return;
         bool api = _preferences.Source == TranslationSource.Api;
-        ApiTranslationPanel.Visibility = api ? Visibility.Visible : Visibility.Collapsed;
+        bool codex = _preferences.UsesCodex;
+        ApiTranslationPanel.Visibility = api && !codex ? Visibility.Visible : Visibility.Collapsed;
+        CodexTranslationPanel.Visibility = codex ? Visibility.Visible : Visibility.Collapsed;
+        CodexTranslationDescription.Text = CodexSourceDescription;
         GpuTranslationPanel.Visibility = api ? Visibility.Collapsed : Visibility.Visible;
         GpuConfigurationPanel.Visibility = api ? Visibility.Collapsed : Visibility.Visible;
         GpuProfilesPanel.Visibility = api ? Visibility.Collapsed : Visibility.Visible;
         GpuActionPanel.Visibility = api ? Visibility.Collapsed : Visibility.Visible;
         GpuProfilesColumn.Width = api ? new GridLength(0) : new GridLength(310);
         GpuProfilesGapColumn.Width = api ? new GridLength(0) : new GridLength(12);
-        StatusText.Text = api
+        StatusText.Text = codex ? "Codex (ChatGPT) · trừ vào hạn mức Codex của gói ChatGPT."
+            : api
             ? "API · Gemini 3.5 Flash-Lite · tự động xoay model và API key."
             : "GPU · giữ nguyên cấu hình Local/Remote hiện tại.";
     }
@@ -115,7 +128,10 @@ public partial class GpuManagerWindow : Window
         _geminiKeys.Clear();
         IReadOnlyList<string> keys = _keyReader();
         for (int index = 0; index < keys.Count; index++)
-            _geminiKeys.Add(new(index, GeminiApiKeyVault.Mask(keys[index])));
+        {
+            string fingerprint = GeminiKeyWorkers.Fingerprint(keys[index]);
+            _geminiKeys.Add(new(index, GeminiApiKeyVault.Mask(keys[index]), fingerprint, GeminiKeyWorkers.NameOf(fingerprint)));
+        }
         GeminiKeysStatus.Text = keys.Count == 0
             ? "Chưa lưu API key. Hãy thêm ít nhất một key trước khi chạy hàng đợi dịch."
             : $"Đã lưu {keys.Count} key; thứ tự trên là thứ tự xoay vòng.";
@@ -729,5 +745,21 @@ public partial class GpuManagerWindow : Window
         finally { IsEnabled = true; _busy = false; }
     }
 
-    private sealed record GeminiKeyItem(int Index, string Masked);
+    private sealed record GeminiKeyItem(int Index, string Masked, string Fingerprint, string Name);
+
+    private void OnGeminiKeyNameCommitted(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox { Tag: string fingerprint } box) return;
+        try
+        {
+            GeminiKeyWorkers.SetName(fingerprint, box.Text);
+            GeminiKeysStatus.Text = "Đã lưu tên key; worker Gemini mới chọn sẽ hiện tên này.";
+        }
+        catch (Exception error) { GeminiKeysStatus.Text = error.Message; }
+    }
+
+    private void OnGeminiKeyNameKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) OnGeminiKeyNameCommitted(sender, e);
+    }
 }

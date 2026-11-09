@@ -39,3 +39,13 @@ Codex làm phần đọc code, sửa và chạy test.
 - Codex CLI phải được cài ngoài sandbox của Claude (npm global trong AppData thật), vì file Claude cài
   từ trong sandbox không hiện ra ở terminal thật. Config mỗi CODEX_HOME phải có
   `[windows] sandbox = "elevated"`; thiếu dòng này Codex chạy read-only và chặn mọi lệnh.
+
+## Dọn bản build để ổ C không đầy
+
+Mỗi bản publish QT Studio nặng ~150–260MB. Trước đây chúng bị giữ lại sau mỗi lần test và dồn tới hơn 15GB.
+
+- Bản build chỉ để test/kiểm chứng: publish vào scratchpad hoặc thư mục tạm, kiểm tra xong thì xóa.
+  Không publish vào `artifacts\` của repo.
+- `QuickTranslator.AiEditor\artifacts\releases\` chỉ chứa bản giao cho user. Mỗi lần thêm bản mới,
+  giữ 3 bản mới nhất, xóa các bản cũ hơn.
+- Codex không đọc file này: khi giao task có build/publish, Claude ghi luôn hai luật trên vào prompt.

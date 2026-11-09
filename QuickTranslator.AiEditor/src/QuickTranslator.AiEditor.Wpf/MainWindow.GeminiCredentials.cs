@@ -62,7 +62,10 @@ public partial class MainWindow
         {
             IReadOnlyList<string> keys = GeminiApiKeysReader();
             GeminiSavedKeyList.ItemsSource = keys.Select((key, index) =>
-                new GeminiSavedKeyItem(index, GeminiApiKeyVault.Mask(key))).ToArray();
+            {
+                string fingerprint = GeminiKeyWorkers.Fingerprint(key);
+                return new GeminiSavedKeyItem(index, GeminiApiKeyVault.Mask(key), fingerprint, GeminiKeyWorkers.NameOf(fingerprint));
+            }).ToArray();
             GeminiApiKeyInput.Clear();
             bool legacy = !string.IsNullOrWhiteSpace(
                 Environment.GetEnvironmentVariable("QTSTUDIO_GEMINI_API_KEY"));
@@ -80,5 +83,21 @@ public partial class MainWindow
         }
     }
 
-    private sealed record GeminiSavedKeyItem(int Index, string Masked);
+    private sealed record GeminiSavedKeyItem(int Index, string Masked, string Fingerprint, string Name);
+
+    private void OnGeminiKeyNameCommitted(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TextBox { Tag: string fingerprint } box) return;
+        try
+        {
+            GeminiKeyWorkers.SetName(fingerprint, box.Text);
+            SetStatus("Đã lưu tên Gemini API key.");
+        }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    private void OnGeminiKeyNameKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) OnGeminiKeyNameCommitted(sender, e);
+    }
 }

@@ -38,7 +38,10 @@ public sealed class CharacterConsistencyRuleSelector(
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(sourceText);
         ArgumentNullException.ThrowIfNull(sceneText);
-        if (!project.ConsistencyLockEnabled || sourceText.Length == 0) return CharacterConsistencySelection.Empty;
+        if (sourceText.Length == 0) return CharacterConsistencySelection.Empty;
+        // With the lock off the rules still reach the prompt as guidance (never LOCKED): a model that sees only a short
+        // passage, whose source may have lost its 他/她, cannot otherwise know a character's gender or narrative pronoun.
+        bool lockOn = project.ConsistencyLockEnabled;
         if (maximumCharacters <= 0 || maximumDialogueRules < 0 || maximumBlockCharacters < 320)
             throw new InvalidOperationException("Giới hạn Character Consistency không hợp lệ.");
 
@@ -50,7 +53,7 @@ public sealed class CharacterConsistencyRuleSelector(
         var segmentIds = inSegment.Select(x => x.Profile.Id).ToHashSet();
         var pronounIds = pronounReferencedCharacterIds?.ToHashSet() ?? [];
         var byPronoun = project.Profiles.Where(profile => pronounIds.Contains(profile.Id) && !segmentIds.Contains(profile.Id) &&
-                profile.NarrativePronounLocked && !string.IsNullOrWhiteSpace(profile.NarrativePronounFor(chapterNumber)))
+                HasNarrativeGuidance(profile, chapterNumber))
             .OrderBy(profile => profile.Id)
             .Select((profile, index) => new RelevantCharacter(profile, int.MaxValue / 3 + index, true)).ToArray();
         var presentIds = segmentIds.Concat(byPronoun.Select(item => item.Profile.Id)).ToHashSet();
@@ -72,8 +75,8 @@ public sealed class CharacterConsistencyRuleSelector(
                     dialogueParticipantIds.Contains(item.Relation.EffectiveListenerCharacterId) &&
                     item.Relation.EffectiveSpeakerCharacterId(item.Owner.Id) == item.Owner.Id &&
                     item.Relation.AppliesTo(chapterNumber) &&
-                    !string.IsNullOrWhiteSpace(item.Relation.SelfReference) &&
-                    !string.IsNullOrWhiteSpace(item.Relation.AddresseeReference))
+                    IsVietnameseTerm(item.Relation.SelfReference) &&
+                    IsVietnameseTerm(item.Relation.AddresseeReference))
                 // A chapter-ranged rule is more specific than a whole-book rule for the same direction.
                 .GroupBy(item => (item.Owner.Id, item.Relation.EffectiveListenerCharacterId))
                 .Select(g => g.OrderBy(item => item.Relation.EffectiveFromChapter is null && item.Relation.EffectiveToChapter is null).First())
@@ -82,8 +85,7 @@ public sealed class CharacterConsistencyRuleSelector(
                 .ThenBy(item => item.Owner.Id).ThenBy(item => item.Relation.EffectiveListenerCharacterId)
                 .Take(maximumDialogueRules).ToArray()
             : [];
-        var narrative = relevant.Where(item => item.Profile.NarrativePronounLocked &&
-            !string.IsNullOrWhiteSpace(item.Profile.NarrativePronounFor(chapterNumber))).ToArray();
+        var narrative = relevant.Where(item => HasNarrativeGuidance(item.Profile, chapterNumber)).ToArray();
         if (narrative.Length == 0 && dialogueRules.Length == 0) return CharacterConsistencySelection.Empty;
 
         var requiredProfiles = narrative.Select(item => item.Profile.Id)
@@ -99,14 +101,17 @@ public sealed class CharacterConsistencyRuleSelector(
         foreach (RelevantCharacter item in relevant.Where(item => requiredProfiles.Contains(item.Profile.Id)))
         {
             string identity = $"- CHARACTER {DisplaySourceName(item.Profile)} = {item.Profile.VietnameseName}";
-            if (item.Profile.NarrativePronounLocked)
-                identity += $"; narrative pronoun = {item.Profile.NarrativePronounFor(chapterNumber)} (LOCKED)";
+            if (item.Profile.Gender is CharacterGender.Male or CharacterGender.Female)
+                identity += $"; gender = {(item.Profile.Gender == CharacterGender.Female ? "female" : "male")}";
+            if (HasNarrativeGuidance(item.Profile, chapterNumber))
+                identity += $"; narrative pronoun = {item.Profile.NarrativePronounFor(chapterNumber)}" +
+                            (lockOn && item.Profile.NarrativePronounLocked ? " (LOCKED)" : "");
             if (item.ReferredByPronoun)
                 identity += $" (referred to as {(item.Profile.Gender == CharacterGender.Female ? "她" : "他")} in this passage)";
             else if (!segmentIds.Contains(item.Profile.Id)) identity += " (in scene, not named in this passage)";
             if (!TryAppendRule(builder, identity)) { omitted++; continue; }
             includedIds.Add(item.Profile.Id);
-            if (item.Profile.NarrativePronounLocked) narrativeCount++;
+            if (HasNarrativeGuidance(item.Profile, chapterNumber)) narrativeCount++;
             foreach (string term in SourceNames(item.Profile)) covered.Add(term);
         }
 
@@ -117,7 +122,7 @@ public sealed class CharacterConsistencyRuleSelector(
             if (!includedSet.Contains(item.Owner.Id) || !includedSet.Contains(listenerId)) { omitted++; continue; }
             CharacterProfile listener = relevant.First(r => r.Profile.Id == listenerId).Profile;
             string line = $"- DIALOGUE {item.Owner.VietnameseName} -> {listener.VietnameseName}: self = {item.Relation.SelfReference}; address = {item.Relation.AddresseeReference}" +
-                (item.Relation.Locked ? " (LOCKED)" : "");
+                (lockOn && item.Relation.Locked ? " (LOCKED)" : "");
             if (!TryAppendRule(builder, line)) { omitted++; continue; }
             dialogueCount++;
         }
@@ -184,6 +189,16 @@ public sealed class CharacterConsistencyRuleSelector(
 
     private static string DisplaySourceName(CharacterProfile profile) =>
         SourceNames(profile).FirstOrDefault() ?? profile.VietnameseName;
+
+    /// <summary>A narrative pronoun worth telling the model: a locked one, or the survey's choice for a character whose
+    /// gender is known (a gender-neutral default would only add noise).</summary>
+    private static bool HasNarrativeGuidance(CharacterProfile profile, int? chapterNumber) =>
+        IsVietnameseTerm(profile.NarrativePronounFor(chapterNumber)) &&
+        (profile.NarrativePronounLocked || profile.Gender is CharacterGender.Male or CharacterGender.Female);
+
+    /// <summary>An addressing or pronoun value in Vietnamese. A survey sometimes stored the source pronouns (我/你),
+    /// which say nothing about which Vietnamese pair to use and are left out of the prompt.</summary>
+    internal static bool IsVietnameseTerm(string? value) => !string.IsNullOrWhiteSpace(value) && !value.Any(IsHan);
 
     private static bool IsHan(char value) => value is >= '\u3400' and <= '\u9fff' or >= '\uf900' and <= '\ufaff';
     private static bool RangesOverlap(int firstStart, int firstLength, int secondStart, int secondLength) =>

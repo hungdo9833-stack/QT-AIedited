@@ -1,0 +1,34 @@
+<Window x:Class="QuickTranslator.AiEditor.Wpf.WorkerPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Thêm worker" Width="560" SizeToContent="Height" MaxHeight="640" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}"
+        Foreground="{DynamicResource TextBrush}">
+ <StackPanel Margin="{StaticResource Inset.Window}">
+  <TextBlock Text="Thêm worker" Style="{StaticResource WindowTitle}"/>
+  <TextBlock x:Name="SubtitleText" Style="{StaticResource WindowSubtitle}" Foreground="{DynamicResource MutedBrush}"
+             TextWrapping="Wrap" Margin="0,4,0,12"/>
+  <ScrollViewer MaxHeight="480" VerticalScrollBarVisibility="Auto">
+   <ItemsControl x:Name="ChoiceList" Focusable="False">
+    <ItemsControl.ItemTemplate>
+     <DataTemplate>
+      <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+              CornerRadius="{StaticResource Radius.Overlay}" Padding="10" Margin="0,0,0,8">
+       <Grid>
+        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel>
+         <TextBlock Text="{Binding Choice.Name}" Style="{StaticResource BodyStrongText}"/>
+         <TextBlock Text="{Binding Detail}" Style="{StaticResource CaptionText}" TextWrapping="Wrap"/>
+        </StackPanel>
+        <Button Grid.Column="1" Content="{Binding ButtonText}" IsEnabled="{Binding CanAdd}" Click="OnChoose"
+                Padding="12,4" Margin="12,0,0,0" VerticalAlignment="Center"
+                AutomationProperties.Name="{Binding Choice.Name, StringFormat=Thêm worker {0}}"/>
+       </Grid>
+      </Border>
+     </DataTemplate>
+    </ItemsControl.ItemTemplate>
+   </ItemsControl>
+  </ScrollViewer>
+  <Button Content="Đóng" IsCancel="True" HorizontalAlignment="Right" Padding="12,4" Margin="0,4,0,0"/>
+ </StackPanel>
+</Window>

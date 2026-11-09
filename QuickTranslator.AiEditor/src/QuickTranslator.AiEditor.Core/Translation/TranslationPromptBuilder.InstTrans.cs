@@ -87,15 +87,23 @@ public sealed partial class TranslationPromptBuilder
             line.StartsWith("Use these rules only when", StringComparison.Ordinal)) return null;
 
         if (MapLine().Match(line) is { Success: true } map)
-            return map.Groups["self"].Success && !map.Groups["listener"].Value.Contains("unclear", StringComparison.Ordinal)
-                ? $"{Note}“{map.Groups["quote"].Value}”这句话是{map.Groups["speaker"].Value}对{map.Groups["listener"].Value}说的：" +
-                  $"说话人自称“{map.Groups["self"].Value}”，称呼对方“{map.Groups["address"].Value}”"
-                : null;
+            return map.Groups["listener"].Value.Contains("unclear", StringComparison.Ordinal) ? null
+                : map.Groups["self"].Success
+                    ? $"{Note}“{map.Groups["quote"].Value}”这句话是{map.Groups["speaker"].Value}对{map.Groups["listener"].Value}说的：" +
+                      $"说话人自称“{map.Groups["self"].Value}”，称呼对方“{map.Groups["address"].Value}”"
+                    // Who speaks to whom still settles the pronouns when no Vietnamese pair is known.
+                    : $"{Note}“{map.Groups["quote"].Value}”这句话是{map.Groups["speaker"].Value}对{map.Groups["listener"].Value}说的";
         if (CharacterLine().Match(line) is { Success: true } character)
         {
             characterRules = true;
-            string pronoun = character.Groups["pronoun"].Success ? $"；叙述中用“{character.Groups["pronoun"].Value.Trim()}”指代此人" : "";
-            return $"{Hard}人物 {character.Groups["zh"].Value.Trim()} 译为 {character.Groups["vi"].Value.Trim()}{pronoun}";
+            string gender = character.Groups["gender"].Value switch { "female" => "（女性）", "male" => "（男性）", _ => "" };
+            string name = $"{Hard}人物 {character.Groups["zh"].Value.Trim()}{gender} 译为 {character.Groups["vi"].Value.Trim()}";
+            if (!character.Groups["pronoun"].Success) return name;
+            string pronoun = character.Groups["pronoun"].Value.Trim();
+            // A locked pronoun is part of the hard rule; the survey's unlocked choice is guidance on its own line.
+            return character.Groups["locked"].Success
+                ? $"{name}；叙述中用“{pronoun}”指代此人"
+                : $"{name}\n{Note}叙述中指代{character.Groups["vi"].Value.Trim()}时用“{pronoun}”，不要换成其他性别的代词";
         }
         if (DialogueRuleLine().Match(line) is { Success: true } rule)
         {
@@ -123,7 +131,7 @@ public sealed partial class TranslationPromptBuilder
     [GeneratedRegex(@"^- “(?<quote>.+?)”: (?<speaker>.+?) → (?<listener>.+?)(?: \(likely\))?(?: \(self=(?<self>.+?); address=(?<address>.+?)\))?$")]
     private static partial Regex MapLine();
 
-    [GeneratedRegex(@"^- CHARACTER (?<zh>.+?) = (?<vi>[^;(]+?)(?:; narrative pronoun = (?<pronoun>.+?) \(LOCKED\))?(?: \(.*\))?$")]
+    [GeneratedRegex(@"^- CHARACTER (?<zh>.+?) = (?<vi>[^;(]+?)(?:; gender = (?<gender>female|male))?(?:; narrative pronoun = (?<pronoun>[^;(]+?)(?<locked> \(LOCKED\))?)?(?: \(.*\))?$")]
     private static partial Regex CharacterLine();
 
     [GeneratedRegex(@"^- DIALOGUE (?<speaker>.+?) -> (?<listener>.+?): self = (?<self>.+?); address = (?<address>.+?)(?<locked> \(LOCKED\))?$")]

@@ -38,17 +38,30 @@ public sealed class GpuBackendProfile
         Runtime = new AiRuntimeProfile
         {
             ModelOptions = new() { Model = DefaultLocalModel, ContextSize = 8192, MaximumOutputTokens = 3072 },
-            SegmentationOptions = new()
+            SegmentationOptions = DefaultSegmentation
         }
+    };
+
+    /// <summary>
+    /// Passage size for a GPU worker. A 2026-11 test on a GL chapter whose source had lost its 她: at 400–500 Han
+    /// characters Index-Translate guessed genders passage by passage (anh/chàng/cô/nàng for one woman); at about 1,400,
+    /// with the characters' genders in the prompt, it kept "nàng" throughout, in the same time. Input (~3k tokens) plus
+    /// output (~1.8k) stays well inside the 8k context of each llama-server slot.
+    /// </summary>
+    public static SegmenterOptions DefaultSegmentation => new()
+    {
+        MinimumHanCharacters = 700, TargetHanCharacters = 1000, MaximumHanCharacters = 1400, MaximumTextElements = 5000
     };
 
     public void Validate()
     {
         Runtime ??= AiRuntimeProfile.CreateDefault(Model);
+        // Profiles saved with the old generic size move to the GPU size; a size the user chose stays.
+        if (Runtime.SegmentationOptions == new SegmenterOptions()) Runtime.SegmentationOptions = DefaultSegmentation;
         Runtime.Validate();
         Model = Runtime.ModelOptions.Model.Trim();
         if (Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Trim().Length > 100 ||
-            !Enum.IsDefined(Kind) || ParallelRequests is < 1 or > 8 ||
+            !Enum.IsDefined(Kind) || ParallelRequests is < 1 or > LlamaServerLaunch.MaximumSlots ||
             string.IsNullOrWhiteSpace(Model) || Model.Trim().Length > 200)
             throw new InvalidDataException("Profile GPU thiếu tên, ID, loại backend hoặc model hợp lệ.");
         if (!Uri.TryCreate(Endpoint, UriKind.Absolute, out Uri? endpoint))

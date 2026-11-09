@@ -5,7 +5,8 @@ using System.Text.Json.Serialization;
 namespace QuickTranslator.AiEditor.Wpf;
 
 internal enum TranslationSource { Gpu, Api }
-internal enum ApiTranslationProvider { Gemini }
+/// <summary>Which cloud service the API source uses: Gemini keys, or Codex (ChatGPT plan) through the Codex CLI.</summary>
+internal enum ApiTranslationProvider { Gemini, Codex }
 internal enum GpuTranslationMode { LocalOnly, RemoteOnly, ParallelLocalRemote }
 
 internal sealed class GpuTranslationPreferences
@@ -27,6 +28,8 @@ internal sealed class GpuTranslationPreferences
 
     public TranslationSource Source { get; set; } = TranslationSource.Gpu;
     public ApiTranslationProvider ApiProvider { get; set; } = ApiTranslationProvider.Gemini;
+    /// <summary>The queue translates with Codex instead of Gemini keys.</summary>
+    [JsonIgnore] public bool UsesCodex => Source == TranslationSource.Api && ApiProvider == ApiTranslationProvider.Codex;
     public GpuTranslationMode Mode { get; set; }
     // Session-only: a persisted flag would make every restart ignore a recovered job's workers.
     [JsonIgnore] public bool ModeExplicitlySelected { get; set; }

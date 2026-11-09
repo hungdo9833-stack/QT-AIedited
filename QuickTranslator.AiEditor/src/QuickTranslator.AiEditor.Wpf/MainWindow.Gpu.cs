@@ -283,6 +283,11 @@ public partial class MainWindow
 
     private async Task EnsureGpuBackendReadyAsync(CancellationToken cancellationToken = default)
     {
+        if (_gpuPreferences.UsesCodex)
+        {
+            EnsureCodexSignedIn();
+            return;
+        }
         if (_gpuPreferences.Source == TranslationSource.Api)
         {
             if (GeminiApiKeyVault.ReadAll().Count == 0)
@@ -323,6 +328,12 @@ public partial class MainWindow
     private void UpdateGpuBackendStatus()
     {
         if (GpuBackendStatus is null) return;
+        if (_gpuPreferences.UsesCodex)
+        {
+            GpuBackendStatus.Text = CodexSourceLabel;
+            GpuSetForeground(GpuBackendStatus, "MutedBrush");
+            return;
+        }
         if (_gpuPreferences.Source == TranslationSource.Api)
         {
             int keyCount;

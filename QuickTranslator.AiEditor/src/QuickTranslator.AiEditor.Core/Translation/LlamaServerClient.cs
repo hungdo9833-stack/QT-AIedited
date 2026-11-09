@@ -22,7 +22,7 @@ public sealed class LlamaServerClient : ILlmBackendClient, IJsonSchemaLlmClient
     public LlamaServerClient(HttpClient httpClient, Uri endpoint, int parallelRequests,
         string? bearerToken = null, bool ownsHttpClient = false)
     {
-        if (parallelRequests is < 1 or > 8) throw new ArgumentOutOfRangeException(nameof(parallelRequests));
+        if (parallelRequests is < 1 or > LlamaServerLaunch.MaximumSlots) throw new ArgumentOutOfRangeException(nameof(parallelRequests));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         Uri normalized = ValidateRemoteEndpoint(endpoint);
         _chatEndpoint = WithPath(normalized, "/v1/chat/completions");

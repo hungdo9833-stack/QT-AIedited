@@ -151,6 +151,12 @@ public static class CodexSurveyImport
             string self = Clip(source.SelfReference?.Trim() ?? "", 80);
             string addressee = Clip(source.AddresseeReference?.Trim() ?? "", 80);
             string relationship = Clip(source.Relationship?.Trim() ?? "", 200);
+            if (self.Any(IsHan) || addressee.Any(IsHan))
+            {
+                // 我/你 tell the translator nothing about the Vietnamese pair; keep the relationship, drop the pronouns.
+                warnings.Add($"Bỏ xưng hô “{self}/{addressee}” của “{source.Speaker} → {source.Listener}”: cần từ tiếng Việt.");
+                self = addressee = "";
+            }
             bool directional = self.Length > 0 && addressee.Length > 0;
             if (!directional && relationship.Length == 0) continue;
             speaker.Relationships.Add(new CharacterRelationship

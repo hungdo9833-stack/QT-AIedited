@@ -12,7 +12,23 @@ public sealed class AutoBookRow(Uri url) : INotifyPropertyChanged
 {
     private string _title = url.ToString(), _stage = "Chờ", _detail = "";
     private bool _canRetry;
+    private string _laneId = TranslationLanes.FollowAppId;
     public Uri Url { get; } = url;
+    /// <summary>The workers this book translates on, as a lane id: the workers' ids joined by commas, or
+    /// <see cref="TranslationLanes.FollowAppId"/> when none is chosen. Read when its translation starts.</summary>
+    public string LaneId { get => _laneId; set => Set(ref _laneId, value ?? TranslationLanes.FollowAppId); }
+    /// <summary>Worker 1, Worker 2…: the GPUs or API pools chosen for this book. Several share its chapters.</summary>
+    public BookWorkerList Workers { get; } = new();
+    /// <summary>No worker chosen: the book follows QT Studio's translation setting.</summary>
+    public bool FollowsApp => Workers.Count == 0;
+
+    /// <summary>Replaces the book's workers and its lane id with them.</summary>
+    public void SetWorkers(IEnumerable<TranslationLaneOption> workers)
+    {
+        Workers.Reset(workers);
+        LaneId = Workers.Count == 0 ? TranslationLanes.FollowAppId : string.Join(",", Workers.Select(worker => worker.Id));
+        PropertyChanged?.Invoke(this, new(nameof(FollowsApp)));
+    }
     public string Title { get => _title; set => Set(ref _title, value); }
     public string Stage { get => _stage; set => Set(ref _stage, value); }
     public string Detail { get => _detail; set => Set(ref _detail, value); }
@@ -57,12 +73,16 @@ internal interface IAutoBookStages
     Task<AutoBookDownload?> DownloadAsync(AutoBookRow row, AutoTranslateSettings settings, CancellationToken cancellationToken);
     Task<string?> PrepareAsync(AutoBookRow row, AutoBookDownload download, AutoTranslateSettings settings, CancellationToken cancellationToken);
     Task<bool> TranslateAsync(AutoBookRow row, string manifestPath, CancellationToken cancellationToken);
+    /// <summary>The GPUs/API pools the book's lane uses now. Books whose sets do not overlap translate at the same time.</summary>
+    IReadOnlySet<string> TranslationResources(AutoBookRow row);
 }
 
 /// <summary>
 /// Downloading, the Codex survey and translation run side by side, so the next book downloads while Codex surveys this one.
-/// Downloads and translation take one book at a time; up to <see cref="SurveyWorkers"/> Codex surveys run at once, since
-/// a survey takes minutes and only waits on Codex. Books can be added or retried while it runs; it ends once no book is left in it.
+/// Downloads take one book at a time; up to <see cref="SurveyWorkers"/> Codex surveys run at once, since a survey takes
+/// minutes and only waits on Codex. Each book translates on its own lane: books whose lanes share no GPU or API pool
+/// translate at the same time, the others wait in order. Books can be added or retried while it runs; it ends once no
+/// book is left in it.
 /// </summary>
 internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSettings settings)
 {
@@ -74,6 +94,9 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
         _surveys = Channel.CreateUnbounded<AutoBookRow>(), _translations = Channel.CreateUnbounded<AutoBookRow>();
     private readonly CancellationTokenSource _stop = new();
     private readonly object _gate = new();
+    private readonly List<AutoBookRow> _waitingTranslations = [];
+    private readonly HashSet<string> _busyResources = new(StringComparer.Ordinal);
+    private SynchronizationContext? _context;
     private int _active;
     private bool _closed;
 
@@ -119,11 +142,12 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
 
     public async Task RunAsync()
     {
+        _context = SynchronizationContext.Current;
         try
         {
             await Task.WhenAll([RunStageAsync(_downloads, DownloadAsync), RunStageAsync(_files, DownloadAsync),
                 .. Enumerable.Range(0, SurveyWorkers).Select(_ => RunStageAsync(_surveys, SurveyAsync)),
-                RunStageAsync(_translations, TranslateAsync)]);
+                RunTranslationsAsync()]);
         }
         finally { _stop.Dispose(); }
     }
@@ -132,23 +156,134 @@ internal sealed class AutoBookPipeline(IAutoBookStages stages, AutoTranslateSett
     {
         await foreach (AutoBookRow row in stage.Reader.ReadAllAsync())
         {
-            Channel<AutoBookRow>? next = null;
-            CancellationToken token = row.Cancellation!.Token;
-            try
-            {
-                token.ThrowIfCancellationRequested();
-                next = await work(row, token);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                if (!row.Removed) row.Stage = row.Step == AutoBookStep.Translate ? "Đã tạm dừng" : "Đã dừng";
-            }
-            catch (Exception ex)
-            {
-                row.Stage = row.Step switch { AutoBookStep.Translate => "Lỗi dịch", AutoBookStep.Survey => "Lỗi khảo sát", _ => "Lỗi tải" };
-                row.Detail = ex.Message;
-            }
+            (Channel<AutoBookRow>? next, CancellationToken token) = await RunWorkAsync(row, work);
             Advance(row, token.IsCancellationRequested ? null : next);
+        }
+    }
+
+    private static async Task<(Channel<AutoBookRow>? Next, CancellationToken Token)> RunWorkAsync(AutoBookRow row,
+        Func<AutoBookRow, CancellationToken, Task<Channel<AutoBookRow>?>> work)
+    {
+        Channel<AutoBookRow>? next = null;
+        CancellationToken token = row.Cancellation!.Token;
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            next = await work(row, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            if (!row.Removed) row.Stage = row.Step == AutoBookStep.Translate ? "Đã tạm dừng" : "Đã dừng";
+        }
+        catch (Exception ex)
+        {
+            row.Stage = row.Step switch { AutoBookStep.Translate => "Lỗi dịch", AutoBookStep.Survey => "Lỗi khảo sát", _ => "Lỗi tải" };
+            row.Detail = ex.Message;
+        }
+        return (next, token);
+    }
+
+    /// <summary>Books wait in order for their lane; a book whose GPUs are all free starts at once, even past a waiting one.</summary>
+    private async Task RunTranslationsAsync()
+    {
+        var running = new List<Task>();
+        await foreach (AutoBookRow row in _translations.Reader.ReadAllAsync())
+        {
+            lock (_gate) _waitingTranslations.Add(row);
+            // A removed or stopped book leaves the wait at once instead of holding the run open.
+            row.Cancellation!.Token.Register(() => Post(() => DispatchTranslations()));
+            // Moving a waiting book to a free lane (say Gemini while the GPUs are busy) starts it at once.
+            row.PropertyChanged += OnWaitingLaneChanged;
+            DispatchTranslations();
+        }
+        await WaitForTranslationsAsync();
+    }
+
+    private readonly List<Task> _runningTranslations = [];
+
+    private async Task WaitForTranslationsAsync()
+    {
+        while (true)
+        {
+            Task[] running;
+            lock (_gate) running = [.. _runningTranslations];
+            if (running.Length == 0) return;
+            await Task.WhenAll(running);
+            lock (_gate) _runningTranslations.RemoveAll(task => task.IsCompleted);
+        }
+    }
+
+    private void OnWaitingLaneChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AutoBookRow.LaneId)) Post(DispatchTranslations);
+    }
+
+    private void Post(Action action)
+    {
+        if (_context is { } context) context.Post(_ => action(), null);
+        else action();
+    }
+
+    private void DispatchTranslations()
+    {
+        var started = new List<(AutoBookRow Row, IReadOnlySet<string> Resources)>();
+        lock (_gate)
+        {
+            foreach (AutoBookRow row in _waitingTranslations.ToArray())
+            {
+                IReadOnlySet<string> resources = row.Cancellation!.IsCancellationRequested
+                    ? new HashSet<string>() : stages.TranslationResources(row);
+                if (resources.Any(_busyResources.Contains))
+                {
+                    row.Stage = "Chờ worker rảnh";
+                    continue;
+                }
+                _waitingTranslations.Remove(row);
+                row.PropertyChanged -= OnWaitingLaneChanged;
+                _busyResources.UnionWith(resources);
+                started.Add((row, resources));
+            }
+        }
+        foreach ((AutoBookRow row, IReadOnlySet<string> resources) in started)
+        {
+            Task task = TranslateOnLaneAsync(row, resources);
+            lock (_gate) _runningTranslations.Add(task);
+        }
+    }
+
+    private async Task TranslateOnLaneAsync(AutoBookRow row, IReadOnlySet<string> resources)
+    {
+        // Choosing other workers for a book that is translating: its queue pauses at a safe point and the book waits
+        // for the new lane, instead of going on with the old one while the row shows the new one.
+        bool moved = false;
+        void OnLaneChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName != nameof(AutoBookRow.LaneId) || moved) return;
+            moved = true;
+            row.Stage = "Đổi worker: đang tạm dừng";
+            row.Cancellation?.Cancel();
+        }
+        row.PropertyChanged += OnLaneChanged;
+        (Channel<AutoBookRow>? next, CancellationToken token) result;
+        try { result = await RunWorkAsync(row, TranslateAsync); }
+        finally { row.PropertyChanged -= OnLaneChanged; }
+        lock (_gate) _busyResources.ExceptWith(resources);
+        if (moved && !row.Removed && !row.Finished && !_stop.IsCancellationRequested && RequeueTranslation(row)) return;
+        DispatchTranslations();
+        Advance(row, result.token.IsCancellationRequested ? null : result.next);
+    }
+
+    /// <summary>Sends a paused book back to wait for its (new) lane; it stays in the run.</summary>
+    private bool RequeueTranslation(AutoBookRow row)
+    {
+        lock (_gate)
+        {
+            if (_closed) return false;
+            row.Cancellation?.Dispose();
+            row.Cancellation = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+            row.Stage = "Chờ dịch";
+            row.Detail = "";
+            return _translations.Writer.TryWrite(row);
         }
     }
 

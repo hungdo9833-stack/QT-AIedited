@@ -41,11 +41,13 @@
                 <MenuItem Header="Th_uộc tính…" Click="OnEditProjectProperties"/>
                 <MenuItem Header="Quản lý _chương…" Click="OnOpenChapterManager"/>
                 <MenuItem Header="_Hàng đợi dịch…" Click="OnShowQueueDetails"/>
+                <MenuItem Header="Sửa chữ Hán sót cả _thư viện…" Click="OnSweepLibraryHan"/>
                 <Separator/>
                 <MenuItem Header="_Mở thư mục" Click="OnOpenProjectFolder"/>
             </MenuItem>
             <MenuItem Header="_Xuất bản">
                 <MenuItem Header="Xuất bản…" Click="OnOpenVanCacPublication"/>
+                <MenuItem Header="Đăng _hàng loạt lên Sắc Viện…" Click="OnOpenVanCacBatchPublish"/>
                 <Separator/>
                 <MenuItem Header="Tài khoản Sắc Viện…" Click="OnOpenVanCacAccount"/>
                 <MenuItem Header="Truyện trên Sắc Viện…" Click="OnOpenVanCacNovels"/>
@@ -1027,7 +1029,8 @@
                                             <ItemsControl x:Name="GeminiSavedKeyList" AutomationProperties.Name="Danh sách Gemini API key đã lưu">
                                                 <ItemsControl.ItemTemplate><DataTemplate><DockPanel Margin="0,2">
                                                     <Button DockPanel.Dock="Right" Content="Xóa" Tag="{Binding Index}" Click="OnRemoveGeminiApiKey" AutomationProperties.Name="Xóa Gemini API key"/>
-                                                    <TextBlock Text="{Binding Masked}" VerticalAlignment="Center" FontFamily="Consolas"/>
+                                                    <TextBlock DockPanel.Dock="Left" Text="{Binding Masked}" VerticalAlignment="Center" FontFamily="Consolas" MinWidth="110"/>
+                                                    <TextBox Text="{Binding Name, Mode=OneTime}" Tag="{Binding Fingerprint}" Margin="8,0" MaxLength="40" LostKeyboardFocus="OnGeminiKeyNameCommitted" KeyDown="OnGeminiKeyNameKeyDown" ToolTip="Tên hiện ở worker khi điều phối (để trống = Key N). Enter để lưu." AutomationProperties.Name="Tên Gemini API key"/>
                                                 </DockPanel></DataTemplate></ItemsControl.ItemTemplate>
                                             </ItemsControl>
                                             <TextBlock Text="Thêm API key (mỗi dòng một key)" Style="{StaticResource FieldLabel}"/>

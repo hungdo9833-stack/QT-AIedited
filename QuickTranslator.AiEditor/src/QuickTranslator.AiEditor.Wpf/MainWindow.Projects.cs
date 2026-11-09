@@ -78,6 +78,9 @@ public partial class MainWindow
 
     private async Task OpenProjectCoreAsync(string path)
     {
+        if (IsTranslatingInBackground(path))
+            throw new InvalidOperationException("Truyện này đang được dịch nền trong Tự động dịch từ link. " +
+                "Chờ dịch xong, hoặc bấm Bỏ ở dòng của nó rồi mở lại.");
         var candidate = (await _projectRepository.OpenAsync(path)).Session;
         var assets = await ReadProjectAssetsAsync(candidate);
         await PrepareGpuProfileForProjectAsync(assets.Translation.GpuProfileId);
@@ -438,12 +441,20 @@ public partial class MainWindow
     private async void OnCloseProject(object sender, RoutedEventArgs e)
     {
         if (_projectSession is null) return;
-        try
-        {
-            await RunWorkspaceTransitionAsync(async () =>
+        try { await CloseProjectCoreAsync(); }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    /// <summary>Saves and closes the open project. False when another operation kept the window from leaving it.</summary>
+    private Task<bool> CloseProjectCoreAsync() =>
+            RunWorkspaceTransitionAsync(async () =>
             {
                 var presets = new PromptPresetManager(await _presetStore.LoadAsync());
-                var reader = await new ReaderPreferencesStore(ReaderPreferencesStore.DefaultPath).LoadAsync();
+                // An unreadable app-wide Reader file (one written by an older build) must not keep the project open:
+                // closing falls back to the default Reader settings.
+                ReaderPreferences reader;
+                try { reader = await new ReaderPreferencesStore(ReaderPreferencesStore.DefaultPath).LoadAsync(); }
+                catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException) { reader = new(); }
                 DropHostedProjectViews();
                 ClearProjectTranslationCoordinator();
                 DetachChapter(); _projectSession = null; _projectResources = null;
@@ -459,9 +470,6 @@ public partial class MainWindow
                 NavigateTo(WorkspaceId.Editor, CurrentEditorMode);
                 SetStatus("Đã đóng dự án sau khi lưu.");
             });
-        }
-        catch (Exception ex) { ShowError(ex); }
-    }
 
     private void ClearChapterEditor()
     {
