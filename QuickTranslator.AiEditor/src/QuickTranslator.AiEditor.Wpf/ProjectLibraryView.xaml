@@ -3,18 +3,57 @@
  xmlns:ui="clr-namespace:QuickTranslator.AiEditor.Wpf"
  MinWidth="700" MinHeight="460" Background="{DynamicResource AppBackgroundBrush}" Foreground="{DynamicResource TextBrush}">
  <Grid Margin="{StaticResource Inset.Window}"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-  <DockPanel Margin="2,0,2,16"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="QuickTranslateButton" Content="Dịch nhanh không cần dự án" Click="OnQuickTranslate" Visibility="Collapsed"/><Button x:Name="CreateButton" Content="Tạo dự án" Click="OnCreate" ui:ButtonIcon.Glyph="&#xE710;"/></StackPanel><StackPanel><TextBlock x:Name="HeaderTitleText" Text="Thư viện truyện" Style="{StaticResource WindowTitle}"/><TextBlock x:Name="HeaderSubtitleText" Text="Mở nhanh dự án, xem tiến độ và tiếp tục biên dịch" Style="{StaticResource WindowSubtitle}"/></StackPanel></DockPanel>
-  <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8"><DockPanel><ComboBox x:Name="StatusFilter" DockPanel.Dock="Right" Width="190" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Lọc trạng thái dự án"><ComboBoxItem Tag="All" IsSelected="True">Tất cả trạng thái</ComboBoxItem><ComboBoxItem Tag="Translating">Đang dịch</ComboBoxItem><ComboBoxItem Tag="Editing">Đang biên tập</ComboBoxItem><ComboBoxItem Tag="Completed">Hoàn thành</ComboBoxItem><ComboBoxItem Tag="Missing">Mất liên kết</ComboBoxItem></ComboBox><TextBox x:Name="SearchInput" Style="{StaticResource SearchTextBox}" Tag="Tìm tên truyện, tác giả hoặc đường dẫn" ToolTip="Tìm tên truyện, tác giả hoặc đường dẫn" TextChanged="OnFilterChanged" AutomationProperties.Name="Tìm dự án" AutomationProperties.HelpText="Tìm tên truyện, tác giả hoặc đường dẫn"/></DockPanel></Border>
-  <ListBox x:Name="ProjectList" Grid.Row="2" BorderThickness="0" Background="Transparent" SelectionChanged="OnSelectionChanged" MouseDoubleClick="OnContinue" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Danh sách dự án">
+  <!-- Header: title, how many books, how to select several, and the two ways to start. -->
+  <DockPanel Margin="2,0,2,12">
+   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="QuickTranslateButton" Content="Dịch nhanh không cần dự án" Click="OnQuickTranslate" Visibility="Collapsed"/><Button x:Name="CreateButton" Content="Tạo dự án" Click="OnCreate" ui:ButtonIcon.Glyph="&#xE710;"/></StackPanel>
+   <StackPanel>
+    <StackPanel Orientation="Horizontal"><TextBlock x:Name="HeaderTitleText" Text="Thư viện truyện" Style="{StaticResource WindowTitle}"/><TextBlock x:Name="CountText" Style="{StaticResource CaptionText}" VerticalAlignment="Bottom" Margin="10,0,0,3" AutomationProperties.LiveSetting="Polite"/></StackPanel>
+    <TextBlock x:Name="HeaderSubtitleText" Text="Mở nhanh dự án, xem tiến độ và tiếp tục biên dịch" Style="{StaticResource WindowSubtitle}"/>
+   </StackPanel>
+  </DockPanel>
+  <!-- Search, sort and filter in one bar. -->
+  <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8"><DockPanel>
+   <ComboBox x:Name="StatusFilter" DockPanel.Dock="Right" Width="170" Margin="8,0,0,0" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Lọc trạng thái dự án"><ComboBoxItem Tag="All" IsSelected="True">Tất cả trạng thái</ComboBoxItem><ComboBoxItem Tag="Translating">Đang dịch</ComboBoxItem><ComboBoxItem Tag="Editing">Đang biên tập</ComboBoxItem><ComboBoxItem Tag="Completed">Hoàn thành</ComboBoxItem><ComboBoxItem Tag="Web">Đã có trên web</ComboBoxItem><ComboBoxItem Tag="Missing">Mất liên kết</ComboBoxItem></ComboBox>
+   <ComboBox x:Name="SortInput" DockPanel.Dock="Right" Width="170" Margin="8,0,0,0" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Sắp xếp dự án"><ComboBoxItem Tag="Recent" IsSelected="True">Mở gần nhất</ComboBoxItem><ComboBoxItem Tag="Title">Tên A → Z</ComboBoxItem><ComboBoxItem Tag="Progress">Tiến độ cao trước</ComboBoxItem><ComboBoxItem Tag="Chapters">Nhiều chương trước</ComboBoxItem></ComboBox>
+   <TextBox x:Name="SearchInput" Style="{StaticResource SearchTextBox}" Tag="Tìm tên truyện, tác giả hoặc đường dẫn" ToolTip="Tìm tên truyện, tác giả hoặc đường dẫn" TextChanged="OnFilterChanged" AutomationProperties.Name="Tìm dự án" AutomationProperties.HelpText="Tìm tên truyện, tác giả hoặc đường dẫn"/>
+  </DockPanel></Border>
+  <!-- Ctrl/Shift + click (and Ctrl+A) select several books; Delete sends them to the Recycle Bin, Enter opens one. -->
+  <ListBox x:Name="ProjectList" Grid.Row="2" Margin="0,8,0,8" SelectionMode="Extended" BorderThickness="0" Background="Transparent" SelectionChanged="OnSelectionChanged" MouseDoubleClick="OnContinue" PreviewKeyDown="OnListKeyDown" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.ScrollUnit="Pixel" AutomationProperties.Name="Danh sách dự án" AutomationProperties.HelpText="Giữ Ctrl hoặc Shift khi nhấp để chọn nhiều dự án">
+   <ListBox.ContextMenu>
+    <ContextMenu x:Name="ProjectMenu" Opened="OnMenuOpened">
+     <MenuItem x:Name="MenuContinue" Header="Tiếp tục biên dịch" Click="OnContinue" InputGestureText="Enter"/>
+     <MenuItem x:Name="MenuOpenFolder" Header="Mở thư mục dự án" Click="OnOpenFolder"/>
+     <MenuItem x:Name="MenuLocate" Header="Tìm lại vị trí…" Click="OnLocate"/>
+     <Separator/>
+     <MenuItem x:Name="MenuSelectAll" Header="Chọn tất cả" Click="OnSelectAll" InputGestureText="Ctrl+A"/>
+     <Separator/>
+     <MenuItem x:Name="MenuRemove" Header="Bỏ liên kết khỏi thư viện" Click="OnRemove"/>
+     <MenuItem x:Name="MenuDelete" Header="Chuyển vào Thùng rác" Click="OnDelete" InputGestureText="Delete"/>
+    </ContextMenu>
+   </ListBox.ContextMenu>
    <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel IsItemsHost="True"/></ItemsPanelTemplate></ListBox.ItemsPanel>
-   <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="8"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style></ListBox.ItemContainerStyle>
-   <ListBox.ItemTemplate><DataTemplate><Border Width="342" Height="220" Style="{StaticResource Card}" Padding="0" ClipToBounds="True"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="106"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+   <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="Margin" Value="6"/><Setter Property="Padding" Value="0"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+     <Border x:Name="Frame" BorderThickness="2" BorderBrush="Transparent" CornerRadius="{StaticResource Radius.Overlay}" Padding="1"><Grid>
+      <ContentPresenter/>
+      <!-- A checked badge makes a multi-selection readable at a glance. -->
+      <Border x:Name="Badge" Visibility="Collapsed" Background="{DynamicResource PrimaryBrush}" CornerRadius="{StaticResource Radius.Overlay}" Width="24" Height="24" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6">
+       <TextBlock Text="&#xE8FB;" Style="{StaticResource IconText}" Foreground="{DynamicResource OnPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Border>
+     </Grid></Border>
+     <ControlTemplate.Triggers>
+      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}"/></Trigger>
+      <Trigger Property="IsSelected" Value="True"><Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource PrimaryBrush}"/><Setter TargetName="Badge" Property="Visibility" Value="Visible"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate></Setter.Value></Setter>
+   </Style></ListBox.ItemContainerStyle>
+   <ListBox.ItemTemplate><DataTemplate><Border Width="330" Height="196" Style="{StaticResource Card}" Padding="0" ClipToBounds="True"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <Border Background="{DynamicResource SelectionBrush}" CornerRadius="{StaticResource Radius.Overlay}"><Grid><TextBlock Text="QT" Style="{StaticResource DisplayText}" FontWeight="Bold" Foreground="{DynamicResource AccentTextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Image Source="{Binding CoverPath}" Stretch="UniformToFill"/></Grid></Border>
-    <Grid Grid.Column="1" Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <TextBlock Text="{Binding Title}" Style="{StaticResource SubtitleText}" TextWrapping="Wrap" MaxHeight="48"/><TextBlock Grid.Row="1" Text="{Binding Metadata}" Foreground="{DynamicResource MutedBrush}" Style="{StaticResource CaptionText}" Margin="0,4,0,8" TextTrimming="CharacterEllipsis"/>
+    <Grid Grid.Column="1" Margin="12,10,12,10"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <TextBlock Text="{Binding Title}" Style="{StaticResource SubtitleText}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="44" ToolTip="{Binding Title}"/><TextBlock Grid.Row="1" Text="{Binding Metadata}" Style="{StaticResource CaptionText}" Margin="0,2,0,6" TextTrimming="CharacterEllipsis"/>
      <ProgressBar Grid.Row="2" Height="6" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}" Foreground="{DynamicResource PrimaryBrush}" Background="{DynamicResource EditorSurfaceBrush}"/>
-     <StackPanel Grid.Row="3" Margin="0,8,0,0"><TextBlock Text="{Binding ProgressLabel}"/>
-      <StackPanel Orientation="Horizontal" Margin="0,4,0,0" ToolTip="{Binding WebToolTip}" AutomationProperties.Name="{Binding WebLabel}">
+     <StackPanel Grid.Row="3" Margin="0,6,0,0"><TextBlock Text="{Binding ProgressLabel}"/>
+      <StackPanel Orientation="Horizontal" Margin="0,3,0,0" ToolTip="{Binding WebToolTip}" AutomationProperties.Name="{Binding WebLabel}">
        <StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasWebStatus}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style>
        <TextBlock Text="&#xE73E;" FontSize="{StaticResource FontSize.Caption}" FontWeight="Bold" Margin="0,0,6,0">
         <TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource IconText}"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsOnWeb}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
@@ -22,11 +61,19 @@
        <TextBlock Text="{Binding WebLabel}" TextTrimming="CharacterEllipsis">
         <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsOnWeb}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SuccessBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
        </TextBlock>
-      </StackPanel><TextBlock Text="{Binding CurrentChapterLabel}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/><TextBlock Text="{Binding Warning}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/></StackPanel>
-     <TextBlock Grid.Row="4" Text="{Binding UpdatedLabel}" Foreground="{DynamicResource MutedBrush}" Style="{StaticResource CaptionText}"/>
+      </StackPanel><TextBlock Text="{Binding CurrentChapterLabel}" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/><TextBlock Text="{Binding Warning}" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel>
+     <TextBlock Grid.Row="4" Text="{Binding UpdatedLabel}" Style="{StaticResource CaptionText}"/>
     </Grid>
    </Grid></Border></DataTemplate></ListBox.ItemTemplate>
   </ListBox>
-  <Border Grid.Row="3" Style="{StaticResource Card}" Padding="8"><DockPanel><Button x:Name="DeleteButton" DockPanel.Dock="Left" Content="Thùng rác" Click="OnDelete" Style="{StaticResource DangerButton}" ui:ButtonIcon.Glyph="&#xE74D;" ToolTip="Chọn một dự án còn liên kết để chuyển vào thùng rác." ToolTipService.ShowOnDisabled="True"/><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="LocateButton" Content="Tìm lại vị trí" Click="OnLocate" ToolTip="Chọn một dự án để tìm lại vị trí." ToolTipService.ShowOnDisabled="True"/><Button x:Name="RemoveButton" Content="Bỏ liên kết" Click="OnRemove" ToolTip="Chọn một dự án để bỏ liên kết." ToolTipService.ShowOnDisabled="True"/><Button x:Name="ContinueButton" IsDefault="True" Content="Tiếp tục biên dịch" Click="OnContinue" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE70F;" ToolTip="Chọn một dự án còn liên kết để tiếp tục." ToolTipService.ShowOnDisabled="True"/></StackPanel><TextBlock x:Name="SelectionHint" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" Text="Chọn một dự án để tiếp tục." TextTrimming="CharacterEllipsis"/></DockPanel></Border>
+  <!-- Action bar: what is selected (or what just happened) on the left, the actions on the right. -->
+  <Border Grid.Row="3" Style="{StaticResource Card}" Padding="8"><DockPanel>
+   <Button x:Name="DeleteButton" DockPanel.Dock="Left" Content="Thùng rác" Click="OnDelete" Style="{StaticResource DangerButton}" ui:ButtonIcon.Glyph="&#xE74D;" ToolTip="Chuyển các dự án đang chọn vào Thùng rác của Windows (phím Delete)." ToolTipService.ShowOnDisabled="True"/>
+   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="LocateButton" Content="Tìm lại vị trí" Click="OnLocate" ToolTip="Chọn một dự án để tìm lại vị trí." ToolTipService.ShowOnDisabled="True"/><Button x:Name="RemoveButton" Content="Bỏ liên kết" Click="OnRemove" ToolTip="Bỏ các dự án đang chọn khỏi thư viện; thư mục dự án vẫn còn." ToolTipService.ShowOnDisabled="True"/><Button x:Name="ContinueButton" IsDefault="True" Content="Tiếp tục biên dịch" Click="OnContinue" Style="{StaticResource PrimaryButton}" ui:ButtonIcon.Glyph="&#xE70F;" ToolTip="Chọn một dự án còn liên kết để tiếp tục." ToolTipService.ShowOnDisabled="True"/></StackPanel>
+   <StackPanel VerticalAlignment="Center" Margin="10,0,8,0">
+    <TextBlock x:Name="SelectionHint" Text="Chọn một dự án để tiếp tục." TextTrimming="CharacterEllipsis"/>
+    <TextBlock x:Name="ActionStatusText" Style="{StaticResource CaptionText}" TextTrimming="CharacterEllipsis" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite"/>
+   </StackPanel>
+  </DockPanel></Border>
  </Grid>
 </UserControl>

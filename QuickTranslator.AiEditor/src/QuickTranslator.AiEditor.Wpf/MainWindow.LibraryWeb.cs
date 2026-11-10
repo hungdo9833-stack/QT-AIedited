@@ -61,8 +61,9 @@ public partial class MainWindow
         try { account.SavePreferences(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         if (cancellationToken.IsCancellationRequested) return;
+        // Redraw from what the view shows now: projects deleted while the check ran must not come back.
         Guid? keep = (view.ProjectList.SelectedItem as ProjectLibraryCard)?.ProjectId ?? activeProjectId;
-        view.SetProjects(WithWebStatus(cards), keep);
+        view.SetProjects(WithWebStatus(view.Projects), keep);
     }
 
     private void StartScreenWebRefresh(ProjectLibraryView view, IReadOnlyList<ProjectLibraryCard> cards)

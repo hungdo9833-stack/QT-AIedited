@@ -3,7 +3,13 @@ using QuickTranslator.AiEditor.Core.Projects;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
-internal enum ProjectLibraryAction { Continue, Create, Locate, Remove, Delete, QuickTranslate }
+internal enum ProjectLibraryAction { Continue, Create, Locate, Remove, Delete, QuickTranslate, OpenFolder }
+
+/// <summary>What an action did inside the library: projects to take off the list, a card found again, a status line.</summary>
+internal sealed record ProjectLibraryOutcome(IReadOnlyCollection<Guid> Removed, ProjectLibraryCard? Replaced, string? Status)
+{
+    public static ProjectLibraryOutcome None { get; } = new([], null, null);
+}
 
 internal sealed record ProjectLibraryCard(Guid ProjectId, string Title, string Author, ProjectStatus? Status,
     string ManifestPath, string? CoverPath, int ChapterCount, int CompletedChapterCount, double Progress,
@@ -36,12 +42,24 @@ internal sealed record ProjectLibraryCard(Guid ProjectId, string Title, string A
     public string Warning => Missing ? "Chọn “Tìm lại vị trí” để nối đúng ID dự án." : Error ?? "";
 }
 
-internal sealed record ProjectLibraryRequest(ProjectLibraryAction Action, ProjectLibraryCard? Project);
+/// <param name="Projects">Every selected project (Ctrl/Shift selection); <paramref name="Project"/> is the first.</param>
+internal sealed record ProjectLibraryRequest(ProjectLibraryAction Action, ProjectLibraryCard? Project,
+    IReadOnlyList<ProjectLibraryCard>? Projects = null)
+{
+    public IReadOnlyList<ProjectLibraryCard> Selected => Projects ?? (Project is null ? [] : [Project]);
+
+    /// <summary>Opening or creating a project leaves the library; every other action is done in place.</summary>
+    public bool LeavesLibrary => Action is ProjectLibraryAction.Continue or ProjectLibraryAction.Create or ProjectLibraryAction.QuickTranslate;
+}
 
 public partial class ProjectLibraryWindow : Window
 {
     internal ProjectLibraryAction? RequestedAction { get; private set; }
     internal ProjectLibraryCard? RequestedProject { get; private set; }
+
+    /// <summary>Runs an action that keeps the library open (delete, remove, locate, open folder) and says what changed.</summary>
+    internal Func<ProjectLibraryRequest, Task<ProjectLibraryOutcome>>? InPlaceHandler { get; set; }
+    private bool _busy;
 
     internal ProjectLibraryWindow(IReadOnlyList<ProjectLibraryCard> projects, Guid? activeProjectId)
     {
@@ -59,11 +77,26 @@ public partial class ProjectLibraryWindow : Window
     public new object FindName(string name) => View.FindName(name) ?? base.FindName(name) ??
         throw new ArgumentException($"Không tìm thấy điều khiển '{name}'.", nameof(name));
 
-    private void OnActionRequested(object? sender, ProjectLibraryRequest request)
+    private async void OnActionRequested(object? sender, ProjectLibraryRequest request)
     {
-        RequestedAction = request.Action;
-        RequestedProject = request.Project;
-        DialogResult = true;
+        if (request.LeavesLibrary || InPlaceHandler is null)
+        {
+            RequestedAction = request.Action;
+            RequestedProject = request.Project;
+            DialogResult = true;
+            return;
+        }
+        if (_busy) return;
+        _busy = true;
+        try { ApplyOutcome(View, await InPlaceHandler(request)); }
+        finally { _busy = false; }
+    }
+
+    internal static void ApplyOutcome(ProjectLibraryView view, ProjectLibraryOutcome outcome)
+    {
+        if (outcome.Removed.Count > 0) view.RemoveProjects(outcome.Removed, outcome.Status ?? "");
+        else if (outcome.Replaced is not null) view.ReplaceProject(outcome.Replaced, outcome.Status ?? "");
+        else view.ShowStatus(outcome.Status);
     }
 
     private void OnClosed(object? sender, EventArgs e)

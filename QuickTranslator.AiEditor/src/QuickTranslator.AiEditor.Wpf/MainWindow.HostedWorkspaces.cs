@@ -227,6 +227,13 @@ public partial class MainWindow
             NavigateTo(WorkspaceId.Editor, CurrentEditorMode);
             return;
         }
+        if (!request.LeavesLibrary)
+        {
+            // Done in place: the start screen keeps its scroll position and selection.
+            if (_startScreenView is not null)
+                ProjectLibraryWindow.ApplyOutcome(_startScreenView, await HandleLibraryInPlaceAsync(request, this));
+            return;
+        }
         await HandleProjectLibraryRequestAsync(request);
         if (_projectSession is null) await RefreshStartScreenAsync();
     }

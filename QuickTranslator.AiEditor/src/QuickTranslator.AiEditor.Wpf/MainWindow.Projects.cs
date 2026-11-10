@@ -514,20 +514,20 @@ public partial class MainWindow
     }
     private async void ShowProjectLibraryWindow()
     {
-        while (!_closing)
-        {
-            IReadOnlyList<ProjectLibraryCard> cards = await BuildProjectLibraryCardsAsync();
-            var window = new ProjectLibraryWindow(cards, _projectSession?.Manifest.ProjectId) { Owner = this };
-            ClampWindowToWorkArea(window, 1180, 760);
-            using var webRefresh = new CancellationTokenSource();
-            window.Closed += (_, _) => webRefresh.Cancel();
-            _ = RefreshLibraryWebStatusAsync(window.View, cards, _projectSession?.Manifest.ProjectId, webRefresh.Token);
-            if (window.ShowDialog() != true || window.RequestedAction is not ProjectLibraryAction action) return;
-            ProjectLibraryCard? selected = window.RequestedProject;
-            if (await HandleProjectLibraryRequestAsync(new(action, selected))) return;
-        }
+        if (_closing) return;
+        IReadOnlyList<ProjectLibraryCard> cards = await BuildProjectLibraryCardsAsync();
+        var window = new ProjectLibraryWindow(cards, _projectSession?.Manifest.ProjectId) { Owner = this };
+        // Delete, remove, locate and open folder happen inside the open window; only opening or creating closes it.
+        window.InPlaceHandler = request => HandleLibraryInPlaceAsync(request, window);
+        ClampWindowToWorkArea(window, 1180, 760);
+        using var webRefresh = new CancellationTokenSource();
+        window.Closed += (_, _) => webRefresh.Cancel();
+        _ = RefreshLibraryWebStatusAsync(window.View, cards, _projectSession?.Manifest.ProjectId, webRefresh.Token);
+        if (window.ShowDialog() != true || window.RequestedAction is not ProjectLibraryAction action) return;
+        await HandleProjectLibraryRequestAsync(new(action, window.RequestedProject));
     }
 
+    /// <summary>Opens, creates or starts quick translation (the actions that leave the library).</summary>
     private async Task<bool> HandleProjectLibraryRequestAsync(ProjectLibraryRequest request)
     {
         ProjectLibraryCard? selected = request.Project;
@@ -538,42 +538,110 @@ public partial class MainWindow
             if (request.Action == ProjectLibraryAction.Create)
             { OnNewProject(this, new RoutedEventArgs()); return true; }
             if (request.Action == ProjectLibraryAction.QuickTranslate) return true;
-            if (selected is null) return false;
-            if (request.Action == ProjectLibraryAction.Locate)
-            {
-                var dialog = new OpenFileDialog { Filter = "Dự án QuickTranslator (*.qtproj)|*.qtproj" };
-                if (dialog.ShowDialog(this) != true) return false;
-                ProjectLibrarySummary summary = await ProjectRepository.ReadLibrarySummaryAsync(dialog.FileName);
-                if (summary.ProjectId != selected.ProjectId) throw new InvalidDataException("Tệp được chọn có Project ID khác.");
-                ProjectLibraryStore.Relocate(_projectLibrary, selected.ProjectId, dialog.FileName);
-                await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher(); return false;
-            }
-            if (request.Action == ProjectLibraryAction.Remove)
-            {
-                if (!BeginUiOperation(allowDuringTranslation: true)) return false;
-                try
-                {
-                    ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
-                    await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher();
-                }
-                finally { EndUiOperation(); }
-                return false;
-            }
-            if (request.Action == ProjectLibraryAction.Delete)
-            {
-                if (selected.ProjectId == _projectSession?.Manifest.ProjectId)
-                { ThemedDialog.Show(this, "Hãy đóng dự án đang mở trước."); return false; }
-                if (ThemedDialog.Show(this, $"Chuyển toàn bộ thư mục “{selected.Title}” vào Thùng rác của Windows?\nBạn có thể phục hồi từ Thùng rác.",
-                    "Xóa dự án", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return false;
-                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(Path.GetDirectoryName(selected.ManifestPath)!,
-                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-                ProjectLibraryStore.RemoveShortcut(_projectLibrary, selected.ProjectId);
-                await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher();
-            }
         }
         catch (Exception ex) { ShowError(ex); }
         return false;
     }
+
+    /// <summary>
+    /// Delete (to the Recycle Bin), remove from the library, locate again or open the folder of the selected projects,
+    /// without closing the library. Dialogs belong to <paramref name="owner"/> so they open over the library.
+    /// </summary>
+    private async Task<ProjectLibraryOutcome> HandleLibraryInPlaceAsync(ProjectLibraryRequest request, Window owner)
+    {
+        IReadOnlyList<ProjectLibraryCard> selected = request.Selected;
+        if (selected.Count == 0) return ProjectLibraryOutcome.None;
+        try
+        {
+            switch (request.Action)
+            {
+                case ProjectLibraryAction.OpenFolder:
+                    string? folder = Path.GetDirectoryName(selected[0].ManifestPath);
+                    if (folder is not null && Directory.Exists(folder))
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{folder}\"") { UseShellExecute = true });
+                    return ProjectLibraryOutcome.None;
+                case ProjectLibraryAction.Locate:
+                    return await LocateLibraryProjectAsync(selected[0], owner);
+                case ProjectLibraryAction.Remove:
+                    if (selected.Count > 1 && ThemedDialog.Show(owner,
+                            $"Bỏ {selected.Count} dự án khỏi thư viện?\n{LibraryTitles(selected)}\n\nThư mục dự án vẫn còn trên ổ đĩa.",
+                            "Bỏ liên kết", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                        return ProjectLibraryOutcome.None;
+                    foreach (ProjectLibraryCard card in selected) ProjectLibraryStore.RemoveShortcut(_projectLibrary, card.ProjectId);
+                    await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher();
+                    return new(selected.Select(card => card.ProjectId).ToArray(), null,
+                        selected.Count == 1 ? $"Đã bỏ “{selected[0].Title}” khỏi thư viện." : $"Đã bỏ {selected.Count} dự án khỏi thư viện.");
+                case ProjectLibraryAction.Delete:
+                    return await DeleteLibraryProjectsAsync(selected, owner);
+            }
+        }
+        catch (Exception ex)
+        {
+            ThemedDialog.Show(owner, ex.Message, "Thư viện", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        return ProjectLibraryOutcome.None;
+    }
+
+    private async Task<ProjectLibraryOutcome> DeleteLibraryProjectsAsync(IReadOnlyList<ProjectLibraryCard> selected, Window owner)
+    {
+        Guid? open = _projectSession?.Manifest.ProjectId;
+        ProjectLibraryCard[] targets = selected.Where(card => !card.Missing && card.ProjectId != open).ToArray();
+        string skipped = selected.Any(card => card.ProjectId == open) ? "\n\nDự án đang mở được giữ lại; hãy đóng nó trước nếu muốn xóa." : "";
+        if (targets.Length == 0)
+        {
+            ThemedDialog.Show(owner, "Không có dự án nào xóa được." + skipped, "Xóa dự án", MessageBoxButton.OK, MessageBoxImage.Information);
+            return ProjectLibraryOutcome.None;
+        }
+        string question = targets.Length == 1
+            ? $"Chuyển toàn bộ thư mục “{targets[0].Title}” vào Thùng rác của Windows?"
+            : $"Chuyển thư mục của {targets.Length} dự án vào Thùng rác của Windows?\n{LibraryTitles(targets)}";
+        if (ThemedDialog.Show(owner, question + "\nBạn có thể phục hồi từ Thùng rác." + skipped, "Xóa dự án",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return ProjectLibraryOutcome.None;
+        var removed = new List<Guid>();
+        var failed = new List<string>();
+        foreach (ProjectLibraryCard card in targets)
+        {
+            try
+            {
+                string folder = Path.GetDirectoryName(card.ManifestPath)!;
+                if (Directory.Exists(folder))
+                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(folder, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                        Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                ProjectLibraryStore.RemoveShortcut(_projectLibrary, card.ProjectId);
+                removed.Add(card.ProjectId);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException)
+            {
+                failed.Add($"{card.Title}: {ex.Message}");
+            }
+        }
+        if (removed.Count > 0) { await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher(); }
+        if (failed.Count > 0)
+            ThemedDialog.Show(owner, "Không xóa được:\n" + string.Join("\n", failed.Take(10)), "Xóa dự án",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        string status = removed.Count == 1
+            ? $"Đã chuyển “{targets.First(card => card.ProjectId == removed[0]).Title}” vào Thùng rác."
+            : $"Đã chuyển {removed.Count} dự án vào Thùng rác.";
+        return new(removed, null, removed.Count == 0 ? null : status);
+    }
+
+    private async Task<ProjectLibraryOutcome> LocateLibraryProjectAsync(ProjectLibraryCard selected, Window owner)
+    {
+        var dialog = new OpenFileDialog { Filter = "Dự án QuickTranslator (*.qtproj)|*.qtproj" };
+        if (dialog.ShowDialog(owner) != true) return ProjectLibraryOutcome.None;
+        ProjectLibrarySummary summary = await ProjectRepository.ReadLibrarySummaryAsync(dialog.FileName);
+        if (summary.ProjectId != selected.ProjectId) throw new InvalidDataException("Tệp được chọn có Project ID khác.");
+        ProjectLibraryStore.Relocate(_projectLibrary, selected.ProjectId, dialog.FileName);
+        await _projectLibraryStore.SaveAsync(_projectLibrary); RefreshProjectSwitcher();
+        ProjectLibraryCard card = WithWebStatus([new ProjectLibraryCard(summary.ProjectId, summary.VietnameseTitle, summary.Author,
+            summary.Status, Path.GetFullPath(dialog.FileName), summary.CoverImagePath, summary.ChapterCount,
+            summary.CompletedChapterCount, summary.Progress, summary.CurrentChapterTitle, selected.LastOpenedAt, false, null)])[0];
+        return new([], card, $"Đã nối lại “{card.Title}”.");
+    }
+
+    private static string LibraryTitles(IReadOnlyList<ProjectLibraryCard> cards) =>
+        string.Join("\n", cards.Take(10).Select(card => "• " + card.Title)) +
+        (cards.Count > 10 ? $"\n… và {cards.Count - 10} dự án khác" : "");
 
     private async Task<IReadOnlyList<ProjectLibraryCard>> BuildProjectLibraryCardsAsync()
     {
