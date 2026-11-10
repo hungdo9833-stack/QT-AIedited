@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
+using QuickTranslator.AiEditor.Core;
 using QuickTranslator.AiEditor.Core.Projects;
 using QuickTranslator.AiEditor.Core.Publishing;
 
@@ -288,7 +289,7 @@ public sealed class VanCacPublisherTests
         var seen = new List<VanCacPublishProgress>();
         VanCacPublishReport report = await VanCacPublishRunner.RunAsync(
             Chapters(Chapter(1), Chapter(2), Chapter(3), Chapter(4, complete: false), Chapter(5, inspect: true), Chapter(6, text: "  ")),
-            6, sink, new("n", VanCacChapterStatus.Draft, AllowIncomplete: false), new SyncProgress(seen.Add));
+            6, sink, new("n", VanCacChapterStatus.Draft, AllowIncomplete: false), new DirectProgress<VanCacPublishProgress>(seen.Add));
         Assert.Equal((1, 1, 1, 1, 2), (report.Created, report.Updated, report.Unchanged, report.SkippedEmpty, report.SkippedIncomplete));
         Assert.True(report.Completed);
         Assert.Equal([1, 2, 3], sink.Sent.Select(s => s.Number));
@@ -346,10 +347,5 @@ public sealed class VanCacPublisherTests
             new("n", null, false));
         Assert.Equal(1, report.Created);
         Assert.Contains("Project đã thay đổi", report.AbortReason);
-    }
-
-    private sealed class SyncProgress(Action<VanCacPublishProgress> report) : IProgress<VanCacPublishProgress>
-    {
-        public void Report(VanCacPublishProgress value) => report(value);
     }
 }

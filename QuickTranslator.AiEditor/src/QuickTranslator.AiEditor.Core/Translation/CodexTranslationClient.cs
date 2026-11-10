@@ -38,7 +38,7 @@ public sealed class CodexTranslationClient(CodexSurveyOptions options, ICodexPro
         Directory.CreateDirectory(folder);
         var started = DateTimeOffset.UtcNow;
         var output = new List<string>();
-        var progress = new SynchronousProgress(line => { lock (output) { output.Add(line); if (output.Count > 200) output.RemoveAt(0); } });
+        var progress = new DirectProgress<string>(line => { lock (output) { output.Add(line); if (output.Count > 200) output.RemoveAt(0); } });
         try
         {
             string last = Path.Combine(folder, "last.md");
@@ -97,11 +97,5 @@ public sealed class CodexTranslationClient(CodexSurveyOptions options, ICodexPro
     {
         string text = log.Trim();
         return text.Length == 0 ? "" : " " + (text.Length > 400 ? "…" + text[^400..] : text);
-    }
-
-    /// <summary>Progress that runs at once on the reporting thread (Progress&lt;T&gt; would post it elsewhere).</summary>
-    private sealed class SynchronousProgress(Action<string> report) : IProgress<string>
-    {
-        public void Report(string value) => report(value);
     }
 }

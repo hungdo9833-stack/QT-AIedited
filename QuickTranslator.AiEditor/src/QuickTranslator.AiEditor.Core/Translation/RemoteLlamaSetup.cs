@@ -194,7 +194,7 @@ public sealed class RemoteLlamaSetup
         else if (!executable.Success)
         {
             progress?.Report(new(RemoteLlamaSetupStage.PreparePackage, "Đang chuẩn bị llama.cpp trên máy này…"));
-            LlamaCppPackage package = await _packages.EnsureAsync(new TextProgress(text =>
+            LlamaCppPackage package = await _packages.EnsureAsync(new DirectProgress<string>(text =>
                 progress?.Report(new(RemoteLlamaSetupStage.PreparePackage, text))), cancellationToken).ConfigureAwait(false);
             if (!string.Equals(package.Build, LlamaCppRelease.Build, StringComparison.Ordinal) || package.ZipPaths.Count != 2)
                 throw new InvalidOperationException("Gói llama.cpp không đúng bản đã ghim " + LlamaCppRelease.Build + ".");
@@ -202,7 +202,7 @@ public sealed class RemoteLlamaSetup
             foreach (string zip in package.ZipPaths)
             {
                 long prior = completed, length = new FileInfo(zip).Length;
-                var upload = new ByteProgress(bytes => progress?.Report(new(RemoteLlamaSetupStage.Upload,
+                var upload = new DirectProgress<long>(bytes => progress?.Report(new(RemoteLlamaSetupStage.Upload,
                     $"Đang tải {Path.GetFileName(zip)} lên máy thuê…", Math.Clamp((prior + bytes) * 100d / total, 0, 100))));
                 await session.UploadFileAsync(zip, RemoteLlamaWindowsScripts.DownloadDirectory + "\\" + Path.GetFileName(zip), upload, cancellationToken).ConfigureAwait(false);
                 completed += length;
@@ -246,8 +246,6 @@ public sealed class RemoteLlamaSetup
         if (!result.Success) throw new InvalidOperationException("Máy thuê từ chối bước cài đặt: " +
             SafeTail(string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error)); }
     private static string SafeTail(string value) => value.Trim().Length <= 3000 ? value.Trim() : value.Trim()[^3000..];
-    private sealed class TextProgress(Action<string> report) : IProgress<string> { public void Report(string value) => report(value); }
-    private sealed class ByteProgress(Action<long> report) : IProgress<long> { public void Report(long value) => report(value); }
 }
 
 internal sealed record RemoteLlamaTaskSpecification(string Model, int Port, int Slots, int ContextPerSlot);
