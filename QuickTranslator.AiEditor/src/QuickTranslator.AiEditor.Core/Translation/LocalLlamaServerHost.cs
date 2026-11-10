@@ -78,7 +78,7 @@ public sealed class LocalLlamaServerHost : IAsyncDisposable
             if (_process is { HasExited: false } && _configuration == wanted && Endpoint is not null) return Endpoint;
             StopCore();
             SetStatus(LocalLlamaServerState.Installing, "llama-server máy này: đang tải llama.cpp");
-            var packageProgress = new Progress<string>(text => { progress?.Report(text); SetStatus(LocalLlamaServerState.Installing, text); });
+            var packageProgress = new DirectProgress<string>(text => { progress?.Report(text); SetStatus(LocalLlamaServerState.Installing, text); });
             LlamaCppPackage package = await _packages.EnsureAsync(packageProgress, cancellationToken).ConfigureAwait(false);
             int port = _portSelector();
             var launch = new LlamaServerLaunch(model, port, profile.ParallelRequests,

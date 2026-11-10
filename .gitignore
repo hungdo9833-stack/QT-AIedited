@@ -1,0 +1,4 @@
+# Local-only folders at the worktree root (project ignores live in QuickTranslator.AiEditor/.gitignore)
+/artifacts/
+.wrangler/
+.claude/settings.local.json

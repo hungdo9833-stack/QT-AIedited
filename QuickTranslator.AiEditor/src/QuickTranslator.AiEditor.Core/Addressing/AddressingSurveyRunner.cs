@@ -77,9 +77,9 @@ public sealed class AddressingSurveyRunner(IJsonSchemaLlmClient client)
             if (batch.Length == 0) break;
             if (sent >= maximumRequests) { stoppedBy = "RequestBudget"; break; }
             string stage = scenes ? "Cảnh" : "Nhân vật và cặp";
-            int before = sent, shown = sent; // Progress callbacks run elsewhere: they count their own copy only.
+            int before = sent, shown = sent; // The engine may report from several requests at once: count atomically.
             var run = await engine.RunAsync(store, batch, options, maximumRequests - sent, settings,
-                new Progress<string>(m => progress?.Report(new(stage, Interlocked.Increment(ref shown), maximumRequests, m))), ct).ConfigureAwait(false);
+                new DirectProgress<string>(m => progress?.Report(new(stage, Interlocked.Increment(ref shown), maximumRequests, m))), ct).ConfigureAwait(false);
             sent = before + run.RequestsSent; state = run.State;
             progress?.Report(new(stage, sent, maximumRequests, $"Xong đợt {stage.ToLowerInvariant()}: {run.RequestsSent} request."));
             if (run.StoppedBy is not null) { stoppedBy = run.StoppedBy; break; }

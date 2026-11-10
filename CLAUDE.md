@@ -1,6 +1,7 @@
 ## Giao việc cho Codex
 
-Claude là agent chính. Dùng /codex:rescue (ưu tiên chạy nền) cho các task:
+Claude là agent chính. Giao cho Codex qua `codex-run.ps1` (xem bên dưới, ưu tiên chạy nền; không dùng
+/codex:rescue vì nó chạy bằng tài khoản khác) các task:
 - Nhỏ, rõ ràng, độc lập với phần đang làm
 - Cơ học: viết/sửa test, sửa lint/type error, đổi tên, format, boilerplate, migrate cú pháp
 - Có cách kiểm chứng (test hoặc lint chạy được)
@@ -19,19 +20,20 @@ Mục tiêu: tiết kiệm quota của Claude. Claude chỉ viết prompt giao v
 Codex làm phần đọc code, sửa và chạy test.
 
 - Mỗi workspace có CODEX_HOME riêng: `~/.codex-personal`, `~/.codex-business`.
-  Kiểm tra đăng nhập: `~/.codex-dual/codex-run.ps1 -Workspace personal -Status`.
+  Kiểm tra đăng nhập: `~/.codex-dual/codex-run.ps1 -Workspace business -Status`.
 - Chạy một task (nền):
-  `powershell -File ~/.codex-dual/codex-run.ps1 -Workspace personal -PromptFile <task.md> -Dir <worktree>`.
-  Tin nhắn cuối của Codex được ghi vào `<task>.personal.result.md`.
-- Mặc định giao cho personal; khi personal hết quota (lỗi usage/rate limit) thì chuyển sang business.
+  `powershell -File ~/.codex-dual/codex-run.ps1 -Workspace business -PromptFile <task.md> -Dir <worktree>`.
+  Tin nhắn cuối của Codex được ghi vào `<task>.business.result.md`.
+- Chỉ giao cho business (user chỉ định 2026-10-29). Khi business hết quota (lỗi usage/rate limit, exit code 1)
+  thì hỏi user, không tự chuyển sang personal.
 - Hai task song song chỉ khi độc lập và không sửa chung file. Mỗi task chạy trong một git worktree
   riêng (`git worktree add ../wt-<tên> -b codex/<tên>`), không chạy hai task trong cùng thư mục.
 - Prompt viết vào file trong scratchpad, theo mẫu: mục tiêu, file được sửa, file KHÔNG được động vào,
   lệnh kiểm chứng (build + test), và trả về tóm tắt ngắn. Dặn Codex KHÔNG chạy git commit/add:
   sandbox của Codex luôn khóa `.git`, nên lệnh commit sẽ báo Permission denied.
-- Chọn model: mặc định không truyền gì (config của mỗi workspace: `gpt-5.6-sol`, effort `medium`).
-  Chỉ khi Codex làm sai lần đầu mới giao lại với `-Effort high` hoặc `-Model <slug>` mạnh hơn.
-  Không cân nhắc model mỗi lần giao việc. Task nào tốn quota bất thường thì báo user chọn model.
+- Chọn model (user chỉ định 2026-10-23): luôn truyền `-Effort high -Model gpt-6.1-sol`. Khi gặp lỗi
+  "model is at capacity" thì lùi lần lượt sang `gpt-5.6-sol`, rồi `gpt-6-astra`. Config của workspace
+  (`gpt-5.6-sol`, effort `medium`) chỉ là giá trị dự phòng. Task nào tốn quota bất thường thì báo user.
 - Không dùng `--dangerously-bypass-approvals-and-sandbox`. Claude không bao giờ tự đăng nhập Codex.
 - Review: `git -C <worktree> diff`, tự chạy test; đạt thì Claude commit lên nhánh `codex/<tên>` rồi merge.
 - Sandbox của Codex không đọc được `%APPDATA%\NuGet\NuGet.Config`, nên `dotnet restore` thất bại. Claude chạy
@@ -48,4 +50,5 @@ Mỗi bản publish QT Studio nặng ~150–260MB. Trước đây chúng bị gi
   Không publish vào `artifacts\` của repo.
 - `QuickTranslator.AiEditor\artifacts\releases\` chỉ chứa bản giao cho user. Mỗi lần thêm bản mới,
   giữ 3 bản mới nhất, xóa các bản cũ hơn.
-- Codex không đọc file này: khi giao task có build/publish, Claude ghi luôn hai luật trên vào prompt.
+- Codex không đọc file này mà đọc `AGENTS.md` ở gốc repo (đã có hai luật trên, `--no-restore` và cấm git).
+  Prompt giao việc không cần lặp lại các luật đó; chỉ ghi mục tiêu, file được sửa, file cấm và lệnh kiểm chứng.
