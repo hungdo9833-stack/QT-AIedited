@@ -131,14 +131,10 @@ public sealed partial class ProjectRepository
                 ProjectChapterEntry[] entries = ids.Select(id => after.Chapters.SingleOrDefault(x =>
                     x.ChapterId == id && (x.DeletedAt is not null) == restore)
                     ?? throw new FileNotFoundException($"Không tìm thấy chương {id:D} trong trạng thái cần chuyển.")).ToArray();
-                if (restore)
-                {
-                    int[] collisions = after.Chapters.Where(x => x.DeletedAt is null).Select(x => x.Number)
-                        .Intersect(entries.Select(x => x.Number)).ToArray();
-                    if (entries.GroupBy(x => x.Number).Any(group => group.Count() > 1) || collisions.Length > 0)
-                        throw new InvalidOperationException("Số chương đã được dùng; không thể phục hồi: " +
-                            string.Join(", ", collisions.Distinct().Order()));
-                }
+                // Numbers stay consecutive: a deleted chapter closes its gap, a restored one goes back to its old place
+                // and pushes the chapters from there on up, exactly undoing the delete (as Insert does).
+                if (restore) ReopenNumbers(after, entries);
+                else CloseNumbers(after, entries);
                 DateTimeOffset movedAt = DateTimeOffset.UtcNow;
                 var moves = new List<(string Source, string Destination)>();
                 foreach (ProjectChapterEntry entry in entries)
@@ -197,6 +193,65 @@ public sealed partial class ProjectRepository
         {
             for (int index = acquired - 1; index >= 0; index--) chapterGates[index].Release();
         }
+    }
+
+    /// <summary>Active chapters after the deleted ones move down, so no number is left empty.</summary>
+    private static void CloseNumbers(ProjectManifest manifest, IReadOnlyCollection<ProjectChapterEntry> deleted)
+    {
+        int[] removed = deleted.Select(entry => entry.Number).Order().ToArray();
+        HashSet<Guid> ids = deleted.Select(entry => entry.ChapterId).ToHashSet();
+        foreach (ProjectChapterEntry entry in manifest.Chapters.Where(x => x.DeletedAt is null && !ids.Contains(x.ChapterId)))
+            entry.Number -= removed.Count(number => number < entry.Number);
+    }
+
+    /// <summary>Each restored chapter takes its old number back (at most one past the last) and the rest move up.</summary>
+    private static void ReopenNumbers(ProjectManifest manifest, IReadOnlyCollection<ProjectChapterEntry> restored)
+    {
+        HashSet<Guid> ids = restored.Select(entry => entry.ChapterId).ToHashSet();
+        var active = manifest.Chapters.Where(x => x.DeletedAt is null && !ids.Contains(x.ChapterId)).ToList();
+        foreach (ProjectChapterEntry entry in restored.OrderBy(x => x.Number))
+        {
+            int last = active.Select(x => x.Number).DefaultIfEmpty(0).Max();
+            int target = Math.Clamp(entry.Number, 1, last + 1);
+            foreach (ProjectChapterEntry later in active.Where(x => x.Number >= target)) later.Number++;
+            entry.Number = target;
+            active.Add(entry);
+        }
+    }
+
+    /// <summary>
+    /// Renumbers the active chapters 1, 2, 3… in their current order. Fixes books where an older version left gaps
+    /// (a chapter inserted and deleted again pushed every later number up for good). Returns how many changed.
+    /// </summary>
+    public async Task<int> CloseChapterNumberGapsAsync(ProjectSession session, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        await session.OperationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ProjectManifest after = Clone(session.Manifest);
+            int changed = 0, next = 1;
+            foreach (ProjectChapterEntry entry in after.Chapters.Where(x => x.DeletedAt is null).OrderBy(x => x.Number).ToArray())
+            {
+                if (entry.Number != next) { entry.Number = next; changed++; }
+                next++;
+            }
+            if (changed == 0) return 0;
+            NormalizeManifest(after);
+            await WriteFastManifestAsync(session.ManifestPath, after, cancellationToken).ConfigureAwait(false);
+            session.Manifest = after;
+            PublishManifestCommitted(session, "CloseChapterNumberGaps");
+            return changed;
+        }
+        finally { session.OperationGate.Release(); }
+    }
+
+    /// <summary>Numbers missing between 1 and the last active chapter (empty when the book is numbered without gaps).</summary>
+    public static IReadOnlyList<int> MissingChapterNumbers(ProjectManifest manifest)
+    {
+        HashSet<int> used = manifest.Chapters.Where(x => x.DeletedAt is null).Select(x => x.Number).ToHashSet();
+        int last = used.DefaultIfEmpty(0).Max();
+        return Enumerable.Range(1, Math.Max(0, last)).Where(number => !used.Contains(number)).ToArray();
     }
 
     internal static ChapterDocument PrepareRegisteredChapter(ProjectSession session, ChapterDocument chapter, int number,

@@ -119,6 +119,7 @@ public partial class MainWindow
         RefreshProjectSwitcher(); RefreshProjectChapterList(); Refresh();
         SetStatus($"Đã mở dự án “{candidate.Manifest.VietnameseTitle}”." +
             (_projectLibraryReady ? "" : " Danh sách gần đây không đọc được; chưa ghi shortcut."));
+        ReportChapterNumberGaps();
     }
 
     private async Task SafelyLeaveCurrentProjectAsync()

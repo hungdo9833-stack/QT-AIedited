@@ -36,19 +36,50 @@ public partial class MainWindow
         ProjectChapterEntry[] selected = chapterIds.Distinct().Select(id =>
             session.Manifest.Chapters.SingleOrDefault(entry => entry.ChapterId == id && entry.DeletedAt is not null)
                 ?? throw new InvalidOperationException("Lựa chọn đã thay đổi; hãy chọn lại chương trong History.")).ToArray();
-        int[] duplicateNumbers = selected.GroupBy(entry => entry.Number).Where(group => group.Count() > 1)
-            .Select(group => group.Key).ToArray();
-        int[] activeNumbers = session.Manifest.Chapters.Where(entry => entry.DeletedAt is null)
-            .Select(entry => entry.Number).Intersect(selected.Select(entry => entry.Number)).ToArray();
-        if (duplicateNumbers.Length > 0 || activeNumbers.Length > 0)
-            throw new InvalidOperationException("Không thể phục hồi vì số chương đang trùng: " +
-                string.Join(", ", duplicateNumbers.Concat(activeNumbers).Distinct().Order()));
+        // A restored chapter goes back to its old number and the chapters from there on move up; nothing collides.
         bool completed = await RunWorkspaceTransitionAsync(async () =>
         {
             await _projectRepository.RestoreDeletedChaptersAsync(session, selected.Select(entry => entry.ChapterId).ToArray());
             RefreshProjectChapterList();
         });
         if (!completed) throw new OperationCanceledException("Chưa phục hồi vì workspace chưa sẵn sàng.");
+    }
+
+    /// <summary>Tác vụ chương → "Đánh số lại liên tục": closes the gaps an older version left after delete.</summary>
+    private async void OnCloseChapterNumberGaps(object sender, RoutedEventArgs e)
+    {
+        if (_projectSession is null) return;
+        ProjectSession session = _projectSession;
+        IReadOnlyList<int> missing = ProjectRepository.MissingChapterNumbers(session.Manifest);
+        if (missing.Count == 0)
+        {
+            ThemedDialog.Show(this, "Số chương đã liên tục, không có số nào bị nhảy.", "Đánh số lại chương",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (ThemedDialog.Show(this,
+                $"Truyện đang thiếu số chương: {string.Join(", ", missing.Take(15))}{(missing.Count > 15 ? "…" : "")}.\n\n" +
+                "Đánh số lại tất cả chương thành 1, 2, 3… theo đúng thứ tự hiện tại? Nội dung và bản dịch không đổi.\n" +
+                "Nếu truyện đã đăng lên Sắc Viện, những chương bị đổi số cần đăng lại để số trên web khớp.",
+                "Đánh số lại chương", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        try
+        {
+            int changed = await _projectRepository.CloseChapterNumberGapsAsync(session);
+            if (session.Manifest.CurrentChapterId is Guid current && _service is not null) await LoadProjectChapterCoreAsync(current);
+            RefreshProjectChapterList();
+            SetStatus($"Đã đánh số lại {changed} chương; số chương giờ liên tục từ 1 đến {session.Manifest.ChapterCount}.");
+        }
+        catch (Exception ex) { ShowError(ex); }
+    }
+
+    /// <summary>Says once, on opening a book, that its numbers have gaps and how to fix them.</summary>
+    private void ReportChapterNumberGaps()
+    {
+        if (_projectSession is null) return;
+        IReadOnlyList<int> missing = ProjectRepository.MissingChapterNumbers(_projectSession.Manifest);
+        if (missing.Count > 0)
+            SetStatus($"⚠ Số chương bị nhảy (thiếu {string.Join(", ", missing.Take(5))}{(missing.Count > 5 ? "…" : "")}). " +
+                "Mục lục → Tác vụ chương → Đánh số lại liên tục để sửa.");
     }
 
     private void EnsureChaptersNotOwnedByActiveTranslationJob(IReadOnlyCollection<Guid> chapterIds)

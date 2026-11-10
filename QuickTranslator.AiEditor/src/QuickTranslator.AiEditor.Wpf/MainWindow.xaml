@@ -200,6 +200,9 @@
                                 <MenuItem x:Name="ProjectRenameChapterButton" Header="Đổi tên chương" Click="OnRenameProjectChapter"/>
                                 <MenuItem x:Name="ProjectDuplicateChapterButton" Header="Nhân bản chương" Click="OnDuplicateProjectChapter"/>
                                 <MenuItem x:Name="ProjectDeleteChapterButton" Header="Xóa chương" Click="OnDeleteProjectChapter"/>
+                                <Separator/>
+                                <MenuItem x:Name="ProjectRenumberChaptersButton" Header="Đánh số lại liên tục" Click="OnCloseChapterNumberGaps"
+                                          ToolTip="Đánh số lại các chương thành 1, 2, 3… theo thứ tự hiện tại khi số bị nhảy (ví dụ 0104 · Chương 103)."/>
                             </MenuItem>
                         </Menu>
                     </WrapPanel>
