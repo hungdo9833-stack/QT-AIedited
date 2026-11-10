@@ -51,6 +51,8 @@ public partial class MainWindow
         try
         {
             var library = await _projectLibraryStore.LoadAsync();
+            // Books the list lost (an older version kept only 40) come back from their folders.
+            if (await ProjectLibraryStore.DiscoverAsync(library) > 0) await _projectLibraryStore.SaveAsync(library);
             _projectLibrary = library; _projectLibraryReady = true;
         }
         catch (Exception ex) { ShowError(ex); }

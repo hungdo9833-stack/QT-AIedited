@@ -50,7 +50,60 @@ public sealed class ProjectLibraryStore(string? path = null)
         item.ManifestPath = session.ManifestPath;
         item.LastOpenedAt = DateTimeOffset.UtcNow;
         item.Missing = false;
-        library.RecentProjects = library.RecentProjects.OrderByDescending(x => x.LastOpenedAt).Take(40).ToList();
+        // The library is the list of every book, not a recent-files menu: a cap of 40 once dropped 110 of 150 books.
+        library.RecentProjects = library.RecentProjects.OrderByDescending(x => x.LastOpenedAt).ToList();
+    }
+
+    /// <summary>
+    /// Adds the projects the list lost: every *.qtproj in a folder beside a listed book (the books' common parent
+    /// folders) or in the default projects folder. Returns how many were added.
+    /// </summary>
+    public static async Task<int> DiscoverAsync(ProjectLibrary library, CancellationToken cancellationToken = default)
+    {
+        var known = library.RecentProjects.Select(x => SafeFullPath(x.ManifestPath)).Where(x => x is not null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ids = library.RecentProjects.Select(x => x.ProjectId).ToHashSet();
+        IEnumerable<string> roots = library.RecentProjects
+            .Select(x => Path.GetDirectoryName(Path.GetDirectoryName(SafeFullPath(x.ManifestPath) ?? "")))
+            .Append(library.DefaultProjectsDirectory)
+            .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        int added = 0;
+        foreach (string root in roots)
+        {
+            if (!Directory.Exists(root)) continue;
+            IEnumerable<string> manifests;
+            try
+            {
+                manifests = Directory.EnumerateDirectories(root)
+                    .SelectMany(folder => Directory.EnumerateFiles(folder, "*.qtproj", SearchOption.TopDirectoryOnly)).ToArray();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+            foreach (string manifestPath in manifests)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!known.Add(manifestPath)) continue;
+                try
+                {
+                    ProjectManifest manifest = await ProjectRepository.ReadManifestAsync(manifestPath, cancellationToken).ConfigureAwait(false);
+                    if (!ids.Add(manifest.ProjectId)) continue;
+                    library.RecentProjects.Add(new RecentProject
+                    {
+                        ProjectId = manifest.ProjectId, Title = manifest.VietnameseTitle, ManifestPath = manifestPath,
+                        LastOpenedAt = manifest.LastOpenedAt
+                    });
+                    added++;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException) { } // Not a readable project: leave it out.
+            }
+        }
+        if (added > 0) library.RecentProjects = library.RecentProjects.OrderByDescending(x => x.LastOpenedAt).ToList();
+        return added;
+    }
+
+    private static string? SafeFullPath(string path)
+    {
+        try { return Path.GetFullPath(path); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
     }
 
     public static void RemoveShortcut(ProjectLibrary library, Guid projectId) =>
