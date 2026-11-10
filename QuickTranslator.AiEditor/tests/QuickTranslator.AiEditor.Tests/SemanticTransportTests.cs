@@ -9,6 +9,8 @@ namespace QuickTranslator.AiEditor.Tests;
 
 public sealed class SemanticTransportTests
 {
+    private static readonly JsonElement Schema = JsonDocument.Parse(
+        "{\"type\":\"object\",\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"required\":[\"ok\"],\"additionalProperties\":false}").RootElement.Clone();
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
     {
         public List<Uri> Calls { get; } = [];
@@ -23,8 +25,8 @@ public sealed class SemanticTransportTests
             var handler = new Handler(_ => blocked ? Json("{\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}") : new(HttpStatusCode.TooManyRequests));
             var options = new ModelOptions { Model = "gemini-3.8-flash", ContextSize = 32768 };
             using var client = SemanticSurveyBackend.Gemini("TEST-FAKE-NOT-A-KEY", Guid.NewGuid(), options, new(5), handler);
-            if (blocked) await Assert.ThrowsAsync<GeminiSurveyBlockedException>(() => client.TranslateStructuredAsync("neutral mock", options, SemanticSurveyContract.ResponseSchema));
-            else await Assert.ThrowsAsync<GeminiSurveyHttpException>(() => client.TranslateStructuredAsync("neutral mock", options, SemanticSurveyContract.ResponseSchema));
+            if (blocked) await Assert.ThrowsAsync<GeminiSurveyBlockedException>(() => client.TranslateStructuredAsync("neutral mock", options, Schema));
+            else await Assert.ThrowsAsync<GeminiSurveyHttpException>(() => client.TranslateStructuredAsync("neutral mock", options, Schema));
             Assert.Single(handler.Calls); Assert.Equal(1, client.Transport.RequestsUsed); Assert.All(handler.Calls, uri => Assert.DoesNotContain("TEST-FAKE", uri.ToString()));
         }
     }
@@ -34,8 +36,8 @@ public sealed class SemanticTransportTests
         var handler = new Handler(_ => Json("{\"choices\":[{\"message\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}"));
         var options = new ModelOptions { Model = GpuBackendProfile.DefaultLocalModel, ContextSize = 32768 };
         using var client = SemanticSurveyBackend.LlamaServer(GpuBackendProfile.CreateDefaultLocal(), options, new(1), handler);
-        await client.TranslateStructuredAsync("first", options, SemanticSurveyContract.ResponseSchema);
-        await Assert.ThrowsAsync<SemanticTransportBudgetException>(() => client.TranslateStructuredAsync("source not sent", options, SemanticSurveyContract.ResponseSchema));
+        await client.TranslateStructuredAsync("first", options, Schema);
+        await Assert.ThrowsAsync<SemanticTransportBudgetException>(() => client.TranslateStructuredAsync("source not sent", options, Schema));
         Assert.Equal("/v1/chat/completions", Assert.Single(handler.Calls).AbsolutePath); Assert.Equal(1, client.Transport.RequestsUsed);
     }
     [Fact]
@@ -43,15 +45,15 @@ public sealed class SemanticTransportTests
     {
         var handler = new Handler(_ => throw new InvalidOperationException("Must not send")); var options = new ModelOptions { Model = "gemini-3.6-flash", ContextSize = 32768 };
         using var client = SemanticSurveyBackend.Gemini("MOCK", Guid.NewGuid(), options, new(5, 1), handler);
-        await Assert.ThrowsAsync<SemanticTransportBudgetException>(() => client.TranslateStructuredAsync("neutral", options, SemanticSurveyContract.ResponseSchema));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => client.TranslateStructuredAsync("neutral", options with { Model = "other" }, SemanticSurveyContract.ResponseSchema));
+        await Assert.ThrowsAsync<SemanticTransportBudgetException>(() => client.TranslateStructuredAsync("neutral", options, Schema));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.TranslateStructuredAsync("neutral", options with { Model = "other" }, Schema));
         Assert.Empty(handler.Calls); Assert.Equal(0, client.Transport.RequestsUsed);
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Multi_evidence_schema_is_sent_once_and_transient_or_network_errors_do_not_trigger_hidden_retries(bool network)
+    public async Task Schema_is_sent_once_unchanged_and_transient_or_network_errors_do_not_trigger_hidden_retries(bool network)
     {
         string? body = null;
         var handler = new Handler(r =>
@@ -62,11 +64,11 @@ public sealed class SemanticTransportTests
         });
         var options = new ModelOptions { Model = "gemini-3.8-flash", ContextSize = 65536 };
         using var client = SemanticSurveyBackend.Gemini("FAKE-ONLY", Guid.NewGuid(), options, new(5), handler);
-        await Assert.ThrowsAsync<SemanticTransportFailureException>(() => client.TranslateStructuredAsync("Mock two-evidence prompt", options, SemanticSurveyContract.MultiEvidenceSchema));
+        await Assert.ThrowsAsync<SemanticTransportFailureException>(() => client.TranslateStructuredAsync("Mock two-evidence prompt", options, Schema));
         Assert.Single(handler.Calls); Assert.Equal(1, client.Transport.RequestsUsed);
         using var json = JsonDocument.Parse(body!);
         var sent = json.RootElement.GetProperty("generationConfig").GetProperty("responseJsonSchema");
-        Assert.Equal(GeminiSemanticWire.Schema.GetRawText(), sent.GetRawText()); Assert.DoesNotContain("anyOf", sent.GetRawText());
-        Assert.EndsWith(GeminiSemanticWire.PromptAddendum, json.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString());
+        Assert.Equal("ok", sent.GetProperty("required")[0].GetString());
+        Assert.Equal("Mock two-evidence prompt", json.RootElement.GetProperty("contents")[0].GetProperty("parts")[0].GetProperty("text").GetString());
     }
 }

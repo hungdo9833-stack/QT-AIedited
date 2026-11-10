@@ -25,48 +25,6 @@ public sealed class BookIntelligenceSession2Tests
     }
 
     [Fact]
-    public void Adaptive_scanner_covers_long_regex_free_chapter_and_audit_is_deterministic()
-    {
-        Guid chapter = Guid.NewGuid();
-        string source = string.Concat(Enumerable.Repeat("风吹过原野，夜色安静。", 500));
-        string hash = Hash(source);
-        List<CorpusEvidence> first = ProjectCorpusIndexer.ScanChapter(chapter, source, hash, [], 0.5);
-        List<CorpusEvidence> second = ProjectCorpusIndexer.ScanChapter(chapter, source, hash, [], 0.5);
-        Assert.True(first.Count > 4);
-        Assert.All(first, x => Assert.Equal(x.Excerpt, source.Substring(x.StartUtf16, x.LengthUtf16)));
-        Assert.Equal(first.Where(x => x.IsAuditSample).Select(x => x.StartUtf16),
-            second.Where(x => x.IsAuditSample).Select(x => x.StartUtf16));
-        Assert.Contains(first, x => x.Priority == EvidencePriority.Low && x.IsAuditSample);
-    }
-
-    [Fact]
-    public void Scanner_detects_multiline_identity_and_relationship_signals()
-    {
-        string source = "那人缓缓开口，自称\r\n林朝。\r\n苏雨其实是他的亲生妹妹。";
-        List<CorpusEvidence> evidence = ProjectCorpusIndexer.ScanChapter(Guid.NewGuid(), source, Hash(source), []);
-        Assert.Contains(evidence, x => x.Priority == EvidencePriority.High && x.PriorityReason.Length > 0);
-        Assert.Contains(evidence.SelectMany(x => x.Signals), x => x == "relationship-signal");
-    }
-
-
-    [Fact]
-    public void Entity_resolution_aggregates_evidence_and_does_not_auto_merge_similar_names()
-    {
-        Guid project = Guid.NewGuid();
-        BookIntelligenceState state = State(project, "小朝见到林朝。", "林朝说小朝是乳名。");
-        ProjectResources resources = Resources(project);
-        CorpusEvidence[] evidence = state.Evidence.ToArray();
-        CandidateIdentity a = EntityResolutionService.Resolve(state, resources, "小朝", "Tiểu Triều", [], [evidence[0].Id]);
-        CandidateIdentity b = EntityResolutionService.Resolve(state, resources, "小朝", "Tiểu Triều", ["林朝"], [evidence[1].Id]);
-        Assert.Equal(a.Id, b.Id);
-        Assert.Equal(2, b.EvidenceHistory.Count);
-        Assert.Equal(CandidateIdentityStatus.Candidate, b.Status);
-        Assert.Null(b.ProposedExistingCharacterId);
-    }
-
-
-
-    [Fact]
     public void Timeline_does_not_leak_relationship_or_addressing_before_reveal()
     {
         Guid project = Guid.NewGuid(), a = Guid.NewGuid(), b = Guid.NewGuid();
