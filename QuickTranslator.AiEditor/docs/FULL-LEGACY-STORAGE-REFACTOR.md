@@ -82,4 +82,4 @@ Không có no-op wrapper hoặc implementation giả để giữ API cũ. Các p
 - M3: `479f27ed4c6d5443e1f7411549ca242891e58aa3` — tài liệu kiến trúc hiện hành và dọn workflow recovery.
 - M4: commit validation/acceptance cuối trên cùng branch; SHA được ghi trong báo cáo bàn giao sau commit.
 
-Kết quả test, benchmark và giới hạn chi tiết nằm trong [VALIDATION.vi.md](VALIDATION.vi.md).
+Kết quả test, benchmark và giới hạn chi tiết nằm trong [VALIDATION.vi.md](archive/VALIDATION.vi.md).
