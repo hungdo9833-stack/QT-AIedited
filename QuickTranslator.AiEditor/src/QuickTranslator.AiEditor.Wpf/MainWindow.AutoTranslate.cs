@@ -152,6 +152,7 @@ public partial class MainWindow
         // Codex translation follows the workspace and model chosen here (its effort stays low).
         _codexTranslationOptions = _codexTranslationOptions with { CodexHome = settings.Codex.CodexHome, Model = settings.Codex.Model };
         CodexSurveyOptions codex = settings.Codex with { KnownGenres = await KnownGenresAsync(cancellationToken) };
+        preparer.AdvancedEditing = settings.AdvancedEditing;
         AutoBookPrepared prepared = await preparer.PrepareAsync(download, _projectLibrary.DefaultProjectsDirectory,
             codex, status, cancellationToken, content);
         row.Title = prepared.Title;

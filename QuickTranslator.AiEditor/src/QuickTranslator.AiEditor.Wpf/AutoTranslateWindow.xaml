@@ -63,6 +63,9 @@
                 ToolTip="Các truyện thêm vào từ giờ nhận những worker này; đổi worker của từng truyện ở cột Worker dịch."/>
      <ContentControl x:Name="DefaultWorkersEditor" ContentTemplate="{StaticResource WorkerChips}" Focusable="False" VerticalAlignment="Center"/>
      <CheckBox x:Name="PrepareOnlyCheck" Content="Chỉ chuẩn bị (tải + khảo sát), chưa dịch" VerticalAlignment="Center" Margin="12,4,4,4"/>
+     <CheckBox x:Name="AdvancedEditingCheck" Content="Dịch nâng cao" VerticalAlignment="Center" Margin="12,4,4,4"
+               ToolTip="Dịch nâng cao (2 lượt): mỗi đoạn dịch xong được gửi thêm một lần để biên tập lại thành văn tiếng Việt tự nhiên (đối chiếu nguyên văn, giữ tên và xưng hô). Tốn gấp đôi số lượt gọi AI và chậm gần gấp đôi. Áp dụng cho truyện mới thêm; truyện đã có thì bật trong Nhân vật → Tùy chọn hồ sơ &amp; xưng hô."
+               AutomationProperties.Name="Dịch nâng cao cho truyện mới"/>
     </WrapPanel>
    </StackPanel>
   </Border>

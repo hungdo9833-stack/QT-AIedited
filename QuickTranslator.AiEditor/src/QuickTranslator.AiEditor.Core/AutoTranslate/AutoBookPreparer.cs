@@ -48,6 +48,8 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
     public string WorkRoot { get; init; } = CodexSurveyRunner.DefaultWorkRoot;
     /// <summary>VietPhrase backend that names every chapter before import; null keeps the Chinese titles.</summary>
     public IChapterTitleTranslationBackend? TitleBackend { get; init; }
+    /// <summary>Turns advanced editing (Dich nang cao) on for the new book (a second request per segment that polishes the Vietnamese).</summary>
+    public bool AdvancedEditing { get; set; }
 
     public async Task<AutoBookPrepared> PrepareAsync(Uri url, string projectsDirectory, TimeSpan downloadDelay,
         CodexSurveyOptions codex, IProgress<AutoBookStatus>? status = null, CancellationToken cancellationToken = default,
@@ -232,6 +234,7 @@ public sealed class AutoBookPreparer(ProjectRepository repository, Func<WebImpor
             await SaveContentFlagsAsync(session, survey.ContentFlags, cancellationToken).ConfigureAwait(false);
         var store = new ProjectResourceStore(session);
         ProjectResources resources = await store.LoadAsync(cancellationToken).ConfigureAwait(false);
+        survey.Characters.AdvancedEditing = AdvancedEditing || resources.Characters.AdvancedEditing;
         resources.Characters = survey.Characters;
         resources.Terms = survey.Terms.ToList();
         await store.SaveAsync(resources, cancellationToken).ConfigureAwait(false);

@@ -8,7 +8,8 @@ using QuickTranslator.AiEditor.Core.AutoTranslate;
 
 namespace QuickTranslator.AiEditor.Wpf;
 
-public sealed record AutoTranslateSettings(CodexSurveyOptions Codex, TimeSpan DownloadDelay, bool PrepareOnly = false);
+public sealed record AutoTranslateSettings(CodexSurveyOptions Codex, TimeSpan DownloadDelay, bool PrepareOnly = false,
+    bool AdvancedEditing = false);
 
 public partial class AutoTranslateWindow : Window
 {
@@ -233,6 +234,6 @@ public partial class AutoTranslateWindow : Window
             Effort = ((ComboBoxItem)EffortInput.SelectedItem).Content.ToString()!,
             CodexHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex-" + workspace)
         };
-        return new(codex, TimeSpan.FromSeconds(seconds), PrepareOnlyCheck.IsChecked == true);
+        return new(codex, TimeSpan.FromSeconds(seconds), PrepareOnlyCheck.IsChecked == true, AdvancedEditingCheck.IsChecked == true);
     }
 }

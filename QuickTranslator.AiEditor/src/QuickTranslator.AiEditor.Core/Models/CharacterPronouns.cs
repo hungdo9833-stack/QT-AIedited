@@ -237,6 +237,8 @@ public sealed class CharacterProject
     public bool ConsistencyLockEnabled { get; set; }
     /// <summary>Story era for dialogue register: modern books never get archaic addressing (ngươi, huynh…).</summary>
     public StorySetting Setting { get; set; }
+    /// <summary>"Biên tập nâng cao": every AI translation of this book gets a second request that polishes the Vietnamese.</summary>
+    public bool AdvancedEditing { get; set; }
     public List<CharacterProfile> Profiles { get; set; } = [];
 
     public void Validate()

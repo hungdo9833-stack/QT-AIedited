@@ -118,6 +118,11 @@ public sealed partial class TranslationPromptBuilder
             string banned = Regex.Match(line, @"Never use archaic addressing: (.+?)\.?$") is { Success: true } m ? $"；禁止使用古风称呼：{m.Groups[1].Value}" : "";
             return $"{Note}故事背景为现代：对话按人物关系和语气使用现代越南语称呼（tôi、anh、em、chị、cô、cậu、ông、bà、con、bố、mẹ、tao、mày…）{banned}";
         }
+        if (line.StartsWith(StorySettingRules.StylePrefix, StringComparison.Ordinal))
+            return $"{Note}译文要像越南作家写的小说：按越南语习惯调整语序，不要逐字照搬中文句式；有常用的越南语说法时，不要硬套生僻的汉越词" +
+                "（如“表姨母”译 dì họ，不译 biểu di mẫu）；过长的句子可以拆开；原文重复的连接词（如“甚至”）不必每次照译" +
+                (line.Contains(" historical.", StringComparison.Ordinal) ? "；古代背景可保留常见古风称谓（phụ thân、cô nương、công tử…），叙述仍要通顺易懂"
+                    : line.Contains(" modern.", StringComparison.Ordinal) ? "；现代背景的叙述用日常越南语，少用汉越词" : "");
         if (line.StartsWith("The passage opens mid-conversation", StringComparison.Ordinal))
             return $"{Note}本段开头的对话承接上文，说话人与听话人的自称和称呼与上文保持一致";
         if (Regex.Match(line, @"^Preceding source \(reference only, do not translate\): (.+)$") is { Success: true } preceding)

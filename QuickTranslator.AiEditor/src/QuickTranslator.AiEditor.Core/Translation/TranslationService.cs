@@ -351,6 +351,13 @@ public sealed partial class TranslationService
             if (echo.EchoLinesInsideProse >= 2)
                 echoIssues.Add(new(IssueCode.EchoedPromptNotes, IssueSeverity.Error,
                     "Bản dịch lẫn ghi chú nhân vật/lời thoại của prompt giữa các câu; không lưu, hãy dịch lại."));
+            (string? preEditText, string? editingNote) = (null, null);
+            if (context.CharacterProject.AdvancedEditing && echo.EchoLinesInsideProse < 2 && !string.IsNullOrWhiteSpace(result.Text))
+            {
+                (string? edited, editingNote) = await EditAsync(context, selected.SourceText, result.Text, options, cancellationToken)
+                    .ConfigureAwait(false);
+                if (edited is not null) { preEditText = result.Text; result = result with { Text = edited }; }
+            }
             Guid postProcessBatchId = Guid.NewGuid();
             var chineseAnalysis = AnalyseAutomaticChinese(context, selected, result.Text, postProcessBatchId);
             var pronounAnalysis = AnalyseAutomaticPronouns(context, selected, chineseAnalysis.Text,
@@ -363,6 +370,8 @@ public sealed partial class TranslationService
             {
                 var segment = Find(segmentId);
                 attempt.AiText = result.Text;
+                attempt.PreEditText = preEditText;
+                attempt.EditingNote = editingNote;
                 attempt.Metrics = result.Metrics;
                 attempt.ResponseDone = result.Done;
                 attempt.DoneReason = result.DoneReason;
@@ -423,6 +432,34 @@ public sealed partial class TranslationService
             throw;
         }
         finally { _translationGate.Release(); }
+    }
+
+    /// <summary>
+    /// "Biên tập nâng cao": asks the same backend to polish the draft. Returns the edited text, or null when the request
+    /// failed or its output was unsafe to use; either way the note says what happened and the draft is never lost.
+    /// </summary>
+    private async Task<(string? Edited, string Note)> EditAsync(ChapterDocument context, string source, string draft,
+        ModelOptions options, CancellationToken cancellationToken)
+    {
+        AdvancedEditingContext editing = AdvancedEditingContext.For(context.CharacterProject, context.ConfirmedTerms, source,
+            draft, context.ChapterNumber);
+        string prompt = AdvancedEditing.BuildPrompt(source, draft, editing);
+        try
+        {
+            LlmCompletion edited = await _client.TranslateAsync(prompt, options, cancellationToken).ConfigureAwait(false);
+            if (edited.Done == false || string.Equals(edited.DoneReason, "length", StringComparison.OrdinalIgnoreCase))
+                return (null, "Biên tập nâng cao bị cắt giữa chừng; giữ bản dịch gốc.");
+            AdvancedEditingOutcome outcome = AdvancedEditing.Review(draft, edited.Text, editing);
+            return outcome.Text is { } text
+                ? (text, "Đã biên tập nâng cao." + (outcome.KeptParagraphs > 0
+                    ? $" {outcome.KeptParagraphs} đoạn văn giữ bản dịch gốc vì bản biên tập đổi xưng hô." : ""))
+                : (null, $"Biên tập nâng cao không dùng được ({outcome.Reason}); giữ bản dịch gốc.");
+        }
+        // Even a used-up quota keeps the finished translation; the next request reports the quota as usual.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return (null, "Biên tập nâng cao lỗi; giữ bản dịch gốc: " + ex.Message);
+        }
     }
 
     public async Task SaveAsync(CancellationToken cancellationToken = default)

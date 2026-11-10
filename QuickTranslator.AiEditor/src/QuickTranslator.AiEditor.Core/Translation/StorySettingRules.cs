@@ -31,6 +31,24 @@ public static class StorySettingRules
         };
     }
 
+    public const string StylePrefix = "TRANSLATION STYLE:";
+
+    /// <summary>
+    /// Prose style for every translation: AI drafts read as translated Chinese (Hán-Việt calques, Chinese word order,
+    /// repeated connectives). One line, with the register the story setting allows.
+    /// </summary>
+    public static string StyleBlock(CharacterProject project)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        return StylePrefix + " " + project.Setting switch
+        {
+            StorySetting.Historical => "historical",
+            StorySetting.Modern => "modern",
+            _ => "unspecified"
+        } + ". Write natural Vietnamese prose in Vietnamese word order; prefer common Vietnamese words over obscure Hán-Việt calques; " +
+            "split overlong sentences; do not repeat a connective just because the source repeats it.";
+    }
+
     /// <summary>One warning per archaic term found inside quoted dialogue of a modern book.</summary>
     public static IReadOnlyList<TranslationIssue> CheckDialogue(CharacterProject project, string translatedText)
     {

@@ -34,6 +34,10 @@ public sealed class TranslationAttempt
     public string? SourceSha256 { get; set; }
     public Guid? NormalizationRunId { get; set; }
     public string? AiText { get; set; }
+    /// <summary>The translation before "Biên tập nâng cao" rewrote it into <see cref="AiText"/>.</summary>
+    public string? PreEditText { get; set; }
+    /// <summary>What "Biên tập nâng cao" did: edited, or why the draft was kept.</summary>
+    public string? EditingNote { get; set; }
     public bool? ResponseDone { get; set; }
     public string? DoneReason { get; set; }
     public GenerationMetrics? Metrics { get; set; }

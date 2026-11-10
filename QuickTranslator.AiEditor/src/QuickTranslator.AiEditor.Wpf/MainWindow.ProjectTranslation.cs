@@ -314,30 +314,7 @@ public partial class MainWindow
                 definitions.Add(CreateWorkerDefinition(worker.WorkerId, worker.Backend, worker.ModelOptions,
                     worker.SegmentationOptions, worker.HourlyPrice));
         }
-        else
-        {
-            GpuBackendProfile local = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
-            if (_gpuPreferences.UsesCodex)
-                definitions.Add(CodexWorkerDefinition(CodexTranslationProfileId));
-            else if (_gpuPreferences.Source == TranslationSource.Api)
-            {
-                ModelOptions options = GeminiTranslationModelOptions();
-                // Cloud API behaves like a remote worker for coordinator fault semantics: one terminal
-                // quota failure takes the worker offline instead of failing every remaining chapter.
-                var backend = new GpuBackendSnapshot(GeminiTranslationProfileId, GpuBackendKind.Remote,
-                    "Gemini API", "https://generativelanguage.googleapis.com", options.Model);
-                definitions.Add(CreateWorkerDefinition(GeminiTranslationProfileId, backend, options,
-                    GeminiTranslationSegmentationOptions(), null));
-            }
-            else if (_gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote)
-                definitions.Add(ProjectTranslationProfileWorker(local));
-            if (_gpuPreferences.Mode is GpuTranslationMode.RemoteOnly or GpuTranslationMode.ParallelLocalRemote)
-            {
-                Guid remoteId = CurrentRemoteProfileId()
-                    ?? throw new InvalidOperationException("Mở GPU Manager, kết nối và chọn một profile Remote trước khi dùng Remote/Parallel.");
-                definitions.Add(ProjectTranslationProfileWorker(_gpuBackends.GetProfile(remoteId)));
-            }
-        }
+        else AddCurrentSourceWorkers(definitions, null);
         var coordinator = new ProjectTranslationCoordinator(_projectSession, _projectRepository, definitions,
             cancellationToken => LoadProjectTranslationEnvironmentAsync(_projectSession, cancellationToken));
         coordinator.ProgressChanged += OnProjectTranslationProgressChanged;
@@ -349,6 +326,33 @@ public partial class MainWindow
             _projectTranslationLoadTask = null;
         }
         return coordinator;
+    }
+
+    /// <summary>The workers the main window's translation source (Thiết lập AI) stands for.</summary>
+    /// <param name="owned">Where their clients go for disposal; null for the open project's queue.</param>
+    private void AddCurrentSourceWorkers(List<ProjectTranslationWorkerDefinition> definitions, List<IDisposable>? owned)
+    {
+        GpuBackendProfile local = _gpuBackends.GetProfile(GpuBackendProfile.DefaultLocalId);
+        if (_gpuPreferences.UsesCodex)
+            definitions.Add(CodexWorkerDefinition(CodexTranslationProfileId, owned));
+        else if (_gpuPreferences.Source == TranslationSource.Api)
+        {
+            ModelOptions options = GeminiTranslationModelOptions();
+            // Cloud API behaves like a remote worker for coordinator fault semantics: one terminal
+            // quota failure takes the worker offline instead of failing every remaining chapter.
+            var backend = new GpuBackendSnapshot(GeminiTranslationProfileId, GpuBackendKind.Remote,
+                "Gemini API", "https://generativelanguage.googleapis.com", options.Model);
+            definitions.Add(CreateWorkerDefinition(GeminiTranslationProfileId, backend, options,
+                GeminiTranslationSegmentationOptions(), null, owned));
+        }
+        else if (_gpuPreferences.Mode is GpuTranslationMode.LocalOnly or GpuTranslationMode.ParallelLocalRemote)
+            definitions.Add(ProjectTranslationProfileWorker(local, owned));
+        if (_gpuPreferences.Mode is GpuTranslationMode.RemoteOnly or GpuTranslationMode.ParallelLocalRemote)
+        {
+            Guid remoteId = CurrentRemoteProfileId()
+                ?? throw new InvalidOperationException("Mở GPU Manager, kết nối và chọn một profile Remote trước khi dùng Remote/Parallel.");
+            definitions.Add(ProjectTranslationProfileWorker(_gpuBackends.GetProfile(remoteId), owned));
+        }
     }
 
     // A fresh worker for a GPU profile, using the profile's runtime settings (or its model's defaults).

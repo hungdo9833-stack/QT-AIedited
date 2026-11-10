@@ -29,6 +29,9 @@ public sealed class CodexTranslationClient(CodexSurveyOptions options, ICodexPro
         "- Tin nhắn cuối cùng của bạn CHỈ chứa bản dịch tiếng Việt hoàn chỉnh của toàn bộ 【源文】, giữ nguyên số đoạn và " +
         "thứ tự; không lời dẫn, không giải thích, không Markdown, không lặp lại ràng buộc.\n\n";
 
+    public const string EditingInstruction =
+        "Không chạy lệnh, không đọc hay tạo file. Chỉ trả lời bằng tin nhắn; tin nhắn cuối cùng CHỈ chứa bản đã biên tập.\n\n";
+
     public CodexSurveyOptions Options => options;
 
     public async Task<LlmCompletion> TranslateAsync(string prompt, ModelOptions modelOptions, CancellationToken cancellationToken = default)
@@ -42,7 +45,9 @@ public sealed class CodexTranslationClient(CodexSurveyOptions options, ICodexPro
         try
         {
             string last = Path.Combine(folder, "last.md");
-            int exit = await _runner.RunAsync(new CodexRunRequest(folder, Instruction + prompt, last, options), progress,
+            // An editing request carries its own instructions; the translation one would contradict them.
+            string request = AdvancedEditing.IsEditingPrompt(prompt) ? EditingInstruction + prompt : Instruction + prompt;
+            int exit = await _runner.RunAsync(new CodexRunRequest(folder, request, last, options), progress,
                 cancellationToken).ConfigureAwait(false);
             string log;
             lock (output) log = string.Join('\n', output);

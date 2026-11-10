@@ -86,7 +86,10 @@ public sealed partial class TranslationService
         // Explicitly confirmed spellings override optional provider entries. References stay short.
         var glossary = confirmed.Concat(external).DistinctBy(t => t.Chinese).Take(Math.Max(64, confirmed.Length)).ToArray();
         // The story setting comes first: it is one short line and the register every other block assumes.
-        var contextBlocks = new List<string> { StorySettingRules.PromptBlock(chapter.CharacterProject) };
+        var contextBlocks = new List<string>
+        {
+            StorySettingRules.PromptBlock(chapter.CharacterProject), StorySettingRules.StyleBlock(chapter.CharacterProject)
+        };
         var previous = chapter.Segments.LastOrDefault(s => s.Order < segment.Order &&
             !string.IsNullOrWhiteSpace(s.EditableText));
         if (previous is not null && !string.IsNullOrWhiteSpace(previous.EditableText))

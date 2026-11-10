@@ -15,7 +15,7 @@ public sealed class ProjectSidebarUiTests
         Assert.Equal(Visibility.Collapsed, ((Border)fixture.Window.FindName("GlobalToolbar")).Visibility);
         var list = (ListBox)fixture.Window.FindName("ProjectChapterList");
         Assert.Equal(SelectionMode.Extended, list.SelectionMode);
-        Assert.Equal(new[] { "Đổi tên", "Xóa", "Dịch lại", "Chèn chương phía trên", "Chèn chương phía dưới", "Nhân bản" },
+        Assert.Equal(new[] { "Đổi tên", "Xóa", "Dịch lại", "Dịch nâng cao (2 lượt)", "Biên tập nâng cao (1 lượt)", "Chèn chương phía trên", "Chèn chương phía dưới", "Nhân bản" },
             list.ContextMenu!.Items.OfType<MenuItem>().Select(item => item.Header));
         return Task.CompletedTask;
     });

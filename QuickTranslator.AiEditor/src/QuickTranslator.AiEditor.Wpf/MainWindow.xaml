@@ -217,6 +217,10 @@
                             <MenuItem x:Name="ProjectChapterRenameMenuItem" Header="Đổi tên" Click="OnRenameProjectChapter"/>
                             <MenuItem x:Name="ProjectChapterDeleteMenuItem" Header="Xóa" Click="OnDeleteProjectChapter"/>
                             <MenuItem x:Name="ProjectChapterRetranslateMenuItem" Header="Dịch lại" Click="OnRetranslateProjectChapters"/>
+                            <MenuItem x:Name="ProjectChapterAdvancedTranslateMenuItem" Header="Dịch nâng cao (2 lượt)" Click="OnAdvancedTranslateProjectChapters"
+                                      ToolTip="Dịch các chương đã chọn rồi biên tập lại từng đoạn thành văn tiếng Việt tự nhiên: 2 lượt gọi AI mỗi đoạn. Bật Dịch nâng cao cho cả truyện."/>
+                            <MenuItem x:Name="ProjectChapterAdvancedEditMenuItem" Header="Biên tập nâng cao (1 lượt)" Click="OnAdvancedEditProjectChapters"
+                                      ToolTip="Không dịch lại: chỉ gửi bản dịch đang có kèm nguyên văn để biên tập thành văn tiếng Việt tự nhiên, 1 lượt gọi AI mỗi đoạn. Có thể hoàn tác."/>
                             <Separator/>
                             <MenuItem x:Name="ProjectChapterInsertAboveMenuItem" Header="Chèn chương phía trên" Click="OnInsertProjectChapterAbove"/>
                             <MenuItem x:Name="ProjectChapterInsertBelowMenuItem" Header="Chèn chương phía dưới" Click="OnInsertProjectChapterBelow"/>
@@ -876,6 +880,8 @@
                                        <TextBox x:Name="CharacterProjectNameInput" Width="300" ToolTip="Tên dự án" AutomationProperties.Name="Tên dự án nhân vật" AutomationProperties.HelpText="Tên dự án"/>
                                <CheckBox x:Name="ConsistencyLockCheck" Content="Bật khóa nhất quán dự án" ToolTip="Chèn đại từ và cách xưng hô đã khóa vào prompt của đúng nhân vật xuất hiện trong đoạn"/>
                                <CheckBox x:Name="NormalizeAfterTranslationCheck" Content="Chuẩn hóa an toàn sau dịch" IsChecked="True"/>
+                               <CheckBox x:Name="AdvancedEditingCheck" Content="Dịch nâng cao"
+                                         ToolTip="Dịch nâng cao (2 lượt): mọi lần dịch truyện này, mỗi đoạn dịch xong được gửi thêm một lần để biên tập lại thành văn tiếng Việt tự nhiên (đối chiếu nguyên văn, giữ tên và xưng hô). Tốn gấp đôi số lượt gọi AI và chậm gần gấp đôi. Chỉ muốn làm mượt bản đã dịch thì chuột phải chương → Biên tập nâng cao (1 lượt)."/>
                                <ComboBox x:Name="StorySettingCombo" Width="190" SelectedIndex="0" AutomationProperties.Name="Bối cảnh truyện"
                                          ToolTip="Hiện đại: lời thoại không dùng ngươi/ta/huynh… và đoạn dịch còn những từ này sẽ được cảnh báo. Cổ trang: cho phép xưng hô cổ.">
                                    <ComboBoxItem Tag="Unspecified" Content="Bối cảnh: chưa chọn"/>

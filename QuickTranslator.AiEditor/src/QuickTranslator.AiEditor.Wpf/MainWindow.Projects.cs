@@ -389,7 +389,8 @@ public partial class MainWindow
         ProjectRenameChapterButton.IsEnabled = ProjectChapterRenameMenuItem.IsEnabled = one;
         ProjectDuplicateChapterButton.IsEnabled = ProjectChapterDuplicateMenuItem.IsEnabled = one;
         ProjectDeleteChapterButton.IsEnabled = ProjectChapterDeleteMenuItem.IsEnabled = available && count > 0;
-        ProjectChapterRetranslateMenuItem.IsEnabled = available && count > 0;
+        ProjectChapterRetranslateMenuItem.IsEnabled = ProjectChapterAdvancedTranslateMenuItem.IsEnabled =
+            ProjectChapterAdvancedEditMenuItem.IsEnabled = available && count > 0;
         ProjectChapterInsertAboveMenuItem.IsEnabled = ProjectChapterInsertBelowMenuItem.IsEnabled = one;
     }
     private void OnChapterSearchChanged(object sender, RoutedEventArgs e) { if (_initialized) RefreshProjectChapterList(); }

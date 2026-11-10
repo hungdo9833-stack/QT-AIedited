@@ -5,7 +5,7 @@
         WindowStartupLocation="CenterOwner" Background="{DynamicResource AppBackgroundBrush}"
         Foreground="{DynamicResource TextBrush}">
  <StackPanel Margin="{StaticResource Inset.Window}">
-  <TextBlock Text="Sửa chữ Hán sót trong các truyện đã dịch" Style="{StaticResource WindowTitle}"/>
+  <TextBlock x:Name="HeadingText" Text="Sửa chữ Hán sót trong các truyện đã dịch" Style="{StaticResource WindowTitle}"/>
   <TextBlock x:Name="SubtitleText" Style="{StaticResource WindowSubtitle}" Foreground="{DynamicResource MutedBrush}"
              TextWrapping="Wrap" Margin="0,4,0,12"/>
   <TextBlock x:Name="ProgressText" Style="{StaticResource BodyStrongText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
